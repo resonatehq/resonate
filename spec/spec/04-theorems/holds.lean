@@ -168,15 +168,15 @@ theorem task_acquired_iff_has_ttl :
   invariant_along_trace_via Induction.task_shape_init Induction.task_shape_step
     Induction.task_acquired_iff_has_ttl_of_shape mat tr hv h0
 
-theorem task_acquired_iff_has_expires_at :
-    ∀ n, well_formed_task_acquired_iff_has_expires_at (tr n).now (tr n).state = true :=
+theorem task_acquired_iff_has_lease_timeout_at :
+    ∀ n, well_formed_task_acquired_iff_has_lease_timeout_at (tr n).now (tr n).state = true :=
   invariant_along_trace_via Induction.task_shape_init Induction.task_shape_step
-    Induction.task_acquired_iff_has_expires_at_of_shape mat tr hv h0
+    Induction.task_acquired_iff_has_lease_timeout_at_of_shape mat tr hv h0
 
-theorem task_pending_iff_has_retry_at :
-    ∀ n, well_formed_task_pending_iff_has_retry_at (tr n).now (tr n).state = true :=
+theorem task_pending_iff_has_retry_timeout_at :
+    ∀ n, well_formed_task_pending_iff_has_retry_timeout_at (tr n).now (tr n).state = true :=
   invariant_along_trace_via Induction.task_shape_init Induction.task_shape_step
-    Induction.task_pending_iff_has_retry_at_of_shape mat tr hv h0
+    Induction.task_pending_iff_has_retry_timeout_at_of_shape mat tr hv h0
 
 theorem task_fulfilled_is_cleared :
     ∀ n, well_formed_task_fulfilled_is_cleared (tr n).now (tr n).state = true :=

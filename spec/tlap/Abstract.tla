@@ -38,12 +38,12 @@ New(req, t) ==
 Project(obj, t) ==
     IF obj.promise.state = "pending" /\ obj.promise.timeoutAt <= t THEN
         [ promise |-> [obj.promise EXCEPT
-                          !.state = IF obj.promise.tags.timer THEN "resolved"
+                          !.state     = IF obj.promise.tags.timer THEN "resolved"
                                         ELSE "rejectedTimedout",
                           !.value     = NoValue,
                           !.settledAt = obj.promise.timeoutAt],
-          task    |-> [obj.task EXCEPT !.state     = IF @ = "none" THEN "none"
-                                                     ELSE "fulfilled",
+          task    |-> [obj.task EXCEPT !.state          = IF @ = "none" THEN "none"
+                                                          ELSE "fulfilled",
                                        !.pid            = NoPid,
                                        !.ttl            = NoTime,
                                        !.leaseTimeoutAt = NoTime,
@@ -72,8 +72,8 @@ HandlePromiseSettle(req) ==
                                                         !.value     = req.value,
                                                         !.settledAt = now],
                         task    |-> [old.task EXCEPT
-                                        !.state = IF @ = "none" THEN "none"
-                                                      ELSE "fulfilled",
+                                        !.state          = IF @ = "none" THEN "none"
+                                                           ELSE "fulfilled",
                                         !.pid            = NoPid,
                                         !.ttl            = NoTime,
                                         !.leaseTimeoutAt = NoTime,
@@ -115,7 +115,7 @@ HandleTaskCreate(req) ==
                  objects' =
                      Write(objects, req.action.id,
                            IF born.promise.state = "pending" THEN
-                             [born EXCEPT !.task.state     = "acquired",
+                             [born EXCEPT !.task.state          = "acquired",
                                           !.task.version        = @ + 1,
                                           !.task.ttl            = req.ttl,
                                           !.task.pid            = req.pid,
@@ -209,7 +209,7 @@ HandleTaskSuspend(req) ==
                       objects' =
                           [ i \in DOMAIN objects |->
                                IF i = req.id THEN
-                                   [old EXCEPT !.task.state     = "suspended",
+                                   [old EXCEPT !.task.state          = "suspended",
                                                !.task.pid            = NoPid,
                                                !.task.ttl            = NoTime,
                                                !.task.leaseTimeoutAt = NoTime,
@@ -235,7 +235,7 @@ HandleTaskFulfill(req) ==
                                         !.state     = req.action.state,
                                         !.value     = req.action.value,
                                         !.settledAt = now],
-                        task    |-> [old.task EXCEPT !.state     = "fulfilled",
+                        task    |-> [old.task EXCEPT !.state          = "fulfilled",
                                                      !.pid            = NoPid,
                                                      !.ttl            = NoTime,
                                                      !.leaseTimeoutAt = NoTime,
@@ -307,7 +307,7 @@ ProcessLeaseTimeout ==
             /\ Project(old, now).promise.state = "pending"
             /\ objects' =
                    Write(objects, i,
-                         [old EXCEPT !.task.state     = "pending",
+                         [old EXCEPT !.task.state          = "pending",
                                      !.task.pid            = NoPid,
                                      !.task.ttl            = NoTime,
                                      !.task.leaseTimeoutAt = NoTime,
@@ -470,11 +470,11 @@ well_formed_promise_settled_at_lte_timeout_at ==
     \A i \in DOMAIN objects :
         objects[i].promise.settledAt /= NoTime => objects[i].promise.settledAt <= objects[i].promise.timeoutAt
 
-well_formed_task_pending_iff_has_retry_at ==
+well_formed_task_pending_iff_has_retry_timeout_at ==
     \A i \in DOMAIN objects :
         objects[i].task.state /= "none" => ((objects[i].task.state = "pending") <=> (objects[i].task.retryTimeoutAt /= NoTime))
 
-well_formed_task_acquired_iff_has_expires_at ==
+well_formed_task_acquired_iff_has_lease_timeout_at ==
     \A i \in DOMAIN objects :
         objects[i].task.state /= "none" => ((objects[i].task.state = "acquired") <=> (objects[i].task.leaseTimeoutAt /= NoTime))
 

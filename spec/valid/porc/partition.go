@@ -51,7 +51,7 @@ func originOf(id string) string {
 //
 // That is not a cosmetic misfiling. The lease extension is then never
 // applied in the partition that owns the task, `leaseTimeoutAt` stays at its
-// old value, and R5 `leaseExpiry` becomes enabled EARLIER than the
+// old value, and R5 `processLeaseTimeout` becomes enabled EARLIER than the
 // specification allows. Since firing an internal step is a choice, an
 // enabled-too-early internal step only ADDS candidates — so the partitioned replay
 // accepts everything the whole-state replay does and possibly more. A

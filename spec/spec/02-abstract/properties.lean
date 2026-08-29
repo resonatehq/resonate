@@ -284,11 +284,11 @@ def well_formed_task_acquired_iff_has_ttl (_now : Nat) (s : ServerState) : Bool 
   s.tasks.all fun t =>
     (t.state == .acquired) == t.ttl.isSome
 
-def well_formed_task_acquired_iff_has_expires_at (_now : Nat) (s : ServerState) : Bool :=
+def well_formed_task_acquired_iff_has_lease_timeout_at (_now : Nat) (s : ServerState) : Bool :=
   s.tasks.all fun t =>
     (t.state == .acquired) == t.leaseTimeoutAt.isSome
 
-def well_formed_task_pending_iff_has_retry_at (_now : Nat) (s : ServerState) : Bool :=
+def well_formed_task_pending_iff_has_retry_timeout_at (_now : Nat) (s : ServerState) : Bool :=
   s.tasks.all fun t =>
     (t.state == .pending) == t.retryTimeoutAt.isSome
 
@@ -1126,10 +1126,10 @@ def catalogue : List Named :=
       , property := .state well_formed_task_acquired_iff_has_pid },
     { name := "well_formed_task_acquired_iff_has_ttl"
       , property := .state well_formed_task_acquired_iff_has_ttl },
-    { name := "well_formed_task_acquired_iff_has_expires_at"
-      , property := .state well_formed_task_acquired_iff_has_expires_at },
-    { name := "well_formed_task_pending_iff_has_retry_at"
-      , property := .state well_formed_task_pending_iff_has_retry_at },
+    { name := "well_formed_task_acquired_iff_has_lease_timeout_at"
+      , property := .state well_formed_task_acquired_iff_has_lease_timeout_at },
+    { name := "well_formed_task_pending_iff_has_retry_timeout_at"
+      , property := .state well_formed_task_pending_iff_has_retry_timeout_at },
     { name := "well_formed_task_fulfilled_is_cleared"
       , property := .state well_formed_task_fulfilled_is_cleared },
     { name := "well_formed_task_suspended_is_cleared"

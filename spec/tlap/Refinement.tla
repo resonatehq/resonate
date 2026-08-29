@@ -119,7 +119,7 @@ ProcessLeaseTimeout(i, doc, t) ==
         Skip(doc)
     ELSE
         LET old == doc[i]
-            new == [old EXCEPT !.task.state     = "pending",
+            new == [old EXCEPT !.task.state          = "pending",
                                !.task.pid            = NoPid,
                                !.task.ttl            = NoTime,
                                !.task.leaseTimeoutAt = NoTime,
@@ -193,7 +193,7 @@ ProcessCallback(req, doc, t) ==
                 LET struck     == Write(doc, req.id, newAwaited)
                     awaiter    == Project(struck[req.awaiter], t)
                     newAwaiter == IF awaiter.task.state = "suspended" THEN
-                                      [awaiter EXCEPT !.task.state     = "pending",
+                                      [awaiter EXCEPT !.task.state          = "pending",
                                                       !.task.pid            = NoPid,
                                                       !.task.ttl            = NoTime,
                                                       !.task.leaseTimeoutAt = NoTime,
@@ -295,7 +295,7 @@ Walked(r) ==
                /\ UNCHANGED <<stamp, docs, timeouts, outbox, steps, now>>
            ELSE IF k < Len(Walk(r)) THEN
                /\ s' = IF s = top THEN [req |-> r, k |-> 1]
-                        ELSE [s EXCEPT !.k = @ + 1]
+                       ELSE [s EXCEPT !.k = @ + 1]
                /\ UNCHANGED <<stamp, clockA, docs, timeouts, outbox, steps, now>>
            ELSE
                /\ s' = top
@@ -326,8 +326,8 @@ NextS ==
                          /\ Head(steps[r].pending).tag = "PutDocument"
                          /\ docs[OriginOf(steps[r].ev)] = steps[r].expect )
                    /\ stamp' = IF steps[r].pending = << >>
-                                THEN Del(stamp, r)
-                                ELSE stamp
+                               THEN Del(stamp, r)
+                               ELSE stamp
     \/ \E r \in DOMAIN steps : Walked(r)
 
 InitS ==

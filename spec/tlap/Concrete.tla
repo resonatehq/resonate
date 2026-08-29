@@ -47,12 +47,12 @@ New(req, t) ==
 Project(obj, t) ==
     IF obj.promise.state = "pending" /\ obj.promise.timeoutAt <= t THEN
         [ promise |-> [obj.promise EXCEPT
-                          !.state = IF obj.promise.tags.timer THEN "resolved"
+                          !.state     = IF obj.promise.tags.timer THEN "resolved"
                                         ELSE "rejectedTimedout",
                           !.value     = NoValue,
                           !.settledAt = obj.promise.timeoutAt],
-          task    |-> [obj.task EXCEPT !.state     = IF @ = "none" THEN "none"
-                                                     ELSE "fulfilled",
+          task    |-> [obj.task EXCEPT !.state          = IF @ = "none" THEN "none"
+                                                          ELSE "fulfilled",
                                        !.pid            = NoPid,
                                        !.ttl            = NoTime,
                                        !.leaseTimeoutAt = NoTime,
@@ -94,8 +94,8 @@ HandlePromiseSettle(req, doc, t) ==
             new == [ promise |-> [old.promise EXCEPT !.state     = req.state,
                                                      !.value     = req.value,
                                                      !.settledAt = t],
-                     task    |-> [old.task EXCEPT !.state     = IF @ = "none" THEN "none"
-                                                               ELSE "fulfilled",
+                     task    |-> [old.task EXCEPT !.state          = IF @ = "none" THEN "none"
+                                                                     ELSE "fulfilled",
                                                   !.pid            = NoPid,
                                                   !.ttl            = NoTime,
                                                   !.leaseTimeoutAt = NoTime,
@@ -161,7 +161,7 @@ HandleTaskCreate(req, doc, t) ==
     ELSE IF req.action.id \notin DOMAIN doc THEN
         LET born == New(req.action, t)
             new  == IF born.promise.state = "pending" THEN
-                        [born EXCEPT !.task.state     = "acquired",
+                        [born EXCEPT !.task.state          = "acquired",
                                      !.task.version        = @ + 1,
                                      !.task.ttl            = req.ttl,
                                      !.task.pid            = req.pid,
@@ -180,7 +180,7 @@ HandleTaskCreate(req, doc, t) ==
               sends |-> << >> ]
     ELSE
         LET old == Project(doc[req.action.id], t)
-            new == [old EXCEPT !.task.state     = "acquired",
+            new == [old EXCEPT !.task.state          = "acquired",
                                !.task.version        = @ + 1,
                                !.task.ttl            = req.ttl,
                                !.task.pid            = req.pid,
@@ -202,7 +202,7 @@ HandleTaskAcquire(req, doc, t) ==
         Skip(doc)
     ELSE
         LET old == Project(doc[req.id], t)
-            new == [old EXCEPT !.task.state     = "acquired",
+            new == [old EXCEPT !.task.state          = "acquired",
                                !.task.version        = @ + 1,
                                !.task.ttl            = req.ttl,
                                !.task.pid            = req.pid,
@@ -274,7 +274,7 @@ HandleTaskSuspend(req, doc, t) ==
             Skip(doc)
         ELSE
             LET old == Project(doc[req.id], t)
-                new == [old EXCEPT !.task.state     = "suspended",
+                new == [old EXCEPT !.task.state          = "suspended",
                                    !.task.pid            = NoPid,
                                    !.task.ttl            = NoTime,
                                    !.task.leaseTimeoutAt = NoTime,
@@ -314,7 +314,7 @@ HandleTaskFulfill(req, doc, t) ==
             new == [ promise |-> [old.promise EXCEPT !.state     = req.action.state,
                                                      !.value     = req.action.value,
                                                      !.settledAt = t],
-                     task    |-> [old.task EXCEPT !.state     = "fulfilled",
+                     task    |-> [old.task EXCEPT !.state          = "fulfilled",
                                                   !.pid            = NoPid,
                                                   !.ttl            = NoTime,
                                                   !.leaseTimeoutAt = NoTime,
@@ -337,7 +337,7 @@ HandleTaskRelease(req, doc, t) ==
         Skip(doc)
     ELSE
         LET old == Project(doc[req.id], t)
-            new == [old EXCEPT !.task.state     = "pending",
+            new == [old EXCEPT !.task.state          = "pending",
                                !.task.pid            = NoPid,
                                !.task.ttl            = NoTime,
                                !.task.leaseTimeoutAt = NoTime,
@@ -358,7 +358,7 @@ HandleTaskHalt(req, doc, t) ==
         Skip(doc)
     ELSE
         LET old == Project(doc[req.id], t)
-            new == [old EXCEPT !.task.state     = "halted",
+            new == [old EXCEPT !.task.state          = "halted",
                                !.task.pid            = NoPid,
                                !.task.ttl            = NoTime,
                                !.task.leaseTimeoutAt = NoTime,
@@ -383,7 +383,7 @@ HandleTaskContinue(req, doc, t) ==
         Skip(doc)
     ELSE
         LET old == Project(doc[req.id], t)
-            new == [old EXCEPT !.task.state     = "pending",
+            new == [old EXCEPT !.task.state          = "pending",
                                !.task.pid            = NoPid,
                                !.task.ttl            = NoTime,
                                !.task.leaseTimeoutAt = NoTime,
@@ -529,7 +529,7 @@ SweepCallbacks(doc, t) ==
                         IF i \notin Woken \/ struck.task.state \in {"none", "fulfilled"} THEN
                             struck
                         ELSE IF struck.task.state = "suspended" THEN
-                            [struck EXCEPT !.task.state     = "pending",
+                            [struck EXCEPT !.task.state          = "pending",
                                            !.task.pid            = NoPid,
                                            !.task.ttl            = NoTime,
                                            !.task.leaseTimeoutAt = NoTime,
@@ -548,7 +548,7 @@ SweepExpiresAt(doc, t) ==
     IN
     [ doc   |-> [ i \in DOMAIN doc |->
                     IF i \in S THEN
-                        [ doc[i] EXCEPT !.task.state     = "pending",
+                        [ doc[i] EXCEPT !.task.state          = "pending",
                                         !.task.pid            = NoPid,
                                         !.task.ttl            = NoTime,
                                         !.task.leaseTimeoutAt = NoTime,

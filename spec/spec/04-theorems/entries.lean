@@ -656,13 +656,13 @@ theorem task_acquired_iff_has_ttl_of_shape (now : Nat) (s : ServerState) :
   all_mono (fun _ h => by
     simp only [qTaskShape, Bool.and_eq_true] at h; exact h.1.1.1.1.1.1.1.2) _
 
-theorem task_acquired_iff_has_expires_at_of_shape (now : Nat) (s : ServerState) :
-    s.tasks.all qTaskShape = true → well_formed_task_acquired_iff_has_expires_at now s = true :=
+theorem task_acquired_iff_has_lease_timeout_at_of_shape (now : Nat) (s : ServerState) :
+    s.tasks.all qTaskShape = true → well_formed_task_acquired_iff_has_lease_timeout_at now s = true :=
   all_mono (fun _ h => by
     simp only [qTaskShape, Bool.and_eq_true] at h; exact h.1.1.1.1.1.1.2) _
 
-theorem task_pending_iff_has_retry_at_of_shape (now : Nat) (s : ServerState) :
-    s.tasks.all qTaskShape = true → well_formed_task_pending_iff_has_retry_at now s = true :=
+theorem task_pending_iff_has_retry_timeout_at_of_shape (now : Nat) (s : ServerState) :
+    s.tasks.all qTaskShape = true → well_formed_task_pending_iff_has_retry_timeout_at now s = true :=
   all_mono (fun _ h => by
     simp only [qTaskShape, Bool.and_eq_true] at h; exact h.1.1.1.1.1.2) _
 

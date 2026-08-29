@@ -52,11 +52,11 @@ inv_well_formed_task_acquired_iff_has_pid ==
 inv_well_formed_task_acquired_iff_has_ttl ==
     I!well_formed_task_acquired_iff_has_ttl
 
-inv_well_formed_task_acquired_iff_has_expires_at ==
-    I!well_formed_task_acquired_iff_has_expires_at
+inv_well_formed_task_acquired_iff_has_lease_timeout_at ==
+    I!well_formed_task_acquired_iff_has_lease_timeout_at
 
-inv_well_formed_task_pending_iff_has_retry_at ==
-    I!well_formed_task_pending_iff_has_retry_at
+inv_well_formed_task_pending_iff_has_retry_timeout_at ==
+    I!well_formed_task_pending_iff_has_retry_timeout_at
 
 inv_well_formed_task_fulfilled_is_cleared ==
     I!well_formed_task_fulfilled_is_cleared

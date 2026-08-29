@@ -134,8 +134,8 @@ two of them are obligations the catalogue cannot state.
 Measured against this model:
 
 **The catalogue has no wheel.** Deadlines live *on the task record* —
-`well_formed_task_acquired_iff_has_expires_at`,
-`well_formed_task_pending_iff_has_retry_at`. There is no second store to drift
+`well_formed_task_acquired_iff_has_lease_timeout_at`,
+`well_formed_task_pending_iff_has_retry_timeout_at`. There is no second store to drift
 from them, so nothing in the 95 says an index agrees with the fields it
 indexes. `WheelSound` and `WheelComplete` are therefore **not ports of
 anything** — they are the price of the two-store premise, and they have to be

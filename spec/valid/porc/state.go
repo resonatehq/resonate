@@ -182,13 +182,13 @@ func (p *Promise) Project(now uint64) *Promise {
 // Neither Promise nor Task carries an id any more. The id belongs to the
 // Object the two are faces of.
 type Task struct {
-	State     TaskState
-	Version   uint64
-	TTL       *uint64
-	PID       *string
+	State          TaskState
+	Version        uint64
+	TTL            *uint64
+	PID            *string
 	LeaseTimeoutAt *uint64
-	RetryTimeoutAt   *uint64
-	Resumes   []string
+	RetryTimeoutAt *uint64
+	Resumes        []string
 }
 
 func (t *Task) clone() *Task {

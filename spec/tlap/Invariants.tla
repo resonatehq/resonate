@@ -112,11 +112,11 @@ well_formed_task_acquired_iff_has_ttl ==
     \A i \in DOMAIN objects :
         (objects[i].task.state = "acquired") <=> (objects[i].task.ttl /= NoTime)
 
-well_formed_task_acquired_iff_has_expires_at ==
+well_formed_task_acquired_iff_has_lease_timeout_at ==
     \A i \in DOMAIN objects :
         (objects[i].task.state = "acquired") <=> (objects[i].task.leaseTimeoutAt /= NoTime)
 
-well_formed_task_pending_iff_has_retry_at ==
+well_formed_task_pending_iff_has_retry_timeout_at ==
     \A i \in DOMAIN objects :
         (objects[i].task.state = "pending") <=> (objects[i].task.retryTimeoutAt /= NoTime)
 

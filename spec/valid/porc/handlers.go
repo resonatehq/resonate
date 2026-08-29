@@ -283,7 +283,7 @@ type TaskRef struct {
 // and ignored both the request's task list and the version. That is
 // invisible on the response channel, which always answers 200, but it
 // writes `leaseTimeoutAt` on tasks the request never named — and `leaseTimeoutAt`
-// is what R5 `leaseExpiry` guards on. A checker built on it would accept
+// is what R5 `processLeaseTimeout` guards on. A checker built on it would accept
 // runs the specification forbids.
 func (s *ServerState) TaskHeartbeat(d Discipline, pid string, refs []TaskRef, now uint64) Response {
 	for _, ref := range refs {

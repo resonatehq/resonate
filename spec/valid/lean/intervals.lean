@@ -112,7 +112,7 @@ def Visible (s : ServerState) : ServerState :=
     On the abstract machine it is a theorem instead of a hunt.
     `processRetryTimeout` writes `retryTimeoutAt` and nothing else, and a
     pending task has no `leaseTimeoutAt` at all —
-    `well_formed_task_acquired_iff_has_expires_at` is an iff in the
+    `well_formed_task_acquired_iff_has_lease_timeout_at` is an iff in the
     catalogue. Two deadlines that shared a key now live on the object
     that owns them, and the interference is gone with the sharing. Kept
     as a definition because the theorems below cite it; it is now
