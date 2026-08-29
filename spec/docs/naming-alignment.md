@@ -37,6 +37,25 @@ One more, structural rather than named: Lean carries materialisation as
 `Env.mat : Bool`, Go as a `Discipline` enum threaded through every handler.
 Same parameter, different shape.
 
+## Where the checker now runs ahead of the machine
+
+`valid/porc` enforces the id schema: the `resonate:origin` tag must not carry
+a `:` and must prefix the id, and `register_callback`, `task.suspend` and
+`task.heartbeat` refuse to cross origins. `spec/02-abstract` on `main` has no
+origin notion to mirror — the branch `claude/id-origin-suffix` (`077ef6c`) is
+where the specification grows one, as a structured `Ident` of origin and
+suffix with parsing left to the edge, which is a better answer than the
+string-splitting the checker does.
+
+Two mismatches survive that branch:
+
+- its `taskFence` refuses a cross-origin target; the server answers 200, and
+  `CheckPartitionable` treats such a fence as a hazard, so partitioned replay
+  rests on a rule nothing enforces;
+- it does not enforce the doors in the Go handlers, only in
+  `CheckPartitionable`, and it leaves `cmd/loadgen` tagging `resonate:origin`
+  on ids the server then refuses.
+
 ## Holdouts on the lease/retry rename
 
 `expiresAt`/`retryAt` became `leaseTimeoutAt`/`retryTimeoutAt`, which is what
