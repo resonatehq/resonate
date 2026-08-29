@@ -66,26 +66,31 @@ The conformance model is where the vocabulary diverges:
 
 | concept | Lean | Go | Rust | C# accordant |
 |---|---|---|---|---|
-| a promise's state | `state` | `State` | `state` | **`Status`** |
+| a promise's state | `state` | `State` | `state` | `State` ✔ |
 | a promise's param | `param` | `Param` | `param` | **`ParamData`** |
 | carries a target | `targeted` | *(inlined)* | — | **`HasTarget`** |
 | is a timer | `isTimer` | `IsTimer` | — | **`TimerTag`** |
 | awaitable | `external` | `External` | — | `IsExternal` ✔ |
 | address validity | `addressValid` | `addressValid` | `is_valid_address` ✔ | `AddressValid` ✔ |
 | lease deadline | `leaseTimeoutAt` | `LeaseTimeoutAt` | `expires_at` | `LeaseTimeoutAt` ✔ |
-| retry deadline | `retryTimeoutAt` | `RetryTimeoutAt` | `retry_at` | *(not modelled)* |
+| retry deadline | `retryTimeoutAt` | `RetryTimeoutAt` | `retry_at` | `RetryTimeoutAt` ✔ |
 
-`Status` is the one worth deciding: every other model, and the wire itself,
-says `state`. The rest of the C# column is a defensible dialect — `HasTarget`
-and `TimerTag` name the tag rather than the predicate — but they read as
-different concepts when they are the same one.
+`Status` was the one worth deciding, and it is decided: accordant now says
+`State`, leaving `Status` to mean the HTTP status, which is a different
+thing. `HasTarget` and `TimerTag` remain a dialect — they name the tag rather
+than the predicate — but they read as different concepts when they are the
+same one.
 
 Case conventions are not divergences: `TTL`/`PID` in Go, snake_case in Rust,
 PascalCase in C# are each idiomatic and should stay.
 
 ## Structural gaps, for completeness
 
-- accordant models no `listeners` and no `resumes`, and no schedules.
+- accordant models no `listeners` and no `resumes`, and no schedules. It now
+  carries both task deadlines, though only the lease one is observable: R6's
+  re-arm and its `execute` are both invisible over this wire, so the model
+  folds R6 into the clock step rather than branching on a choice no read can
+  ever collapse.
 - the Rust engines do not decompose the internal steps the way the spec does:
   `process_timeouts`, `process_callbacks` and `process_schedule_timeout`
   group what the spec separates into R1, R3, R4, R5 and R6. Nothing there is
