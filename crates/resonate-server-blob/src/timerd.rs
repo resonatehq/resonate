@@ -47,12 +47,11 @@
 //!
 //! # Dependants
 //!
-//! `main` spawns the wall-clock loop; `S3Server` calls [`Timerd::round`]
+//! `main` spawns the wall-clock loop; `Server` calls [`Timerd::round`]
 //! directly from `debug.tick` and pauses the loop under the debug startup flag, so a
 //! test on a synthetic clock and a server on a real one take the same path.
 
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -60,7 +59,7 @@ use async_trait::async_trait;
 
 use resonate_core::Unavailable;
 
-use super::applier::{ApplierPool, KeySpace, TimerEntry};
+use super::applier::{KeySpace, OriginActors, TimerEntry};
 use super::store::Store;
 use super::timer_queue::TimerQueue;
 
@@ -90,12 +89,9 @@ impl Default for TimerdCfg {
 /// How long a failed sweep's keys wait in memory before the loop looks again.
 const RETRY_DELAY_MS: i64 = 1_000;
 
-/// How long the loop naps between pause checks while the debug startup flag holds it.
-const PAUSED_NAP: Duration = Duration::from_millis(100);
-
 pub struct Timerd {
     store: Arc<dyn Store>,
-    applier: Arc<ApplierPool>,
+    applier: Arc<OriginActors>,
     schedules: Option<Arc<dyn ScheduleFirer>>,
     queue: Arc<TimerQueue>,
     keys: KeySpace,
@@ -105,7 +101,7 @@ pub struct Timerd {
 impl Timerd {
     pub fn new(
         store: Arc<dyn Store>,
-        applier: Arc<ApplierPool>,
+        applier: Arc<OriginActors>,
         schedules: Option<Arc<dyn ScheduleFirer>>,
         queue: Arc<TimerQueue>,
         keys: KeySpace,
@@ -277,12 +273,11 @@ impl Timerd {
     }
 
     /// The wall-clock loop: seed once, then sleep until the nearest armed
-    /// deadline and fire it. Paused while `paused` is set, which is what
-    /// the debug startup flag does: with the loop stopped, `debug.tick` is the only
-    /// thing that moves time.
+    /// deadline and fire it. Under the debug startup flag this loop is simply
+    /// never spawned — the clock is the caller's, and `debug.tick` is the
+    /// only thing that moves time.
     pub fn spawn(
         self: Arc<Self>,
-        paused: Arc<AtomicBool>,
         mut shutdown: tokio::sync::watch::Receiver<bool>,
     ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
@@ -306,17 +301,13 @@ impl Timerd {
                 }
             }
             loop {
-                let sleep_for = if paused.load(Ordering::SeqCst) {
-                    PAUSED_NAP
-                } else {
-                    match self.queue.next_deadline() {
-                        Some(at) => Duration::from_millis(
-                            at.saturating_sub(resonate_core::util::system_time_ms())
-                                .max(0) as u64,
-                        ),
-                        // Nothing armed: sleep until an arm wakes us.
-                        None => Duration::from_secs(3_600),
-                    }
+                let sleep_for = match self.queue.next_deadline() {
+                    Some(at) => Duration::from_millis(
+                        at.saturating_sub(resonate_core::util::system_time_ms())
+                            .max(0) as u64,
+                    ),
+                    // Nothing armed: sleep until an arm wakes us.
+                    None => Duration::from_secs(3_600),
                 };
                 tokio::select! {
                     _ = tokio::time::sleep(sleep_for) => {}
@@ -325,9 +316,6 @@ impl Timerd {
                         tracing::info!("Timer loop shutting down");
                         return;
                     }
-                }
-                if paused.load(Ordering::SeqCst) {
-                    continue;
                 }
                 let now = resonate_core::util::system_time_ms();
                 match self.fire_due(now).await {
@@ -346,7 +334,7 @@ mod tests {
     use crate::cache::{DocCache, MemDocCache};
     use crate::codec;
     use crate::kernel::state::Req;
-    use crate::outbox::Outbox;
+    use crate::sender::{NullRouter, Sender};
     use crate::store::ObjectStoreAdapter;
     use resonate_core::types::PromiseState;
     use serde_json::json;
@@ -360,22 +348,21 @@ mod tests {
 
     struct Rig {
         store: Arc<dyn Store>,
-        applier: Arc<ApplierPool>,
-        outbox: Arc<Outbox>,
+        applier: Arc<OriginActors>,
+        sender: Arc<Sender>,
         timers: Arc<TimerQueue>,
     }
 
     fn rig() -> Rig {
         let store: Arc<dyn Store> = Arc::new(ObjectStoreAdapter::in_memory());
         let cache: Arc<dyn DocCache> = Arc::new(MemDocCache::new(16));
-        let outbox = Arc::new(Outbox::new(None, "http://server"));
-        outbox.set_paused(true);
-        // One queue, as `S3Server::build` wires it.
+        let sender = Arc::new(Sender::new(Arc::new(NullRouter), "http://server", true));
+        // One queue, as `Server::build` wires it.
         let timers = Arc::new(TimerQueue::new());
-        let applier = Arc::new(ApplierPool::new(
+        let applier = Arc::new(OriginActors::new(
             Arc::clone(&store),
             cache,
-            Arc::clone(&outbox),
+            Arc::clone(&sender),
             Arc::clone(&timers),
             keys(),
             ApplierCfg::default(),
@@ -383,7 +370,7 @@ mod tests {
         Rig {
             store,
             applier,
-            outbox,
+            sender,
             timers,
         }
     }
@@ -482,13 +469,12 @@ mod tests {
         let inner: Arc<dyn Store> = Arc::new(ObjectStoreAdapter::in_memory());
         let r = {
             let store: Arc<dyn Store> = Arc::new(NoListing(Arc::clone(&inner)));
-            let outbox = Arc::new(Outbox::new(None, "http://server"));
-            outbox.set_paused(true);
+            let sender = Arc::new(Sender::new(Arc::new(NullRouter), "http://server", true));
             let timers = Arc::new(TimerQueue::new());
-            let applier = Arc::new(ApplierPool::new(
+            let applier = Arc::new(OriginActors::new(
                 Arc::clone(&store),
                 Arc::new(MemDocCache::new(16)),
-                Arc::clone(&outbox),
+                Arc::clone(&sender),
                 Arc::clone(&timers),
                 keys(),
                 ApplierCfg::default(),
@@ -496,7 +482,7 @@ mod tests {
             Rig {
                 store,
                 applier,
-                outbox,
+                sender,
                 timers,
             }
         };
@@ -553,7 +539,7 @@ mod tests {
         let restarted = Rig {
             store: Arc::clone(&r.store),
             applier: Arc::clone(&r.applier),
-            outbox: Arc::clone(&r.outbox),
+            sender: Arc::clone(&r.sender),
             timers: Arc::new(TimerQueue::new()),
         };
         let td = timerd(&restarted, None);
@@ -619,7 +605,7 @@ mod tests {
         let armed = timer_keys(&r).await;
         assert_eq!(armed.len(), 1);
         assert!(armed[0].contains(&format!("{:020}", 60_000)));
-        assert_eq!(r.outbox.snapshot().len(), 1, "the task was re-dispatched");
+        assert_eq!(r.sender.snapshot().len(), 1, "the task was re-dispatched");
     }
 
     #[tokio::test]
@@ -800,21 +786,16 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn the_loop_does_nothing_while_paused_and_fires_once_resumed() {
+    async fn the_loop_fires_an_overdue_deadline() {
         let r = rig();
         // A deadline already in wall-clock terms overdue.
         create(&r, "o", "o:a", 5_000, 0).await;
-        let paused = Arc::new(AtomicBool::new(true));
         let (tx, rx) = tokio::sync::watch::channel(false);
         let td = Arc::new(timerd(&r, None));
-        let handle = Arc::clone(&td).spawn(Arc::clone(&paused), rx);
-        tokio::time::sleep(Duration::from_millis(60)).await;
-        assert_eq!(timer_keys(&r).await.len(), 1, "paused, so nothing swept");
-
-        paused.store(false, Ordering::SeqCst);
+        let handle = Arc::clone(&td).spawn(rx);
         eventually(
             || async { timer_keys(&r).await.is_empty() },
-            "resumed, so the overdue key must be swept",
+            "the overdue key must be swept",
         )
         .await;
 
@@ -833,7 +814,7 @@ mod tests {
             .unwrap();
         assert!(r.timers.is_empty());
         let (tx, rx) = tokio::sync::watch::channel(false);
-        let handle = Arc::new(timerd(&r, None)).spawn(Arc::new(AtomicBool::new(false)), rx);
+        let handle = Arc::new(timerd(&r, None)).spawn(rx);
         eventually(
             || async { timer_keys(&r).await.is_empty() },
             "the seeded key must fire and be collected",

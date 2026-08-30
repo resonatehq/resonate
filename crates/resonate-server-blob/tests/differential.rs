@@ -25,7 +25,7 @@ use resonate_core::types::{
 };
 use resonate_core::ResonateServer;
 use resonate_server_blob::oracle::{Oracle, SharedOracle};
-use resonate_server_blob::server::{S3Server, S3ServerCfg};
+use resonate_server_blob::server::{Server, ServerCfg};
 use serde_json::{json, Value};
 
 /// Every backend gets the same limit, or `preload` would differ by
@@ -109,7 +109,7 @@ fn pick<T: Clone>(rng: &mut fastrand::Rng, v: &[T]) -> Option<T> {
 async fn differential_random() {
     debug_assert_eq!(22, ALL_OPS.len(), "Op has 22 variants; ALL_OPS must match");
 
-    let server = S3Server::in_memory(S3ServerCfg {
+    let server = Server::in_memory(ServerCfg {
         debug: true,
         search: true,
         ..Default::default()
@@ -256,8 +256,9 @@ async fn send_all(
 }
 
 /// The whole snapshot, messages included: both backends queue — the blob
-/// outbox is paused under the debug flag and the oracle keeps `outgoing` — so
-/// unlike the engine-level harness there is no returned-vs-queued split.
+/// sender holds messages under the debug flag and the oracle keeps
+/// `outgoing` — so unlike the engine-level harness there is no
+/// returned-vs-queued split.
 async fn snap_all(backends: &[(String, Backend)], now: i64) -> Vec<(String, Value)> {
     let envelope = req("debug.snap", json!({}));
     let mut out = Vec::new();

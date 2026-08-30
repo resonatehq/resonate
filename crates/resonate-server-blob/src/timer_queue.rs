@@ -29,7 +29,7 @@
 //!
 //! The applier and the schedule service arm and disarm around their timer-key
 //! writes; the timer service takes what is due, seeds after a restart, and
-//! re-arms what it could not sweep. `S3Server::build` creates the one shared
+//! re-arms what it could not sweep. `Server::build` creates the one shared
 //! instance.
 
 use std::collections::BTreeSet;

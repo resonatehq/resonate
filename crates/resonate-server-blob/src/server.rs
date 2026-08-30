@@ -1,4 +1,4 @@
-//! `ResonateServer` over S3.
+//! `ResonateServer` over blob storage.
 //!
 //! # Contract
 //!
@@ -24,8 +24,8 @@
 //!
 //! # Dependencies
 //!
-//! [`S3Server::build`] wires the whole backend — store, cache, outbox,
-//! applier, schedule service, timer poller, scan service — and it is the one
+//! [`Server::build`] wires the whole backend — store, cache, sender, origin
+//! actors, schedule service, timer poller, scan service — and it is the one
 //! constructor for production and for tests, so the differential suite
 //! exercises the graph `main` builds rather than a lookalike.
 //!
@@ -34,7 +34,6 @@
 //! `main`'s backend selection, the differential suite, and the live-bucket
 //! smoke tests, all through the `ResonateServer` port.
 
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -53,11 +52,11 @@ use resonate_core::types::{
 use resonate_core::util;
 use resonate_core::{ResonateRouter, ResonateServer, Unavailable};
 
-use super::applier::{ApplierCfg, ApplierPool, KeySpace};
+use super::applier::{ApplierCfg, KeySpace, OriginActors};
 use super::cache::{DocCache, MemDocCache};
-use super::outbox::Outbox;
 use super::scan::ScanService;
 use super::schedules::ScheduleService;
+use super::sender::{NullRouter, Sender};
 use super::store::Store;
 use super::timer_queue::TimerQueue;
 use super::timerd::{ScheduleFirer, Timerd, TimerdCfg};
@@ -71,7 +70,7 @@ fn origin_of(id: &str) -> &str {
 
 /// Everything needed to stand up the backend.
 #[derive(Debug, Clone)]
-pub struct S3ServerCfg {
+pub struct ServerCfg {
     pub keys: KeySpace,
     pub applier: ApplierCfg,
     pub timerd: TimerdCfg,
@@ -85,7 +84,7 @@ pub struct S3ServerCfg {
     pub server_url: String,
 }
 
-impl Default for S3ServerCfg {
+impl Default for ServerCfg {
     fn default() -> Self {
         Self {
             keys: KeySpace::new("", 4),
@@ -99,53 +98,59 @@ impl Default for S3ServerCfg {
     }
 }
 
-pub struct S3Server {
-    applier: Arc<ApplierPool>,
+pub struct Server {
+    store: Arc<dyn Store>,
+    cache: Arc<dyn DocCache>,
+    actors: Arc<OriginActors>,
+    sender: Arc<Sender>,
     timerd: Arc<Timerd>,
     scan: ScanService,
     schedules: Arc<ScheduleService>,
-    outbox: Arc<Outbox>,
-    store: Arc<dyn Store>,
     keys: KeySpace,
+    /// The debug startup flag: `debug.*` is answered, `head.debug_time` is
+    /// honoured, messages are held instead of routed, and the timer loop is
+    /// never spawned. The clock belongs to the caller for the life of the
+    /// process, or it never does.
     debug: bool,
     search: bool,
-    /// True for the life of the process when `cfg.debug` is set. Shared with
-    /// the timer poller, which is the point: with the loop paused,
-    /// `debug.tick` is the only thing that moves time. The clock belongs to
-    /// the caller for the life of the process, or it never does.
-    debug_mode: Arc<AtomicBool>,
 }
 
-impl S3Server {
+impl Server {
     /// Wire the whole backend over `store`.
     ///
     /// One constructor for production and for tests, so the differential suite
-    /// exercises the same graph `main` builds.
+    /// exercises the same graph `main` builds. The router is an ordinary
+    /// argument: `main` constructs the dispatcher empty, builds this server
+    /// around it, and registers the workers one statement later — so there is
+    /// nothing to bind after the fact.
     pub fn build(
         store: Arc<dyn Store>,
-        router: Option<Arc<dyn ResonateRouter>>,
-        cfg: S3ServerCfg,
+        router: Arc<dyn ResonateRouter>,
+        cfg: ServerCfg,
     ) -> Arc<Self> {
         let cache: Arc<dyn DocCache> = Arc::new(MemDocCache::new(cfg.cache_capacity));
-        let outbox = Arc::new(Outbox::new(router, cfg.server_url.clone()));
+        // Under the debug flag the sender holds messages for the life of the
+        // process — they sit in `debug.snap` instead of leaving, which is
+        // what makes the snapshot's message list mean anything.
+        let sender = Arc::new(Sender::new(router, cfg.server_url.clone(), cfg.debug));
         let timers = Arc::new(TimerQueue::new());
-        let applier = Arc::new(ApplierPool::new(
+        let actors = Arc::new(OriginActors::new(
             Arc::clone(&store),
             Arc::clone(&cache),
-            Arc::clone(&outbox),
+            Arc::clone(&sender),
             Arc::clone(&timers),
             cfg.keys.clone(),
             cfg.applier.clone(),
         ));
         let schedules = Arc::new(ScheduleService::new(
             Arc::clone(&store),
-            Arc::clone(&applier),
+            Arc::clone(&actors),
             Arc::clone(&timers),
             cfg.keys.clone(),
         ));
         let timerd = Arc::new(Timerd::new(
             Arc::clone(&store),
-            Arc::clone(&applier),
+            Arc::clone(&actors),
             Some(Arc::clone(&schedules) as Arc<dyn ScheduleFirer>),
             Arc::clone(&timers),
             cfg.keys.clone(),
@@ -153,37 +158,31 @@ impl S3Server {
         ));
         let scan = ScanService::new(
             Arc::clone(&store),
-            cache,
+            Arc::clone(&cache),
             Arc::clone(&schedules),
-            Arc::clone(&outbox),
+            Arc::clone(&sender),
             cfg.keys.clone(),
         );
-        // Under the debug flag the outbox is paused for the life of the
-        // process — queued messages sit in `debug.snap` instead of leaving,
-        // which is what makes the snapshot's message list mean anything.
-        if cfg.debug {
-            outbox.set_paused(true);
-        }
         Arc::new(Self {
-            applier,
+            store,
+            cache,
+            actors,
+            sender,
             timerd,
             scan,
             schedules,
-            outbox,
-            store,
             keys: cfg.keys,
             debug: cfg.debug,
             search: cfg.search,
-            debug_mode: Arc::new(AtomicBool::new(cfg.debug)),
         })
     }
 
     /// A ready-to-drive backend over an in-process store. Tests and the
     /// differential suite.
-    pub fn in_memory(cfg: S3ServerCfg) -> Arc<Self> {
+    pub fn in_memory(cfg: ServerCfg) -> Arc<Self> {
         Self::build(
             Arc::new(super::store::ObjectStoreAdapter::in_memory()),
-            None,
+            Arc::new(NullRouter),
             cfg,
         )
     }
@@ -203,14 +202,13 @@ impl S3Server {
         }
     }
 
-    /// The flag the timer poller watches — set at construction from
-    /// `cfg.debug` and never afterwards.
-    pub fn debug_mode(&self) -> Arc<AtomicBool> {
-        Arc::clone(&self.debug_mode)
+    /// The read cache, shared by the actors and the scan service.
+    pub fn cache(&self) -> &Arc<dyn DocCache> {
+        &self.cache
     }
 
     pub fn kernel_cfg(&self) -> KernelCfg {
-        self.applier.cfg_kernel()
+        self.actors.cfg_kernel()
     }
 
     async fn dispatch(&self, req: &RequestEnvelope, now: i64) -> Result<Reply, Unavailable> {
@@ -226,33 +224,33 @@ impl S3Server {
             "promise.get" => {
                 let r: PromiseGetData = parsed!(data);
                 let origin = origin_of(&r.id).to_string();
-                self.applier.submit(&origin, Req::PromiseGet(r), now).await
+                self.actors.submit(&origin, Req::PromiseGet(r), now).await
             }
             "promise.create" => {
                 let r: PromiseCreateData = parsed!(data);
                 let origin = origin_of(&r.id).to_string();
-                self.applier
+                self.actors
                     .submit(&origin, Req::PromiseCreate(r), now)
                     .await
             }
             "promise.settle" => {
                 let r: PromiseSettleData = parsed!(data);
                 let origin = origin_of(&r.id).to_string();
-                self.applier
+                self.actors
                     .submit(&origin, Req::PromiseSettle(r), now)
                     .await
             }
             "promise.register_callback" => {
                 let r: PromiseRegisterCallbackData = parsed!(data);
                 let origin = origin_of(&r.awaiter).to_string();
-                self.applier
+                self.actors
                     .submit(&origin, Req::PromiseRegisterCallback(r), now)
                     .await
             }
             "promise.register_listener" => {
                 let r: PromiseRegisterListenerData = parsed!(data);
                 let origin = origin_of(&r.awaited).to_string();
-                self.applier
+                self.actors
                     .submit(&origin, Req::PromiseRegisterListener(r), now)
                     .await
             }
@@ -265,32 +263,32 @@ impl S3Server {
             "task.get" => {
                 let r: TaskGetData = parsed!(data);
                 let origin = origin_of(&r.id).to_string();
-                self.applier.submit(&origin, Req::TaskGet(r), now).await
+                self.actors.submit(&origin, Req::TaskGet(r), now).await
             }
             "task.create" => {
                 let r: TaskCreateData = parsed!(data);
                 let origin = origin_of(&r.action.data.id).to_string();
-                self.applier.submit(&origin, Req::TaskCreate(r), now).await
+                self.actors.submit(&origin, Req::TaskCreate(r), now).await
             }
             "task.acquire" => {
                 let r: TaskAcquireData = parsed!(data);
                 let origin = origin_of(&r.id).to_string();
-                self.applier.submit(&origin, Req::TaskAcquire(r), now).await
+                self.actors.submit(&origin, Req::TaskAcquire(r), now).await
             }
             "task.release" => {
                 let r: TaskReleaseData = parsed!(data);
                 let origin = origin_of(&r.id).to_string();
-                self.applier.submit(&origin, Req::TaskRelease(r), now).await
+                self.actors.submit(&origin, Req::TaskRelease(r), now).await
             }
             "task.fulfill" => {
                 let r: TaskFulfillData = parsed!(data);
                 let origin = origin_of(&r.id).to_string();
-                self.applier.submit(&origin, Req::TaskFulfill(r), now).await
+                self.actors.submit(&origin, Req::TaskFulfill(r), now).await
             }
             "task.suspend" => {
                 let r: TaskSuspendData = parsed!(data);
                 let origin = origin_of(&r.id).to_string();
-                self.applier.submit(&origin, Req::TaskSuspend(r), now).await
+                self.actors.submit(&origin, Req::TaskSuspend(r), now).await
             }
             "task.fence" => {
                 let r: TaskFenceData = parsed!(data);
@@ -305,7 +303,7 @@ impl S3Server {
                     }
                 }
                 let origin = origin_of(&r.id).to_string();
-                self.applier
+                self.actors
                     .submit(
                         &origin,
                         Req::TaskFence {
@@ -320,21 +318,19 @@ impl S3Server {
                 let r: TaskHeartbeatData = parsed!(data);
                 // The validator requires a non-empty batch sharing one origin.
                 let origin = origin_of(&r.tasks[0].id).to_string();
-                self.applier
+                self.actors
                     .submit(&origin, Req::TaskHeartbeat(r), now)
                     .await
             }
             "task.halt" => {
                 let r: TaskHaltData = parsed!(data);
                 let origin = origin_of(&r.id).to_string();
-                self.applier.submit(&origin, Req::TaskHalt(r), now).await
+                self.actors.submit(&origin, Req::TaskHalt(r), now).await
             }
             "task.continue" => {
                 let r: TaskContinueData = parsed!(data);
                 let origin = origin_of(&r.id).to_string();
-                self.applier
-                    .submit(&origin, Req::TaskContinue(r), now)
-                    .await
+                self.actors.submit(&origin, Req::TaskContinue(r), now).await
             }
             "task.search" => {
                 let r: TaskSearchData = parsed!(data);
@@ -394,8 +390,8 @@ impl S3Server {
         }
         // Order matters: the objects are gone, so anything still holding a
         // document or a queued message is holding a ghost.
-        self.applier.reset().await;
-        self.outbox.clear();
+        self.actors.reset().await;
+        self.sender.clear();
         tracing::warn!("Debug reset: all data cleared");
         Ok(Reply::status(200, Value::Object(serde_json::Map::new())))
     }
@@ -457,7 +453,7 @@ fn parse<T: DeserializeOwned + Validate>(data: &Value) -> Result<T, Reply> {
 }
 
 #[async_trait]
-impl ResonateServer for S3Server {
+impl ResonateServer for Server {
     async fn process(&self, req: &RequestEnvelope) -> Result<ResponseEnvelope, Unavailable> {
         // Debug-time overrides are gated by config, so a caller cannot move the
         // server's clock. The gate is here rather than at the HTTP edge so
@@ -492,8 +488,8 @@ mod tests {
     const PID: &str = "pid-1";
     const TTL: i64 = 60_000;
 
-    fn server(debug: bool) -> Arc<S3Server> {
-        S3Server::in_memory(S3ServerCfg {
+    fn server(debug: bool) -> Arc<Server> {
+        Server::in_memory(ServerCfg {
             keys: KeySpace::new("p", 4),
             debug,
             search: true,
@@ -515,7 +511,7 @@ mod tests {
         }
     }
 
-    async fn send(s: &Arc<S3Server>, kind: &str, data: Value, now: i64) -> ResponseEnvelope {
+    async fn send(s: &Arc<Server>, kind: &str, data: Value, now: i64) -> ResponseEnvelope {
         let mut req = envelope(kind, data);
         req.head.debug_time = Some(now);
         s.process(&req).await.expect("in-process backend answers")
@@ -524,7 +520,7 @@ mod tests {
     /// A debug server — born with the background loops paused, as the
     /// differential suite drives it. Debug is a startup flag, so there is
     /// nothing to start.
-    async fn started() -> Arc<S3Server> {
+    async fn started() -> Arc<Server> {
         server(true)
     }
 
@@ -725,7 +721,7 @@ mod tests {
 
     /// Claim `diff:t` and create a promise in a *different* origin, so a fence
     /// naming it would have to span two documents.
-    async fn with_cross_origin_target(s: &Arc<S3Server>) {
+    async fn with_cross_origin_target(s: &Arc<Server>) {
         send(
             s,
             "task.create",
@@ -813,7 +809,7 @@ mod tests {
     #[tokio::test]
     async fn searches_are_refused_by_default() {
         // `search` defaults to false: a deployment opts in.
-        let s = S3Server::in_memory(S3ServerCfg {
+        let s = Server::in_memory(ServerCfg {
             keys: KeySpace::new("p", 4),
             server_url: "http://server:8001".into(),
             ..Default::default()

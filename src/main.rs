@@ -478,7 +478,7 @@ async fn run_server(config: Config) -> Result<(), String> {
 ///
 /// Shared by the SQL path (inside `Arc::new_cyclic`, where the handle is the
 /// not-yet-live `Weak<Server>`) and the blob path (after construction, where
-/// it is a downgraded `Arc<S3Server>`), so both build exactly the same
+/// it is a downgraded `Arc` of the blob server), so both build exactly the same
 /// transports. A disabled transport is simply not registered, and the router
 /// reports its addresses as undeliverable.
 fn build_workers(
@@ -537,19 +537,20 @@ fn build_workers(
 /// Serve over the blob backend.
 ///
 /// A parallel to the tail of `run_server` rather than a branch inside it. The
-/// SQL path closes its ownership ring with `Arc::new_cyclic` because `Server`
-/// takes the router as a constructor argument; the blob server binds the
-/// router after construction through its `LateRouter`, so nothing here needs
-/// the cyclic form. The two paths share the workers (`build_workers`) and the
-/// gateway, and differ in which background loop runs: the blob backend owns
-/// its own firing loop (`timerd`) and delivers messages from its own outbox,
-/// so neither the timer wheel nor the timeout sweep exists on this path.
+/// SQL path closes its ownership ring with `Arc::new_cyclic` because its
+/// `Server::new` also takes the timer wheel, whose callbacks point back at the
+/// server; the blob path has no such back-edge, so it is a straight line: the
+/// dispatcher is built empty, the server around it, and the workers are
+/// registered one statement later. The two paths share the workers
+/// (`build_workers`) and the gateway, and differ in which background loop
+/// runs: the blob backend owns its own firing loop (`timerd`) and routes
+/// messages as they are decided, so neither the timer wheel nor the timeout
+/// sweep exists on this path.
 #[cfg(feature = "blob")]
 async fn run_blob_server(config: Config) -> Result<(), String> {
     use resonate_server_blob::applier::{ApplierCfg, KeySpace};
     use resonate_server_blob::kernel::state::KernelCfg;
-    use resonate_server_blob::outbox::LateRouter;
-    use resonate_server_blob::server::{S3Server, S3ServerCfg};
+    use resonate_server_blob::server::{Server as BlobServer, ServerCfg as BlobServerCfg};
     use resonate_server_blob::store::{ObjectStoreAdapter, Store};
 
     let blob_cfg = config.storage.blob.clone();
@@ -591,11 +592,17 @@ async fn run_blob_server(config: Config) -> Result<(), String> {
         }
     };
 
-    let late_router = Arc::new(LateRouter::new());
-    let blob = S3Server::build(
+    // The dispatcher is constructed empty and filled exactly once, a few
+    // statements down: the server takes the router as an ordinary constructor
+    // argument, and the workers take a handle to the server — so the router
+    // comes first, the server around it, and the workers before anything
+    // listens. No late binding, no cyclic construction.
+    let dispatcher = Arc::new(transport::TransportDispatcher::deferred());
+    let router: Arc<dyn ResonateRouter> = Arc::clone(&dispatcher) as Arc<dyn ResonateRouter>;
+    let blob = BlobServer::build(
         store,
-        Some(Arc::clone(&late_router) as Arc<dyn ResonateRouter>),
-        S3ServerCfg {
+        Arc::clone(&router),
+        BlobServerCfg {
             keys: KeySpace::new(blob_cfg.prefix.clone(), blob_cfg.timer_shards),
             applier: ApplierCfg {
                 max_cas_retries: blob_cfg.max_cas_retries,
@@ -624,7 +631,7 @@ async fn run_blob_server(config: Config) -> Result<(), String> {
     // Every worker holds a weak handle to the server, exactly as on the SQL
     // path — this owns the server, so nothing in the graph keeps it alive.
     let server_handle: std::sync::Weak<dyn ResonateServer> = {
-        let weak: std::sync::Weak<S3Server> = Arc::downgrade(&blob);
+        let weak: std::sync::Weak<BlobServer> = Arc::downgrade(&blob);
         weak
     };
     let poll_registry = Arc::new(PollRegistry::new(
@@ -632,10 +639,10 @@ async fn run_blob_server(config: Config) -> Result<(), String> {
         config.transports.http_poll.clone(),
     ));
     let workers = build_workers(server_handle, &config, &poll_registry);
-    let router: Arc<dyn ResonateRouter> = Arc::new(transport::TransportDispatcher::new(workers));
-    // Close the knot: the outbox has held a placeholder since the server was
-    // built, and nothing has been delivered through it yet.
-    late_router.bind(Arc::clone(&router));
+    assert!(
+        dispatcher.register_workers(workers),
+        "the dispatcher is filled exactly once"
+    );
 
     let debug = config.debug;
     router.init(debug).await.map_err(|e| e.to_string())?;
@@ -644,15 +651,18 @@ async fn run_blob_server(config: Config) -> Result<(), String> {
     let mut handles = Vec::new();
 
     // One loop, not two: the timer loop fires armed deadlines from memory,
-    // listing the store only to seed itself at startup, and the outbox
-    // delivers as it is written rather than being drained by a second loop.
-    handles.push(Arc::clone(blob.timerd()).spawn(blob.debug_mode(), shutdown_rx.clone()));
+    // listing the store only to seed itself at startup, and messages leave
+    // as they are decided rather than being drained by a second loop. Under
+    // the debug flag the loop is simply never spawned — the clock is the
+    // caller's.
     if debug {
         tracing::warn!(
-            "Debug mode — the timer loop is paused and the outbox holds its \
-             queue. Time advances only through debug.tick, and debug.* \
-             operations are answered."
+            "Debug mode — no timer loop, and messages are held for debug.snap. \
+             Time advances only through debug.tick, and debug.* operations \
+             are answered."
         );
+    } else {
+        handles.push(Arc::clone(blob.timerd()).spawn(shutdown_rx.clone()));
     }
 
     let metrics_port = config.observability.metrics_port;

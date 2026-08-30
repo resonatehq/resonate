@@ -4,8 +4,8 @@
 //! registers `resonate_messages_total` and `resonate_schedule_promises_total`
 //! there; two registrations of one name in one process is an `Err` that a
 //! `lazy_static` `.unwrap()` turns into a panic on first use. Distinct names
-//! keep the two paths distinguishable on a dashboard anyway — the blob outbox
-//! and `Server::deliver` are different code delivering different queues.
+//! keep the two paths distinguishable on a dashboard anyway — the blob sender
+//! and the binary's `Server::deliver` are different code on different paths.
 
 use lazy_static::lazy_static;
 use prometheus::{
@@ -15,7 +15,7 @@ use prometheus::{
 lazy_static! {
     pub static ref MESSAGES_TOTAL: CounterVec = register_counter_vec!(
         "resonate_blob_messages_total",
-        "Total number of messages delivered by the blob outbox, by kind",
+        "Total number of messages routed by the blob sender, by kind",
         &["kind"]
     )
     .unwrap();

@@ -18,7 +18,7 @@
 //! 3. **DELETE the old timer object** (best effort) — after, so nothing is
 //!    left uncovered in between. A failure leaves an orphan armed in the
 //!    queue, which fires it as a no-op and collects it.
-//! 4. **Hand the sends to the outbox** — strictly post-commit, at most once.
+//! 4. **Hand the sends to the sender** — strictly post-commit, at most once.
 //! 5. **Answer the callers.**
 //!
 //! | dies after | orphan | recovery |
@@ -47,15 +47,15 @@
 //!
 //! The kernel (`handle`, `drain`, `apply_effects`) for every decision, the
 //! codec for the bytes, the store for the objects, the cache for the read
-//! path, the timer queue mirroring every timer key it writes, and the outbox
+//! path, the timer queue mirroring every timer key it writes, and the sender
 //! for post-commit sends. [`KeySpace`], defined here, names every key in the
 //! bucket.
 //!
 //! # Dependants
 //!
-//! Every write in the backend goes through [`ApplierPool::submit`]: `S3Server`
+//! Every write in the backend goes through [`OriginActors::submit`]: `Server`
 //! routes each request to it, the timer poller sweeps origins through
-//! [`ApplierPool::tick`], and the schedule service submits `ScheduleFire`
+//! [`OriginActors::tick`], and the schedule service submits `ScheduleFire`
 //! through it. The other modules share [`KeySpace`] to agree on where things
 //! live.
 
@@ -71,7 +71,7 @@ use resonate_core::Unavailable;
 
 use super::cache::DocCache;
 use super::codec;
-use super::outbox::Outbox;
+use super::sender::Sender;
 use super::store::{Etag, Store, StoreError};
 use super::timer_queue::TimerQueue;
 
@@ -316,7 +316,7 @@ impl Work {
 struct Shared {
     store: Arc<dyn Store>,
     cache: Arc<dyn DocCache>,
-    outbox: Arc<Outbox>,
+    sender: Arc<Sender>,
     timers: Arc<TimerQueue>,
     keys: KeySpace,
     cfg: ApplierCfg,
@@ -327,15 +327,15 @@ struct Shared {
 }
 
 /// The per-origin actors, and the only way into them.
-pub struct ApplierPool {
+pub struct OriginActors {
     shared: Arc<Shared>,
 }
 
-impl ApplierPool {
+impl OriginActors {
     pub fn new(
         store: Arc<dyn Store>,
         cache: Arc<dyn DocCache>,
-        outbox: Arc<Outbox>,
+        sender: Arc<Sender>,
         timers: Arc<TimerQueue>,
         keys: KeySpace,
         cfg: ApplierCfg,
@@ -344,7 +344,7 @@ impl ApplierPool {
             shared: Arc::new(Shared {
                 store,
                 cache,
-                outbox,
+                sender,
                 timers,
                 keys,
                 cfg,
@@ -358,8 +358,8 @@ impl ApplierPool {
         &self.shared.keys
     }
 
-    pub fn outbox(&self) -> &Arc<Outbox> {
-        &self.shared.outbox
+    pub fn sender(&self) -> &Arc<Sender> {
+        &self.shared.sender
     }
 
     pub fn store(&self) -> &Arc<dyn Store> {
@@ -503,7 +503,7 @@ async fn run_batch(origin: &str, batch: Vec<Work>, shared: &Arc<Shared>) {
             Ok(()) => {
                 for effect in &decision.sends {
                     if let Effect::Send { address, out } = effect {
-                        shared.outbox.dispatch(address, out.clone()).await;
+                        shared.sender.dispatch(address, out.clone()).await;
                     }
                 }
                 return answer(batch, decision.replies);
@@ -709,6 +709,7 @@ async fn perform(
 mod tests {
     use super::*;
     use crate::cache::{MemDocCache, NoopDocCache};
+    use crate::sender::NullRouter;
     use crate::store::{FaultStore, ObjectStoreAdapter};
     use async_trait::async_trait;
     use serde_json::json;
@@ -780,7 +781,7 @@ mod tests {
         KeySpace::new("p", 4)
     }
 
-    fn pool_with(store: Arc<dyn Store>, cache: Arc<dyn DocCache>) -> ApplierPool {
+    fn pool_with(store: Arc<dyn Store>, cache: Arc<dyn DocCache>) -> OriginActors {
         pool_with_timers(store, cache, Arc::new(TimerQueue::new()))
     }
 
@@ -788,17 +789,16 @@ mod tests {
         store: Arc<dyn Store>,
         cache: Arc<dyn DocCache>,
         timers: Arc<TimerQueue>,
-    ) -> ApplierPool {
-        let outbox = Arc::new(Outbox::new(None, "http://server"));
-        outbox.set_paused(true);
-        ApplierPool::new(store, cache, outbox, timers, keys(), ApplierCfg::default())
+    ) -> OriginActors {
+        let sender = Arc::new(Sender::new(Arc::new(NullRouter), "http://server", true));
+        OriginActors::new(store, cache, sender, timers, keys(), ApplierCfg::default())
     }
 
     fn shared_store() -> Arc<dyn Store> {
         Arc::new(ObjectStoreAdapter::in_memory())
     }
 
-    fn pool() -> ApplierPool {
+    fn pool() -> OriginActors {
         pool_with(shared_store(), Arc::new(MemDocCache::new(16)))
     }
 
@@ -1274,12 +1274,11 @@ mod tests {
         let cache: Arc<dyn DocCache> = Arc::new(StaleVersion {
             held: std::sync::Mutex::new(None),
         });
-        let outbox = Arc::new(Outbox::new(None, "http://server"));
-        outbox.set_paused(true);
-        let p = ApplierPool::new(
+        let sender = Arc::new(Sender::new(Arc::new(NullRouter), "http://server", true));
+        let p = OriginActors::new(
             Arc::clone(&store),
             cache,
-            outbox,
+            sender,
             Arc::new(TimerQueue::new()),
             keys(),
             ApplierCfg {
@@ -1484,12 +1483,11 @@ mod tests {
     #[tokio::test]
     async fn a_reaped_actor_is_replaced_on_the_next_request() {
         let store = shared_store();
-        let outbox = Arc::new(Outbox::new(None, "http://server"));
-        outbox.set_paused(true);
-        let p = ApplierPool::new(
+        let sender = Arc::new(Sender::new(Arc::new(NullRouter), "http://server", true));
+        let p = OriginActors::new(
             Arc::clone(&store),
             Arc::new(MemDocCache::new(4)),
-            outbox,
+            sender,
             Arc::new(TimerQueue::new()),
             keys(),
             ApplierCfg {
@@ -1541,15 +1539,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sends_reach_the_outbox_only_after_the_commit() {
+    async fn sends_reach_the_sender_only_after_the_commit() {
         let inner = shared_store();
         let faulty = Arc::new(FaultStore::new(Arc::clone(&inner)));
-        let outbox = Arc::new(Outbox::new(None, "http://server"));
-        outbox.set_paused(true);
-        let p = ApplierPool::new(
+        let sender = Arc::new(Sender::new(Arc::new(NullRouter), "http://server", true));
+        let p = OriginActors::new(
             Arc::clone(&faulty) as Arc<dyn Store>,
             Arc::new(NoopDocCache),
-            Arc::clone(&outbox),
+            Arc::clone(&sender),
             Arc::new(TimerQueue::new()),
             keys(),
             ApplierCfg::default(),
@@ -1565,7 +1562,7 @@ mod tests {
             .await
             .is_err());
         assert!(
-            outbox.snapshot().is_empty(),
+            sender.snapshot().is_empty(),
             "nothing is sent for a commit that did not happen"
         );
 
@@ -1577,6 +1574,6 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(outbox.snapshot().len(), 1);
+        assert_eq!(sender.snapshot().len(), 1);
     }
 }

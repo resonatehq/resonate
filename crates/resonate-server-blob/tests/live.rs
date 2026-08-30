@@ -32,7 +32,8 @@ use resonate_core::types::{RequestEnvelope, RequestHead, ResponseEnvelope, SUPPO
 use resonate_core::ResonateServer;
 use resonate_server_blob::{
     applier::KeySpace,
-    server::{S3Server, S3ServerCfg},
+    sender::NullRouter,
+    server::{Server, ServerCfg},
     store::{Etag, ObjectStoreAdapter, Store, StoreError},
 };
 use serde_json::{json, Value};
@@ -201,7 +202,7 @@ fn envelope(kind: &str, data: Value, now: i64) -> RequestEnvelope {
     }
 }
 
-async fn send(server: &Arc<S3Server>, kind: &str, data: Value, now: i64) -> ResponseEnvelope {
+async fn send(server: &Arc<Server>, kind: &str, data: Value, now: i64) -> ResponseEnvelope {
     server
         .process(&envelope(kind, data, now))
         .await
@@ -214,10 +215,10 @@ async fn a_workflow_runs_end_to_end_against_a_live_store() {
         Some(pair) => pair,
         None => return,
     };
-    let server = S3Server::build(
+    let server = Server::build(
         Arc::clone(&store),
-        None,
-        S3ServerCfg {
+        Arc::new(NullRouter),
+        ServerCfg {
             keys: KeySpace::new(prefix.clone(), 4),
             debug: true,
             search: true,
@@ -225,7 +226,7 @@ async fn a_workflow_runs_end_to_end_against_a_live_store() {
         },
     );
     // Debug is a startup flag: the server above was built with `debug: true`,
-    // so delivery is already paused and queued messages stay visible in the
+    // so messages are held rather than routed and stay visible in the
     // snapshot.
 
     // Claim work by describing it.

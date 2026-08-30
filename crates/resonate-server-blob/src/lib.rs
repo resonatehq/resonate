@@ -11,9 +11,9 @@
 //! The internal graph, bottom up: [`store`] is the port to the bucket and
 //! [`codec`] the bytes on it; [`applier`] decides and writes through both,
 //! backed by [`cache`] and [`timer_queue`] and handing post-commit sends to
-//! [`outbox`]; [`timerd`] and [`schedules`] drive deadlines through the
-//! applier; [`scan`] reads the whole store; and [`server`] wires all of it
-//! behind the `ResonateServer` port.
+//! [`sender`]; [`timerd`] and [`schedules`] drive deadlines through the
+//! origin actors; [`scan`] reads the whole store; and [`server`] wires all of
+//! it behind the `ResonateServer` port.
 //!
 //! This crate depends on `resonate-core` and third-party crates only. It is a
 //! complete server — its own message delivery, its own timers, its own
@@ -25,9 +25,9 @@ pub mod codec;
 pub mod kernel;
 pub mod metrics;
 pub mod oracle;
-pub mod outbox;
 pub mod scan;
 pub mod schedules;
+pub mod sender;
 pub mod server;
 pub mod store;
 pub mod timer_queue;

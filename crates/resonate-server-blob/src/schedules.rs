@@ -33,7 +33,7 @@
 //! # Dependants
 //!
 //! The timer poller fires due schedules through the [`ScheduleFirer`] impl;
-//! `S3Server` routes `schedule.get/create/delete` here; the scan service reads
+//! `Server` routes `schedule.get/create/delete` here; the scan service reads
 //! `list_all` for `schedule.search`.
 
 use std::collections::BTreeMap;
@@ -50,7 +50,7 @@ use resonate_core::types::{
 use resonate_core::util;
 use resonate_core::Unavailable;
 
-use super::applier::{ApplierPool, KeySpace};
+use super::applier::{KeySpace, OriginActors};
 use super::store::{Etag, Store, StoreError};
 use super::timer_queue::TimerQueue;
 use super::timerd::ScheduleFirer;
@@ -131,7 +131,7 @@ fn origin_of(id: &str) -> &str {
 
 pub struct ScheduleService {
     store: Arc<dyn Store>,
-    applier: Arc<ApplierPool>,
+    applier: Arc<OriginActors>,
     timers: Arc<TimerQueue>,
     keys: KeySpace,
 }
@@ -139,7 +139,7 @@ pub struct ScheduleService {
 impl ScheduleService {
     pub fn new(
         store: Arc<dyn Store>,
-        applier: Arc<ApplierPool>,
+        applier: Arc<OriginActors>,
         timers: Arc<TimerQueue>,
         keys: KeySpace,
     ) -> Self {
@@ -373,7 +373,7 @@ mod tests {
     use crate::applier::ApplierCfg;
     use crate::cache::{DocCache, MemDocCache};
     use crate::codec;
-    use crate::outbox::Outbox;
+    use crate::sender::{NullRouter, Sender};
     use crate::store::ObjectStoreAdapter;
     use crate::timerd::{Timerd, TimerdCfg};
     use serde_json::json;
@@ -388,23 +388,22 @@ mod tests {
 
     struct Rig {
         store: Arc<dyn Store>,
-        applier: Arc<ApplierPool>,
+        applier: Arc<OriginActors>,
         schedules: Arc<ScheduleService>,
-        outbox: Arc<Outbox>,
+        sender: Arc<Sender>,
         timers: Arc<TimerQueue>,
     }
 
     fn rig() -> Rig {
         let store: Arc<dyn Store> = Arc::new(ObjectStoreAdapter::in_memory());
         let cache: Arc<dyn DocCache> = Arc::new(MemDocCache::new(16));
-        let outbox = Arc::new(Outbox::new(None, "http://server"));
-        outbox.set_paused(true);
-        // One queue, as `S3Server::build` wires it.
+        let sender = Arc::new(Sender::new(Arc::new(NullRouter), "http://server", true));
+        // One queue, as `Server::build` wires it.
         let timers = Arc::new(TimerQueue::new());
-        let applier = Arc::new(ApplierPool::new(
+        let applier = Arc::new(OriginActors::new(
             Arc::clone(&store),
             cache,
-            Arc::clone(&outbox),
+            Arc::clone(&sender),
             Arc::clone(&timers),
             keys(),
             ApplierCfg::default(),
@@ -419,7 +418,7 @@ mod tests {
             store,
             applier,
             schedules,
-            outbox,
+            sender,
             timers,
         }
     }
@@ -595,7 +594,7 @@ mod tests {
         assert_eq!(p.tags["resonate:prefix"], promise_id);
         // The first dispatch is timed from the sweep, not from created_at.
         assert_eq!(doc.tasks[&promise_id].retry_at, Some(now + 30_000));
-        assert_eq!(r.outbox.snapshot().len(), 1);
+        assert_eq!(r.sender.snapshot().len(), 1);
     }
 
     #[tokio::test]
@@ -682,7 +681,7 @@ mod tests {
         assert_eq!(p.created_at, due);
         assert_eq!(p.settled_at, Some(due + 1));
         assert_eq!(doc.tasks[&promise_id].state.as_str(), "fulfilled");
-        assert!(r.outbox.snapshot().is_empty());
+        assert!(r.sender.snapshot().is_empty());
     }
 
     #[tokio::test]

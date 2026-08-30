@@ -36,7 +36,7 @@
 //! Everything in the backend that touches the bucket goes through [`Store`]:
 //! the applier (documents and timer objects), the timer poller (listing and
 //! collecting due keys), the schedule service, the scan service, and
-//! `S3Server` itself (readiness, `debug.reset`). Tests use [`FaultStore`] to
+//! `Server` itself (readiness, `debug.reset`). Tests use [`FaultStore`] to
 //! cut the power between two effects and inspect exactly what landed.
 
 use std::collections::BTreeSet;

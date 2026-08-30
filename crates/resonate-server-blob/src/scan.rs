@@ -22,12 +22,12 @@
 //! # Dependencies
 //!
 //! The store and the codec to list and read every document, the cache
-//! (read-only), the schedule service for `schedule.search`, and the outbox for
+//! (read-only), the schedule service for `schedule.search`, and the sender for
 //! the `messages` half of `debug.snap`.
 //!
 //! # Dependants
 //!
-//! `S3Server` alone, which routes `promise.search`, `task.search`,
+//! `Server` alone, which routes `promise.search`, `task.search`,
 //! `schedule.search` and `debug.snap` here.
 
 use std::collections::BTreeMap;
@@ -45,8 +45,8 @@ use resonate_core::Unavailable;
 use super::applier::KeySpace;
 use super::cache::DocCache;
 use super::codec;
-use super::outbox::Outbox;
 use super::schedules::ScheduleService;
+use super::sender::Sender;
 use super::store::Store;
 
 /// The largest page any search will return, matching the SQL handlers.
@@ -56,7 +56,7 @@ pub struct ScanService {
     store: Arc<dyn Store>,
     cache: Arc<dyn DocCache>,
     schedules: Arc<ScheduleService>,
-    outbox: Arc<Outbox>,
+    sender: Arc<Sender>,
     keys: KeySpace,
 }
 
@@ -65,14 +65,14 @@ impl ScanService {
         store: Arc<dyn Store>,
         cache: Arc<dyn DocCache>,
         schedules: Arc<ScheduleService>,
-        outbox: Arc<Outbox>,
+        sender: Arc<Sender>,
         keys: KeySpace,
     ) -> Self {
         Self {
             store,
             cache,
             schedules,
-            outbox,
+            sender,
             keys,
         }
     }
@@ -269,7 +269,7 @@ impl ScanService {
             listeners,
             tasks,
             task_timeouts,
-            messages: self.outbox.snapshot(),
+            messages: self.sender.snapshot(),
         })
     }
 }
@@ -316,9 +316,10 @@ fn paginate<T>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::applier::{ApplierCfg, ApplierPool};
+    use crate::applier::{ApplierCfg, OriginActors};
     use crate::cache::MemDocCache;
     use crate::kernel::state::Req;
+    use crate::sender::NullRouter;
     use crate::store::ObjectStoreAdapter;
     use serde_json::{json, Value};
 
@@ -331,7 +332,7 @@ mod tests {
     }
 
     struct Rig {
-        applier: Arc<ApplierPool>,
+        applier: Arc<OriginActors>,
         schedules: Arc<ScheduleService>,
         scan: ScanService,
     }
@@ -339,12 +340,11 @@ mod tests {
     fn rig() -> Rig {
         let store: Arc<dyn Store> = Arc::new(ObjectStoreAdapter::in_memory());
         let cache: Arc<dyn DocCache> = Arc::new(MemDocCache::new(64));
-        let outbox = Arc::new(Outbox::new(None, "http://server"));
-        outbox.set_paused(true);
-        let applier = Arc::new(ApplierPool::new(
+        let sender = Arc::new(Sender::new(Arc::new(NullRouter), "http://server", true));
+        let applier = Arc::new(OriginActors::new(
             Arc::clone(&store),
             Arc::clone(&cache),
-            Arc::clone(&outbox),
+            Arc::clone(&sender),
             Arc::new(crate::timer_queue::TimerQueue::new()),
             keys(),
             ApplierCfg::default(),
@@ -355,7 +355,7 @@ mod tests {
             Arc::new(crate::timer_queue::TimerQueue::new()),
             keys(),
         ));
-        let scan = ScanService::new(store, cache, Arc::clone(&schedules), outbox, keys());
+        let scan = ScanService::new(store, cache, Arc::clone(&schedules), sender, keys());
         Rig {
             applier,
             schedules,
