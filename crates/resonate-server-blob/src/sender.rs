@@ -2,12 +2,13 @@
 //!
 //! # Contract
 //!
-//! Sends are post-commit effects. The kernel decides them, the applier hands
-//! them here *after* the document lands, and delivery is at-most-once: a
-//! message is routed exactly when it is dispatched, and a delivery failure is
-//! logged and dropped rather than retried. A lost `Execute` is recovered by
-//! the task's retry deadline; a lost `Unblock` is lost, exactly as on the SQL
-//! backends.
+//! Sends are post-commit effects. The kernel decides them — as fully-formed
+//! `core::types::Message`s, the router's own vocabulary, so nothing here
+//! translates anything — the applier hands them here *after* the document
+//! lands, and delivery is at-most-once: a message is routed exactly when it
+//! is dispatched, and a delivery failure is logged and dropped rather than
+//! retried. A lost `Execute` is recovered by the task's retry deadline; a
+//! lost `Unblock` is lost, exactly as on the SQL backends.
 //!
 //! There is no queue in production — the router is the queue's replacement,
 //! and it exists from construction. Under the debug startup flag messages are
@@ -20,9 +21,8 @@
 //!
 //! # Dependencies
 //!
-//! The message types in `core::types`, the [`ResonateRouter`] port for actual
-//! delivery, and `kernel::state::OutEntry`, the shape the kernel decides
-//! sends in.
+//! The message types in `core::types` and the [`ResonateRouter`] port for
+//! actual delivery.
 //!
 //! # Dependants
 //!
@@ -34,12 +34,8 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 
-use crate::kernel::state::OutEntry;
 use crate::metrics;
-use resonate_core::types::{
-    ExecuteMsg, ExecuteMsgData, ExecuteMsgTask, Message, MessageHead, PromiseRecord,
-    SnapshotMessage, UnblockMsg, UnblockMsgData, UnblockMsgHead,
-};
+use resonate_core::types::{Message, SnapshotMessage};
 use resonate_core::{ResonateRouter, Unavailable};
 
 /// A router with nowhere to route to: every message is accepted and dropped.
@@ -61,96 +57,62 @@ impl ResonateRouter for NullRouter {
 /// their outgoing tables.
 #[derive(Default)]
 struct Held {
-    /// Task id to (address, version). One row per task: a newer dispatch
+    /// Task id to (address, message). One row per task: a newer dispatch
     /// replaces an older one.
-    executes: BTreeMap<String, (String, i64)>,
-    /// (promise id, address) to the settled promise. First write wins.
-    unblocks: BTreeMap<(String, String), PromiseRecord>,
+    executes: BTreeMap<String, (String, Message)>,
+    /// (promise id, address) to the unblock. First write wins.
+    unblocks: BTreeMap<(String, String), Message>,
 }
 
 /// Where a decided message goes.
 pub struct Sender {
     router: Arc<dyn ResonateRouter>,
-    server_url: String,
     /// `Some` exactly when the debug startup flag is set — messages are held
     /// here for `debug.snap` instead of leaving the process.
     held: Option<Mutex<Held>>,
 }
 
 impl Sender {
-    pub fn new(
-        router: Arc<dyn ResonateRouter>,
-        server_url: impl Into<String>,
-        debug: bool,
-    ) -> Self {
+    pub fn new(router: Arc<dyn ResonateRouter>, debug: bool) -> Self {
         Self {
             router,
-            server_url: server_url.into(),
             held: debug.then(|| Mutex::new(Held::default())),
         }
     }
 
     /// Route one message, or hold it under the debug flag.
-    pub async fn dispatch(&self, address: &str, out: OutEntry) {
+    pub async fn dispatch(&self, address: &str, msg: Message) {
         if let Some(held) = &self.held {
             let mut held = held.lock().unwrap_or_else(|e| e.into_inner());
-            match out {
-                OutEntry::Execute { task_id, version } => {
+            match &msg {
+                Message::Execute(e) => {
                     held.executes
-                        .insert(task_id, (address.to_string(), version));
+                        .insert(e.data.task.id.clone(), (address.to_string(), msg));
                 }
-                OutEntry::Unblock {
-                    promise_id,
-                    promise,
-                } => {
+                Message::Unblock(u) => {
                     held.unblocks
-                        .entry((promise_id, address.to_string()))
-                        .or_insert(*promise);
+                        .entry((u.data.promise.id.clone(), address.to_string()))
+                        .or_insert(msg);
                 }
             }
             return;
         }
 
-        match out {
-            OutEntry::Execute { task_id, version } => {
+        match &msg {
+            Message::Execute(e) => {
                 metrics::MESSAGES_TOTAL
                     .with_label_values(&["execute"])
                     .inc();
-                let msg = Message::Execute(ExecuteMsg {
-                    kind: "execute".to_string(),
-                    head: MessageHead {
-                        server_url: self.server_url.clone(),
-                    },
-                    data: ExecuteMsgData {
-                        task: ExecuteMsgTask {
-                            id: task_id.clone(),
-                            version,
-                        },
-                    },
-                });
-                tracing::info!(kind = "execute", task_id = %task_id, version, address = %address, "Dispatching execute message");
-                self.route(address, &msg).await;
+                tracing::info!(kind = "execute", task_id = %e.data.task.id, version = e.data.task.version, address = %address, "Dispatching execute message");
             }
-            OutEntry::Unblock {
-                promise_id,
-                promise,
-            } => {
+            Message::Unblock(u) => {
                 metrics::MESSAGES_TOTAL
                     .with_label_values(&["unblock"])
                     .inc();
-                let msg = Message::Unblock(UnblockMsg {
-                    kind: "unblock".to_string(),
-                    head: UnblockMsgHead {},
-                    data: UnblockMsgData { promise: *promise },
-                });
-                tracing::info!(kind = "unblock", promise_id = %promise_id, address = %address, "Dispatching unblock message");
-                self.route(address, &msg).await;
+                tracing::info!(kind = "unblock", promise_id = %u.data.promise.id, address = %address, "Dispatching unblock message");
             }
         }
-    }
-
-    async fn route(&self, address: &str, msg: &Message) {
-        if let Err(e) = self.router.route(address, msg).await {
+        if let Err(e) = self.router.route(address, &msg).await {
             tracing::warn!(address = %address, error = %e, "Message not delivered");
         }
     }
@@ -158,32 +120,27 @@ impl Sender {
     /// The held messages as `debug.snap` reports them. Empty outside debug.
     ///
     /// Shape and order match the SQL backends' `snap`: executes by task id,
-    /// then unblocks by `(promise id, address)`, each with an empty head.
+    /// then unblocks by `(promise id, address)`, each with an empty head —
+    /// the snapshot never carried a `serverUrl`.
     pub fn snapshot(&self) -> Vec<SnapshotMessage> {
         let Some(held) = &self.held else {
             return Vec::new();
         };
         let held = held.lock().unwrap_or_else(|e| e.into_inner());
+        let blank_head = |msg: &Message, address: &str| {
+            let mut message = serde_json::to_value(msg).expect("a message serializes");
+            message["head"] = serde_json::json!({});
+            SnapshotMessage {
+                address: address.to_string(),
+                message,
+            }
+        };
         let mut out = Vec::with_capacity(held.executes.len() + held.unblocks.len());
-        for (task_id, (address, version)) in &held.executes {
-            out.push(SnapshotMessage {
-                address: address.clone(),
-                message: serde_json::json!({
-                    "kind": "execute",
-                    "head": {},
-                    "data": { "task": { "id": task_id, "version": version } }
-                }),
-            });
+        for (address, msg) in held.executes.values() {
+            out.push(blank_head(msg, address));
         }
-        for ((_, address), promise) in &held.unblocks {
-            out.push(SnapshotMessage {
-                address: address.clone(),
-                message: serde_json::json!({
-                    "kind": "unblock",
-                    "head": {},
-                    "data": { "promise": promise }
-                }),
-            });
+        for ((_, address), msg) in &held.unblocks {
+            out.push(blank_head(msg, address));
         }
         out
     }
@@ -199,7 +156,10 @@ impl Sender {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use resonate_core::types::{PromiseState, PromiseValue};
+    use resonate_core::types::{
+        ExecuteMsg, ExecuteMsgData, ExecuteMsgTask, MessageHead, PromiseRecord, PromiseState,
+        PromiseValue, UnblockMsg, UnblockMsgData, UnblockMsgHead,
+    };
 
     /// A router that records what it was asked to deliver.
     struct Recorder {
@@ -237,39 +197,53 @@ mod tests {
         }
     }
 
-    fn promise(id: &str) -> PromiseRecord {
-        PromiseRecord {
-            id: id.to_string(),
-            state: PromiseState::Resolved,
-            param: PromiseValue::default(),
-            value: PromiseValue::default(),
-            tags: Default::default(),
-            timeout_at: 100,
-            created_at: 1,
-            settled_at: Some(50),
-        }
+    fn execute(task_id: &str, version: i64) -> Message {
+        Message::Execute(ExecuteMsg {
+            kind: "execute".to_string(),
+            head: MessageHead {
+                server_url: "http://server:8001".to_string(),
+            },
+            data: ExecuteMsgData {
+                task: ExecuteMsgTask {
+                    id: task_id.to_string(),
+                    version,
+                },
+            },
+        })
+    }
+
+    fn unblock(promise_id: &str) -> Message {
+        Message::Unblock(UnblockMsg {
+            kind: "unblock".to_string(),
+            head: UnblockMsgHead {},
+            data: UnblockMsgData {
+                promise: PromiseRecord {
+                    id: promise_id.to_string(),
+                    state: PromiseState::Resolved,
+                    param: PromiseValue::default(),
+                    value: PromiseValue::default(),
+                    tags: Default::default(),
+                    timeout_at: 100,
+                    created_at: 1,
+                    settled_at: Some(50),
+                },
+            },
+        })
     }
 
     fn live(router: Arc<Recorder>) -> Sender {
-        Sender::new(router, "http://server:8001", false)
+        Sender::new(router, false)
     }
 
     fn debug(router: Arc<Recorder>) -> Sender {
-        Sender::new(router, "http://server:8001", true)
+        Sender::new(router, true)
     }
 
     #[tokio::test]
-    async fn an_execute_is_routed_with_the_server_url() {
+    async fn an_execute_is_routed_as_decided_with_its_server_url() {
         let rec = Recorder::new();
         let s = live(Arc::clone(&rec));
-        s.dispatch(
-            "http://w",
-            OutEntry::Execute {
-                task_id: "o:t".into(),
-                version: 3,
-            },
-        )
-        .await;
+        s.dispatch("http://w", execute("o:t", 3)).await;
         let sent = rec.sent();
         assert_eq!(sent.len(), 1);
         assert_eq!(sent[0].0, "http://w");
@@ -284,14 +258,7 @@ mod tests {
     async fn an_unblock_is_routed_with_an_empty_head() {
         let rec = Recorder::new();
         let s = live(Arc::clone(&rec));
-        s.dispatch(
-            "poll://any@g",
-            OutEntry::Unblock {
-                promise_id: "o:p".into(),
-                promise: Box::new(promise("o:p")),
-            },
-        )
-        .await;
+        s.dispatch("poll://any@g", unblock("o:p")).await;
         let sent = rec.sent();
         assert_eq!(sent.len(), 1);
         assert_eq!(sent[0].0, "poll://any@g");
@@ -304,14 +271,7 @@ mod tests {
     async fn a_failed_delivery_is_dropped_not_retried() {
         let rec = Recorder::failing();
         let s = live(Arc::clone(&rec));
-        s.dispatch(
-            "http://w",
-            OutEntry::Execute {
-                task_id: "o:t".into(),
-                version: 0,
-            },
-        )
-        .await;
+        s.dispatch("http://w", execute("o:t", 0)).await;
         // Routed once, held nowhere: the message is gone whether or not it
         // landed.
         assert_eq!(rec.sent().len(), 1);
@@ -320,15 +280,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_null_router_accepts_and_drops() {
-        let s = Sender::new(Arc::new(NullRouter), "http://server:8001", false);
-        s.dispatch(
-            "http://w",
-            OutEntry::Execute {
-                task_id: "o:t".into(),
-                version: 0,
-            },
-        )
-        .await;
+        let s = Sender::new(Arc::new(NullRouter), false);
+        s.dispatch("http://w", execute("o:t", 0)).await;
         assert!(s.snapshot().is_empty());
     }
 
@@ -336,14 +289,7 @@ mod tests {
     async fn under_debug_messages_are_held_not_routed() {
         let rec = Recorder::new();
         let s = debug(Arc::clone(&rec));
-        s.dispatch(
-            "http://w",
-            OutEntry::Execute {
-                task_id: "o:t".into(),
-                version: 0,
-            },
-        )
-        .await;
+        s.dispatch("http://w", execute("o:t", 0)).await;
         assert!(rec.sent().is_empty());
         assert_eq!(s.snapshot().len(), 1);
     }
@@ -354,14 +300,7 @@ mod tests {
         let rec = Recorder::new();
         let s = debug(Arc::clone(&rec));
         for (address, version) in [("http://a", 0), ("http://b", 1)] {
-            s.dispatch(
-                address,
-                OutEntry::Execute {
-                    task_id: "o:t".into(),
-                    version,
-                },
-            )
-            .await;
+            s.dispatch(address, execute("o:t", version)).await;
         }
         let snap = s.snapshot();
         assert_eq!(snap.len(), 1);
@@ -375,14 +314,7 @@ mod tests {
         let rec = Recorder::new();
         let s = debug(Arc::clone(&rec));
         for _ in 0..3 {
-            s.dispatch(
-                "http://w",
-                OutEntry::Unblock {
-                    promise_id: "o:p".into(),
-                    promise: Box::new(promise("o:p")),
-                },
-            )
-            .await;
+            s.dispatch("http://w", unblock("o:p")).await;
         }
         assert_eq!(s.snapshot().len(), 1);
     }
@@ -392,14 +324,7 @@ mod tests {
         let rec = Recorder::new();
         let s = debug(Arc::clone(&rec));
         for address in ["http://a", "http://b"] {
-            s.dispatch(
-                address,
-                OutEntry::Unblock {
-                    promise_id: "o:p".into(),
-                    promise: Box::new(promise("o:p")),
-                },
-            )
-            .await;
+            s.dispatch(address, unblock("o:p")).await;
         }
         assert_eq!(s.snapshot().len(), 2);
     }
@@ -409,24 +334,10 @@ mod tests {
         let rec = Recorder::new();
         let s = debug(Arc::clone(&rec));
         for task in ["o:z", "o:a"] {
-            s.dispatch(
-                "http://w",
-                OutEntry::Execute {
-                    task_id: task.into(),
-                    version: 0,
-                },
-            )
-            .await;
+            s.dispatch("http://w", execute(task, 0)).await;
         }
         for p in ["o:q", "o:b"] {
-            s.dispatch(
-                "http://w",
-                OutEntry::Unblock {
-                    promise_id: p.into(),
-                    promise: Box::new(promise(p)),
-                },
-            )
-            .await;
+            s.dispatch("http://w", unblock(p)).await;
         }
         let kinds: Vec<String> = s
             .snapshot()
@@ -451,17 +362,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_snapshot_blanks_the_execute_head() {
+        // The SQL backends' snap reports messages with empty heads; the held
+        // execute carries a serverUrl, so the snapshot must blank it.
+        let rec = Recorder::new();
+        let s = debug(Arc::clone(&rec));
+        s.dispatch("http://w", execute("o:t", 0)).await;
+        assert_eq!(s.snapshot()[0].message["head"], serde_json::json!({}));
+    }
+
+    #[tokio::test]
     async fn clearing_forgets_everything_held() {
         let rec = Recorder::new();
         let s = debug(Arc::clone(&rec));
-        s.dispatch(
-            "http://w",
-            OutEntry::Execute {
-                task_id: "o:t".into(),
-                version: 0,
-            },
-        )
-        .await;
+        s.dispatch("http://w", execute("o:t", 0)).await;
         s.clear();
         assert!(s.snapshot().is_empty());
         assert!(rec.sent().is_empty());

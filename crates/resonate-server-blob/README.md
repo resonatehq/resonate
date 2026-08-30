@@ -205,10 +205,15 @@ end:
 
 ```rust
 pub(crate) struct Tx {
-    pub(crate) doc:   OriginDoc,               // a CLONE of the input document
-    pub(crate) sends: Vec<(String, OutEntry)>, // messages the decision owes, outside the doc
+    pub(crate) doc:   OriginDoc,              // a CLONE of the input document
+    pub(crate) sends: Vec<(String, Message)>, // wire messages the decision owes, outside the doc
 }
 ```
+
+`Message` is `resonate_core::types::Message` — the router's own vocabulary.
+The kernel builds the wire message itself (the `execute` head's `serverUrl`
+comes in through `KernelCfg`), so nothing downstream translates anything: the
+shell routes what the kernel decided, verbatim.
 
 The roll-up happens in three nested layers.
 
@@ -224,7 +229,7 @@ callback); messages go to `tx.sends`. Then `tx.finish(before)` recomputes
 2. `SetDocument(tx.doc)` — the whole mutated clone. There is no diff; the
    document is the write unit;
 3. `DelTimeout` — the old timer, only after the commit it belonged to is gone;
-4. `Send { address, out }` — strictly post-commit.
+4. `Send { address, msg }` — the wire `Message`, strictly post-commit.
 
 One wrinkle worth knowing: a request that returns a 4xx still returns
 effects. `try_timeout` runs first in most ops and lazily settles expired

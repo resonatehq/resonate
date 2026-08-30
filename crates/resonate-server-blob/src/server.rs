@@ -80,7 +80,9 @@ pub struct ServerCfg {
     /// Whether the search operations are answered. Each search reads every
     /// document in the store, so this is opt-in.
     pub search: bool,
-    /// Advertised in every `execute` message.
+    /// Advertised in every `execute` message's head. Threaded into
+    /// `applier.kernel.server_url` at build, since the kernel is what builds
+    /// the messages.
     pub server_url: String,
 }
 
@@ -132,15 +134,19 @@ impl Server {
         // Under the debug flag the sender holds messages for the life of the
         // process — they sit in `debug.snap` instead of leaving, which is
         // what makes the snapshot's message list mean anything.
-        let sender = Arc::new(Sender::new(router, cfg.server_url.clone(), cfg.debug));
+        let sender = Arc::new(Sender::new(router, cfg.debug));
         let timers = Arc::new(TimerQueue::new());
+        // The kernel builds the execute messages, so the advertised URL is
+        // its config, threaded from the one field callers set.
+        let mut applier_cfg = cfg.applier.clone();
+        applier_cfg.kernel.server_url = cfg.server_url.clone();
         let actors = Arc::new(OriginActors::new(
             Arc::clone(&store),
             Arc::clone(&cache),
             Arc::clone(&sender),
             Arc::clone(&timers),
             cfg.keys.clone(),
-            cfg.applier.clone(),
+            applier_cfg,
         ));
         let schedules = Arc::new(ScheduleService::new(
             Arc::clone(&store),
@@ -522,6 +528,17 @@ mod tests {
     /// nothing to start.
     async fn started() -> Arc<Server> {
         server(true)
+    }
+
+    #[tokio::test]
+    async fn the_server_url_reaches_the_kernel() {
+        // The kernel builds the execute messages, so the one URL callers set
+        // on ServerCfg must arrive in its config.
+        let s = Server::in_memory(ServerCfg {
+            server_url: "http://me:1".into(),
+            ..Default::default()
+        });
+        assert_eq!(s.kernel_cfg().server_url, "http://me:1");
     }
 
     #[tokio::test]

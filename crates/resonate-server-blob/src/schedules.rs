@@ -397,7 +397,7 @@ mod tests {
     fn rig() -> Rig {
         let store: Arc<dyn Store> = Arc::new(ObjectStoreAdapter::in_memory());
         let cache: Arc<dyn DocCache> = Arc::new(MemDocCache::new(16));
-        let sender = Arc::new(Sender::new(Arc::new(NullRouter), "http://server", true));
+        let sender = Arc::new(Sender::new(Arc::new(NullRouter), true));
         // One queue, as `Server::build` wires it.
         let timers = Arc::new(TimerQueue::new());
         let applier = Arc::new(OriginActors::new(

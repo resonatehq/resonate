@@ -371,7 +371,7 @@ impl OriginActors {
     }
 
     pub fn cfg_kernel(&self) -> KernelCfg {
-        self.shared.cfg.kernel
+        self.shared.cfg.kernel.clone()
     }
 
     /// Decide one request against its origin's document.
@@ -502,8 +502,8 @@ async fn run_batch(origin: &str, batch: Vec<Work>, shared: &Arc<Shared>) {
         match perform(origin, &loaded, &decision, shared).await {
             Ok(()) => {
                 for effect in &decision.sends {
-                    if let Effect::Send { address, out } = effect {
-                        shared.sender.dispatch(address, out.clone()).await;
+                    if let Effect::Send { address, msg } = effect {
+                        shared.sender.dispatch(address, msg.clone()).await;
                     }
                 }
                 return answer(batch, decision.replies);
@@ -790,7 +790,7 @@ mod tests {
         cache: Arc<dyn DocCache>,
         timers: Arc<TimerQueue>,
     ) -> OriginActors {
-        let sender = Arc::new(Sender::new(Arc::new(NullRouter), "http://server", true));
+        let sender = Arc::new(Sender::new(Arc::new(NullRouter), true));
         OriginActors::new(store, cache, sender, timers, keys(), ApplierCfg::default())
     }
 
@@ -1274,7 +1274,7 @@ mod tests {
         let cache: Arc<dyn DocCache> = Arc::new(StaleVersion {
             held: std::sync::Mutex::new(None),
         });
-        let sender = Arc::new(Sender::new(Arc::new(NullRouter), "http://server", true));
+        let sender = Arc::new(Sender::new(Arc::new(NullRouter), true));
         let p = OriginActors::new(
             Arc::clone(&store),
             cache,
@@ -1483,7 +1483,7 @@ mod tests {
     #[tokio::test]
     async fn a_reaped_actor_is_replaced_on_the_next_request() {
         let store = shared_store();
-        let sender = Arc::new(Sender::new(Arc::new(NullRouter), "http://server", true));
+        let sender = Arc::new(Sender::new(Arc::new(NullRouter), true));
         let p = OriginActors::new(
             Arc::clone(&store),
             Arc::new(MemDocCache::new(4)),
@@ -1542,7 +1542,7 @@ mod tests {
     async fn sends_reach_the_sender_only_after_the_commit() {
         let inner = shared_store();
         let faulty = Arc::new(FaultStore::new(Arc::clone(&inner)));
-        let sender = Arc::new(Sender::new(Arc::new(NullRouter), "http://server", true));
+        let sender = Arc::new(Sender::new(Arc::new(NullRouter), true));
         let p = OriginActors::new(
             Arc::clone(&faulty) as Arc<dyn Store>,
             Arc::new(NoopDocCache),

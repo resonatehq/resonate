@@ -193,7 +193,7 @@ impl TaskDoc {
 }
 
 /// Tuning the kernel reads but never chooses.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KernelCfg {
     /// How long a pending task waits before its dispatch is re-sent.
     pub retry_timeout: i64,
@@ -201,6 +201,10 @@ pub struct KernelCfg {
     /// SQL storage configs call `preload_limit`, so the truncation happens
     /// where theirs does.
     pub preload_limit: u32,
+    /// Stamped into every `execute` message's head — the URL workers call
+    /// back on. Config, not I/O: the kernel stays a pure function of
+    /// `(doc, req, now, cfg)`.
+    pub server_url: String,
 }
 
 impl Default for KernelCfg {
@@ -208,6 +212,7 @@ impl Default for KernelCfg {
         Self {
             retry_timeout: 30_000,
             preload_limit: 10,
+            server_url: String::new(),
         }
     }
 }
@@ -262,19 +267,6 @@ pub struct ScheduleFireData {
     pub fired_at: i64,
 }
 
-/// A message the shell must deliver after the document commits.
-#[derive(Debug, Clone, PartialEq)]
-pub enum OutEntry {
-    /// Dispatch a task to its target. Superseded by a later `Execute` for the
-    /// same task id, exactly as `outgoing_execute`'s primary key implies.
-    Execute { task_id: String, version: i64 },
-    /// Notify a listener that a promise settled.
-    Unblock {
-        promise_id: String,
-        promise: Box<PromiseRecord>,
-    },
-}
-
 /// Something the shell must do. The kernel itself does nothing.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Effect {
@@ -285,8 +277,14 @@ pub enum Effect {
     SetTimeout { at: i64 },
     /// Remove the origin's timer object at `at`.
     DelTimeout { at: i64 },
-    /// Deliver `out` to `address`, strictly after the document commits.
-    Send { address: String, out: OutEntry },
+    /// Deliver `msg` to `address`, strictly after the document commits.
+    ///
+    /// `msg` is the wire message itself — `core`'s vocabulary, not a private
+    /// one — so the shell routes it without translating anything.
+    Send {
+        address: String,
+        msg: resonate_core::types::Message,
+    },
 }
 
 /// The answer to one request. Never an `Err`: a rejection is a status.

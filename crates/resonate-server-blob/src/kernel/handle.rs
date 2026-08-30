@@ -37,28 +37,32 @@ use validator::Validate;
 
 use resonate_core::is_valid_address;
 use resonate_core::types::{
-    format_validation_errors, PromiseCreateData, PromiseRecord, PromiseResponseData, PromiseState,
-    PromiseValue, SettleState, TaskAcquireResponseData, TaskCreateResponseData,
-    TaskFenceResponseData, TaskFulfillResponseData, TaskRecord, TaskResponseData, TaskState,
-    TaskSuspendPreloadData, PROTOCOL_VERSION,
+    format_validation_errors, ExecuteMsg, ExecuteMsgData, ExecuteMsgTask, Message, MessageHead,
+    PromiseCreateData, PromiseRecord, PromiseResponseData, PromiseState, PromiseValue, SettleState,
+    TaskAcquireResponseData, TaskCreateResponseData, TaskFenceResponseData,
+    TaskFulfillResponseData, TaskRecord, TaskResponseData, TaskState, TaskSuspendPreloadData,
+    UnblockMsg, UnblockMsgData, UnblockMsgHead, PROTOCOL_VERSION,
 };
 
 use super::state::{
-    min_deadline, Effect, KernelCfg, OriginDoc, OutEntry, PromiseDoc, Reply, Req, TaskDoc,
-    TAG_BRANCH, TAG_DELAY, TAG_TARGET,
+    min_deadline, Effect, KernelCfg, OriginDoc, PromiseDoc, Reply, Req, TaskDoc, TAG_BRANCH,
+    TAG_DELAY, TAG_TARGET,
 };
 
 /// A decision in progress: the working document plus the messages it owes.
 pub(crate) struct Tx {
     pub(crate) doc: OriginDoc,
-    pub(crate) sends: Vec<(String, OutEntry)>,
+    pub(crate) sends: Vec<(String, Message)>,
+    /// From [`KernelCfg::server_url`], for the `execute` heads built here.
+    server_url: String,
 }
 
 impl Tx {
-    pub(crate) fn new(doc: &OriginDoc) -> Self {
+    pub(crate) fn new(doc: &OriginDoc, cfg: &KernelCfg) -> Self {
         Self {
             doc: doc.clone(),
             sends: Vec::new(),
+            server_url: cfg.server_url.clone(),
         }
     }
 
@@ -81,8 +85,8 @@ impl Tx {
                 fx.push(Effect::DelTimeout { at });
             }
         }
-        for (address, out) in self.sends {
-            fx.push(Effect::Send { address, out });
+        for (address, msg) in self.sends {
+            fx.push(Effect::Send { address, msg });
         }
         fx
     }
@@ -97,17 +101,25 @@ impl Tx {
         };
         self.sends.push((
             address,
-            OutEntry::Execute {
-                task_id: task_id.to_string(),
-                version,
-            },
+            Message::Execute(ExecuteMsg {
+                kind: "execute".to_string(),
+                head: MessageHead {
+                    server_url: self.server_url.clone(),
+                },
+                data: ExecuteMsgData {
+                    task: ExecuteMsgTask {
+                        id: task_id.to_string(),
+                        version,
+                    },
+                },
+            }),
         ));
     }
 }
 
 /// Decide one request.
 pub fn handle(doc: &OriginDoc, req: &Req, now: i64, cfg: &KernelCfg) -> (Vec<Effect>, Reply) {
-    let mut tx = Tx::new(doc);
+    let mut tx = Tx::new(doc, cfg);
     let reply = match req {
         Req::PromiseGet(r) => op_promise_get(&mut tx, r, now, cfg),
         Req::PromiseCreate(r) => op_promise_create(&mut tx, r, now, cfg),
@@ -1073,10 +1085,13 @@ pub(crate) fn trigger_listeners(tx: &mut Tx, id: &str) {
     for address in listeners {
         tx.sends.push((
             address,
-            OutEntry::Unblock {
-                promise_id: id.to_string(),
-                promise: Box::new(promise.clone()),
-            },
+            Message::Unblock(UnblockMsg {
+                kind: "unblock".to_string(),
+                head: UnblockMsgHead {},
+                data: UnblockMsgData {
+                    promise: promise.clone(),
+                },
+            }),
         ));
     }
 }
@@ -1108,6 +1123,8 @@ pub(crate) fn preload(doc: &OriginDoc, id: &str, cfg: &KernelCfg) -> Vec<Promise
 mod tests {
     use super::*;
     use crate::kernel::state::{apply_effects, TAG_TIMER};
+    use resonate_core::types::Message;
+
     use serde_json::json;
 
     const W: &str = "http://worker:9999";
@@ -1124,14 +1141,34 @@ mod tests {
     }
 
     /// Apply a request and return the new document, the sends, and the reply.
-    fn step(doc: &OriginDoc, req: Req, now: i64) -> (OriginDoc, Vec<(String, OutEntry)>, Reply) {
+    /// The execute message the kernel builds under the test cfg (whose
+    /// `server_url` is empty).
+    fn exec_send(address: &str, task_id: &str, version: i64) -> (String, Message) {
+        (
+            address.to_string(),
+            Message::Execute(resonate_core::types::ExecuteMsg {
+                kind: "execute".into(),
+                head: resonate_core::types::MessageHead {
+                    server_url: String::new(),
+                },
+                data: resonate_core::types::ExecuteMsgData {
+                    task: resonate_core::types::ExecuteMsgTask {
+                        id: task_id.into(),
+                        version,
+                    },
+                },
+            }),
+        )
+    }
+
+    fn step(doc: &OriginDoc, req: Req, now: i64) -> (OriginDoc, Vec<(String, Message)>, Reply) {
         let (fx, reply) = handle(doc, &req, now, &cfg());
         let mut next = doc.clone();
         apply_effects(&mut next, &fx);
         let sends = fx
             .into_iter()
             .filter_map(|e| match e {
-                Effect::Send { address, out } => Some((address, out)),
+                Effect::Send { address, msg } => Some((address, msg)),
                 _ => None,
             })
             .collect();
@@ -1207,16 +1244,7 @@ mod tests {
         // The armed set is the retry timer and the promise deadline; the timer
         // object sits at the nearer of the two.
         assert_eq!(doc.timer_at, Some(31_000));
-        assert_eq!(
-            sends,
-            vec![(
-                W.to_string(),
-                OutEntry::Execute {
-                    task_id: "o:a".into(),
-                    version: 0
-                }
-            )]
-        );
+        assert_eq!(sends, vec![exec_send(W, "o:a", 0)]);
     }
 
     #[test]
@@ -1384,12 +1412,9 @@ mod tests {
         assert_eq!(sends[0].0, "http://one");
         assert_eq!(sends[1].0, "http://two");
         match &sends[0].1 {
-            OutEntry::Unblock {
-                promise_id,
-                promise,
-            } => {
-                assert_eq!(promise_id, "o:a");
-                assert_eq!(promise.state, PromiseState::Resolved);
+            Message::Unblock(u) => {
+                assert_eq!(u.data.promise.id, "o:a");
+                assert_eq!(u.data.promise.state, PromiseState::Resolved);
             }
             other => panic!("expected unblock, got {other:?}"),
         }
@@ -1418,8 +1443,8 @@ mod tests {
         let (next, sends, _) = step(&doc, settle_req("o:awaited", "resolved"), 700);
         let executed: Vec<&str> = sends
             .iter()
-            .filter_map(|(_, o)| match o {
-                OutEntry::Execute { task_id, .. } => Some(task_id.as_str()),
+            .filter_map(|(_, m)| match m {
+                Message::Execute(e) => Some(e.data.task.id.as_str()),
                 _ => None,
             })
             .collect();
@@ -1862,16 +1887,7 @@ mod tests {
         assert_eq!((t.pid.as_deref(), t.ttl), (None, None));
         assert_eq!(t.retry_at, Some(31_000));
         // Only a claim bumps the version, so the next worker acquires at 1.
-        assert_eq!(
-            sends,
-            vec![(
-                W.to_string(),
-                OutEntry::Execute {
-                    task_id: "o:t".into(),
-                    version: 1
-                }
-            )]
-        );
+        assert_eq!(sends, vec![exec_send(W, "o:t", 1)]);
     }
 
     // --- task.fulfill ------------------------------------------------------
@@ -2150,16 +2166,7 @@ mod tests {
         let t = &next.tasks["o:t"];
         assert_eq!(t.state, TaskState::Pending);
         assert_eq!(t.retry_at, Some(31_000));
-        assert_eq!(
-            sends,
-            vec![(
-                W.to_string(),
-                OutEntry::Execute {
-                    task_id: "o:t".into(),
-                    version: 1
-                }
-            )]
-        );
+        assert_eq!(sends, vec![exec_send(W, "o:t", 1)]);
     }
 
     // --- preload -----------------------------------------------------------

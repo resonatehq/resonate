@@ -340,7 +340,7 @@ mod tests {
     fn rig() -> Rig {
         let store: Arc<dyn Store> = Arc::new(ObjectStoreAdapter::in_memory());
         let cache: Arc<dyn DocCache> = Arc::new(MemDocCache::new(64));
-        let sender = Arc::new(Sender::new(Arc::new(NullRouter), "http://server", true));
+        let sender = Arc::new(Sender::new(Arc::new(NullRouter), true));
         let applier = Arc::new(OriginActors::new(
             Arc::clone(&store),
             Arc::clone(&cache),

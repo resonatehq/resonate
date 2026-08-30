@@ -609,6 +609,8 @@ async fn run_blob_server(config: Config) -> Result<(), String> {
                 kernel: KernelCfg {
                     retry_timeout: config.tasks.retry_timeout,
                     preload_limit: blob_cfg.preload_limit,
+                    // Overridden at build with ServerCfg.server_url below.
+                    ..Default::default()
                 },
                 ..Default::default()
             },

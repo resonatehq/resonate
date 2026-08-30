@@ -28,7 +28,7 @@ use super::state::{Effect, KernelCfg, OriginDoc};
 
 /// Sweep every deadline at or before `now`.
 pub fn drain(doc: &OriginDoc, now: i64, cfg: &KernelCfg) -> Vec<Effect> {
-    let mut tx = Tx::new(doc);
+    let mut tx = Tx::new(doc, cfg);
 
     // Phase 1 — settle every armed promise deadline that has passed. All of
     // them first, then their chains, so an awaiter that is itself expiring is
@@ -113,7 +113,8 @@ pub fn drain(doc: &OriginDoc, now: i64, cfg: &KernelCfg) -> Vec<Effect> {
 mod tests {
     use super::*;
     use crate::kernel::handle::handle;
-    use crate::kernel::state::{apply_effects, OutEntry, Req};
+    use crate::kernel::state::{apply_effects, Req};
+    use resonate_core::types::Message;
     use serde_json::json;
 
     const W: &str = "http://worker:9999";
@@ -138,14 +139,14 @@ mod tests {
         next
     }
 
-    fn sweep(doc: &OriginDoc, now: i64) -> (OriginDoc, Vec<(String, OutEntry)>) {
+    fn sweep(doc: &OriginDoc, now: i64) -> (OriginDoc, Vec<(String, Message)>) {
         let fx = drain(doc, now, &cfg());
         let mut next = doc.clone();
         apply_effects(&mut next, &fx);
         let sends = fx
             .into_iter()
             .filter_map(|e| match e {
-                Effect::Send { address, out } => Some((address, out)),
+                Effect::Send { address, msg } => Some((address, msg)),
                 _ => None,
             })
             .collect();
@@ -165,11 +166,11 @@ mod tests {
         ))
     }
 
-    fn executed(sends: &[(String, OutEntry)]) -> Vec<(String, i64)> {
+    fn executed(sends: &[(String, Message)]) -> Vec<(String, i64)> {
         sends
             .iter()
             .filter_map(|(_, o)| match o {
-                OutEntry::Execute { task_id, version } => Some((task_id.clone(), *version)),
+                Message::Execute(e) => Some((e.data.task.id.clone(), e.data.task.version)),
                 _ => None,
             })
             .collect()

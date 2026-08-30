@@ -38,6 +38,6 @@ pub mod state;
 pub use drain::drain;
 pub use handle::handle;
 pub use state::{
-    apply_effects, check_invariants, min_deadline, Effect, KernelCfg, OriginDoc, OutEntry,
-    PromiseDoc, Reply, Req, TaskDoc,
+    apply_effects, check_invariants, min_deadline, Effect, KernelCfg, OriginDoc, PromiseDoc, Reply,
+    Req, TaskDoc,
 };
