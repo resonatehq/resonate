@@ -14,6 +14,7 @@
 //! goroutines. The queries underneath are the same queries.
 
 mod db;
+mod tls;
 mod ops_promise;
 mod ops_schedule;
 mod ops_task;
@@ -72,6 +73,27 @@ pub struct Config {
     /// How many branch siblings a task response may carry.
     #[serde(default = "default_preload_limit")]
     pub preload_limit: u32,
+    /// Worker heartbeat TTL in ms — how long a dead instance keeps its
+    /// shard assignment. Must exceed the server's sweep interval, or live
+    /// workers expire between their own heartbeats.
+    #[serde(default = "default_worker_ttl")]
+    pub worker_ttl: i64,
+    /// TLS to the cluster.
+    #[serde(default)]
+    pub tls: TlsConfig,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TlsConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// Encrypt but skip certificate verification — for dev clusters with
+    /// private-CA certs, the SCYLLADB_TLS_INSECURE the Go deployment used.
+    #[serde(default)]
+    pub insecure: bool,
+    /// PEM file with the CA to trust instead of the WebPKI roots.
+    #[serde(default)]
+    pub ca_cert: Option<String>,
 }
 
 fn default_hosts() -> Vec<String> {
@@ -92,6 +114,9 @@ fn default_shards() -> i16 {
 fn default_preload_limit() -> u32 {
     10
 }
+fn default_worker_ttl() -> i64 {
+    180_000
+}
 
 impl Default for Config {
     fn default() -> Self {
@@ -107,6 +132,8 @@ impl Default for Config {
             bucket_lookback: default_bucket_lookback(),
             shards: default_shards(),
             preload_limit: default_preload_limit(),
+            worker_ttl: default_worker_ttl(),
+            tls: TlsConfig::default(),
         }
     }
 }
@@ -118,6 +145,8 @@ pub struct ScyllaEngine {
     pub(crate) shards: i16,
     pub(crate) task_retry_timeout: i64,
     pub(crate) preload_limit: u32,
+    pub(crate) worker_ttl: i64,
+    pub(crate) worker_id: uuid::Uuid,
     pub(crate) debug: bool,
 }
 
@@ -149,6 +178,17 @@ impl ScyllaEngine {
         if !cfg.username.is_empty() || !cfg.password.is_empty() {
             builder = builder.user(cfg.username.clone(), cfg.password.clone());
         }
+        if cfg.tls.enabled {
+            builder = builder.tls_context(Some(tls::context(&cfg.tls)?));
+        }
+        // Explicit, not inherited: Quorum for reads and writes, Serial for
+        // the LWT Paxos round — the settings this engine's mechanics assume,
+        // stated rather than left to whatever the driver ships.
+        let profile = scylla::client::execution_profile::ExecutionProfile::builder()
+            .consistency(scylla::statement::Consistency::Quorum)
+            .serial_consistency(Some(scylla::statement::SerialConsistency::Serial))
+            .build();
+        builder = builder.default_execution_profile_handle(profile.into_handle());
         let session = builder
             .build()
             .await
@@ -191,6 +231,8 @@ impl ScyllaEngine {
             shards: cfg.shards.max(1),
             task_retry_timeout,
             preload_limit: cfg.preload_limit,
+            worker_ttl: cfg.worker_ttl.max(1_000),
+            worker_id: uuid::Uuid::new_v4(),
             debug,
         })
     }

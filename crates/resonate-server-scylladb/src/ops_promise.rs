@@ -209,10 +209,10 @@ impl ScyllaEngine {
             cql_map(&r.tags),
             big(r.timeout_at),
             big(created_at),
-            settled_at.and_then(|v| big(v)),
+            settled_at.and_then(big),
             opt_text(task_state),
-            task_version.and_then(|v| int(v)),
-            task_retry_arg.and_then(|v| big(v)),
+            task_version.and_then(int),
+            task_retry_arg.and_then(big),
         ];
         let (applied, row) = self
             .cas(
@@ -552,6 +552,10 @@ impl ScyllaEngine {
                     });
                 }
             }
+            // A halted awaiter records nothing at registration time — its
+            // resume ledger fills only through the settle fanout. (The Go
+            // implementation appends here too; the protocol does not.)
+            Some("halted") => {}
             Some(state) => {
                 let (applied, _row) = self
                     .cas(
@@ -629,8 +633,10 @@ impl ScyllaEngine {
     }
 
     /// A full scan, filtered and sorted in memory: search is an operator's
-    /// read, and the table is partitioned for transitions, not for it.
-    pub(crate) async fn op_promise_search(&self, req: &RequestEnvelope, _now: i64) -> Output {
+    /// read, and the table is partitioned for transitions, not for it. The
+    /// records project expiry, like every read, and the state filter asks
+    /// the projected state.
+    pub(crate) async fn op_promise_search(&self, req: &RequestEnvelope, now: i64) -> Output {
         let r: PromiseSearchData = match parse(req) {
             Ok(r) => r,
             Err(e) => return Output::response(e),
@@ -652,15 +658,15 @@ impl ScyllaEngine {
             Ok(rows) => rows,
             Err(e) => return storage_err(req, e),
         };
-        let state_filter = r.state.map(|s| s.to_string());
         let mut promises: Vec<PromiseRecord> = rows
             .iter()
             .map(PromiseRow::from_map)
-            .filter(|p| {
-                state_filter
-                    .as_ref()
-                    .map(|s| &p.state == s)
-                    .unwrap_or(true)
+            .map(|p| {
+                let record = crate::db::project(&p, now);
+                (record, p)
+            })
+            .filter(|(record, p)| {
+                r.state.map(|s| record.state == s).unwrap_or(true)
                     && r.tags
                         .as_ref()
                         .map(|ft| {
@@ -669,7 +675,7 @@ impl ScyllaEngine {
                         })
                         .unwrap_or(true)
             })
-            .map(|p| p.to_promise_record())
+            .map(|(record, _)| record)
             .collect();
         promises.sort_by(|a, b| a.id.cmp(&b.id));
         if let Some(cursor) = r.cursor.as_deref() {

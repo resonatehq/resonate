@@ -214,6 +214,23 @@ impl PromiseRow {
     }
 }
 
+/// The record as a reader sees it: the deadline is a projection every read
+/// applies, so a pending row past its deadline reads as its timeout verdict
+/// — the same bytes an eager settle wrote, because the verdict and
+/// `settled_at = timeout_at` are deterministic.
+pub(crate) fn project(p: &PromiseRow, now: i64) -> PromiseRecord {
+    let mut record = p.to_promise_record();
+    if p.state == "pending" && now >= p.timeout_at {
+        record.state = if p.is_timer() {
+            PromiseState::Resolved
+        } else {
+            PromiseState::RejectedTimedout
+        };
+        record.settled_at = Some(p.timeout_at);
+    }
+    record
+}
+
 pub(crate) fn parse_promise_state(s: &str) -> PromiseState {
     match s {
         "resolved" => PromiseState::Resolved,
@@ -432,37 +449,11 @@ impl ScyllaEngine {
             });
         }
 
-        // EXPLORATORY (decision pending): the relational engines delete a
-        // fulfilled awaiter's registrations at settlement; Go leaves them to
-        // be skipped lazily. The differential sees the difference in the
-        // callbacks section (first at ~step 1923). Aligned here so the run
-        // can continue cataloguing; same-origin rules make it one
-        // partition-local scan.
-        if settled.task_state.is_some() {
-            let holders = self
-                .rows(
-                    "SELECT id, callbacks FROM promises WHERE origin = ?",
-                    (settled.origin.as_str(),),
-                )
-                .await?;
-            for m in holders {
-                let hid = get_text(&m, "id").unwrap_or_default();
-                if hid != settled.id
-                    && get_set(&m, "callbacks").iter().any(|c| c == &settled.id)
-                {
-                    let _ = self
-                        .exec(
-                            "UPDATE promises SET callbacks = callbacks - ? WHERE origin = ? AND id = ?",
-                            (
-                                vec![settled.id.clone()],
-                                settled.origin.as_str(),
-                                hid.as_str(),
-                            ),
-                        )
-                        .await;
-                }
-            }
-        }
+        // No registration cleanup: a fulfilled awaiter stays in other
+        // promises' callbacks sets and is skipped lazily when they settle,
+        // exactly as the Go implementation leaves it. The snapshot's
+        // member-side projection is what keeps that invisible — a fulfilled
+        // member reports as absent, because it is provably inert.
 
         // Queue cleanup on a win, best effort — a kill here leaves an
         // orphan entry the tick handlers classify and delete.
@@ -534,17 +525,27 @@ impl ScyllaEngine {
         for cb in callbacks {
             let rows = self
                 .rows(
-                    "SELECT task_state, task_version, target, timeout_at FROM promises WHERE origin = ? AND id = ?",
+                    "SELECT state, task_state, task_version, target, timeout_at FROM promises WHERE origin = ? AND id = ?",
                     (origin, cb.as_str()),
                 )
                 .await?;
             if let Some(m) = rows.first() {
+                // An awaiter that is settled, or expired at `now`, is not
+                // resumed and records nothing: its own deadline owns it. A
+                // same-sweep expiry settles it moments later, and resuming
+                // it first would emit an execute for a task about to
+                // fulfill — the extra message the model never sends.
+                let state = get_text(m, "state").unwrap_or_default();
+                let timeout_at = get_big(m, "timeout_at").unwrap_or(0);
+                if state != "pending" || timeout_at <= now {
+                    continue;
+                }
                 awaiters.push(Awaiter {
                     id: cb.clone(),
                     task_state: get_text(m, "task_state"),
                     version: get_int(m, "task_version").unwrap_or(0) as i64,
                     target: get_text(m, "target"),
-                    timeout_at: get_big(m, "timeout_at").unwrap_or(0),
+                    timeout_at,
                 });
             }
         }
@@ -708,7 +709,7 @@ pub(crate) fn rows_of(result: QueryResult) -> StorageResult<Vec<RowMap>> {
     for row in rows_result.rows::<Row>().map_err(backend)? {
         let row = row.map_err(backend)?;
         let mut m = RowMap::new();
-        for (name, value) in names.iter().zip(row.columns.into_iter()) {
+        for (name, value) in names.iter().zip(row.columns) {
             m.insert(name.clone(), value);
         }
         out.push(m);

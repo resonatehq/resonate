@@ -158,12 +158,12 @@ impl ScyllaEngine {
                     .await;
             }
             Some(row) => {
-                // EXPLORATORY (decision pending): Go anchors a resumed
-                // awaiter's retry at the entry's own deadline (timeoutAt +
-                // retry); the relational engines anchor at the sweep's
-                // clock. The differential sees the difference in the armed
-                // hints (first at ~step 1976). Aligned to the sweep clock so
-                // the run can continue cataloguing.
+                // Deliberate deviation from Go: the sweep's clock anchors a
+                // resumed awaiter's retry, not the entry's own deadline. Go
+                // anchored at timeoutAt + retry, which is the lookback
+                // hazard — a late sweep writes follow-ups into buckets the
+                // scan has already passed. Every other engine anchors at
+                // the sweep clock, and so does this one.
                 self.try_timeout(ctx, &row, now).await?;
             }
         }
@@ -675,30 +675,89 @@ impl ScyllaEngine {
         now: i64,
     ) -> StorageResult<(usize, Vec<Outgoing>, Vec<Scheduled>)> {
         let mut ctx = Ctx::default();
-        let fired = self.sweep(&mut ctx, now, false).await?;
+        let shards = self.assigned_shards().await;
+        let fired = self.sweep_shards(&mut ctx, now, &shards).await?;
         Ok((fired, ctx.messages, ctx.armed))
     }
 
-    /// One sweep at `t`. `filtering` selects the debug path: full-table
-    /// ALLOW FILTERING scans so arbitrary test timestamps do not walk
-    /// millions of buckets. Both paths collect-then-sort, because rows come
-    /// back in token order and the seed contract needs determinism.
     pub(crate) async fn sweep(
         &self,
         ctx: &mut Ctx,
         t: i64,
         filtering: bool,
     ) -> StorageResult<usize> {
+        if filtering {
+            self.sweep_inner(ctx, t, None).await
+        } else {
+            let shards: Vec<i16> = (0..self.shards).collect();
+            self.sweep_inner(ctx, t, Some(&shards)).await
+        }
+    }
+
+    async fn sweep_shards(&self, ctx: &mut Ctx, t: i64, shards: &[i16]) -> StorageResult<usize> {
+        self.sweep_inner(ctx, t, Some(shards)).await
+    }
+
+    /// Which queue shards this instance sweeps — the Go coordinator, run
+    /// inline on each sweep instead of in a goroutine: heartbeat a worker
+    /// row with a TTL, read the live workers, split the shards round-robin
+    /// over UUID-sorted workers. Any failure falls back to all shards;
+    /// overlap is exactly what the handlers' idempotency covers.
+    async fn assigned_shards(&self) -> Vec<i16> {
+        let all: Vec<i16> = (0..self.shards).collect();
+        if self.shards <= 1 {
+            return all;
+        }
+        let ttl_secs = (self.worker_ttl / 1_000).max(1) as i32;
+        if self
+            .exec(
+                "INSERT INTO workers (worker_id) VALUES (?) USING TTL ?",
+                (CqlValue::Uuid(self.worker_id), ttl_secs),
+            )
+            .await
+            .is_err()
+        {
+            return all;
+        }
+        let Ok(rows) = self.rows("SELECT worker_id FROM workers", ()).await else {
+            return all;
+        };
+        let mut workers: Vec<uuid::Uuid> = rows
+            .iter()
+            .filter_map(|m| match m.get("worker_id") {
+                Some(Some(CqlValue::Uuid(u))) => Some(*u),
+                _ => None,
+            })
+            .collect();
+        workers.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
+        let Some(idx) = workers.iter().position(|w| *w == self.worker_id) else {
+            return all;
+        };
+        (0..self.shards)
+            .filter(|s| (*s as usize) % workers.len() == idx)
+            .collect()
+    }
+
+    /// One sweep at `t`. `shards = None` selects the debug path: full-table
+    /// ALLOW FILTERING scans so arbitrary test timestamps do not walk
+    /// millions of buckets. Both paths collect-then-sort, because rows come
+    /// back in token order and the seed contract needs determinism.
+    async fn sweep_inner(
+        &self,
+        ctx: &mut Ctx,
+        t: i64,
+        shards: Option<&[i16]>,
+    ) -> StorageResult<usize> {
         // promise_timeouts
         let mut promise_entries: Vec<(i64, String, String)> = Vec::new();
-        for m in self.scan_queue("promise_timeouts", "timeout_at, origin, promise_id", t, filtering).await? {
+        for m in self.scan_queue("promise_timeouts", "timeout_at, origin, promise_id", t, shards).await? {
             promise_entries.push((
                 get_big(&m, "timeout_at").unwrap_or(0),
                 get_text(&m, "origin").unwrap_or_default(),
                 get_text(&m, "promise_id").unwrap_or_default(),
             ));
         }
-        promise_entries.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.2.cmp(&b.2)));
+        promise_entries.sort_by(|a, b| a.2.cmp(&b.2).then_with(|| a.0.cmp(&b.0)));
         for (at, origin, id) in &promise_entries {
             let origin = if origin.is_empty() { id.clone() } else { origin.clone() };
             self.on_promise_timeout(ctx, &origin, id, *at, t).await?;
@@ -711,7 +770,7 @@ impl ScyllaEngine {
                 "task_timeouts",
                 "timeout_at, timeout_type, origin, task_id, promise_timeout_at",
                 t,
-                filtering,
+                shards,
             )
             .await?
         {
@@ -728,9 +787,9 @@ impl ScyllaEngine {
             ));
         }
         task_entries.sort_by(|a, b| {
-            a.0.cmp(&b.0)
-                .then_with(|| a.1.cmp(&b.1))
+            a.1.cmp(&b.1)
                 .then_with(|| a.3.cmp(&b.3))
+                .then_with(|| a.0.cmp(&b.0))
         });
         for (at, ttype, origin, id, p_timeout) in &task_entries {
             let origin = if origin.is_empty() { id.clone() } else { origin.clone() };
@@ -748,7 +807,7 @@ impl ScyllaEngine {
                 "schedule_timeouts",
                 "timeout_at, origin, schedule_id, create_token",
                 t,
-                filtering,
+                shards,
             )
             .await?
         {
@@ -764,8 +823,8 @@ impl ScyllaEngine {
             ));
         }
         schedule_entries.sort_by(|a, b| {
-            a.0.cmp(&b.0)
-                .then_with(|| a.2.cmp(&b.2))
+            a.2.cmp(&b.2)
+                .then_with(|| a.0.cmp(&b.0))
                 .then_with(|| a.3.cmp(&b.3))
         });
         let mut fired = 0usize;
@@ -781,19 +840,19 @@ impl ScyllaEngine {
         table: &str,
         cols: &str,
         t: i64,
-        filtering: bool,
+        shards: Option<&[i16]>,
     ) -> StorageResult<Vec<crate::db::RowMap>> {
         let mut out = Vec::new();
-        if filtering {
-            out.extend(
-                self.rows(
+        let Some(shards) = shards else {
+            return self
+                .rows(
                     &format!("SELECT {cols} FROM {table} WHERE timeout_at <= ? ALLOW FILTERING"),
                     (t,),
                 )
-                .await?,
-            );
-        } else {
-            for shard in 0..self.shards {
+                .await;
+        };
+        {
+            for shard in shards.iter().copied() {
                 for bucket in self.buckets_to_scan(t) {
                     out.extend(
                         self.rows(

@@ -941,12 +941,19 @@ impl ScyllaEngine {
         };
         let mut ctx = Ctx::default();
         for task_ref in &r.tasks {
-            let row = match self.read_and_try_timeout(&mut ctx, &task_ref.id, now).await {
+            // task.heartbeat is the one operation that does not sweep first:
+            // a plain read, and a lease is refused an extension when the
+            // promise has logically expired — otherwise a heartbeat in the
+            // window before the sweep would extend a dead task's lease.
+            let origin = crate::origin_of(&task_ref.id).to_string();
+            let row = match self.read_promise(&origin, &task_ref.id).await {
                 Err(e) => return storage_err(req, e),
                 Ok(None) => continue,
                 Ok(Some(row)) => row,
             };
-            let eligible = row.task_state.as_deref() == Some("acquired")
+            let promise_live = row.state != "pending" || row.timeout_at > now;
+            let eligible = promise_live
+                && row.task_state.as_deref() == Some("acquired")
                 && row.task_version == task_ref.version
                 && row.task_pid.as_deref() == Some(r.pid.as_str())
                 && row.task_ttl.is_some();
