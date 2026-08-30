@@ -31,6 +31,14 @@ CREATE TABLE IF NOT EXISTS promises (
   parent_id TEXT GENERATED ALWAYS AS (json_extract(tags, '$.resonate:parent')) STORED,
   branch_id TEXT GENERATED ALWAYS AS (json_extract(tags, '$.resonate:branch')) STORED,
   is_timer BOOLEAN NOT NULL GENERATED ALWAYS AS (COALESCE(json_extract(tags, '$.resonate:timer'), '') = 'true') STORED,
+  -- `resonate_core::types::is_awaitable`, in SQL: every otype but internal.
+  -- Doors ask this, and the eager sweep is exactly this — awaitable and
+  -- armed are one rule, so an internal promise costs no timer.
+  awaitable BOOLEAN NOT NULL GENERATED ALWAYS AS (
+    COALESCE(json_extract(tags, '$.resonate:scope'), '') = 'global'
+    OR COALESCE(json_extract(tags, '$.resonate:external'), '') = 'true'
+    OR json_extract(tags, '$.resonate:target') IS NOT NULL
+    OR COALESCE(json_extract(tags, '$.resonate:timer'), '') = 'true') STORED,
   timeout_at BIGINT NOT NULL,
   created_at BIGINT NOT NULL,
   settled_at BIGINT,
@@ -52,9 +60,11 @@ CREATE INDEX IF NOT EXISTS idx_promises_timeout_at ON promises (timeout_at) WHER
 CREATE INDEX IF NOT EXISTS idx_promises_target ON promises (target) WHERE target IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_promises_branch_id ON promises (branch_id) WHERE branch_id IS NOT NULL;
 
--- `promise_timeouts` is gone: a pending promise past its timeout_at is
--- exactly the queue, and the partial index above is the same index the
--- table carried.
+-- `promise_timeouts` is gone: a pending, awaitable promise past its
+-- timeout_at is exactly the queue, and the partial index above is the same
+-- index the table carried. Internal promises never join it — their deadline
+-- is a projection every read applies (try_timeout), never a write the
+-- machine owes.
 CREATE INDEX IF NOT EXISTS idx_promises_retry_timeout_at ON promises (retry_timeout_at ASC, id ASC) WHERE retry_timeout_at IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_promises_lease_timeout_at ON promises (lease_timeout_at ASC, id ASC) WHERE lease_timeout_at IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_promises_pid ON promises (pid) WHERE pid IS NOT NULL;

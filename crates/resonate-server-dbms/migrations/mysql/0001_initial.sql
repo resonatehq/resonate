@@ -29,6 +29,14 @@ CREATE TABLE IF NOT EXISTS promises (
   parent_id VARCHAR(255) GENERATED ALWAYS AS (tags->>'$."resonate:parent"') STORED,
   branch_id VARCHAR(255) GENERATED ALWAYS AS (tags->>'$."resonate:branch"') STORED,
   is_timer BOOLEAN GENERATED ALWAYS AS (COALESCE(tags->>'$."resonate:timer"', '') = 'true') STORED NOT NULL,
+  -- `resonate_core::types::is_awaitable`, in SQL: every otype but internal.
+  -- Doors ask this, and the eager sweep is exactly this — awaitable and
+  -- armed are one rule, so an internal promise costs no timer.
+  awaitable BOOLEAN GENERATED ALWAYS AS (
+    COALESCE(tags->>'$."resonate:scope"', '') = 'global'
+    OR COALESCE(tags->>'$."resonate:external"', '') = 'true'
+    OR tags->>'$."resonate:target"' IS NOT NULL
+    OR COALESCE(tags->>'$."resonate:timer"', '') = 'true') STORED NOT NULL,
   timeout_at BIGINT NOT NULL,
   created_at BIGINT NOT NULL,
   settled_at BIGINT,

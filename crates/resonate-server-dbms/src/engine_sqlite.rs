@@ -396,6 +396,7 @@ impl SqliteEngine {
                     settled_at,
                     already_timedout,
                     address,
+                    awaitable: resonate_core::types::is_awaitable(&r.tags),
                 })?;
                 if result.was_created {
                     tracing::info!(
@@ -559,7 +560,7 @@ impl SqliteEngine {
                         "Awaiter promise has no resonate:target tag",
                     ));
                 }
-                if !resonate_core::types::is_external(&p_awaited.tags) {
+                if !resonate_core::types::is_awaitable(&p_awaited.tags) {
                     tracing::debug!(awaited = %r.awaited, "Callback registration rejected: awaited is not awaitable");
                     return Ok(ResponseEnvelope::error(
                         kind_str.clone(),
@@ -623,7 +624,7 @@ impl SqliteEngine {
                 db.try_timeout(&[&r.awaited], now)?;
                 match db.promise_register_listener(&r.awaited, &r.address)? {
                     Some(promise) => {
-                        if !resonate_core::types::is_external(&promise.tags) {
+                        if !resonate_core::types::is_awaitable(&promise.tags) {
                             tracing::debug!(awaited = %r.awaited, "Listener registration rejected: awaited is not awaitable");
                             return Ok(ResponseEnvelope::error(
                                 kind_str.clone(),
@@ -1510,6 +1511,7 @@ impl SqliteEngine {
                             settled_at,
                             already_timedout,
                             address,
+                            awaitable: resonate_core::types::is_awaitable(&create_data.tags),
                         })?;
                         if !result.task_exists {
                             tracing::debug!(task_id = %r.id, fenced_action = "promise.create", "Task fence rejected: task not found");
@@ -2252,11 +2254,13 @@ impl SqliteDb<'_> {
         self.armed.borrow_mut().push(Scheduled { at, timeout });
     }
 
-    /// A promise joins the eager sweep only when it is targeted — the queue is
-    /// `state = 'pending' AND target IS NOT NULL`, so an untargeted promise
-    /// times out lazily through `try_timeout` and has no deadline to announce.
-    fn arm_promise_timeout(&self, promise_id: &str, timeout_at: i64, targeted: bool) {
-        if targeted {
+    /// A promise joins the eager sweep only when it is awaitable — the queue
+    /// is `state = 'pending' AND awaitable`, because a deadline is owed as a
+    /// write exactly where someone can be waiting to observe it. An internal
+    /// promise times out lazily through `try_timeout` and has no deadline to
+    /// announce.
+    fn arm_promise_timeout(&self, promise_id: &str, timeout_at: i64, awaitable: bool) {
+        if awaitable {
             self.arm(
                 timeout_at,
                 Timeout::PromiseTimeout {
@@ -2578,6 +2582,7 @@ impl<'a> SqliteDb<'a> {
             settled_at,
             already_timedout,
             address,
+            awaitable,
         } = *params;
         // Idempotent insert
         let inserted = self.conn.execute(
@@ -2592,7 +2597,7 @@ impl<'a> SqliteDb<'a> {
             // inserted, and `task_state IS NULL` is the guard that used to be
             // `INSERT OR IGNORE INTO tasks`: a promise carries at most one task,
             // and only the first writer gets to install it. No promise timeout
-            // is written either way — `state = 'pending' AND target IS NOT NULL`
+            // is written either way — `state = 'pending' AND awaitable`
             // is the queue, and the INSERT above already put the row in it.
             if already_timedout {
                 // Already timed out — create fulfilled task if resonate:target
@@ -2603,21 +2608,23 @@ impl<'a> SqliteDb<'a> {
                         params![id],
                     )?;
                 }
-            } else if let Some(addr) = address {
-                self.arm_promise_timeout(id, timeout_at, true);
-                // TaskInfraCreated
-                let created = self.conn.execute(
-                    "UPDATE promises SET task_state = 'pending', task_version = 0, retry_timeout_at = ?2
-                     WHERE id = ?1 AND task_state IS NULL",
-                    params![id, created_at + self.task_retry_timeout],
-                )? > 0;
-                if created {
-                    self.arm_retry(id, created_at + self.task_retry_timeout);
-                    self.emit(Outgoing::Execute {
-                        address: addr.to_string(),
-                        task_id: id.to_string(),
-                        version: 0,
-                    });
+            } else {
+                self.arm_promise_timeout(id, timeout_at, awaitable);
+                if let Some(addr) = address {
+                    // TaskInfraCreated
+                    let created = self.conn.execute(
+                        "UPDATE promises SET task_state = 'pending', task_version = 0, retry_timeout_at = ?2
+                         WHERE id = ?1 AND task_state IS NULL",
+                        params![id, created_at + self.task_retry_timeout],
+                    )? > 0;
+                    if created {
+                        self.arm_retry(id, created_at + self.task_retry_timeout);
+                        self.emit(Outgoing::Execute {
+                            address: addr.to_string(),
+                            task_id: id.to_string(),
+                            version: 0,
+                        });
+                    }
                 }
             }
         }
@@ -2667,7 +2674,7 @@ impl<'a> SqliteDb<'a> {
         // resume, which would otherwise wake the awaiter for a registration
         // that never happened.
         if let Some(ref pa) = awaited {
-            if !resonate_core::types::is_external(&pa.tags) {
+            if !resonate_core::types::is_awaitable(&pa.tags) {
                 return Ok(RegisterCallbackResult { awaited, awaiter });
             }
         }
@@ -2725,7 +2732,7 @@ impl<'a> SqliteDb<'a> {
             // A listener is an obligation, and the server owes an observation
             // only where someone can be blocked. Refused by the caller with a
             // 422, so nothing is written here.
-            if p.state == PromiseState::Pending && resonate_core::types::is_external(&p.tags) {
+            if p.state == PromiseState::Pending && resonate_core::types::is_awaitable(&p.tags) {
                 self.conn.execute(
                     "INSERT OR IGNORE INTO listeners (promise_id, address) VALUES (?1, ?2)",
                     params![awaited_id, address],
@@ -2844,7 +2851,7 @@ impl<'a> SqliteDb<'a> {
                     self.arm_promise_timeout(
                         promise_id,
                         timeout_at,
-                        promise.tags.contains_key("resonate:target"),
+                        resonate_core::types::is_awaitable(&promise.tags),
                     );
                     self.arm_lease(promise_id, pid, created_at + ttl);
                 }
@@ -2931,6 +2938,7 @@ impl<'a> SqliteDb<'a> {
             settled_at,
             already_timedout,
             address,
+            awaitable,
         } = *params;
         // Fence check
         let task = self.task_get(task_id)?;
@@ -2957,6 +2965,7 @@ impl<'a> SqliteDb<'a> {
             settled_at,
             already_timedout,
             address,
+            awaitable,
         })?;
 
         Ok(TaskFenceResult {
@@ -3067,7 +3076,7 @@ impl<'a> SqliteDb<'a> {
         for aid in awaited_ids {
             if let Some(p) = self.promise_get(aid)? {
                 found_count += 1;
-                if !resonate_core::types::is_external(&p.tags) {
+                if !resonate_core::types::is_awaitable(&p.tags) {
                     non_awaitable_count += 1;
                 }
                 if p.state != PromiseState::Pending {
@@ -3404,7 +3413,7 @@ impl<'a> SqliteDb<'a> {
         let mut stmt = self.conn.prepare(
             "SELECT deadline, kind, id, pid FROM (
                  SELECT timeout_at AS deadline, 'promise' AS kind, id AS id, NULL AS pid
-                   FROM promises WHERE state = 'pending' AND target IS NOT NULL
+                   FROM promises WHERE state = 'pending' AND awaitable
                  UNION ALL
                  SELECT retry_timeout_at, 'retry', id, NULL
                    FROM promises WHERE task_state = 'pending' AND retry_timeout_at IS NOT NULL
@@ -3515,7 +3524,7 @@ impl<'a> SqliteDb<'a> {
 
         if promise_inserted {
             // Step 6 is gone with `promise_timeouts`; the INSERT above already
-            // put a pending, targeted promise on the queue.
+            // put a pending, awaitable promise on the queue.
             if already_timedout {
                 // Promise is immediately settled — create fulfilled task if resonate:target is set
                 if address.is_some() {
@@ -3525,21 +3534,27 @@ impl<'a> SqliteDb<'a> {
                         params![promise_id],
                     )?;
                 }
-            } else if let Some(addr) = &address {
-                // Step 7: Create task infrastructure if resonate:target is set
-                self.arm_promise_timeout(&promise_id, promise_timeout_at, true);
-                let created = self.conn.execute(
-                    "UPDATE promises SET task_state = 'pending', task_version = 0, retry_timeout_at = ?2
-                     WHERE id = ?1 AND task_state IS NULL",
-                    params![promise_id, time + self.task_retry_timeout],
-                )? > 0;
-                if created {
-                    self.arm_retry(&promise_id, time + self.task_retry_timeout);
-                    self.emit(Outgoing::Execute {
-                        address: addr.clone(),
-                        task_id: promise_id.clone(),
-                        version: 0,
-                    });
+            } else {
+                self.arm_promise_timeout(
+                    &promise_id,
+                    promise_timeout_at,
+                    resonate_core::types::is_awaitable(promise_tags),
+                );
+                if let Some(addr) = &address {
+                    // Step 7: Create task infrastructure if resonate:target is set
+                    let created = self.conn.execute(
+                        "UPDATE promises SET task_state = 'pending', task_version = 0, retry_timeout_at = ?2
+                         WHERE id = ?1 AND task_state IS NULL",
+                        params![promise_id, time + self.task_retry_timeout],
+                    )? > 0;
+                    if created {
+                        self.arm_retry(&promise_id, time + self.task_retry_timeout);
+                        self.emit(Outgoing::Execute {
+                            address: addr.clone(),
+                            task_id: promise_id.clone(),
+                            version: 0,
+                        });
+                    }
                 }
             }
         }
@@ -3597,16 +3612,17 @@ impl<'a> SqliteDb<'a> {
 
         // Statement 1: Process expired promise timeouts.
         //
-        // `state = 'pending' AND target IS NOT NULL` is the whole of what
+        // `state = 'pending' AND awaitable` is the whole of what
         // `promise_timeouts` held: rows entered on create and left on settle,
-        // and only a targeted promise was ever swept eagerly. Untargeted ones
-        // still time out lazily, through `try_timeout`.
+        // and only an awaitable promise is ever swept eagerly — a deadline is
+        // owed as a write exactly where someone can be waiting to observe it.
+        // Internal promises still time out lazily, through `try_timeout`.
         let expired_ids: Vec<String> = match selected("promise") {
             None => Vec::new(),
             Some(id) => {
                 let mut stmt = self.conn.prepare(
                     "SELECT id FROM promises
-                     WHERE state = 'pending' AND target IS NOT NULL AND timeout_at <= ?1
+                     WHERE state = 'pending' AND awaitable AND timeout_at <= ?1
                        AND (?2 IS NULL OR id = ?2)
                      ORDER BY id",
                 )?;
@@ -3728,7 +3744,7 @@ impl<'a> SqliteDb<'a> {
         // predicates are the membership rules the deleted tables carried.
         let mut stmt = conn.prepare(
             "SELECT id, timeout_at FROM promises
-             WHERE state = 'pending' AND target IS NOT NULL ORDER BY id",
+             WHERE state = 'pending' AND awaitable ORDER BY id",
         )?;
         let promise_timeouts: Vec<SnapshotPromiseTimeout> = {
             let mut rows = stmt.query([])?;
@@ -3916,12 +3932,12 @@ fn row_to_schedule(row: &rusqlite::Row) -> rusqlite::Result<ScheduleRecord> {
 //                     other — which is why fulfilling a task, dropping its
 //                     timeout and clearing its lease are one UPDATE here.
 //
-//   promise_timeouts  Gone. The queue is `state = 'pending' AND target IS NOT
-//                     NULL`, which is what rows entering on create and leaving
+//   promise_timeouts  Gone. The queue is `state = 'pending' AND awaitable`,
+//                     which is what rows entering on create and leaving
 //                     on settle amounted to; idx_promises_timeout_at is the
-//                     index the table carried. Untargeted promises were never
-//                     swept eagerly and still are not — they time out lazily,
-//                     through try_timeout.
+//                     index the table carried. Internal promises are never
+//                     swept eagerly — their deadline is a projection every
+//                     read applies, through try_timeout.
 //
 //   schedule_timeouts Gone: `next_run_at` already is the queue, and
 //                     process_schedule_timeout's idempotency guard reads the

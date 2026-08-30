@@ -76,10 +76,12 @@ CREATE TABLE IF NOT EXISTS promises (
   target        TEXT    GENERATED ALWAYS AS (tags->>'resonate:target') STORED,
   is_timer      BOOLEAN NOT NULL GENERATED ALWAYS AS (
                   COALESCE(tags->>'resonate:timer', '') = 'true') STORED,
-  -- `resonate_core::types::otype`, in SQL: who may be blocked on this. Four
-  -- alternatives, not a hierarchy — `scope = global` is the one the wire
-  -- actually carries, and the one that makes a caller's promise awaitable.
-  external      BOOLEAN NOT NULL GENERATED ALWAYS AS (
+  -- `resonate_core::types::is_awaitable`, in SQL: every otype but internal —
+  -- external by any of `scope = global` (the form the wire actually carries),
+  -- the escape hatch, or a timer; runnable by a target. Doors ask this, and
+  -- the eager sweep is exactly this: awaitable and armed are one rule, so an
+  -- internal promise costs no timer.
+  awaitable     BOOLEAN NOT NULL GENERATED ALWAYS AS (
                   COALESCE(tags->>'resonate:scope', '')       = 'global'
                   OR COALESCE(tags->>'resonate:external', '') = 'true'
                   OR tags->>'resonate:target' IS NOT NULL
@@ -129,9 +131,9 @@ CREATE TABLE IF NOT EXISTS promises (
 );
 
 -- The promise timeout sweep queue is NOT a column: promise_timeouts membership
--- is exactly (state = 'pending' AND target IS NOT NULL), given
--- `consistent_task_iff_targeted_promise`. A targetless promise has no task and
--- is never swept eagerly; it times out lazily on first touch (try_timeout).
+-- is exactly (state = 'pending' AND awaitable). An internal promise is never
+-- swept eagerly — its deadline is a projection every read applies
+-- (try_timeout), never a write the machine owes.
 CREATE INDEX IF NOT EXISTS idx_promises_timeout_at
   ON promises (timeout_at) WHERE state = 'pending';
 
@@ -311,8 +313,9 @@ ALTER TABLE promises ADD CONSTRAINT well_formed_promise_timer_not_targeted
   CHECK ((NOT (is_timer AND (target IS NOT NULL))));
 
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_promise_obligations_require_external;
-ALTER TABLE promises ADD CONSTRAINT well_formed_promise_obligations_require_external
-  CHECK ((external OR ((callbacks = '{}'::text[]) AND (listeners =
+ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_promise_obligations_require_awaitable;
+ALTER TABLE promises ADD CONSTRAINT well_formed_promise_obligations_require_awaitable
+  CHECK ((awaitable OR ((callbacks = '{}'::text[]) AND (listeners =
   '{}'::text[]))));
 
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_promise_awaiter_is_not_self;

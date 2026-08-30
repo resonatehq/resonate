@@ -116,7 +116,7 @@ pub struct TaskSuspendResult {
     pub was_suspended: bool,
     pub missing_count: i32,
     /// Awaited promises that exist but may not be awaited — see
-    /// `resonate_core::types::is_external`. Refused with the same 422 as a
+    /// `resonate_core::types::is_awaitable`. Refused with the same 422 as a
     /// missing one, and counted apart only so the message can say which.
     pub non_awaitable_count: i32,
 }
@@ -157,6 +157,10 @@ pub struct PromiseCreateParams<'a> {
     pub settled_at: Option<i64>,
     pub already_timedout: bool,
     pub address: Option<&'a str>,
+    /// `resonate_core::types::is_awaitable`, computed where the tags are
+    /// still typed. Decides whether the deadline is armed: awaitable and
+    /// armed are one rule, so an internal promise costs no timer.
+    pub awaitable: bool,
 }
 
 pub struct PromiseSettleParams<'a> {
@@ -202,6 +206,8 @@ pub struct TaskFenceCreateParams<'a> {
     pub settled_at: Option<i64>,
     pub already_timedout: bool,
     pub address: Option<&'a str>,
+    /// See [`PromiseCreateParams::awaitable`].
+    pub awaitable: bool,
 }
 
 pub struct TaskFenceSettleParams<'a> {

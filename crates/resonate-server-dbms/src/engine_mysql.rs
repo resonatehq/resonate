@@ -434,6 +434,7 @@ impl MysqlEngine {
                     settled_at,
                     already_timedout,
                     address,
+                    awaitable: resonate_core::types::is_awaitable(&r.tags),
                 })?;
                 if result.was_created {
                     tracing::info!(
@@ -597,7 +598,7 @@ impl MysqlEngine {
                         "Awaiter promise has no resonate:target tag",
                     ));
                 }
-                if !resonate_core::types::is_external(&p_awaited.tags) {
+                if !resonate_core::types::is_awaitable(&p_awaited.tags) {
                     tracing::debug!(awaited = %r.awaited, "Callback registration rejected: awaited is not awaitable");
                     return Ok(ResponseEnvelope::error(
                         kind_str.clone(),
@@ -661,7 +662,7 @@ impl MysqlEngine {
                 db.try_timeout(&[&r.awaited], now)?;
                 match db.promise_register_listener(&r.awaited, &r.address)? {
                     Some(promise) => {
-                        if !resonate_core::types::is_external(&promise.tags) {
+                        if !resonate_core::types::is_awaitable(&promise.tags) {
                             tracing::debug!(awaited = %r.awaited, "Listener registration rejected: awaited is not awaitable");
                             return Ok(ResponseEnvelope::error(
                                 kind_str.clone(),
@@ -1548,6 +1549,7 @@ impl MysqlEngine {
                             settled_at,
                             already_timedout,
                             address,
+                            awaitable: resonate_core::types::is_awaitable(&create_data.tags),
                         })?;
                         if !result.task_exists {
                             tracing::debug!(task_id = %r.id, fenced_action = "promise.create", "Task fence rejected: task not found");
@@ -2293,8 +2295,8 @@ impl<'a> MysqlDb<'a> {
         self.armed.borrow_mut().push(Scheduled { at, timeout });
     }
 
-    fn arm_promise_timeout(&self, promise_id: &str, timeout_at: i64, targeted: bool) {
-        if targeted {
+    fn arm_promise_timeout(&self, promise_id: &str, timeout_at: i64, awaitable: bool) {
+        if awaitable {
             self.arm(
                 timeout_at,
                 Timeout::PromiseTimeout {
@@ -2775,6 +2777,7 @@ impl MysqlDb<'_> {
             settled_at,
             already_timedout,
             address,
+            awaitable,
         } = *params;
         if id.len() > 255 {
             return Err(StorageError::InvalidInput(
@@ -2801,11 +2804,14 @@ impl MysqlDb<'_> {
 
         let was_created = res.rows_affected() > 0;
         if was_created {
-            // No promise timeout to write: `state = 'pending' AND target IS NOT
-            // NULL` is the queue, and the INSERT above already put the row in
+            // No promise timeout to write: `state = 'pending' AND awaitable`
+            // is the queue, and the INSERT above already put the row in
             // it. Creating the task is an UPDATE of that same row, and
             // `task_state IS NULL` is the guard `INSERT IGNORE INTO tasks`
             // used to be — a promise carries at most one task.
+            if !already_timedout {
+                self.arm_promise_timeout(id, timeout_at, awaitable);
+            }
             if let Some(addr) = address {
                 let task_state = if already_timedout {
                     "fulfilled"
@@ -2826,7 +2832,6 @@ impl MysqlDb<'_> {
                 )?;
 
                 if task_res.rows_affected() > 0 && !already_timedout {
-                    self.arm_promise_timeout(id, timeout_at, true);
                     self.arm_retry(id, created_at + trt);
                     self.emit(Outgoing::Execute {
                         address: addr.to_string(),
@@ -2928,7 +2933,7 @@ impl MysqlDb<'_> {
                 let tags: String = row.get("tags");
                 awaited_awaitable =
                     serde_json::from_str::<std::collections::HashMap<String, String>>(&tags)
-                        .map(|t| resonate_core::types::is_external(&t))
+                        .map(|t| resonate_core::types::is_awaitable(&t))
                         .unwrap_or(false);
             } else {
                 awaiter_state = Some(rstate);
@@ -3018,7 +3023,7 @@ impl MysqlDb<'_> {
             serde_json::from_str::<std::collections::HashMap<String, String>>(
                 &r.get::<String, _>("tags"),
             )
-            .map(|t| resonate_core::types::is_external(&t))
+            .map(|t| resonate_core::types::is_awaitable(&t))
             .unwrap_or(false)
         });
 
@@ -3167,7 +3172,7 @@ impl MysqlDb<'_> {
                 self.arm_promise_timeout(
                     promise_id,
                     timeout_at,
-                    promise.tags.contains_key("resonate:target"),
+                    resonate_core::types::is_awaitable(&promise.tags),
                 );
                 self.arm_lease(promise_id, pid, created_at + ttl);
             }
@@ -3275,6 +3280,7 @@ impl MysqlDb<'_> {
             settled_at,
             already_timedout,
             address,
+            awaitable,
         } = *params;
         let trt = self.task_retry_timeout;
 
@@ -3304,6 +3310,9 @@ impl MysqlDb<'_> {
             )?;
 
             if res.rows_affected() > 0 {
+                if !already_timedout {
+                    self.arm_promise_timeout(promise_id, timeout_at, awaitable);
+                }
                 if let Some(addr) = address {
                     let task_state = if already_timedout {
                         "fulfilled"
@@ -3323,7 +3332,6 @@ impl MysqlDb<'_> {
                         .execute(self.tx().as_mut()),
                     )?;
                     if task_res.rows_affected() > 0 && !already_timedout {
-                        self.arm_promise_timeout(promise_id, timeout_at, true);
                         self.arm_retry(promise_id, created_at + trt);
                         self.emit(Outgoing::Execute {
                             address: addr.to_string(),
@@ -3524,9 +3532,9 @@ impl MysqlDb<'_> {
             });
         }
 
-        // 4b. Count awaited promises that may not be awaited — the three tags
-        // of `resonate_core::types::is_external`, two of them already stored
-        // as generated columns.
+        // 4b. Count awaited promises that may not be awaited —
+        // `resonate_core::types::is_awaitable`, stored as the `awaitable`
+        // generated column.
         let non_awaitable_count = if awaited_ids.is_empty() {
             0i32
         } else {
@@ -3537,9 +3545,7 @@ impl MysqlDb<'_> {
                 .join(", ");
             let sql = format!(
                 "SELECT COUNT(*) AS cnt FROM promises WHERE id IN ({}) \
-                 AND NOT (COALESCE(tags->>'$.\"resonate:scope\"', '') = 'global' \
-                          OR COALESCE(tags->>'$.\"resonate:external\"', '') = 'true' \
-                          OR target IS NOT NULL OR is_timer)",
+                 AND NOT awaitable",
                 placeholders
             );
             let mut q = sqlx::query(&sql);
@@ -4000,7 +4006,7 @@ impl MysqlDb<'_> {
                 // untyped NULL takes the one the third branch supplies.
                 "SELECT deadline, kind, id, pid FROM (
                      SELECT timeout_at AS deadline, 0 AS kind, id AS id, NULL AS pid
-                       FROM promises WHERE state = 'pending' AND target IS NOT NULL
+                       FROM promises WHERE state = 'pending' AND awaitable
                      UNION ALL
                      SELECT retry_timeout_at, 1, id, NULL
                        FROM promises WHERE task_state = 'pending' AND retry_timeout_at IS NOT NULL
@@ -4139,7 +4145,14 @@ impl MysqlDb<'_> {
 
         if promise_res.rows_affected() > 0 {
             // 6a is gone with `promise_timeouts`: the INSERT above already put
-            // a pending, targeted promise on the queue.
+            // a pending, awaitable promise on the queue.
+            if !already_timedout {
+                self.arm_promise_timeout(
+                    &computed_promise_id,
+                    computed_timeout_at,
+                    resonate_core::types::is_awaitable(promise_tags),
+                );
+            }
             if already_timedout {
                 // Promise is immediately settled — create fulfilled task if resonate:target is set
                 if address.is_some() {
@@ -4164,7 +4177,6 @@ impl MysqlDb<'_> {
                     .execute(self.tx().as_mut()),
                 )?;
                 if task_res.rows_affected() > 0 {
-                    self.arm_promise_timeout(&computed_promise_id, computed_timeout_at, true);
                     self.arm_retry(&computed_promise_id, time + trt);
                     self.emit(Outgoing::Execute {
                         address: addr.to_string(),
@@ -4212,19 +4224,20 @@ impl MysqlDb<'_> {
             Some(_) => None,
         };
 
-        // Statement 1: Expire all pending promises with timeout_at <= time
-        // (with resonate:target).
+        // Statement 1: Expire all awaitable pending promises with
+        // timeout_at <= time.
         //
-        // `state = 'pending' AND target IS NOT NULL` is the whole of what
+        // `state = 'pending' AND awaitable` is the whole of what
         // `promise_timeouts` held: rows entered on create and left on settle,
-        // and only a targeted promise was ever swept eagerly. Untargeted ones
-        // still time out lazily, through `try_timeout`.
+        // and only an awaitable promise is ever swept eagerly — a deadline is
+        // owed as a write exactly where someone can be waiting to observe it.
+        // Internal promises still time out lazily, through `try_timeout`.
         let expired_rows = match selected("promise") {
             None => Vec::new(),
             Some(id) => rt_block_on(
                 sqlx::query(
                     "SELECT id FROM promises
-                     WHERE state = 'pending' AND target IS NOT NULL AND timeout_at <= ?
+                     WHERE state = 'pending' AND awaitable AND timeout_at <= ?
                        AND (? IS NULL OR id = ?)
                      ORDER BY id",
                 )
@@ -4385,7 +4398,7 @@ impl MysqlDb<'_> {
         let pt_rows = rt_block_on(
             sqlx::query(
                 "SELECT id, timeout_at FROM promises
-                 WHERE state = 'pending' AND target IS NOT NULL ORDER BY id",
+                 WHERE state = 'pending' AND awaitable ORDER BY id",
             )
             .fetch_all(self.tx().as_mut()),
         )?;

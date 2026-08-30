@@ -500,6 +500,7 @@ impl PostgresEngine {
                     settled_at,
                     already_timedout,
                     address,
+                    awaitable: resonate_core::types::is_awaitable(&r.tags),
                 })?;
                 if result.was_created {
                     tracing::info!(
@@ -663,7 +664,7 @@ impl PostgresEngine {
                         "Awaiter promise has no resonate:target tag",
                     ));
                 }
-                if !resonate_core::types::is_external(&p_awaited.tags) {
+                if !resonate_core::types::is_awaitable(&p_awaited.tags) {
                     tracing::debug!(awaited = %r.awaited, "Callback registration rejected: awaited is not awaitable");
                     return Ok(ResponseEnvelope::error(
                         kind_str.clone(),
@@ -727,7 +728,7 @@ impl PostgresEngine {
                 db.try_timeout(&[&r.awaited], now)?;
                 match db.promise_register_listener(&r.awaited, &r.address)? {
                     Some(promise) => {
-                        if !resonate_core::types::is_external(&promise.tags) {
+                        if !resonate_core::types::is_awaitable(&promise.tags) {
                             tracing::debug!(awaited = %r.awaited, "Listener registration rejected: awaited is not awaitable");
                             return Ok(ResponseEnvelope::error(
                                 kind_str.clone(),
@@ -1614,6 +1615,7 @@ impl PostgresEngine {
                             settled_at,
                             already_timedout,
                             address,
+                            awaitable: resonate_core::types::is_awaitable(&create_data.tags),
                         })?;
                         if !result.task_exists {
                             tracing::debug!(task_id = %r.id, fenced_action = "promise.create", "Task fence rejected: task not found");
@@ -2345,8 +2347,8 @@ impl<'a> PostgresDb<'a> {
         self.armed.borrow_mut().push(Scheduled { at, timeout });
     }
 
-    fn arm_promise_timeout(&self, promise_id: &str, timeout_at: i64, targeted: bool) {
-        if targeted {
+    fn arm_promise_timeout(&self, promise_id: &str, timeout_at: i64, awaitable: bool) {
+        if awaitable {
             self.arm(
                 timeout_at,
                 Timeout::PromiseTimeout {
@@ -2845,6 +2847,7 @@ impl PostgresDb<'_> {
             settled_at,
             already_timedout,
             address,
+            awaitable,
         } = *params;
         let trt = self.task_retry_timeout;
 
@@ -2887,7 +2890,7 @@ impl PostgresDb<'_> {
         self.absorb_and_arm_retries(&rows[0], created_at + trt);
         let was_created: bool = rows[0].get("was_created");
         if was_created && !already_timedout {
-            self.arm_promise_timeout(id, timeout_at, address.is_some());
+            self.arm_promise_timeout(id, timeout_at, awaitable);
         }
         Ok(PromiseCreateResult {
             was_created,
@@ -2984,7 +2987,7 @@ impl PostgresDb<'_> {
             -- the direct resume, which would wake the awaiter for a
             -- registration that never happened.
             awaitable AS (
-              SELECT EXISTS (SELECT 1 FROM awaited WHERE external) AS ok
+              SELECT EXISTS (SELECT 1 FROM awaited WHERE awaitable) AS ok
             ),
             -- link: awaited still pending and awaitable, awaiter targeted and pending
             linked AS (
@@ -3078,14 +3081,14 @@ impl PostgresDb<'_> {
             WITH locked_promise AS (
               SELECT * FROM promises WHERE id = $1 FOR UPDATE
             ),
-            -- A listener is an obligation, and `external` is where the server
+            -- A listener is an obligation, and `awaitable` is where the server
             -- owes an observation. Refused by the caller with a 422, so nothing
             -- is written for a promise that may not be awaited.
             linked AS (
               UPDATE promises p SET listeners = p.listeners || $2
               WHERE p.id = $1
                 AND NOT (p.listeners @> ARRAY[$2])
-                AND EXISTS (SELECT 1 FROM locked_promise WHERE state = 'pending' AND external)
+                AND EXISTS (SELECT 1 FROM locked_promise WHERE state = 'pending' AND awaitable)
               RETURNING p.id
             )
             SELECT {cols} FROM locked_promise",
@@ -3200,7 +3203,7 @@ impl PostgresDb<'_> {
                 self.arm_promise_timeout(
                     promise_id,
                     timeout_at,
-                    promise.tags.contains_key("resonate:target"),
+                    resonate_core::types::is_awaitable(&promise.tags),
                 );
                 self.arm_lease(promise_id, pid, created_at + ttl);
             }
@@ -3296,6 +3299,7 @@ impl PostgresDb<'_> {
             settled_at,
             already_timedout,
             address,
+            awaitable,
         } = *params;
         let trt = self.task_retry_timeout;
 
@@ -3333,6 +3337,8 @@ impl PostgresDb<'_> {
             SELECT
               EXISTS (SELECT 1 FROM fence_check) AS task_exists,
               (SELECT ok FROM fence_ok) AS fence_ok,
+              EXISTS (SELECT 1 FROM inserted_or_skipped_promise p
+                      WHERE p.state = 'pending') AS promise_pending_created,
               {cols}, {messages}
             FROM (SELECT 1) AS dummy
             LEFT JOIN result r ON true
@@ -3347,14 +3353,15 @@ impl PostgresDb<'_> {
             return Err(StorageError::Serialization);
         }
         let row = &rows[0];
-        let armed = self.absorb_and_arm_retries(row, created_at + trt);
+        self.absorb_and_arm_retries(row, created_at + trt);
         let promise_id_val: Option<String> = row.get("id");
-        // A promise joins the eager sweep under exactly the condition its task
-        // gets a retry deadline: newly created, targeted, not already timed
-        // out. So the retries this statement armed name the promises too, and
-        // there is no separate `was_created` to read.
-        for id in &armed {
-            self.arm_promise_timeout(id, timeout_at, true);
+        // A promise joins the eager sweep when this statement created it
+        // still pending — the CTE says so directly, because "got a retry
+        // deadline" no longer names the same set: an awaitable, untargeted
+        // promise is armed with no retry to ride on.
+        let promise_pending_created: bool = row.get("promise_pending_created");
+        if promise_pending_created {
+            self.arm_promise_timeout(promise_id, timeout_at, awaitable);
         }
         Ok(TaskFenceResult {
             task_exists: row.get("task_exists"),
@@ -3515,17 +3522,17 @@ impl PostgresDb<'_> {
               SELECT EXISTS (SELECT 1 FROM me WHERE task_version = $2 AND task_state = 'acquired') AS ok
             ),
             awaited AS (
-              SELECT id, state, external
+              SELECT id, state, awaitable
               FROM promises WHERE id = ANY($3) AND (SELECT ok FROM matched)
             ),
             missing AS (
               SELECT (COALESCE(array_length($3::text[], 1), 0) - COUNT(*)::INT) AS cnt FROM awaited
             ),
-            -- `external` is the generated column of the same three tags as
-            -- `resonate_core::types::is_external`. A promise nothing outside
+            -- `awaitable` is the generated column of the same four tags as
+            -- `resonate_core::types::is_awaitable`. A promise nothing outside
             -- its own execution can settle may not be awaited.
             non_awaitable AS (
-              SELECT COUNT(*)::INT AS cnt FROM awaited WHERE NOT external
+              SELECT COUNT(*)::INT AS cnt FROM awaited WHERE NOT awaitable
             ),
             can_suspend AS (
               SELECT 1 WHERE (SELECT ok FROM matched)
@@ -3925,7 +3932,7 @@ impl PostgresDb<'_> {
             sqlx::query(
                 "SELECT deadline, kind, id, pid FROM (
                      SELECT timeout_at AS deadline, 'promise' AS kind, id AS id, NULL::text AS pid
-                       FROM promises WHERE state = 'pending' AND target IS NOT NULL
+                       FROM promises WHERE state = 'pending' AND awaitable
                      UNION ALL
                      SELECT retry_timeout_at, 'retry', id, NULL
                        FROM promises WHERE task_state = 'pending' AND retry_timeout_at IS NOT NULL
@@ -4026,6 +4033,8 @@ impl PostgresDb<'_> {
             )
             SELECT id, cron, promise_id, promise_timeout, NULLIF(promise_param_headers, '{{}}'::jsonb)::text AS promise_param_headers,
                    promise_param_data, promise_tags::text, created_at, next_run_at, last_run_at,
+                   EXISTS (SELECT 1 FROM inserted_or_skipped_promise p
+                           WHERE p.state = 'pending') AS promise_pending_created,
                    {messages}
             FROM updated_schedule
         ", messages = emitted_json(&["emit_new"])))
@@ -4035,13 +4044,24 @@ impl PostgresDb<'_> {
         if rows.is_empty() {
             return Ok(None);
         }
-        let armed = self.absorb_and_arm_retries(&rows[0], time + trt);
+        self.absorb_and_arm_retries(&rows[0], time + trt);
         // The schedule advanced, so its own deadline moved. The promise this
-        // firing created has one too, if it is still pending and targeted —
-        // which is exactly when a retry deadline was armed for it.
+        // firing created has one too, if it is still pending and awaitable —
+        // asked of the CTE directly, because "got a retry deadline" no longer
+        // names the same set: a cron that mints timers arms with no retry to
+        // ride on.
         let schedule = row_to_schedule(&rows[0]);
-        for id in &armed {
-            self.arm_promise_timeout(id, fired_at + schedule.promise_timeout, true);
+        let promise_pending_created: bool = rows[0].get("promise_pending_created");
+        if promise_pending_created {
+            let computed_promise_id = schedule
+                .promise_id
+                .replace("{{.id}}", schedule_id)
+                .replace("{{.timestamp}}", &fired_at.to_string());
+            self.arm_promise_timeout(
+                &computed_promise_id,
+                fired_at + schedule.promise_timeout,
+                resonate_core::types::is_awaitable(promise_tags),
+            );
         }
         self.arm(
             schedule.next_run_at,
@@ -4090,12 +4110,14 @@ impl PostgresDb<'_> {
 
         // Statement 1: expired promises.
         //
-        // `state = 'pending' AND target IS NOT NULL` is the whole of what
+        // `state = 'pending' AND awaitable` is the whole of what
         // promise_timeouts held: rows enter on create and leave on settle, and
-        // only targeted promises are ever swept eagerly.
+        // only awaitable promises are ever swept eagerly — a deadline is owed
+        // as a write exactly where someone can be waiting to observe it.
+        // Internal promises still time out lazily, through `try_timeout`.
         if let Some(id) = selected("promise") {
             let sql = expire_batch_sql(
-                "state = 'pending' AND target IS NOT NULL AND timeout_at <= $1
+                "state = 'pending' AND awaitable AND timeout_at <= $1
                  AND ($2::text IS NULL OR id = $2)",
                 "$1",
                 trt,
@@ -4196,7 +4218,7 @@ impl PostgresDb<'_> {
         let pt_rows = rt_block_on(
             sqlx::query(
                 "SELECT id, timeout_at FROM promises
-                 WHERE state = 'pending' AND target IS NOT NULL ORDER BY id",
+                 WHERE state = 'pending' AND awaitable ORDER BY id",
             )
             .fetch_all(self.tx().as_mut()),
         )?;

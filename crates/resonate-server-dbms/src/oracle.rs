@@ -213,7 +213,7 @@ impl Oracle {
 
         for pt in &self.p_timeouts {
             if self.promises.get(&pt.id).is_some_and(|p| {
-                p.state == PromiseState::Pending && p.tags.contains_key("resonate:target")
+                p.state == PromiseState::Pending && resonate_core::types::is_awaitable(&p.tags)
             }) {
                 out.push(Scheduled {
                     at: pt.timeout,
@@ -417,7 +417,7 @@ impl Oracle {
                 );
             }
         } else {
-            if addr.is_some() {
+            if resonate_core::types::is_awaitable(&r.tags) {
                 self.set_p_timeout(&r.id, r.timeout_at);
             }
             if let Some(ref addr) = addr {
@@ -548,7 +548,7 @@ impl Oracle {
                 "Awaiter promise has no resonate:target tag",
             );
         }
-        if !resonate_core::types::is_external(&awaited_record.tags) {
+        if !resonate_core::types::is_awaitable(&awaited_record.tags) {
             return ResponseEnvelope::error(
                 req.kind.clone(),
                 req.head.corr_id.clone(),
@@ -640,7 +640,7 @@ impl Oracle {
             Some(p) => {
                 // A listener is an obligation, and the server owes an
                 // observation only where someone can be blocked.
-                if !resonate_core::types::is_external(&p.tags) {
+                if !resonate_core::types::is_awaitable(&p.tags) {
                     return ResponseEnvelope::error(
                         req.kind.clone(),
                         req.head.corr_id.clone(),
@@ -1178,7 +1178,7 @@ impl Oracle {
             let awaitable = self
                 .promises
                 .get(&action.data.awaited)
-                .is_some_and(|p| resonate_core::types::is_external(&p.tags));
+                .is_some_and(|p| resonate_core::types::is_awaitable(&p.tags));
             if !awaitable {
                 return ResponseEnvelope::error(
                     req.kind.clone(),
@@ -1337,7 +1337,7 @@ impl Oracle {
                             );
                         }
                     } else {
-                        if addr.is_some() {
+                        if resonate_core::types::is_awaitable(&create_data.tags) {
                             self.set_p_timeout(&create_data.id, create_data.timeout_at);
                         }
                         if let Some(ref a) = addr {
@@ -1947,9 +1947,9 @@ impl Oracle {
             }
         }
 
-        // Collect expired promise timeouts — after fix 1, p_timeouts only contains
-        // promises with resonate:target, and del_p_timeout is always called on settlement
-        // so all entries here are guaranteed to be Pending with a target.
+        // Collect expired promise timeouts — p_timeouts only contains
+        // awaitable promises, and del_p_timeout is always called on settlement
+        // so all entries here are guaranteed to be Pending and awaitable.
         let expired_promise_ids: Vec<String> = self
             .p_timeouts
             .iter()
@@ -2129,7 +2129,7 @@ impl Oracle {
                             );
                         }
                     } else {
-                        if addr.is_some() {
+                        if resonate_core::types::is_awaitable(&tags) {
                             self.set_p_timeout(&promise_id, timeout_at);
                         }
                         if let Some(ref a) = addr {
@@ -2521,13 +2521,13 @@ impl Oracle {
     }
 
     /// Pending promises that may be awaited — see
-    /// `resonate_core::types::is_external`. The generator needs these apart
+    /// `resonate_core::types::is_awaitable`. The generator needs these apart
     /// from `pending_promise_ids`, or every callback it plans is refused.
-    pub fn external_pending_promise_ids(&self) -> Vec<String> {
+    pub fn awaitable_pending_promise_ids(&self) -> Vec<String> {
         self.promises
             .iter()
             .filter(|(_, p)| {
-                p.state == PromiseState::Pending && resonate_core::types::is_external(&p.tags)
+                p.state == PromiseState::Pending && resonate_core::types::is_awaitable(&p.tags)
             })
             .map(|(id, _)| id.clone())
             .collect()

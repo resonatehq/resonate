@@ -548,43 +548,53 @@ fn validate_task_suspend_data(data: &TaskSuspendData) -> Result<(), validator::V
     Ok(())
 }
 
-/// Who may be blocked on a promise. Derived from its tags, never stored.
+/// One judgment on a promise, three consequences: who may block on it, what
+/// runs it, and whether the machine owes its deadline as a write. Derived
+/// from its tags, never stored.
 ///
-/// `External` if any one of four things is true, and they are alternatives
-/// rather than a hierarchy:
+/// - `Internal` — nobody outside its own call graph; nothing runs it; NO
+///   armed timeout. Its deadline is a projection every read applies, never
+///   a write the machine owes.
+/// - `External` — anyone may await it; nothing runs it — a person, a
+///   webhook or the clock settles it; armed timeout. Reached by any of
+///   three tags, alternatives rather than a hierarchy:
+///   `resonate:scope = global` (the form the wire actually carries),
+///   `resonate:external = true` (the open-ended escape hatch), or
+///   `resonate:timer = true` (a sleep settles at its deadline, so there is
+///   something to await).
+/// - `Runnable` — anyone may await it, AND a worker is handed the
+///   execution. `resonate:target` present, which is the same condition as
+///   carrying a task — both directions hold, and the storage invariant
+///   `consistent_task_iff_targeted_promise` is the other half of it.
 ///
-/// - `resonate:scope = global` — the form the wire actually carries, and what
-///   makes a promise a caller wrote awaitable;
-/// - `resonate:external = true` — the open-ended escape hatch, for a kind
-///   nobody enumerated;
-/// - `resonate:target` present — a dispatch target implies anyone may await
-///   the result;
-/// - `resonate:timer = true` — a sleep, which settles at its deadline, so
-///   there is something to await.
+/// This was two axes for a while — `otype` of external or internal crossed
+/// with an `okind` of task or idle — and the pair carried a proof that
+/// their 2x2 was really a chain: target was a disjunct of external, so
+/// internal-plus-task named a cell no tag list could produce. Three values
+/// say that instead of proving it; the chain is the type, and the dead cell
+/// has nowhere to be written.
 ///
-/// Two things follow, and the second follows from the first: an external
-/// promise may be awaited, and an external promise is armed. The server owes
-/// an observation exactly where someone can be blocked, so this is one rule,
-/// not two. An internal promise is neither awaitable nor armed, and costs
-/// nothing.
+/// Doors ask [`OType::awaitable`], never name a constructor. A door written
+/// `otype == External` compiles and silently refuses every runnable promise
+/// — the ordinary case, a parent awaiting the child a worker runs.
 ///
 /// Nothing here gates settling, and nothing here decides the verdict a
 /// deadline produces — that is `is_timer` alone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OType {
-    External,
     Internal,
+    External,
+    Runnable,
 }
 
-/// What causes a promise to run. Derived from its tags, never stored.
-///
-/// `Task` exactly when a dispatch target is present, which is the same
-/// condition as carrying a task — both directions hold, and the storage
-/// invariant `consistent_task_iff_targeted_promise` is the other half of it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OKind {
-    Task,
-    Idle,
+impl OType {
+    /// Every value but `Internal`: who may register a callback or listener,
+    /// and equally whose deadline is armed. The server owes an observation
+    /// exactly where someone can be blocked, so awaitable-and-armed is one
+    /// rule, not two — an internal promise is neither, and costs nothing.
+    pub fn awaitable(self) -> bool {
+        self != OType::Internal
+    }
 }
 
 type Tags = std::collections::HashMap<String, String>;
@@ -600,9 +610,10 @@ pub fn is_timer(tags: &Tags) -> bool {
 }
 
 pub fn otype(tags: &Tags) -> OType {
-    if tag_is(tags, "resonate:scope", "global")
+    if tags.contains_key("resonate:target") {
+        OType::Runnable
+    } else if tag_is(tags, "resonate:scope", "global")
         || tag_is(tags, "resonate:external", "true")
-        || tags.contains_key("resonate:target")
         || is_timer(tags)
     {
         OType::External
@@ -611,17 +622,9 @@ pub fn otype(tags: &Tags) -> OType {
     }
 }
 
-pub fn okind(tags: &Tags) -> OKind {
-    if tags.contains_key("resonate:target") {
-        OKind::Task
-    } else {
-        OKind::Idle
-    }
-}
-
-/// `otype(tags) == External`, as a predicate — the awaitable-and-armed test.
-pub fn is_external(tags: &Tags) -> bool {
-    otype(tags) == OType::External
+/// `otype(tags).awaitable()`, as a predicate — the awaitable-and-armed test.
+pub fn is_awaitable(tags: &Tags) -> bool {
+    otype(tags).awaitable()
 }
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
@@ -1145,15 +1148,18 @@ mod tests {
     }
 
     #[test]
-    fn a_promise_is_external_when_any_of_four_tags_says_something_else_settles_it() {
-        // `scope = global` is the form real SDK traffic carries; the other
-        // three are the escape hatch, a dispatch target, and a sleep.
-        assert_eq!(otype(&tag("resonate:scope", "global")), OType::External);
-        assert_eq!(otype(&tag("resonate:external", "true")), OType::External);
+    fn one_judgment_on_a_promise_internal_external_or_runnable() {
+        // Runnable exactly when a target is present — the same condition as
+        // carrying a task.
         assert_eq!(
             otype(&tag("resonate:target", "poll://any@w")),
-            OType::External
+            OType::Runnable
         );
+
+        // External by any of three tags: `scope = global` is the form real
+        // SDK traffic carries; the others are the escape hatch and a sleep.
+        assert_eq!(otype(&tag("resonate:scope", "global")), OType::External);
+        assert_eq!(otype(&tag("resonate:external", "true")), OType::External);
         assert_eq!(otype(&tag("resonate:timer", "true")), OType::External);
 
         assert_eq!(otype(&Tags::new()), OType::Internal);
@@ -1165,11 +1171,18 @@ mod tests {
     }
 
     #[test]
-    fn a_promise_runs_as_a_task_exactly_when_it_names_a_target() {
-        assert_eq!(okind(&tag("resonate:target", "poll://any@w")), OKind::Task);
-        assert_eq!(okind(&tag("resonate:scope", "global")), OKind::Idle);
-        assert_eq!(okind(&tag("resonate:timer", "true")), OKind::Idle);
-        assert_eq!(okind(&Tags::new()), OKind::Idle);
+    fn awaitable_and_armed_is_every_value_but_internal() {
+        // The door trap the axis exists to close: a door asking
+        // `otype == External` would refuse every runnable promise — the
+        // ordinary case, a parent awaiting the child a worker runs. Doors
+        // ask `awaitable`, and this is its whole truth table.
+        assert!(OType::Runnable.awaitable());
+        assert!(OType::External.awaitable());
+        assert!(!OType::Internal.awaitable());
+
+        assert!(is_awaitable(&tag("resonate:target", "poll://any@w")));
+        assert!(is_awaitable(&tag("resonate:timer", "true")));
+        assert!(!is_awaitable(&Tags::new()));
     }
 
     #[test]

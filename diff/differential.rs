@@ -1075,10 +1075,10 @@ fn gen_promise_create(rng: &mut fastrand::Rng, oracle: &Oracle, now: i64) -> Req
 /// Mostly awaitable, so the registration paths are actually walked; one time
 /// in four whatever is pending, so the 422 stays covered too.
 fn pick_awaited(rng: &mut fastrand::Rng, oracle: &Oracle, awaiter: &str) -> String {
-    let prefer_external = rng.u32(0..4) != 0;
-    if prefer_external {
-        let external = oracle.external_pending_promise_ids();
-        if let Some(id) = external.iter().find(|p| p.as_str() != awaiter) {
+    let prefer_awaitable = rng.u32(0..4) != 0;
+    if prefer_awaitable {
+        let awaitable = oracle.awaitable_pending_promise_ids();
+        if let Some(id) = awaitable.iter().find(|p| p.as_str() != awaiter) {
             return id.clone();
         }
     }
