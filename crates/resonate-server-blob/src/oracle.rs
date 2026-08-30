@@ -1,0 +1,2513 @@
+// BTreeMap/BTreeSet, not Hash*: every traversal of oracle state is ordered by
+// key. These maps back the differential's request generator and its `preload`
+// response, and `HashMap` iteration order is randomized per process — so a
+// seeded run did not reproduce a trajectory, and an unsorted `preload` differed
+// from the engines' `ORDER BY id ASC` at random. Ordering by construction
+// removes the class; a `.sort()` at each call site only removes the instance.
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+
+use serde_json::{json, Value};
+use validator::Validate;
+
+use async_trait::async_trait;
+use resonate_core::types::{
+    format_validation_errors, PromiseCreateData, PromiseGetData, PromiseRecord,
+    PromiseRegisterCallbackData, PromiseRegisterListenerData, PromiseResponseData,
+    PromiseSearchData, PromiseSearchResponseData, PromiseSettleData, PromiseState, PromiseValue,
+    RequestEnvelope, RequestHead, ResponseEnvelope, ScheduleCreateData, ScheduleDeleteData,
+    ScheduleGetData, ScheduleRecord, ScheduleResponseData, ScheduleSearchData,
+    ScheduleSearchResponseData, SettleState, Snapshot, SnapshotCallback, SnapshotListener,
+    SnapshotMessage, SnapshotPromiseTimeout, SnapshotTaskTimeout, TaskAcquireData,
+    TaskAcquireResponseData, TaskContinueData, TaskCreateData, TaskCreateResponseData,
+    TaskFenceData, TaskFenceResponseData, TaskFulfillData, TaskFulfillResponseData, TaskGetData,
+    TaskHaltData, TaskHeartbeatData, TaskRecord, TaskReleaseData, TaskResponseData, TaskSearchData,
+    TaskSearchResponseData, TaskState, TaskSuspendData, TaskSuspendPreloadData, PROTOCOL_VERSION,
+};
+use resonate_core::util;
+use resonate_core::{ResonateServer, Unavailable};
+use std::sync::Mutex;
+
+const PENDING_RETRY_TTL: i64 = 30_000;
+
+// ─── Internal state types ─────────────────────────────────────────────────────
+
+struct Promise {
+    state: PromiseState,
+    param: PromiseValue,
+    value: PromiseValue,
+    tags: HashMap<String, String>,
+    timeout_at: i64,
+    created_at: i64,
+    settled_at: Option<i64>,
+    callbacks: BTreeSet<String>,
+    listeners: BTreeSet<String>,
+}
+
+struct Task {
+    state: TaskState,
+    version: i64,
+    pid: Option<String>,
+    ttl: Option<i64>,
+    resumes: BTreeSet<String>,
+}
+
+struct Schedule {
+    cron: String,
+    promise_id: String,
+    promise_timeout: i64,
+    promise_param: PromiseValue,
+    promise_tags: HashMap<String, String>,
+    created_at: i64,
+    last_run_at: Option<i64>,
+}
+
+#[derive(Clone, Copy)]
+enum TTimeoutKind {
+    Retry = 0,
+    Lease = 1,
+}
+
+struct PTimeout {
+    id: String,
+    timeout: i64,
+}
+struct TTimeout {
+    id: String,
+    kind: TTimeoutKind,
+    timeout: i64,
+}
+struct STimeout {
+    id: String,
+    timeout: i64,
+}
+
+// ─── Oracle ───────────────────────────────────────────────────────────────────
+
+pub struct Oracle {
+    /// How many branch siblings a task response may carry — the storage
+    /// configs' `preload_limit`, so the model truncates where the engines do.
+    preload_limit: u32,
+    promises: BTreeMap<String, Promise>,
+    tasks: BTreeMap<String, Task>,
+    schedules: BTreeMap<String, Schedule>,
+    p_timeouts: Vec<PTimeout>,
+    t_timeouts: Vec<TTimeout>,
+    s_timeouts: Vec<STimeout>,
+    outgoing: Vec<(String, Value)>,
+}
+
+impl Default for Oracle {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Oracle {
+    /// The same default the storage configs carry, so a model built without
+    /// an explicit limit compares against an engine built without one.
+    pub fn new() -> Self {
+        Self::with_preload_limit(10)
+    }
+
+    pub fn with_preload_limit(preload_limit: u32) -> Self {
+        Self {
+            preload_limit,
+            promises: BTreeMap::new(),
+            tasks: BTreeMap::new(),
+            schedules: BTreeMap::new(),
+            p_timeouts: Vec::new(),
+            t_timeouts: Vec::new(),
+            s_timeouts: Vec::new(),
+            outgoing: Vec::new(),
+        }
+    }
+
+    /// Fire every timeout now due.
+    pub fn sweep(&mut self, now: i64) {
+        let req = RequestEnvelope {
+            kind: "debug.tick".to_string(),
+            head: RequestHead {
+                corr_id: String::new(),
+                version: PROTOCOL_VERSION.to_string(),
+                auth: None,
+                debug_time: Some(now),
+            },
+            data: json!({ "time": now }),
+        };
+        self.apply(&req);
+    }
+
+    /// Does the running sweep keep this row?
+    ///
+    /// Always, at this port. The narrowing to one timeout existed for the
+    /// engine port's `Input::Internal`, which a `ResonateServer` does not
+    /// have — `debug.tick` is a bulk sweep, so every row is kept.
+    fn tick_selects(&self, _kind: &str, _id: &str) -> bool {
+        true
+    }
+
+    pub fn apply(&mut self, req: &RequestEnvelope) -> ResponseEnvelope {
+        let now = util::resolve_time(req.head.debug_time);
+        match req.kind.as_str() {
+            "promise.get" => self.op_promise_get(req, now),
+            "promise.create" => self.op_promise_create(req, now),
+            "promise.settle" => self.op_promise_settle(req, now),
+            "promise.register_callback" => self.op_promise_register_callback(req, now),
+            "promise.register_listener" => self.op_promise_register_listener(req, now),
+            "promise.search" => self.op_promise_search(req),
+            "task.get" => self.op_task_get(req, now),
+            "task.create" => self.op_task_create(req, now),
+            "task.acquire" => self.op_task_acquire(req, now),
+            "task.release" => self.op_task_release(req, now),
+            "task.fulfill" => self.op_task_fulfill(req, now),
+            "task.suspend" => self.op_task_suspend(req, now),
+            "task.fence" => self.op_task_fence(req, now),
+            "task.heartbeat" => self.op_task_heartbeat(req, now),
+            "task.halt" => self.op_task_halt(req, now),
+            "task.continue" => self.op_task_continue(req, now),
+            "task.search" => self.op_task_search(req),
+            "schedule.get" => self.op_schedule_get(req),
+            "schedule.create" => self.op_schedule_create(req, now),
+            "schedule.delete" => self.op_schedule_delete(req),
+            "schedule.search" => self.op_schedule_search(req),
+            "debug.reset" => self.op_debug_reset(req),
+            "debug.snap" => self.op_debug_snap(req),
+            "debug.tick" => self.op_debug_tick(req),
+            _ => ResponseEnvelope::error(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                400,
+                &format!("Unknown operation: {}", req.kind),
+            ),
+        }
+    }
+
+    // ─── Parse helper ─────────────────────────────────────────────────────────
+
+    fn parse<T>(&self, req: &RequestEnvelope) -> Result<T, ResponseEnvelope>
+    where
+        T: serde::de::DeserializeOwned + Validate,
+    {
+        let d: T = match serde_json::from_value(req.data.clone()) {
+            Ok(d) => d,
+            Err(e) => {
+                return Err(ResponseEnvelope::error(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    400,
+                    &format!("Invalid request: {}", e),
+                ))
+            }
+        };
+        if let Err(e) = d.validate() {
+            return Err(ResponseEnvelope::error(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                400,
+                &format_validation_errors(&e),
+            ));
+        }
+        Ok(d)
+    }
+
+    // ─── Promise operations ────────────────────────────────────────────────────
+
+    fn op_promise_get(&mut self, req: &RequestEnvelope, now: i64) -> ResponseEnvelope {
+        let r: PromiseGetData = match self.parse(req) {
+            Ok(r) => r,
+            Err(e) => return e,
+        };
+        self.try_timeout(std::slice::from_ref(&r.id), now);
+        match self.promises.get(&r.id) {
+            None => ResponseEnvelope::error(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                404,
+                "Promise not found",
+            ),
+            Some(p) => ResponseEnvelope::success(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                &PromiseResponseData {
+                    promise: Self::to_promise_record(now, &r.id, p),
+                },
+            ),
+        }
+    }
+
+    fn op_promise_create(&mut self, req: &RequestEnvelope, now: i64) -> ResponseEnvelope {
+        let r: PromiseCreateData = match self.parse(req) {
+            Ok(r) => r,
+            Err(e) => return e,
+        };
+        if let Some(addr) = r.tags.get("resonate:target") {
+            if !resonate_core::is_valid_address(addr) {
+                return ResponseEnvelope::error(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    400,
+                    "Invalid resonate:target address",
+                );
+            }
+        }
+        self.try_timeout(std::slice::from_ref(&r.id), now);
+        if let Some(p) = self.promises.get(&r.id) {
+            return ResponseEnvelope::success(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                &PromiseResponseData {
+                    promise: Self::to_promise_record(now, &r.id, p),
+                },
+            );
+        }
+        let addr = r.tags.get("resonate:target").cloned();
+        let already_timedout = now >= r.timeout_at;
+        let (state, created_at, settled_at) = if already_timedout {
+            (
+                Self::timeout_state(&r.tags),
+                r.timeout_at,
+                Some(r.timeout_at),
+            )
+        } else {
+            (PromiseState::Pending, now, None)
+        };
+        let promise = Promise {
+            state,
+            param: r.param.clone(),
+            value: PromiseValue::default(),
+            tags: r.tags.clone(),
+            timeout_at: r.timeout_at,
+            created_at,
+            settled_at,
+            callbacks: BTreeSet::new(),
+            listeners: BTreeSet::new(),
+        };
+        let record = Self::to_promise_record(now, &r.id, &promise);
+        self.promises.insert(r.id.clone(), promise);
+        if already_timedout {
+            if addr.is_some() {
+                self.tasks.insert(
+                    r.id.clone(),
+                    Task {
+                        state: TaskState::Fulfilled,
+                        version: 0,
+                        pid: None,
+                        ttl: None,
+                        resumes: BTreeSet::new(),
+                    },
+                );
+            }
+        } else {
+            if addr.is_some() {
+                self.set_p_timeout(&r.id, r.timeout_at);
+            }
+            if let Some(ref addr) = addr {
+                self.tasks.insert(
+                    r.id.clone(),
+                    Task {
+                        state: TaskState::Pending,
+                        version: 0,
+                        pid: None,
+                        ttl: None,
+                        resumes: BTreeSet::new(),
+                    },
+                );
+                let delay_at = r
+                    .tags
+                    .get("resonate:delay")
+                    .and_then(|v| v.parse::<i64>().ok());
+                if let Some(delay_at) = delay_at {
+                    if now < delay_at {
+                        self.set_t_timeout(&r.id, TTimeoutKind::Retry, delay_at);
+                    } else {
+                        self.set_t_timeout(
+                            &r.id,
+                            TTimeoutKind::Retry,
+                            created_at + PENDING_RETRY_TTL,
+                        );
+                        self.send_execute(addr, &r.id, 0);
+                    }
+                } else {
+                    self.set_t_timeout(&r.id, TTimeoutKind::Retry, created_at + PENDING_RETRY_TTL);
+                    self.send_execute(addr, &r.id, 0);
+                }
+            }
+        }
+        ResponseEnvelope::success(
+            req.kind.clone(),
+            req.head.corr_id.clone(),
+            &PromiseResponseData { promise: record },
+        )
+    }
+
+    fn op_promise_settle(&mut self, req: &RequestEnvelope, now: i64) -> ResponseEnvelope {
+        let r: PromiseSettleData = match self.parse(req) {
+            Ok(r) => r,
+            Err(e) => return e,
+        };
+        self.try_timeout(std::slice::from_ref(&r.id), now);
+        let is_pending = match self.promises.get(&r.id) {
+            None => {
+                return ResponseEnvelope::error(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    404,
+                    "Promise not found",
+                )
+            }
+            Some(p) => p.state == PromiseState::Pending,
+        };
+        if !is_pending {
+            let record = self
+                .promises
+                .get(&r.id)
+                .map(|p| Self::to_promise_record(now, &r.id, p))
+                .unwrap();
+            return ResponseEnvelope::success(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                &PromiseResponseData { promise: record },
+            );
+        }
+        if let Some(p) = self.promises.get_mut(&r.id) {
+            p.state = Self::settle_to_promise_state(r.state);
+            p.value = r.value.clone();
+            p.settled_at = Some(now);
+        }
+        let record = self
+            .promises
+            .get(&r.id)
+            .map(|p| Self::to_promise_record(now, &r.id, p))
+            .unwrap();
+        self.del_p_timeout(&r.id);
+        self.trigger_settlement(&r.id, now);
+        ResponseEnvelope::success(
+            req.kind.clone(),
+            req.head.corr_id.clone(),
+            &PromiseResponseData { promise: record },
+        )
+    }
+
+    fn op_promise_register_callback(
+        &mut self,
+        req: &RequestEnvelope,
+        now: i64,
+    ) -> ResponseEnvelope {
+        let r: PromiseRegisterCallbackData = match self.parse(req) {
+            Ok(r) => r,
+            Err(e) => return e,
+        };
+        self.try_timeout(&[r.awaited.clone(), r.awaiter.clone()], now);
+
+        let awaited_record = match self.promises.get(&r.awaited) {
+            None => {
+                return ResponseEnvelope::error(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    404,
+                    "Awaited promise not found",
+                )
+            }
+            Some(p) => Self::to_promise_record(now, &r.awaited, p),
+        };
+        let (awaiter_state, awaiter_has_target) = match self.promises.get(&r.awaiter) {
+            None => {
+                return ResponseEnvelope::error(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    422,
+                    "Awaiter promise not found",
+                )
+            }
+            Some(p) => (p.state, p.tags.contains_key("resonate:target")),
+        };
+        if !awaiter_has_target {
+            return ResponseEnvelope::error(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                422,
+                "Awaiter promise has no resonate:target tag",
+            );
+        }
+        if !resonate_core::types::is_external(&awaited_record.tags) {
+            return ResponseEnvelope::error(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                422,
+                "Awaited promise is not awaitable",
+            );
+        }
+
+        let awaited_pending = awaited_record.state == PromiseState::Pending;
+        let awaiter_pending = awaiter_state == PromiseState::Pending;
+
+        if awaited_pending && awaiter_pending {
+            if let Some(p) = self.promises.get_mut(&r.awaited) {
+                p.callbacks.insert(r.awaiter.clone());
+            }
+        } else if !awaited_pending && awaiter_pending {
+            // Direct resume: awaited already settled.
+            //
+            // A Suspended awaiter is woken; a Pending or Acquired one is
+            // already running and only records the resume. Either way the
+            // resume IS recorded — SQLite marks the callback ready after
+            // flipping the task to pending (`engine_sqlite.rs`, the
+            // INSERT ... ready = true that follows the resume UPDATE), so a
+            // woken awaiter carries one. This comment used to claim the
+            // opposite and skip the insert for the Suspended case, which put
+            // the model one resume behind SQLite and MySQL.
+            let task_state = self.tasks.get(&r.awaiter).map(|t| t.state);
+            let version = self.tasks.get(&r.awaiter).map(|t| t.version).unwrap_or(0);
+            let addr = self
+                .promises
+                .get(&r.awaiter)
+                .and_then(|p| p.tags.get("resonate:target").cloned());
+            match task_state {
+                Some(TaskState::Suspended) => {
+                    if let Some(t) = self.tasks.get_mut(&r.awaiter) {
+                        t.state = TaskState::Pending;
+                        t.resumes.insert(r.awaited.clone());
+                    }
+                    self.set_t_timeout(&r.awaiter, TTimeoutKind::Retry, now + PENDING_RETRY_TTL);
+                    if let Some(addr) = addr {
+                        self.send_execute(&addr, &r.awaiter, version);
+                    }
+                }
+                Some(TaskState::Pending) | Some(TaskState::Acquired) => {
+                    if let Some(t) = self.tasks.get_mut(&r.awaiter) {
+                        t.resumes.insert(r.awaited.clone());
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        ResponseEnvelope::success(
+            req.kind.clone(),
+            req.head.corr_id.clone(),
+            &PromiseResponseData {
+                promise: awaited_record,
+            },
+        )
+    }
+
+    fn op_promise_register_listener(
+        &mut self,
+        req: &RequestEnvelope,
+        now: i64,
+    ) -> ResponseEnvelope {
+        let r: PromiseRegisterListenerData = match self.parse(req) {
+            Ok(r) => r,
+            Err(e) => return e,
+        };
+        if !resonate_core::is_valid_address(&r.address) {
+            return ResponseEnvelope::error(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                400,
+                "Invalid listener address",
+            );
+        }
+        self.try_timeout(std::slice::from_ref(&r.awaited), now);
+        let is_pending = match self.promises.get(&r.awaited) {
+            None => {
+                return ResponseEnvelope::error(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    404,
+                    "Awaited promise not found",
+                )
+            }
+            Some(p) => {
+                // A listener is an obligation, and the server owes an
+                // observation only where someone can be blocked.
+                if !resonate_core::types::is_external(&p.tags) {
+                    return ResponseEnvelope::error(
+                        req.kind.clone(),
+                        req.head.corr_id.clone(),
+                        422,
+                        "Awaited promise is not awaitable",
+                    );
+                }
+                p.state == PromiseState::Pending
+            }
+        };
+        if is_pending {
+            if let Some(p) = self.promises.get_mut(&r.awaited) {
+                p.listeners.insert(r.address.clone());
+            }
+        }
+        let record = self
+            .promises
+            .get(&r.awaited)
+            .map(|p| Self::to_promise_record(now, &r.awaited, p))
+            .unwrap();
+        ResponseEnvelope::success(
+            req.kind.clone(),
+            req.head.corr_id.clone(),
+            &PromiseResponseData { promise: record },
+        )
+    }
+
+    fn op_promise_search(&self, req: &RequestEnvelope) -> ResponseEnvelope {
+        let r: PromiseSearchData = match serde_json::from_value(req.data.clone()) {
+            Ok(r) => r,
+            Err(e) => {
+                return ResponseEnvelope::error(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    400,
+                    &format!("Invalid request: {}", e),
+                )
+            }
+        };
+        if let Err(e) = r.validate() {
+            return ResponseEnvelope::error(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                400,
+                &format_validation_errors(&e),
+            );
+        }
+        let limit = match r.limit {
+            Some(n) if n > 1000 => {
+                return ResponseEnvelope::error(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    400,
+                    "Invalid 'limit' — must be between 1 and 1000",
+                )
+            }
+            Some(n) => n as usize,
+            None => 100,
+        };
+        let mut promises: Vec<PromiseRecord> = self
+            .promises
+            .iter()
+            .filter(|(_, p)| {
+                r.state.map(|s| p.state == s).unwrap_or(true)
+                    && r.tags
+                        .as_ref()
+                        .map(|ft| {
+                            ft.iter()
+                                .all(|(k, v)| p.tags.get(k).map(|pv| pv == v).unwrap_or(false))
+                        })
+                        .unwrap_or(true)
+            })
+            .map(|(id, p)| Self::to_promise_record(0, id, p))
+            .collect();
+        promises.sort_by(|a, b| a.id.cmp(&b.id));
+        let start = r
+            .cursor
+            .as_deref()
+            .and_then(|c| promises.iter().position(|p| p.id.as_str() > c))
+            .unwrap_or(0);
+        let page: Vec<_> = promises.into_iter().skip(start).take(limit + 1).collect();
+        let has_more = page.len() > limit;
+        let result: Vec<_> = page.into_iter().take(limit).collect();
+        let cursor = if has_more {
+            result.last().map(|p| p.id.clone())
+        } else {
+            None
+        };
+        ResponseEnvelope::success(
+            req.kind.clone(),
+            req.head.corr_id.clone(),
+            &PromiseSearchResponseData {
+                promises: result,
+                cursor,
+            },
+        )
+    }
+
+    // ─── Task operations ───────────────────────────────────────────────────────
+
+    fn op_task_get(&mut self, req: &RequestEnvelope, now: i64) -> ResponseEnvelope {
+        let r: TaskGetData = match self.parse(req) {
+            Ok(r) => r,
+            Err(e) => return e,
+        };
+        self.try_timeout(std::slice::from_ref(&r.id), now);
+        let (state, version, resumes, ttl, pid) = match self.tasks.get(&r.id) {
+            None => {
+                return ResponseEnvelope::error(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    404,
+                    "Task not found",
+                )
+            }
+            Some(t) => {
+                let eff = self.effective_task_state(now, &r.id).unwrap_or(t.state);
+                (eff, t.version, t.resumes.len() as i64, t.ttl, t.pid.clone())
+            }
+        };
+        let task = TaskRecord {
+            id: r.id.clone(),
+            state,
+            version,
+            resumes,
+            ttl: if state == TaskState::Fulfilled {
+                None
+            } else {
+                ttl
+            },
+            pid: if state == TaskState::Fulfilled {
+                None
+            } else {
+                pid
+            },
+        };
+        ResponseEnvelope::success(
+            req.kind.clone(),
+            req.head.corr_id.clone(),
+            &TaskResponseData { task },
+        )
+    }
+
+    fn op_task_create(&mut self, req: &RequestEnvelope, now: i64) -> ResponseEnvelope {
+        let r: TaskCreateData = match self.parse(req) {
+            Ok(r) => r,
+            Err(e) => return e,
+        };
+        let action = &r.action.data;
+        if let Some(addr) = action.tags.get("resonate:target") {
+            if !resonate_core::is_valid_address(addr) {
+                return ResponseEnvelope::error(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    400,
+                    "Invalid resonate:target address",
+                );
+            }
+        }
+        let promise_id = action.id.clone();
+        self.try_timeout(std::slice::from_ref(&promise_id), now);
+
+        // Task already exists
+        if let Some(t) = self.tasks.get(&promise_id) {
+            let eff = self
+                .effective_task_state(now, &promise_id)
+                .unwrap_or(t.state);
+            match eff {
+                TaskState::Pending => {
+                    let new_version = t.version + 1;
+                    if let Some(t) = self.tasks.get_mut(&promise_id) {
+                        t.state = TaskState::Acquired;
+                        t.version = new_version;
+                        t.pid = Some(r.pid.clone());
+                        t.ttl = Some(r.ttl);
+                        t.resumes = BTreeSet::new();
+                    }
+                    self.del_t_timeout(&promise_id);
+                    self.set_t_timeout(&promise_id, TTimeoutKind::Lease, now + r.ttl);
+                    let task =
+                        Self::to_task_record(&promise_id, self.tasks.get(&promise_id).unwrap());
+                    let promise = Self::to_promise_record(
+                        now,
+                        &promise_id,
+                        self.promises.get(&promise_id).unwrap(),
+                    );
+                    let preload = self.preload(&promise_id);
+                    return ResponseEnvelope::success(
+                        req.kind.clone(),
+                        req.head.corr_id.clone(),
+                        &TaskCreateResponseData {
+                            task,
+                            promise,
+                            preload,
+                        },
+                    );
+                }
+                TaskState::Fulfilled => {
+                    let task =
+                        Self::to_task_record(&promise_id, self.tasks.get(&promise_id).unwrap());
+                    let promise = Self::to_promise_record(
+                        now,
+                        &promise_id,
+                        self.promises.get(&promise_id).unwrap(),
+                    );
+                    let preload = self.preload(&promise_id);
+                    return ResponseEnvelope::success(
+                        req.kind.clone(),
+                        req.head.corr_id.clone(),
+                        &TaskCreateResponseData {
+                            task,
+                            promise,
+                            preload,
+                        },
+                    );
+                }
+                _ => {
+                    return ResponseEnvelope::error(
+                        req.kind.clone(),
+                        req.head.corr_id.clone(),
+                        409,
+                        "Already exists",
+                    )
+                }
+            }
+        }
+
+        // Promise exists without a task
+        if self.promises.contains_key(&promise_id) {
+            return ResponseEnvelope::error(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                422,
+                "The promise does not have a resonate:target tag",
+            );
+        }
+
+        // Create new promise + task
+        let _addr = action.tags.get("resonate:target").cloned();
+        let already_timedout = now >= action.timeout_at;
+        let (p_state, created_at, settled_at) = if already_timedout {
+            (
+                Self::timeout_state(&action.tags),
+                action.timeout_at,
+                Some(action.timeout_at),
+            )
+        } else {
+            (PromiseState::Pending, now, None)
+        };
+        let promise = Promise {
+            state: p_state,
+            param: action.param.clone(),
+            value: PromiseValue::default(),
+            tags: action.tags.clone(),
+            timeout_at: action.timeout_at,
+            created_at,
+            settled_at,
+            callbacks: BTreeSet::new(),
+            listeners: BTreeSet::new(),
+        };
+        let promise_record = Self::to_promise_record(now, &promise_id, &promise);
+        self.promises.insert(promise_id.clone(), promise);
+
+        let (task_state, task_version, task_ttl, task_pid) = if already_timedout {
+            (TaskState::Fulfilled, 0i64, None, None)
+        } else {
+            (TaskState::Acquired, 1i64, Some(r.ttl), Some(r.pid.clone()))
+        };
+        self.tasks.insert(
+            promise_id.clone(),
+            Task {
+                state: task_state,
+                version: task_version,
+                pid: task_pid,
+                ttl: task_ttl,
+                resumes: BTreeSet::new(),
+            },
+        );
+        if !already_timedout {
+            self.set_p_timeout(&promise_id, action.timeout_at);
+            self.set_t_timeout(&promise_id, TTimeoutKind::Lease, now + r.ttl);
+            // task.create returns an already-acquired task to the caller (who IS the
+            // worker), so no execute notification is needed. SQLite likewise does not
+            // insert into outgoing_execute for this path.
+        }
+        let task = Self::to_task_record(&promise_id, self.tasks.get(&promise_id).unwrap());
+        let preload = self.preload(&promise_id);
+        ResponseEnvelope::success(
+            req.kind.clone(),
+            req.head.corr_id.clone(),
+            &TaskCreateResponseData {
+                task,
+                promise: promise_record,
+                preload,
+            },
+        )
+    }
+
+    fn op_task_acquire(&mut self, req: &RequestEnvelope, now: i64) -> ResponseEnvelope {
+        let r: TaskAcquireData = match self.parse(req) {
+            Ok(r) => r,
+            Err(e) => return e,
+        };
+        self.try_timeout(std::slice::from_ref(&r.id), now);
+        let (task_state, task_version) = match self.tasks.get(&r.id) {
+            None => {
+                return ResponseEnvelope::error(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    404,
+                    "Task not found",
+                )
+            }
+            Some(t) => (t.state, t.version),
+        };
+        if task_state != TaskState::Pending {
+            return ResponseEnvelope::error(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                409,
+                "Task is not pending",
+            );
+        }
+        if task_version != r.version {
+            return ResponseEnvelope::error(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                409,
+                "Version mismatch",
+            );
+        }
+        let promise = match self.promises.get(&r.id) {
+            None => {
+                return ResponseEnvelope::error(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    404,
+                    "Task not found",
+                )
+            }
+            Some(p) => Self::to_promise_record(now, &r.id, p),
+        };
+        let new_version = r.version + 1;
+        if let Some(t) = self.tasks.get_mut(&r.id) {
+            t.state = TaskState::Acquired;
+            t.version = new_version;
+            t.pid = Some(r.pid.clone());
+            t.ttl = Some(r.ttl);
+            t.resumes = BTreeSet::new();
+        }
+        self.del_t_timeout(&r.id);
+        self.set_t_timeout(&r.id, TTimeoutKind::Lease, now + r.ttl);
+        let task = TaskRecord {
+            id: r.id.clone(),
+            state: TaskState::Acquired,
+            version: new_version,
+            resumes: 0,
+            ttl: Some(r.ttl),
+            pid: Some(r.pid.clone()),
+        };
+        let preload = self.preload(&r.id);
+        ResponseEnvelope::success(
+            req.kind.clone(),
+            req.head.corr_id.clone(),
+            &TaskAcquireResponseData {
+                task,
+                promise,
+                preload,
+            },
+        )
+    }
+
+    fn op_task_release(&mut self, req: &RequestEnvelope, now: i64) -> ResponseEnvelope {
+        let r: TaskReleaseData = match self.parse(req) {
+            Ok(r) => r,
+            Err(e) => return e,
+        };
+        self.try_timeout(std::slice::from_ref(&r.id), now);
+        let (task_state, task_version) = match self.tasks.get(&r.id) {
+            None => {
+                return ResponseEnvelope::error(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    404,
+                    "Task not found",
+                )
+            }
+            Some(t) => (t.state, t.version),
+        };
+        if task_state != TaskState::Acquired || task_version != r.version {
+            return ResponseEnvelope::error(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                409,
+                "Task version mismatch or invalid state",
+            );
+        }
+        let addr = self
+            .promises
+            .get(&r.id)
+            .and_then(|p| p.tags.get("resonate:target").cloned());
+        let version = self.tasks.get(&r.id).map(|t| t.version).unwrap_or(0);
+        if let Some(t) = self.tasks.get_mut(&r.id) {
+            t.state = TaskState::Pending;
+            t.pid = None;
+            t.ttl = None;
+        }
+        self.del_t_timeout(&r.id);
+        self.set_t_timeout(&r.id, TTimeoutKind::Retry, now + PENDING_RETRY_TTL);
+        if let Some(addr) = addr {
+            self.send_execute(&addr, &r.id, version);
+        }
+        ResponseEnvelope::new(req.kind.clone(), req.head.corr_id.clone(), 200, json!({}))
+    }
+
+    fn op_task_fulfill(&mut self, req: &RequestEnvelope, now: i64) -> ResponseEnvelope {
+        let r: TaskFulfillData = match self.parse(req) {
+            Ok(r) => r,
+            Err(e) => return e,
+        };
+        let action = &r.action.data;
+        self.try_timeout(std::slice::from_ref(&action.id), now);
+        let (task_state, task_version) = match self.tasks.get(&r.id) {
+            None => {
+                return ResponseEnvelope::error(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    404,
+                    "Task not found",
+                )
+            }
+            Some(t) => (t.state, t.version),
+        };
+        if task_state != TaskState::Acquired || task_version != r.version {
+            return ResponseEnvelope::error(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                409,
+                "Task version mismatch or invalid state",
+            );
+        }
+        let promise_is_pending = match self.promises.get(&action.id) {
+            None => {
+                return ResponseEnvelope::error(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    404,
+                    "Promise not found",
+                )
+            }
+            Some(p) => p.state == PromiseState::Pending,
+        };
+        if !promise_is_pending {
+            let record = self
+                .promises
+                .get(&action.id)
+                .map(|p| Self::to_promise_record(now, &action.id, p))
+                .unwrap();
+            self.trigger_fulfilled(&r.id);
+            return ResponseEnvelope::success(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                &TaskFulfillResponseData { promise: record },
+            );
+        }
+        let settle_state = Self::settle_to_promise_state(action.state);
+        let value = action.value.clone();
+        if let Some(p) = self.promises.get_mut(&action.id) {
+            p.state = settle_state;
+            p.value = value;
+            p.settled_at = Some(now);
+        }
+        let record = self
+            .promises
+            .get(&action.id)
+            .map(|p| Self::to_promise_record(now, &action.id, p))
+            .unwrap();
+        self.del_p_timeout(&action.id);
+        self.trigger_settlement(&action.id, now);
+        ResponseEnvelope::success(
+            req.kind.clone(),
+            req.head.corr_id.clone(),
+            &TaskFulfillResponseData { promise: record },
+        )
+    }
+
+    fn op_task_suspend(&mut self, req: &RequestEnvelope, now: i64) -> ResponseEnvelope {
+        let r: TaskSuspendData = match self.parse(req) {
+            Ok(r) => r,
+            Err(e) => return e,
+        };
+        let mut timeout_ids: Vec<String> = vec![r.id.clone()];
+        for action in &r.actions {
+            timeout_ids.push(action.data.awaited.clone());
+        }
+        self.try_timeout(&timeout_ids, now);
+        let (task_state, task_version) = match self.tasks.get(&r.id) {
+            None => {
+                return ResponseEnvelope::error(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    404,
+                    "Task not found",
+                )
+            }
+            Some(t) => (t.state, t.version),
+        };
+        if task_state != TaskState::Acquired {
+            return ResponseEnvelope::error(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                409,
+                "Task is not acquired or version mismatch",
+            );
+        }
+        if task_version != r.version {
+            return ResponseEnvelope::error(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                409,
+                "Task is not acquired or version mismatch",
+            );
+        }
+        for action in &r.actions {
+            if !self.promises.contains_key(&action.data.awaited) {
+                return ResponseEnvelope::error(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    422,
+                    "Awaited promise not found",
+                );
+            }
+        }
+        for action in &r.actions {
+            let awaitable = self
+                .promises
+                .get(&action.data.awaited)
+                .is_some_and(|p| resonate_core::types::is_external(&p.tags));
+            if !awaitable {
+                return ResponseEnvelope::error(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    422,
+                    "Awaited promise is not awaitable",
+                );
+            }
+        }
+        // Duplicates are refused by validation, so the list is already unique.
+        let awaited: Vec<String> = r.actions.iter().map(|a| a.data.awaited.clone()).collect();
+        let has_settled = awaited.iter().any(|id| {
+            self.promises
+                .get(id)
+                .map(|p| p.state != PromiseState::Pending)
+                .unwrap_or(false)
+        });
+        if has_settled {
+            if let Some(t) = self.tasks.get_mut(&r.id) {
+                t.resumes = BTreeSet::new();
+            }
+            let preload = self.preload(&r.id);
+            return ResponseEnvelope::new(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                300,
+                serde_json::to_value(&TaskSuspendPreloadData { preload }).unwrap(),
+            );
+        }
+        for awaited_id in &awaited {
+            if let Some(p) = self.promises.get_mut(awaited_id) {
+                p.callbacks.insert(r.id.clone());
+            }
+        }
+        if let Some(t) = self.tasks.get_mut(&r.id) {
+            t.state = TaskState::Suspended;
+            t.pid = None;
+            t.ttl = None;
+            t.resumes = BTreeSet::new();
+        }
+        self.del_t_timeout(&r.id);
+        ResponseEnvelope::new(req.kind.clone(), req.head.corr_id.clone(), 200, json!({}))
+    }
+
+    fn op_task_fence(&mut self, req: &RequestEnvelope, now: i64) -> ResponseEnvelope {
+        let r: TaskFenceData = match self.parse(req) {
+            Ok(r) => r,
+            Err(e) => return e,
+        };
+        let action_id = r
+            .action
+            .data
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        self.try_timeout(&[r.id.clone(), action_id.clone()], now);
+        let (task_state, task_version) = match self.tasks.get(&r.id) {
+            None => {
+                return ResponseEnvelope::error(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    404,
+                    "Task not found",
+                )
+            }
+            Some(t) => (t.state, t.version),
+        };
+        if task_state != TaskState::Acquired {
+            return ResponseEnvelope::error(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                409,
+                "Version mismatch",
+            );
+        }
+        if task_version != r.version {
+            return ResponseEnvelope::error(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                409,
+                "Version mismatch",
+            );
+        }
+        match r.action.kind.as_str() {
+            "promise.create" => {
+                let create_data: PromiseCreateData =
+                    match serde_json::from_value(r.action.data.clone()) {
+                        Ok(d) => d,
+                        Err(e) => {
+                            return ResponseEnvelope::error(
+                                req.kind.clone(),
+                                req.head.corr_id.clone(),
+                                400,
+                                &format!("Invalid action data: {}", e),
+                            )
+                        }
+                    };
+                if let Err(e) = create_data.validate() {
+                    return ResponseEnvelope::error(
+                        req.kind.clone(),
+                        req.head.corr_id.clone(),
+                        400,
+                        &format_validation_errors(&e),
+                    );
+                }
+                if let Some(addr) = create_data.tags.get("resonate:target") {
+                    if !resonate_core::is_valid_address(addr) {
+                        return ResponseEnvelope::error(
+                            req.kind.clone(),
+                            req.head.corr_id.clone(),
+                            400,
+                            "Invalid resonate:target address",
+                        );
+                    }
+                }
+                self.try_timeout(std::slice::from_ref(&create_data.id), now);
+                let inner_record = if let Some(p) = self.promises.get(&create_data.id) {
+                    Some(Self::to_promise_record(now, &create_data.id, p))
+                } else {
+                    let addr = create_data.tags.get("resonate:target").cloned();
+                    let already_timedout = now >= create_data.timeout_at;
+                    let (state, created_at, settled_at) = if already_timedout {
+                        (
+                            Self::timeout_state(&create_data.tags),
+                            create_data.timeout_at,
+                            Some(create_data.timeout_at),
+                        )
+                    } else {
+                        (PromiseState::Pending, now, None)
+                    };
+                    let promise = Promise {
+                        state,
+                        param: create_data.param.clone(),
+                        value: PromiseValue::default(),
+                        tags: create_data.tags.clone(),
+                        timeout_at: create_data.timeout_at,
+                        created_at,
+                        settled_at,
+                        callbacks: BTreeSet::new(),
+                        listeners: BTreeSet::new(),
+                    };
+                    let record = Self::to_promise_record(now, &create_data.id, &promise);
+                    self.promises.insert(create_data.id.clone(), promise);
+                    if already_timedout {
+                        if addr.is_some() {
+                            self.tasks.insert(
+                                create_data.id.clone(),
+                                Task {
+                                    state: TaskState::Fulfilled,
+                                    version: 0,
+                                    pid: None,
+                                    ttl: None,
+                                    resumes: BTreeSet::new(),
+                                },
+                            );
+                        }
+                    } else {
+                        if addr.is_some() {
+                            self.set_p_timeout(&create_data.id, create_data.timeout_at);
+                        }
+                        if let Some(ref a) = addr {
+                            self.tasks.insert(
+                                create_data.id.clone(),
+                                Task {
+                                    state: TaskState::Pending,
+                                    version: 0,
+                                    pid: None,
+                                    ttl: None,
+                                    resumes: BTreeSet::new(),
+                                },
+                            );
+                            let delay_at = create_data
+                                .tags
+                                .get("resonate:delay")
+                                .and_then(|v| v.parse::<i64>().ok());
+                            if let Some(delay_at) = delay_at {
+                                if now < delay_at {
+                                    self.set_t_timeout(
+                                        &create_data.id,
+                                        TTimeoutKind::Retry,
+                                        delay_at,
+                                    );
+                                } else {
+                                    self.set_t_timeout(
+                                        &create_data.id,
+                                        TTimeoutKind::Retry,
+                                        created_at + PENDING_RETRY_TTL,
+                                    );
+                                    self.send_execute(a, &create_data.id, 0);
+                                }
+                            } else {
+                                self.set_t_timeout(
+                                    &create_data.id,
+                                    TTimeoutKind::Retry,
+                                    created_at + PENDING_RETRY_TTL,
+                                );
+                                self.send_execute(a, &create_data.id, 0);
+                            }
+                        }
+                    }
+                    Some(record)
+                };
+                let (inner_status, inner_data) = match inner_record {
+                    Some(ref p) => (200i32, json!({ "promise": p })),
+                    None => (404, json!("Promise not found")),
+                };
+                let inner_envelope = json!({
+                    "kind": r.action.kind,
+                    "head": { "corrId": req.head.corr_id, "status": inner_status, "version": PROTOCOL_VERSION },
+                    "data": inner_data,
+                });
+                let preload = self.preload(&r.id);
+                ResponseEnvelope::success(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    &TaskFenceResponseData {
+                        action: inner_envelope,
+                        preload,
+                    },
+                )
+            }
+            "promise.settle" => {
+                let settle_data: PromiseSettleData =
+                    match serde_json::from_value(r.action.data.clone()) {
+                        Ok(d) => d,
+                        Err(e) => {
+                            return ResponseEnvelope::error(
+                                req.kind.clone(),
+                                req.head.corr_id.clone(),
+                                400,
+                                &format!("Invalid action data: {}", e),
+                            )
+                        }
+                    };
+                if let Err(e) = settle_data.validate() {
+                    return ResponseEnvelope::error(
+                        req.kind.clone(),
+                        req.head.corr_id.clone(),
+                        400,
+                        &format_validation_errors(&e),
+                    );
+                }
+                let is_pending = match self.promises.get(&settle_data.id) {
+                    None => false,
+                    Some(p) => p.state == PromiseState::Pending,
+                };
+                if is_pending {
+                    let settle_state = Self::settle_to_promise_state(settle_data.state);
+                    let value = settle_data.value.clone();
+                    if let Some(p) = self.promises.get_mut(&settle_data.id) {
+                        p.state = settle_state;
+                        p.value = value;
+                        p.settled_at = Some(now);
+                    }
+                    self.del_p_timeout(&settle_data.id);
+                    self.trigger_settlement(&settle_data.id, now);
+                }
+                let inner_record = self
+                    .promises
+                    .get(&settle_data.id)
+                    .map(|p| Self::to_promise_record(now, &settle_data.id, p));
+                let (inner_status, inner_data) = match inner_record {
+                    Some(ref p) => (200i32, json!({ "promise": p })),
+                    None => (404, json!("Promise not found")),
+                };
+                let inner_envelope = json!({
+                    "kind": r.action.kind,
+                    "head": { "corrId": req.head.corr_id, "status": inner_status, "version": PROTOCOL_VERSION },
+                    "data": inner_data,
+                });
+                let preload = self.preload(&r.id);
+                ResponseEnvelope::success(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    &TaskFenceResponseData {
+                        action: inner_envelope,
+                        preload,
+                    },
+                )
+            }
+            _ => ResponseEnvelope::error(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                400,
+                "Invalid fence action kind",
+            ),
+        }
+    }
+
+    fn op_task_heartbeat(&mut self, req: &RequestEnvelope, now: i64) -> ResponseEnvelope {
+        let r: TaskHeartbeatData = match self.parse(req) {
+            Ok(r) => r,
+            Err(e) => return e,
+        };
+        for task_ref in &r.tasks {
+            // A heartbeat on a task whose promise has already passed its
+            // deadline is a no-op. `task.heartbeat` is the one operation that
+            // does not sweep first, so without this the lease of a task whose
+            // promise is pending-but-expired would be extended in the window
+            // before the wheel reaches it.
+            let promise_live = self
+                .promises
+                .get(&task_ref.id)
+                .map(|p| p.state != PromiseState::Pending || p.timeout_at > now)
+                .unwrap_or(false);
+            let ttl = self
+                .tasks
+                .get(&task_ref.id)
+                .filter(|t| {
+                    promise_live
+                        && t.state == TaskState::Acquired
+                        && t.version == task_ref.version
+                        && t.pid.as_deref() == Some(&r.pid)
+                })
+                .and_then(|t| t.ttl);
+            if let Some(ttl) = ttl {
+                self.set_t_timeout(&task_ref.id, TTimeoutKind::Lease, now + ttl);
+            }
+        }
+        ResponseEnvelope::new(req.kind.clone(), req.head.corr_id.clone(), 200, json!({}))
+    }
+
+    fn op_task_halt(&mut self, req: &RequestEnvelope, now: i64) -> ResponseEnvelope {
+        let r: TaskHaltData = match self.parse(req) {
+            Ok(r) => r,
+            Err(e) => return e,
+        };
+        self.try_timeout(std::slice::from_ref(&r.id), now);
+        let task_state = match self.tasks.get(&r.id) {
+            None => {
+                return ResponseEnvelope::error(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    404,
+                    "Task not found",
+                )
+            }
+            Some(t) => t.state,
+        };
+        if task_state == TaskState::Fulfilled {
+            return ResponseEnvelope::error(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                409,
+                "Task is fulfilled",
+            );
+        }
+        if task_state == TaskState::Halted {
+            return ResponseEnvelope::new(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                200,
+                json!({}),
+            );
+        }
+        if let Some(t) = self.tasks.get_mut(&r.id) {
+            t.state = TaskState::Halted;
+            t.pid = None;
+            t.ttl = None;
+        }
+        self.del_t_timeout(&r.id);
+        ResponseEnvelope::new(req.kind.clone(), req.head.corr_id.clone(), 200, json!({}))
+    }
+
+    fn op_task_continue(&mut self, req: &RequestEnvelope, now: i64) -> ResponseEnvelope {
+        let r: TaskContinueData = match self.parse(req) {
+            Ok(r) => r,
+            Err(e) => return e,
+        };
+        self.try_timeout(std::slice::from_ref(&r.id), now);
+        let task_state = match self.tasks.get(&r.id) {
+            None => {
+                return ResponseEnvelope::error(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    404,
+                    "Task not found",
+                )
+            }
+            Some(t) => t.state,
+        };
+        if task_state != TaskState::Halted {
+            return ResponseEnvelope::error(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                409,
+                "Task is not halted",
+            );
+        }
+        let version = self.tasks.get(&r.id).map(|t| t.version).unwrap_or(0);
+        let addr = self
+            .promises
+            .get(&r.id)
+            .and_then(|p| p.tags.get("resonate:target").cloned());
+        if let Some(t) = self.tasks.get_mut(&r.id) {
+            t.state = TaskState::Pending;
+        }
+        self.set_t_timeout(&r.id, TTimeoutKind::Retry, now + PENDING_RETRY_TTL);
+        if let Some(addr) = addr {
+            self.send_execute(&addr, &r.id, version);
+        }
+        ResponseEnvelope::new(req.kind.clone(), req.head.corr_id.clone(), 200, json!({}))
+    }
+
+    fn op_task_search(&self, req: &RequestEnvelope) -> ResponseEnvelope {
+        let r: TaskSearchData = match serde_json::from_value(req.data.clone()) {
+            Ok(r) => r,
+            Err(e) => {
+                return ResponseEnvelope::error(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    400,
+                    &format!("Invalid request: {}", e),
+                )
+            }
+        };
+        if let Err(e) = r.validate() {
+            return ResponseEnvelope::error(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                400,
+                &format_validation_errors(&e),
+            );
+        }
+        let limit = match r.limit {
+            Some(n) if n > 1000 => {
+                return ResponseEnvelope::error(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    400,
+                    "Invalid 'limit' — must be between 1 and 1000",
+                )
+            }
+            Some(n) => n as usize,
+            None => 100,
+        };
+        let mut tasks: Vec<TaskRecord> = self
+            .tasks
+            .iter()
+            .filter(|(_, t)| r.state.map(|s| t.state == s).unwrap_or(true))
+            .map(|(id, t)| Self::to_task_record(id, t))
+            .collect();
+        tasks.sort_by(|a, b| a.id.cmp(&b.id));
+        let start = r
+            .cursor
+            .as_deref()
+            .and_then(|c| tasks.iter().position(|t| t.id.as_str() > c))
+            .unwrap_or(0);
+        let page: Vec<_> = tasks.into_iter().skip(start).take(limit + 1).collect();
+        let has_more = page.len() > limit;
+        let result: Vec<_> = page.into_iter().take(limit).collect();
+        let cursor = if has_more {
+            result.last().map(|t| t.id.clone())
+        } else {
+            None
+        };
+        ResponseEnvelope::success(
+            req.kind.clone(),
+            req.head.corr_id.clone(),
+            &TaskSearchResponseData {
+                tasks: result,
+                cursor,
+            },
+        )
+    }
+
+    // ─── Schedule operations ───────────────────────────────────────────────────
+
+    fn op_schedule_get(&self, req: &RequestEnvelope) -> ResponseEnvelope {
+        let r: ScheduleGetData = match serde_json::from_value(req.data.clone()) {
+            Ok(r) => r,
+            Err(e) => {
+                return ResponseEnvelope::error(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    400,
+                    &format!("Invalid request: {}", e),
+                )
+            }
+        };
+        if let Err(e) = r.validate() {
+            return ResponseEnvelope::error(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                400,
+                &format_validation_errors(&e),
+            );
+        }
+        match self.schedules.get(&r.id) {
+            None => ResponseEnvelope::error(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                404,
+                "Schedule not found",
+            ),
+            Some(s) => {
+                let record = self.to_schedule_record(&r.id, s);
+                ResponseEnvelope::success(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    &ScheduleResponseData { schedule: record },
+                )
+            }
+        }
+    }
+
+    fn op_schedule_create(&mut self, req: &RequestEnvelope, now: i64) -> ResponseEnvelope {
+        let r: ScheduleCreateData = match self.parse(req) {
+            Ok(r) => r,
+            Err(e) => return e,
+        };
+        if !util::is_valid_cron(&r.cron) {
+            return ResponseEnvelope::error(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                400,
+                "Invalid cron expression",
+            );
+        }
+        if let Some(s) = self.schedules.get(&r.id) {
+            let record = self.to_schedule_record(&r.id, s);
+            return ResponseEnvelope::success(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                &ScheduleResponseData { schedule: record },
+            );
+        }
+        let next_run_at = util::compute_next_cron(&r.cron, now);
+        let schedule = Schedule {
+            cron: r.cron.clone(),
+            promise_id: r.promise_id.clone(),
+            promise_timeout: r.promise_timeout,
+            promise_param: r.promise_param.clone(),
+            promise_tags: r.promise_tags.clone(),
+            created_at: now,
+            last_run_at: None,
+        };
+        self.schedules.insert(r.id.clone(), schedule);
+        self.set_s_timeout(&r.id, next_run_at);
+        let record = self.to_schedule_record(&r.id, self.schedules.get(&r.id).unwrap());
+        ResponseEnvelope::success(
+            req.kind.clone(),
+            req.head.corr_id.clone(),
+            &ScheduleResponseData { schedule: record },
+        )
+    }
+
+    fn op_schedule_delete(&mut self, req: &RequestEnvelope) -> ResponseEnvelope {
+        let r: ScheduleDeleteData = match self.parse(req) {
+            Ok(r) => r,
+            Err(e) => return e,
+        };
+        if self.schedules.remove(&r.id).is_none() {
+            return ResponseEnvelope::error(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                404,
+                "Schedule not found",
+            );
+        }
+        self.del_s_timeout(&r.id);
+        ResponseEnvelope::new(req.kind.clone(), req.head.corr_id.clone(), 200, json!({}))
+    }
+
+    fn op_schedule_search(&self, req: &RequestEnvelope) -> ResponseEnvelope {
+        let r: ScheduleSearchData = match serde_json::from_value(req.data.clone()) {
+            Ok(r) => r,
+            Err(e) => {
+                return ResponseEnvelope::error(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    400,
+                    &format!("Invalid request: {}", e),
+                )
+            }
+        };
+        if let Err(e) = r.validate() {
+            return ResponseEnvelope::error(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                400,
+                &format_validation_errors(&e),
+            );
+        }
+        let limit = match r.limit {
+            Some(n) if n > 1000 => {
+                return ResponseEnvelope::error(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    400,
+                    "Invalid 'limit' — must be between 1 and 1000",
+                )
+            }
+            Some(n) => n as usize,
+            None => 10,
+        };
+        let mut schedules: Vec<ScheduleRecord> = self
+            .schedules
+            .iter()
+            .filter(|(_, s)| {
+                r.tags
+                    .as_ref()
+                    .map(|ft| {
+                        ft.iter()
+                            .all(|(k, v)| s.promise_tags.get(k).map(|sv| sv == v).unwrap_or(false))
+                    })
+                    .unwrap_or(true)
+            })
+            .map(|(id, s)| self.to_schedule_record(id, s))
+            .collect();
+        schedules.sort_by(|a, b| a.id.cmp(&b.id));
+        let start = r
+            .cursor
+            .as_deref()
+            .and_then(|c| schedules.iter().position(|s| s.id.as_str() > c))
+            .unwrap_or(0);
+        let page: Vec<_> = schedules.into_iter().skip(start).take(limit + 1).collect();
+        let has_more = page.len() > limit;
+        let result: Vec<_> = page.into_iter().take(limit).collect();
+        let cursor = if has_more {
+            result.last().map(|s| s.id.clone())
+        } else {
+            None
+        };
+        ResponseEnvelope::success(
+            req.kind.clone(),
+            req.head.corr_id.clone(),
+            &ScheduleSearchResponseData {
+                schedules: result,
+                cursor,
+            },
+        )
+    }
+
+    // ─── Debug operations ──────────────────────────────────────────────────────
+
+    fn op_debug_reset(&mut self, req: &RequestEnvelope) -> ResponseEnvelope {
+        self.promises.clear();
+        self.tasks.clear();
+        self.schedules.clear();
+        self.p_timeouts.clear();
+        self.t_timeouts.clear();
+        self.s_timeouts.clear();
+        self.outgoing.clear();
+        ResponseEnvelope::new(
+            req.kind.clone(),
+            req.head.corr_id.clone(),
+            200,
+            Value::Object(serde_json::Map::new()),
+        )
+    }
+
+    fn op_debug_snap(&self, req: &RequestEnvelope) -> ResponseEnvelope {
+        let mut promises: Vec<PromiseRecord> = self
+            .promises
+            .iter()
+            .map(|(id, p)| Self::to_promise_record(0, id, p))
+            .collect();
+        promises.sort_by(|a, b| a.id.cmp(&b.id));
+
+        let mut callbacks: Vec<SnapshotCallback> = self
+            .promises
+            .iter()
+            .flat_map(|(id, p)| {
+                p.callbacks.iter().map(move |awaiter| SnapshotCallback {
+                    awaiter: awaiter.clone(),
+                    awaited: id.clone(),
+                })
+            })
+            .collect();
+        callbacks.sort_by(|a, b| a.awaited.cmp(&b.awaited).then(a.awaiter.cmp(&b.awaiter)));
+
+        let mut listeners: Vec<SnapshotListener> = self
+            .promises
+            .iter()
+            .flat_map(|(id, p)| {
+                p.listeners.iter().map(move |addr| SnapshotListener {
+                    promise_id: id.clone(),
+                    address: addr.clone(),
+                })
+            })
+            .collect();
+        listeners.sort_by(|a, b| {
+            a.promise_id
+                .cmp(&b.promise_id)
+                .then(a.address.cmp(&b.address))
+        });
+
+        let mut tasks: Vec<TaskRecord> = self
+            .tasks
+            .iter()
+            .map(|(id, t)| Self::to_task_record(id, t))
+            .collect();
+        tasks.sort_by(|a, b| a.id.cmp(&b.id));
+
+        let mut promise_timeouts: Vec<SnapshotPromiseTimeout> = self
+            .p_timeouts
+            .iter()
+            .map(|pt| SnapshotPromiseTimeout {
+                id: pt.id.clone(),
+                timeout: pt.timeout,
+            })
+            .collect();
+        promise_timeouts.sort_by(|a, b| a.id.cmp(&b.id));
+
+        let mut task_timeouts: Vec<SnapshotTaskTimeout> = self
+            .t_timeouts
+            .iter()
+            .map(|tt| SnapshotTaskTimeout {
+                id: tt.id.clone(),
+                timeout_type: tt.kind as i32,
+                timeout: tt.timeout,
+            })
+            .collect();
+        task_timeouts.sort_by(|a, b| a.id.cmp(&b.id));
+
+        let messages: Vec<SnapshotMessage> = self
+            .outgoing
+            .iter()
+            .map(|(addr, msg)| SnapshotMessage {
+                address: addr.clone(),
+                message: msg.clone(),
+            })
+            .collect();
+
+        let snapshot = Snapshot {
+            promises,
+            promise_timeouts,
+            callbacks,
+            listeners,
+            tasks,
+            task_timeouts,
+            messages,
+        };
+        ResponseEnvelope::new(
+            req.kind.clone(),
+            req.head.corr_id.clone(),
+            200,
+            serde_json::to_value(snapshot).unwrap(),
+        )
+    }
+
+    fn op_debug_tick(&mut self, req: &RequestEnvelope) -> ResponseEnvelope {
+        let time = match req.data.get("time").and_then(|v| v.as_i64()) {
+            Some(t) => t,
+            None => {
+                return ResponseEnvelope::error(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    400,
+                    "Missing or invalid 'time' field",
+                )
+            }
+        };
+        if let Some(debug_time) = req.head.debug_time {
+            if debug_time != time {
+                return ResponseEnvelope::error(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    400,
+                    "resonate:debug_time must equal data.time",
+                );
+            }
+        }
+
+        // Collect expired promise timeouts — after fix 1, p_timeouts only contains
+        // promises with resonate:target, and del_p_timeout is always called on settlement
+        // so all entries here are guaranteed to be Pending with a target.
+        let expired_promise_ids: Vec<String> = self
+            .p_timeouts
+            .iter()
+            .filter(|pt| time >= pt.timeout && self.tick_selects("promise", &pt.id))
+            .map(|pt| pt.id.clone())
+            .collect();
+
+        // Collect expired task lease timeouts
+        let expired_leases: Vec<(String, i64)> = self
+            .t_timeouts
+            .iter()
+            .filter(|tt| {
+                time >= tt.timeout
+                    && matches!(tt.kind, TTimeoutKind::Lease)
+                    && self.tick_selects("lease", &tt.id)
+            })
+            .filter_map(|tt| {
+                self.tasks
+                    .get(&tt.id)
+                    .filter(|t| t.state == TaskState::Acquired)
+                    .map(|t| (tt.id.clone(), t.version))
+            })
+            .collect();
+
+        // Collect expired task retry timeouts
+        let expired_retries: Vec<String> = self
+            .t_timeouts
+            .iter()
+            .filter(|tt| {
+                time >= tt.timeout
+                    && matches!(tt.kind, TTimeoutKind::Retry)
+                    && self.tick_selects("retry", &tt.id)
+            })
+            .filter_map(|tt| {
+                self.tasks
+                    .get(&tt.id)
+                    .filter(|t| t.state == TaskState::Pending)
+                    .map(|_t| tt.id.clone())
+            })
+            .collect();
+
+        // Phase 1: settle expired promises
+        for id in &expired_promise_ids {
+            let computed = self
+                .promises
+                .get(id)
+                .map(|p| (Self::timeout_state(&p.tags), p.timeout_at));
+            if let Some((state, timeout_at)) = computed {
+                if let Some(p) = self.promises.get_mut(id) {
+                    p.state = state;
+                    p.settled_at = Some(timeout_at);
+                }
+            }
+            self.del_p_timeout(id);
+        }
+
+        // Phase 2+3: fulfill tasks, fire callbacks and listeners
+        for id in &expired_promise_ids {
+            self.trigger_settlement(id, time);
+        }
+
+        // Task lease releases
+        for (id, version) in &expired_leases {
+            let still_valid = self
+                .tasks
+                .get(id)
+                .map(|t| t.state == TaskState::Acquired && t.version == *version)
+                .unwrap_or(false);
+            if still_valid {
+                let addr = self
+                    .promises
+                    .get(id)
+                    .and_then(|p| p.tags.get("resonate:target").cloned());
+                let curr_version = self.tasks.get(id).map(|t| t.version).unwrap_or(0);
+                if let Some(t) = self.tasks.get_mut(id) {
+                    t.state = TaskState::Pending;
+                    t.pid = None;
+                    t.ttl = None;
+                }
+                self.del_t_timeout(id);
+                self.set_t_timeout(id, TTimeoutKind::Retry, time + PENDING_RETRY_TTL);
+                if let Some(addr) = addr {
+                    self.send_execute(&addr, id, curr_version);
+                }
+            }
+        }
+
+        // Task retry re-sends
+        for id in &expired_retries {
+            let still_pending = self
+                .tasks
+                .get(id)
+                .map(|t| t.state == TaskState::Pending)
+                .unwrap_or(false);
+            if still_pending {
+                let addr = self
+                    .promises
+                    .get(id)
+                    .and_then(|p| p.tags.get("resonate:target").cloned());
+                let version = self.tasks.get(id).map(|t| t.version).unwrap_or(0);
+                self.set_t_timeout(id, TTimeoutKind::Retry, time + PENDING_RETRY_TTL);
+                if let Some(addr) = addr {
+                    self.send_execute(&addr, id, version);
+                }
+            }
+        }
+
+        // Schedule timeouts
+        let expired_schedules: Vec<(String, i64)> = self
+            .s_timeouts
+            .iter()
+            .filter(|st| time >= st.timeout && self.tick_selects("schedule", &st.id))
+            .map(|st| (st.id.clone(), st.timeout))
+            .collect();
+
+        for (schedule_id, fired_at) in expired_schedules {
+            let (cron, promise_id_template, promise_timeout, promise_param, promise_tags) = {
+                let s = match self.schedules.get(&schedule_id) {
+                    Some(s) => s,
+                    None => continue,
+                };
+                (
+                    s.cron.clone(),
+                    s.promise_id.clone(),
+                    s.promise_timeout,
+                    s.promise_param.clone(),
+                    s.promise_tags.clone(),
+                )
+            };
+            let mut current_timeout = fired_at;
+            while current_timeout <= time {
+                let mut tags = promise_tags.clone();
+                tags.insert("resonate:schedule".to_string(), schedule_id.clone());
+                let promise_id = promise_id_template
+                    .replace("{{.id}}", &schedule_id)
+                    .replace("{{.timestamp}}", &current_timeout.to_string());
+                tags.insert("resonate:origin".to_string(), promise_id.clone());
+                tags.insert("resonate:branch".to_string(), promise_id.clone());
+                tags.insert("resonate:parent".to_string(), promise_id.clone());
+                tags.insert("resonate:prefix".to_string(), promise_id.clone());
+                if !self.promises.contains_key(&promise_id) {
+                    let timeout_at = current_timeout + promise_timeout;
+                    let already_timedout = current_timeout >= timeout_at;
+                    let (state, created_at, settled_at) = if already_timedout {
+                        (
+                            Self::timeout_state(&tags),
+                            current_timeout,
+                            Some(timeout_at),
+                        )
+                    } else {
+                        (PromiseState::Pending, current_timeout, None)
+                    };
+                    let addr = tags.get("resonate:target").cloned();
+                    let promise = Promise {
+                        state,
+                        param: promise_param.clone(),
+                        value: PromiseValue::default(),
+                        tags: tags.clone(),
+                        timeout_at,
+                        created_at,
+                        settled_at,
+                        callbacks: BTreeSet::new(),
+                        listeners: BTreeSet::new(),
+                    };
+                    self.promises.insert(promise_id.clone(), promise);
+                    if already_timedout {
+                        if addr.is_some() {
+                            self.tasks.insert(
+                                promise_id.clone(),
+                                Task {
+                                    state: TaskState::Fulfilled,
+                                    version: 0,
+                                    pid: None,
+                                    ttl: None,
+                                    resumes: BTreeSet::new(),
+                                },
+                            );
+                        }
+                    } else {
+                        if addr.is_some() {
+                            self.set_p_timeout(&promise_id, timeout_at);
+                        }
+                        if let Some(ref a) = addr {
+                            self.tasks.insert(
+                                promise_id.clone(),
+                                Task {
+                                    state: TaskState::Pending,
+                                    version: 0,
+                                    pid: None,
+                                    ttl: None,
+                                    resumes: BTreeSet::new(),
+                                },
+                            );
+                            self.set_t_timeout(
+                                &promise_id,
+                                TTimeoutKind::Retry,
+                                time + PENDING_RETRY_TTL,
+                            );
+                            self.send_execute(a, &promise_id, 0);
+                        }
+                    }
+                }
+                if let Some(s) = self.schedules.get_mut(&schedule_id) {
+                    s.last_run_at = Some(current_timeout);
+                }
+                current_timeout = util::compute_next_cron(&cron, current_timeout);
+            }
+            self.set_s_timeout(&schedule_id, current_timeout);
+        }
+
+        ResponseEnvelope::new(
+            req.kind.clone(),
+            req.head.corr_id.clone(),
+            200,
+            Value::Array(vec![]),
+        )
+    }
+
+    // ─── Internal helpers ──────────────────────────────────────────────────────
+
+    fn try_timeout(&mut self, ids: &[String], now: i64) {
+        let to_settle: Vec<(String, PromiseState, i64)> = ids
+            .iter()
+            .filter_map(|id| {
+                self.promises
+                    .get(id)
+                    .filter(|p| p.state == PromiseState::Pending && now >= p.timeout_at)
+                    .map(|p| (id.clone(), Self::timeout_state(&p.tags), p.timeout_at))
+            })
+            .collect();
+        for (id, state, timeout_at) in to_settle {
+            if let Some(p) = self.promises.get_mut(&id) {
+                p.state = state;
+                p.settled_at = Some(timeout_at);
+            }
+            self.del_p_timeout(&id);
+            self.trigger_settlement(&id, now);
+        }
+    }
+
+    fn trigger_settlement(&mut self, promise_id: &str, now: i64) {
+        self.trigger_fulfilled(promise_id);
+        self.trigger_callbacks(promise_id, now);
+        self.trigger_listeners(promise_id, now);
+    }
+
+    fn trigger_fulfilled(&mut self, promise_id: &str) {
+        let should_fulfill = self
+            .tasks
+            .get(promise_id)
+            .map(|t| t.state != TaskState::Fulfilled)
+            .unwrap_or(false);
+        if should_fulfill {
+            if let Some(t) = self.tasks.get_mut(promise_id) {
+                t.state = TaskState::Fulfilled;
+                t.pid = None;
+                t.ttl = None;
+                t.resumes = BTreeSet::new();
+            }
+            self.del_t_timeout(promise_id);
+            // Remove this task from every promise's callbacks set.
+            // SQLite does DELETE FROM callbacks WHERE awaiter_id = promise_id.
+            for p in self.promises.values_mut() {
+                p.callbacks.remove(promise_id);
+            }
+        }
+    }
+
+    fn trigger_callbacks(&mut self, promise_id: &str, now: i64) {
+        let callbacks: Vec<String> = match self.promises.get_mut(promise_id) {
+            Some(p) => std::mem::take(&mut p.callbacks).into_iter().collect(),
+            None => return,
+        };
+        for awaiter_id in callbacks {
+            let (awaiter_state, awaiter_timeout_at) = match self.promises.get(&awaiter_id) {
+                Some(p) => (p.state, p.timeout_at),
+                None => continue,
+            };
+            if awaiter_state != PromiseState::Pending || now >= awaiter_timeout_at {
+                continue;
+            }
+            let task_state = self.tasks.get(&awaiter_id).map(|t| t.state);
+            let version = self.tasks.get(&awaiter_id).map(|t| t.version).unwrap_or(0);
+            let addr = self
+                .promises
+                .get(&awaiter_id)
+                .and_then(|p| p.tags.get("resonate:target").cloned());
+            match task_state {
+                Some(TaskState::Suspended) => {
+                    if let Some(t) = self.tasks.get_mut(&awaiter_id) {
+                        t.state = TaskState::Pending;
+                        t.resumes = std::iter::once(promise_id.to_string()).collect();
+                    }
+                    self.set_t_timeout(&awaiter_id, TTimeoutKind::Retry, now + PENDING_RETRY_TTL);
+                    if let Some(addr) = addr {
+                        self.send_execute(&addr, &awaiter_id, version);
+                    }
+                }
+                Some(TaskState::Pending | TaskState::Acquired | TaskState::Halted) => {
+                    if let Some(t) = self.tasks.get_mut(&awaiter_id) {
+                        t.resumes.insert(promise_id.to_string());
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn trigger_listeners(&mut self, promise_id: &str, now: i64) {
+        let listeners: Vec<String> = match self.promises.get_mut(promise_id) {
+            Some(p) => std::mem::take(&mut p.listeners).into_iter().collect(),
+            None => return,
+        };
+        if listeners.is_empty() {
+            return;
+        }
+        let record = self
+            .promises
+            .get(promise_id)
+            .map(|p| Self::to_promise_record(now, promise_id, p));
+        if let Some(record) = record {
+            let message =
+                json!({ "kind": "unblock", "head": {}, "data": { "promise": record.clone() } });
+            for addr in listeners {
+                self.outgoing.push((addr, message.clone()));
+            }
+        }
+    }
+
+    fn effective_task_state(&self, now: i64, id: &str) -> Option<TaskState> {
+        let t = self.tasks.get(id)?;
+        if t.state == TaskState::Fulfilled {
+            return Some(TaskState::Fulfilled);
+        }
+        let promise_settled = self
+            .promises
+            .get(id)
+            .map(|p| p.state != PromiseState::Pending || now >= p.timeout_at)
+            .unwrap_or(false);
+        if promise_settled {
+            Some(TaskState::Fulfilled)
+        } else {
+            Some(t.state)
+        }
+    }
+
+    fn send_execute(&mut self, address: &str, task_id: &str, version: i64) {
+        let msg = json!({ "kind": "execute", "head": {}, "data": { "task": { "id": task_id, "version": version } } });
+        for (addr, existing) in &mut self.outgoing {
+            if existing
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .map(|k| k == "execute")
+                .unwrap_or(false)
+                && existing
+                    .pointer("/data/task/id")
+                    .and_then(|v| v.as_str())
+                    .map(|id| id == task_id)
+                    .unwrap_or(false)
+            {
+                *addr = address.to_string();
+                *existing = msg;
+                return;
+            }
+        }
+        self.outgoing.push((address.to_string(), msg));
+    }
+
+    fn preload(&self, promise_id: &str) -> Vec<PromiseRecord> {
+        let branch = match self
+            .promises
+            .get(promise_id)
+            .and_then(|p| p.tags.get("resonate:branch"))
+        {
+            Some(b) if !b.is_empty() => b.clone(),
+            _ => return vec![],
+        };
+        self.promises
+            .iter()
+            .filter(|(id, p)| {
+                *id != promise_id
+                    && p.tags
+                        .get("resonate:branch")
+                        .map(|b| b == &branch)
+                        .unwrap_or(false)
+            })
+            .map(|(id, p)| Self::to_promise_record(0, id, p))
+            .take(self.preload_limit as usize)
+            .collect()
+    }
+
+    fn timeout_state(tags: &HashMap<String, String>) -> PromiseState {
+        if tags
+            .get("resonate:timer")
+            .map(|v| v == "true")
+            .unwrap_or(false)
+        {
+            PromiseState::Resolved
+        } else {
+            PromiseState::RejectedTimedout
+        }
+    }
+
+    fn settle_to_promise_state(s: SettleState) -> PromiseState {
+        match s {
+            SettleState::Resolved => PromiseState::Resolved,
+            SettleState::Rejected => PromiseState::Rejected,
+            SettleState::RejectedCanceled => PromiseState::RejectedCanceled,
+        }
+    }
+
+    fn to_promise_record(now: i64, id: &str, p: &Promise) -> PromiseRecord {
+        let (state, settled_at) =
+            if p.state == PromiseState::Pending && now > 0 && now >= p.timeout_at {
+                (Self::timeout_state(&p.tags), Some(p.timeout_at))
+            } else {
+                (p.state, p.settled_at)
+            };
+        PromiseRecord {
+            id: id.to_string(),
+            state,
+            param: p.param.clone(),
+            value: p.value.clone(),
+            tags: p.tags.clone(),
+            timeout_at: p.timeout_at,
+            created_at: p.created_at,
+            settled_at,
+        }
+    }
+
+    fn to_task_record(id: &str, t: &Task) -> TaskRecord {
+        TaskRecord {
+            id: id.to_string(),
+            state: t.state,
+            version: t.version,
+            resumes: t.resumes.len() as i64,
+            ttl: t.ttl,
+            pid: t.pid.clone(),
+        }
+    }
+
+    fn to_schedule_record(&self, id: &str, s: &Schedule) -> ScheduleRecord {
+        let next_run_at = self
+            .s_timeouts
+            .iter()
+            .find(|st| st.id == id)
+            .map(|st| st.timeout)
+            .unwrap_or(0);
+        ScheduleRecord {
+            id: id.to_string(),
+            cron: s.cron.clone(),
+            promise_id: s.promise_id.clone(),
+            promise_timeout: s.promise_timeout,
+            promise_param: s.promise_param.clone(),
+            promise_tags: s.promise_tags.clone(),
+            created_at: s.created_at,
+            next_run_at,
+            last_run_at: s.last_run_at,
+        }
+    }
+
+    // ─── Timeout list helpers ──────────────────────────────────────────────────
+
+    fn set_p_timeout(&mut self, id: &str, timeout: i64) {
+        for e in &mut self.p_timeouts {
+            if e.id == id {
+                e.timeout = timeout;
+                return;
+            }
+        }
+        self.p_timeouts.push(PTimeout {
+            id: id.to_string(),
+            timeout,
+        });
+    }
+
+    fn del_p_timeout(&mut self, id: &str) {
+        self.p_timeouts.retain(|e| e.id != id);
+    }
+
+    fn set_t_timeout(&mut self, id: &str, kind: TTimeoutKind, timeout: i64) {
+        for e in &mut self.t_timeouts {
+            if e.id == id {
+                e.kind = kind;
+                e.timeout = timeout;
+                return;
+            }
+        }
+        self.t_timeouts.push(TTimeout {
+            id: id.to_string(),
+            kind,
+            timeout,
+        });
+    }
+
+    fn del_t_timeout(&mut self, id: &str) {
+        self.t_timeouts.retain(|e| e.id != id);
+    }
+
+    fn set_s_timeout(&mut self, id: &str, timeout: i64) {
+        for e in &mut self.s_timeouts {
+            if e.id == id {
+                e.timeout = timeout;
+                return;
+            }
+        }
+        self.s_timeouts.push(STimeout {
+            id: id.to_string(),
+            timeout,
+        });
+    }
+
+    fn del_s_timeout(&mut self, id: &str) {
+        self.s_timeouts.retain(|e| e.id != id);
+    }
+
+    // ── Query methods for test generation ────────────────────────────────────
+
+    /// Id order is the map's, and the map is a `BTreeMap` — so every accessor
+    /// the differential's generator draws from is sorted, and the same seed
+    /// walks the same trajectory in every process.
+    pub fn all_promise_ids(&self) -> Vec<String> {
+        self.promises.keys().cloned().collect()
+    }
+
+    pub fn pending_promise_ids(&self) -> Vec<String> {
+        self.promises
+            .iter()
+            .filter(|(_, p)| p.state == PromiseState::Pending)
+            .map(|(id, _)| id.clone())
+            .collect()
+    }
+
+    /// Pending promises that may be awaited — see
+    /// `resonate_core::types::is_external`. The generator needs these apart
+    /// from `pending_promise_ids`, or every callback it plans is refused.
+    pub fn external_pending_promise_ids(&self) -> Vec<String> {
+        self.promises
+            .iter()
+            .filter(|(_, p)| {
+                p.state == PromiseState::Pending && resonate_core::types::is_external(&p.tags)
+            })
+            .map(|(id, _)| id.clone())
+            .collect()
+    }
+
+    pub fn tasks_by_state(&self, state: TaskState) -> Vec<(String, i64)> {
+        self.tasks
+            .iter()
+            .filter(|(_, t)| t.state == state)
+            .map(|(id, t)| (id.clone(), t.version))
+            .collect()
+    }
+
+    pub fn schedule_ids(&self) -> Vec<String> {
+        self.schedules.keys().cloned().collect()
+    }
+
+    pub fn has_tasks_in_state(&self, state: TaskState) -> bool {
+        self.tasks.values().any(|t| t.state == state)
+    }
+
+    pub fn has_pending_promises(&self) -> bool {
+        self.promises
+            .values()
+            .any(|p| p.state == PromiseState::Pending)
+    }
+
+    pub fn has_pending_promises_with_target(&self) -> bool {
+        self.promises
+            .values()
+            .any(|p| p.state == PromiseState::Pending && p.tags.contains_key("resonate:target"))
+    }
+
+    pub fn has_schedules(&self) -> bool {
+        !self.schedules.is_empty()
+    }
+}
+
+/// The reference model behind the same port as the real server.
+///
+/// `Oracle::apply` takes `&mut self`, so the impl needs interior mutability —
+/// and it needs a newtype rather than `Mutex<Oracle>` directly. With
+/// `ResonateServer` living in `resonate-core`, the orphan rule rejects
+/// `impl ResonateServer for Mutex<Oracle>`: `Mutex` is foreign and not
+/// `#[fundamental]`, so `Mutex<Oracle>` does not count as a local type.
+///
+/// The wrapper also states the truth plainly — the real server answers requests
+/// concurrently, and the reference model is its serialized equivalent.
+pub struct SharedOracle(Mutex<Oracle>);
+
+impl SharedOracle {
+    pub fn new() -> Self {
+        Self(Mutex::new(Oracle::new()))
+    }
+
+    pub fn with_preload_limit(preload_limit: u32) -> Self {
+        Self(Mutex::new(Oracle::with_preload_limit(preload_limit)))
+    }
+
+    /// Borrow the model directly, for tests that inspect or seed its state.
+    pub fn lock(&self) -> std::sync::MutexGuard<'_, Oracle> {
+        self.0.lock().expect("oracle mutex poisoned")
+    }
+}
+
+impl Default for SharedOracle {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Unlike [`Server`](crate::server::Server), the oracle honours
+/// `head.debug_time` unconditionally. It has no config to gate on and no clock
+/// of its own, and every caller of it is a test driving a synthetic clock.
+#[async_trait]
+impl ResonateServer for SharedOracle {
+    async fn process(&self, req: &RequestEnvelope) -> Result<ResponseEnvelope, Unavailable> {
+        // No await while the guard is held.
+        let resp = {
+            let mut oracle = self.lock();
+            oracle.apply(req)
+        };
+        Ok(resp)
+    }
+}
+
+#[cfg(test)]
+mod determinism {
+    use super::*;
+    use serde_json::json;
+
+    /// Every accessor the differential's generator draws from, and the
+    /// `preload` it puts in a response, must come back in a fixed order.
+    ///
+    /// This is what makes a seeded run reproducible. The generator plans from
+    /// the oracle, so an unordered traversal here chooses a different request
+    /// in every process — Rust randomizes `HashMap` iteration per process —
+    /// and the seed pins nothing: a failure cannot be re-run, and a pass says
+    /// nothing about what an earlier pass explored. `preload` is worse than
+    /// that: it goes into a response the differential compares elementwise
+    /// against three engines that all say `ORDER BY id ASC`.
+    ///
+    /// Ordering is structural — the state maps are `BTreeMap`/`BTreeSet` — so
+    /// this test fails the moment someone reaches for a `HashMap` again.
+    #[test]
+    fn what_the_generator_reads_is_ordered() {
+        let mut o = Oracle::new();
+        let branch = "o:root";
+        // Insert in an order that is neither sorted nor reverse-sorted, so a
+        // traversal that merely echoes insertion order fails too.
+        for id in ["o:root.m", "o:root.a", "o:root.z", "o:root.c"] {
+            let req = RequestEnvelope {
+                kind: "promise.create".to_string(),
+                head: RequestHead {
+                    corr_id: "t".to_string(),
+                    version: "2026-04-01".to_string(),
+                    auth: None,
+                    debug_time: None,
+                },
+                data: json!({
+                    "id": id,
+                    "timeoutAt": 9_000_000_000_000i64,
+                    "param": {},
+                    "tags": { "resonate:branch": branch },
+                }),
+            };
+            assert_eq!(o.apply(&req).head.status, 200, "create {id}");
+        }
+
+        let sorted = |v: &[String]| v.windows(2).all(|w| w[0] <= w[1]);
+        assert!(sorted(&o.all_promise_ids()), "all_promise_ids");
+        assert!(sorted(&o.pending_promise_ids()), "pending_promise_ids");
+
+        let preload: Vec<String> = o.preload("o:root.a").iter().map(|p| p.id.clone()).collect();
+        assert_eq!(
+            preload,
+            vec!["o:root.c", "o:root.m", "o:root.z"],
+            "preload must match the engines' ORDER BY id ASC"
+        );
+    }
+}

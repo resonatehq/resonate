@@ -24,6 +24,7 @@ pub mod cache;
 pub mod codec;
 pub mod kernel;
 pub mod metrics;
+pub mod oracle;
 pub mod outbox;
 pub mod scan;
 pub mod schedules;
