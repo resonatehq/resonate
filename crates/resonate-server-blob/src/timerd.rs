@@ -58,7 +58,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
-use crate::core::Unavailable;
+use resonate_core::Unavailable;
 
 use super::applier::{ApplierPool, KeySpace, TimerEntry};
 use super::store::Store;
@@ -311,7 +311,7 @@ impl Timerd {
                 } else {
                     match self.queue.next_deadline() {
                         Some(at) => Duration::from_millis(
-                            at.saturating_sub(crate::util::system_time_ms()).max(0) as u64,
+                            at.saturating_sub(resonate_core::util::system_time_ms()).max(0) as u64,
                         ),
                         // Nothing armed: sleep until an arm wakes us.
                         None => Duration::from_secs(3_600),
@@ -328,7 +328,7 @@ impl Timerd {
                 if paused.load(Ordering::SeqCst) {
                     continue;
                 }
-                let now = crate::util::system_time_ms();
+                let now = resonate_core::util::system_time_ms();
                 match self.fire_due(now).await {
                     0 => {}
                     n => tracing::debug!(swept = n, "Timers fired"),
@@ -341,13 +341,13 @@ impl Timerd {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::types::PromiseState;
+    use resonate_core::types::PromiseState;
     use crate::kernel::state::Req;
-    use crate::s3::applier::ApplierCfg;
-    use crate::s3::cache::{DocCache, MemDocCache};
-    use crate::s3::codec;
-    use crate::s3::outbox::Outbox;
-    use crate::s3::store::ObjectStoreAdapter;
+    use crate::applier::ApplierCfg;
+    use crate::cache::{DocCache, MemDocCache};
+    use crate::codec;
+    use crate::outbox::Outbox;
+    use crate::store::ObjectStoreAdapter;
     use serde_json::json;
     use std::sync::Mutex;
 

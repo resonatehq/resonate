@@ -33,13 +33,13 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use crate::core::types::{
+use resonate_core::types::{
     PromiseRecord, PromiseSearchData, PromiseSearchResponseData, ScheduleRecord,
     ScheduleSearchData, ScheduleSearchResponseData, Snapshot, SnapshotCallback, SnapshotListener,
     SnapshotPromiseTimeout, SnapshotTaskTimeout, TaskRecord, TaskSearchData,
     TaskSearchResponseData,
 };
-use crate::core::Unavailable;
+use resonate_core::Unavailable;
 use crate::kernel::state::{OriginDoc, Reply};
 
 use super::applier::KeySpace;
@@ -317,9 +317,9 @@ fn paginate<T>(
 mod tests {
     use super::*;
     use crate::kernel::state::Req;
-    use crate::s3::applier::{ApplierCfg, ApplierPool};
-    use crate::s3::cache::MemDocCache;
-    use crate::s3::store::ObjectStoreAdapter;
+    use crate::applier::{ApplierCfg, ApplierPool};
+    use crate::cache::MemDocCache;
+    use crate::store::ObjectStoreAdapter;
     use serde_json::{json, Value};
 
     const W: &str = "http://worker:9999";
@@ -345,14 +345,14 @@ mod tests {
             Arc::clone(&store),
             Arc::clone(&cache),
             Arc::clone(&outbox),
-            Arc::new(crate::s3::timer_queue::TimerQueue::new()),
+            Arc::new(crate::timer_queue::TimerQueue::new()),
             keys(),
             ApplierCfg::default(),
         ));
         let schedules = Arc::new(ScheduleService::new(
             Arc::clone(&store),
             Arc::clone(&applier),
-            Arc::new(crate::s3::timer_queue::TimerQueue::new()),
+            Arc::new(crate::timer_queue::TimerQueue::new()),
             keys(),
         ));
         let scan = ScanService::new(store, cache, Arc::clone(&schedules), outbox, keys());

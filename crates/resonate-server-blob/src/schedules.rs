@@ -42,11 +42,11 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use crate::core::types::{PromiseValue, ScheduleCreateData, ScheduleRecord, ScheduleResponseData};
-use crate::core::Unavailable;
+use resonate_core::types::{PromiseValue, ScheduleCreateData, ScheduleRecord, ScheduleResponseData};
+use resonate_core::Unavailable;
 use crate::kernel::state::{Reply, Req, ScheduleFireData, TAG_TARGET};
 use crate::metrics;
-use crate::util;
+use resonate_core::util;
 
 use super::applier::{ApplierPool, KeySpace};
 use super::store::{Etag, Store, StoreError};
@@ -191,7 +191,7 @@ impl ScheduleService {
         // Every promise this schedule fires carries the target, so it is held
         // to the same standard promise.create holds one to.
         if let Some(addr) = r.promise_tags.get(TAG_TARGET) {
-            if !crate::core::is_valid_address(addr) {
+            if !resonate_core::is_valid_address(addr) {
                 return Ok(Reply::err(400, "Invalid resonate:target address"));
             }
         }
@@ -368,12 +368,12 @@ impl ScheduleFirer for ScheduleService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::s3::applier::ApplierCfg;
-    use crate::s3::cache::{DocCache, MemDocCache};
-    use crate::s3::codec;
-    use crate::s3::outbox::Outbox;
-    use crate::s3::store::ObjectStoreAdapter;
-    use crate::s3::timerd::{Timerd, TimerdCfg};
+    use crate::applier::ApplierCfg;
+    use crate::cache::{DocCache, MemDocCache};
+    use crate::codec;
+    use crate::outbox::Outbox;
+    use crate::store::ObjectStoreAdapter;
+    use crate::timerd::{Timerd, TimerdCfg};
     use serde_json::json;
 
     const W: &str = "http://worker:9999";

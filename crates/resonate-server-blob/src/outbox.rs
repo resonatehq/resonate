@@ -46,11 +46,11 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use async_trait::async_trait;
 
-use crate::core::types::{
+use resonate_core::types::{
     ExecuteMsg, ExecuteMsgData, ExecuteMsgTask, Message, MessageHead, PromiseRecord,
     SnapshotMessage, UnblockMsg, UnblockMsgData, UnblockMsgHead,
 };
-use crate::core::{ResonateRouter, Unavailable};
+use resonate_core::{ResonateRouter, Unavailable};
 use crate::kernel::state::OutEntry;
 use crate::metrics;
 
@@ -265,7 +265,7 @@ impl Outbox {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::types::{PromiseState, PromiseValue};
+    use resonate_core::types::{PromiseState, PromiseValue};
 
     /// A router that records what it was asked to deliver.
     struct Recorder {
@@ -549,7 +549,7 @@ mod tests {
 #[cfg(test)]
 mod late_router_tests {
     use super::*;
-    use crate::core::types::{PromiseRecord, PromiseState, PromiseValue};
+    use resonate_core::types::{PromiseRecord, PromiseState, PromiseValue};
 
     struct Counting(Mutex<usize>);
 

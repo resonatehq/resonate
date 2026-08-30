@@ -40,16 +40,16 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use validator::Validate;
 
-use crate::core::types::{
+use resonate_core::types::{
     format_validation_errors, PromiseCreateData, PromiseGetData, PromiseRegisterCallbackData,
     PromiseRegisterListenerData, PromiseSearchData, PromiseSettleData, RequestEnvelope,
     ResponseEnvelope, ScheduleCreateData, ScheduleDeleteData, ScheduleGetData, ScheduleSearchData,
     TaskAcquireData, TaskContinueData, TaskCreateData, TaskFenceData, TaskFulfillData, TaskGetData,
     TaskHaltData, TaskHeartbeatData, TaskReleaseData, TaskSearchData, TaskSuspendData,
 };
-use crate::core::{ResonateRouter, ResonateServer, Unavailable};
+use resonate_core::{ResonateRouter, ResonateServer, Unavailable};
 use crate::kernel::state::{KernelCfg, Reply, Req};
-use crate::util;
+use resonate_core::util;
 
 use super::applier::{ApplierCfg, ApplierPool, KeySpace};
 use super::cache::{DocCache, MemDocCache};
@@ -282,10 +282,17 @@ impl S3Server {
                 self.applier.submit(&origin, Req::TaskSuspend(r), now).await
             }
             "task.fence" => {
-                // The validator requires the action's id (when it has one) to
-                // share the task's origin, so one document covers the check and
-                // the action and the fence is atomic.
                 let r: TaskFenceData = parsed!(data);
+                // This backend's own constraint, not the protocol's: a fence
+                // and its action commit as one CAS on one origin's document,
+                // so an action naming another origin has no atomic home here.
+                // The SQL engines accept it; this server refuses it before
+                // any state is read.
+                if let Some(action_id) = r.action.data.get("id").and_then(|v| v.as_str()) {
+                    if origin_of(action_id) != origin_of(&r.id) {
+                        return Ok(Reply::err(400, "Action must belong to the task's origin"));
+                    }
+                }
                 let origin = origin_of(&r.id).to_string();
                 self.applier
                     .submit(
@@ -477,7 +484,7 @@ impl ResonateServer for S3Server {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::types::{RequestHead, SUPPORTED_VERSIONS};
+    use resonate_core::types::{RequestHead, SUPPORTED_VERSIONS};
     use serde_json::json;
 
     const W: &str = "http://worker:9999";
@@ -528,7 +535,7 @@ mod tests {
         assert_eq!(resp.kind, "promise.get");
         assert_eq!(resp.head.corr_id, "corr-1");
         assert_eq!(resp.head.status, 404);
-        assert_eq!(resp.head.version, crate::core::types::PROTOCOL_VERSION);
+        assert_eq!(resp.head.version, resonate_core::types::PROTOCOL_VERSION);
     }
 
     #[tokio::test]

@@ -40,7 +40,7 @@ use std::fmt::Write as _;
 
 use serde_json::Value;
 
-use crate::core::types::{PromiseState, PromiseValue, TaskState};
+use resonate_core::types::{PromiseState, PromiseValue, TaskState};
 use crate::kernel::state::{min_deadline, OriginDoc, PromiseDoc, TaskDoc};
 
 /// Format version, carried in the header's `v`.

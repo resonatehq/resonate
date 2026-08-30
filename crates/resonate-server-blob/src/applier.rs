@@ -65,7 +65,7 @@ use std::time::Duration;
 
 use tokio::sync::{mpsc, oneshot, Mutex as AsyncMutex};
 
-use crate::core::Unavailable;
+use resonate_core::Unavailable;
 use crate::kernel::state::{apply_effects, Effect, KernelCfg, OriginDoc, Reply, Req};
 use crate::kernel::{drain, handle};
 
@@ -708,8 +708,8 @@ async fn perform(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::s3::cache::{MemDocCache, NoopDocCache};
-    use crate::s3::store::{FaultStore, ObjectStoreAdapter};
+    use crate::cache::{MemDocCache, NoopDocCache};
+    use crate::store::{FaultStore, ObjectStoreAdapter};
     use async_trait::async_trait;
     use serde_json::json;
     use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};

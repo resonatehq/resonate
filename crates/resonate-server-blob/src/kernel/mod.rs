@@ -6,7 +6,7 @@
 //! `drain(&doc, now) -> Vec<Effect>` decide; they read no clock, generate no
 //! ids, and touch no I/O. Everything a decision implies — persist the
 //! document, arm a timer, clear a timer, send a message — comes back as an
-//! [`Effect`] for the shell in [`crate::s3`] to perform. Ids are strings,
+//! [`Effect`] for the shell in the shell modules at the crate root to perform. Ids are strings,
 //! clocks are `i64` milliseconds, invariants are `debug_assert!`s, sends live
 //! outside the document, and timers aggregate to one deadline per origin
 //! rather than one per entity.

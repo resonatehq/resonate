@@ -30,7 +30,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::Value;
 
-use crate::core::types::{
+use resonate_core::types::{
     PromiseCreateData, PromiseGetData, PromiseRecord, PromiseRegisterCallbackData,
     PromiseRegisterListenerData, PromiseState, PromiseValue, TaskAcquireData, TaskContinueData,
     TaskCreateData, TaskFenceData, TaskFulfillData, TaskGetData, TaskHaltData, TaskHeartbeatData,
@@ -203,7 +203,7 @@ impl Default for KernelCfg {
 pub enum Req {
     PromiseGet(PromiseGetData),
     PromiseCreate(PromiseCreateData),
-    PromiseSettle(crate::core::types::PromiseSettleData),
+    PromiseSettle(resonate_core::types::PromiseSettleData),
     PromiseRegisterCallback(PromiseRegisterCallbackData),
     PromiseRegisterListener(PromiseRegisterListenerData),
     TaskGet(TaskGetData),

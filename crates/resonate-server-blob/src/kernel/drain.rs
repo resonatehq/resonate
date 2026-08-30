@@ -21,7 +21,7 @@
 //! The s3 applier's `tick`, which the timer poller's sweep and `debug.tick`
 //! drive.
 
-use crate::core::types::{PromiseState, TaskState};
+use resonate_core::types::{PromiseState, TaskState};
 
 use super::handle::{trigger_settlement, Tx};
 use super::state::{Effect, KernelCfg, OriginDoc};

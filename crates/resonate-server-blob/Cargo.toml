@@ -1,0 +1,21 @@
+[package]
+name = "resonate-server-blob"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+resonate-core = { path = "../resonate-core" }
+object_store = { version = "0.14.1", features = ["aws"] }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+validator = { workspace = true }
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+cron = "0.12"
+chrono = "0.4"
+prometheus = "0.13"
+lazy_static = "1"
+futures = "0.3"
+fastrand = "2"

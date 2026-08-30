@@ -35,8 +35,8 @@ use std::collections::BTreeSet;
 use serde_json::json;
 use validator::Validate;
 
-use crate::core::is_valid_address;
-use crate::core::types::{
+use resonate_core::is_valid_address;
+use resonate_core::types::{
     format_validation_errors, PromiseCreateData, PromiseRecord, PromiseResponseData, PromiseState,
     PromiseValue, SettleState, TaskAcquireResponseData, TaskCreateResponseData,
     TaskFenceResponseData, TaskFulfillResponseData, TaskRecord, TaskResponseData, TaskState,
@@ -135,7 +135,7 @@ pub fn handle(doc: &OriginDoc, req: &Req, now: i64, cfg: &KernelCfg) -> (Vec<Eff
 
 fn op_promise_get(
     tx: &mut Tx,
-    r: &crate::core::types::PromiseGetData,
+    r: &resonate_core::types::PromiseGetData,
     now: i64,
     cfg: &KernelCfg,
 ) -> Reply {
@@ -167,7 +167,7 @@ fn op_promise_create(tx: &mut Tx, r: &PromiseCreateData, now: i64, cfg: &KernelC
 
 fn op_promise_settle(
     tx: &mut Tx,
-    r: &crate::core::types::PromiseSettleData,
+    r: &resonate_core::types::PromiseSettleData,
     now: i64,
     cfg: &KernelCfg,
 ) -> Reply {
@@ -189,7 +189,7 @@ fn op_promise_settle(
 
 fn op_promise_register_callback(
     tx: &mut Tx,
-    r: &crate::core::types::PromiseRegisterCallbackData,
+    r: &resonate_core::types::PromiseRegisterCallbackData,
     now: i64,
     cfg: &KernelCfg,
 ) -> Reply {
@@ -225,7 +225,7 @@ fn op_promise_register_callback(
 
 fn op_promise_register_listener(
     tx: &mut Tx,
-    r: &crate::core::types::PromiseRegisterListenerData,
+    r: &resonate_core::types::PromiseRegisterListenerData,
     now: i64,
     cfg: &KernelCfg,
 ) -> Reply {
@@ -255,7 +255,7 @@ fn op_promise_register_listener(
 
 fn op_task_get(
     tx: &mut Tx,
-    r: &crate::core::types::TaskGetData,
+    r: &resonate_core::types::TaskGetData,
     now: i64,
     cfg: &KernelCfg,
 ) -> Reply {
@@ -275,7 +275,7 @@ fn op_task_get(
 /// Mirrors `Server::op_task_create` (`server.rs:1086-1300`).
 fn op_task_create(
     tx: &mut Tx,
-    r: &crate::core::types::TaskCreateData,
+    r: &resonate_core::types::TaskCreateData,
     now: i64,
     cfg: &KernelCfg,
 ) -> Reply {
@@ -351,7 +351,7 @@ fn op_task_create(
 
 fn op_task_acquire(
     tx: &mut Tx,
-    r: &crate::core::types::TaskAcquireData,
+    r: &resonate_core::types::TaskAcquireData,
     now: i64,
     cfg: &KernelCfg,
 ) -> Reply {
@@ -376,7 +376,7 @@ fn op_task_acquire(
 
 fn op_task_release(
     tx: &mut Tx,
-    r: &crate::core::types::TaskReleaseData,
+    r: &resonate_core::types::TaskReleaseData,
     now: i64,
     cfg: &KernelCfg,
 ) -> Reply {
@@ -401,7 +401,7 @@ fn op_task_release(
 
 fn op_task_fulfill(
     tx: &mut Tx,
-    r: &crate::core::types::TaskFulfillData,
+    r: &resonate_core::types::TaskFulfillData,
     now: i64,
     cfg: &KernelCfg,
 ) -> Reply {
@@ -435,7 +435,7 @@ fn op_task_fulfill(
 /// is told to carry on (300).
 fn op_task_suspend(
     tx: &mut Tx,
-    r: &crate::core::types::TaskSuspendData,
+    r: &resonate_core::types::TaskSuspendData,
     now: i64,
     cfg: &KernelCfg,
 ) -> Reply {
@@ -499,7 +499,7 @@ fn op_task_suspend(
 /// worker that lost its lease cannot write.
 fn op_task_fence(
     tx: &mut Tx,
-    r: &crate::core::types::TaskFenceData,
+    r: &resonate_core::types::TaskFenceData,
     corr_id: &str,
     now: i64,
     cfg: &KernelCfg,
@@ -549,7 +549,7 @@ fn op_task_fence(
             )
         }
         "promise.settle" => {
-            let settle_data: crate::core::types::PromiseSettleData =
+            let settle_data: resonate_core::types::PromiseSettleData =
                 match serde_json::from_value(r.action.data.clone()) {
                     Ok(d) => d,
                     Err(e) => return Reply::err(400, &format!("Invalid action data: {}", e)),
@@ -603,7 +603,7 @@ fn fence_reply(
 
 /// A heartbeat extends the lease of every task in the batch the caller still
 /// owns, and silently ignores the rest — it is a liveness signal, not a query.
-fn op_task_heartbeat(tx: &mut Tx, r: &crate::core::types::TaskHeartbeatData, now: i64) -> Reply {
+fn op_task_heartbeat(tx: &mut Tx, r: &resonate_core::types::TaskHeartbeatData, now: i64) -> Reply {
     for want in &r.tasks {
         let ttl = tx
             .doc
@@ -628,7 +628,7 @@ fn op_task_heartbeat(tx: &mut Tx, r: &crate::core::types::TaskHeartbeatData, now
 
 fn op_task_halt(
     tx: &mut Tx,
-    r: &crate::core::types::TaskHaltData,
+    r: &resonate_core::types::TaskHaltData,
     now: i64,
     cfg: &KernelCfg,
 ) -> Reply {
@@ -653,7 +653,7 @@ fn op_task_halt(
 
 fn op_task_continue(
     tx: &mut Tx,
-    r: &crate::core::types::TaskContinueData,
+    r: &resonate_core::types::TaskContinueData,
     now: i64,
     cfg: &KernelCfg,
 ) -> Reply {

@@ -28,14 +28,12 @@
 
 use std::sync::Arc;
 
-use resonate::{
-    core::types::{RequestEnvelope, RequestHead, ResponseEnvelope, SUPPORTED_VERSIONS},
-    core::ResonateServer,
-    s3::{
-        applier::KeySpace,
-        server::{S3Server, S3ServerCfg},
-        store::{Etag, ObjectStoreAdapter, Store, StoreError},
-    },
+use resonate_core::types::{RequestEnvelope, RequestHead, ResponseEnvelope, SUPPORTED_VERSIONS};
+use resonate_core::ResonateServer;
+use resonate_server_blob::{
+    applier::KeySpace,
+    server::{S3Server, S3ServerCfg},
+    store::{Etag, ObjectStoreAdapter, Store, StoreError},
 };
 use serde_json::{json, Value};
 
