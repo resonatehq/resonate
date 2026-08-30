@@ -10,6 +10,7 @@ pub mod address;
 pub mod gateway;
 pub mod router;
 pub mod server;
+pub mod stream;
 pub mod types;
 pub mod util;
 pub mod worker;

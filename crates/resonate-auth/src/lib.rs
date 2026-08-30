@@ -381,8 +381,14 @@ fn extract_resource_id(kind: &str, data: &Value) -> Option<String> {
             .and_then(|v| v.as_str())
             .map(str::to_owned),
 
-        // Operations whose resource ID is data.promiseId
-        "schedule.create" => data
+        // Operations whose resource ID is data.promiseId.
+        //
+        // A stream is checked against the promise producing it, not the origin
+        // it flows back to: writing to a stream is writing on behalf of that
+        // promise, so it is the same authority `promise.settle` demands over
+        // `data.id`. A token scoped to a lineage covers both, since the origin
+        // is a prefix of every promise in it.
+        "schedule.create" | "stream.bos" | "stream.put" | "stream.eos" => data
             .get("promiseId")
             .and_then(|v| v.as_str())
             .map(str::to_owned),

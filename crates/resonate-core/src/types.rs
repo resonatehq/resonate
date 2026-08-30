@@ -797,6 +797,110 @@ pub struct ScheduleSearchData {
     pub cursor: Option<String>,
 }
 
+// --- Stream Request Data Structs ---
+//
+// The ephemeral surface. A stream is a best-effort side channel attached to a
+// durable promise: chunks may be dropped, reordered or never delivered at all,
+// and nothing downstream may act on one as though it were state. The promise is
+// the truth, and a consumer that finds a gap falls back to reading it.
+//
+// Every stream request names two ids. `promise_id` is the promise producing the
+// stream; `origin` is the root of the lineage it belongs to, which is where the
+// stream flows back to — the process that made the call is the one that wants
+// the output. The two are checked against each other here, the same way
+// `promise.register_callback` checks that an awaiter and its awaited share an
+// origin, so a stream cannot be addressed at a lineage it is not part of.
+//
+// None of these carry state, so nothing here reads any: an origin is a routing
+// key, not a promise that has to exist.
+
+/// Begin of stream: promise `promise_id` is about to produce one.
+///
+/// Distinct from the first chunk on purpose. It lets a consumer tell "started,
+/// nothing yet" from "nothing", and it is where the headers describing the
+/// chunks to come belong — `Content-Type` and friends, mirroring
+/// [`PromiseValue::headers`].
+#[derive(Debug, Deserialize, Validate)]
+#[validate(schema(function = "validate_stream_bos_data"))]
+pub struct StreamBosData {
+    #[validate(length(min = 1, message = "Origin is required"))]
+    pub origin: String,
+    #[serde(rename = "promiseId")]
+    #[validate(length(min = 1, message = "Promise ID is required"))]
+    pub promise_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub headers: Option<std::collections::HashMap<String, String>>,
+}
+
+/// One chunk of the stream.
+///
+/// `offset` is the chunk's index in the sequence, not a byte offset. That is
+/// what makes reassembly total rather than approximate: paired with the count
+/// [`StreamEosData`] carries, a consumer has everything exactly when it has
+/// seen `0..count`, and a chunk that arrives twice is recognisably the same
+/// chunk rather than an overlapping range. It also means a producer may safely
+/// re-put a chunk it is unsure landed.
+///
+/// `body` is opaque — the encoding is between the producer and the consumer,
+/// and the server neither decodes it nor measures it.
+#[derive(Debug, Deserialize, Validate)]
+#[validate(schema(function = "validate_stream_put_data"))]
+pub struct StreamPutData {
+    #[validate(length(min = 1, message = "Origin is required"))]
+    pub origin: String,
+    #[serde(rename = "promiseId")]
+    #[validate(length(min = 1, message = "Promise ID is required"))]
+    pub promise_id: String,
+    #[validate(range(min = 0, message = "Offset must be a non-negative integer"))]
+    pub offset: i64,
+    pub body: String,
+}
+
+/// End of stream, and how many chunks it had.
+///
+/// `count` is the completeness check, and the reason the stream can be
+/// best-effort without being unusable: a consumer that has seen fewer than
+/// `count` chunks knows it, and reads the promise instead of guessing.
+#[derive(Debug, Deserialize, Validate)]
+#[validate(schema(function = "validate_stream_eos_data"))]
+pub struct StreamEosData {
+    #[validate(length(min = 1, message = "Origin is required"))]
+    pub origin: String,
+    #[serde(rename = "promiseId")]
+    #[validate(length(min = 1, message = "Promise ID is required"))]
+    pub promise_id: String,
+    #[validate(range(min = 0, message = "Count must be a non-negative integer"))]
+    pub count: i64,
+}
+
+/// A streaming promise must belong to the lineage it names.
+///
+/// The root streams for itself when `promise_id == origin`, and a descendant
+/// streams for the call it descends from — both satisfy this. What it refuses
+/// is a promise pointing its output at some unrelated lineage.
+fn validate_stream_origin(
+    origin_id: &str,
+    promise_id: &str,
+) -> Result<(), validator::ValidationError> {
+    if origin(promise_id) != origin_id {
+        return Err(validator::ValidationError::new("origin_mismatch")
+            .with_message("Promise must belong to the named origin".into()));
+    }
+    Ok(())
+}
+
+fn validate_stream_bos_data(data: &StreamBosData) -> Result<(), validator::ValidationError> {
+    validate_stream_origin(&data.origin, &data.promise_id)
+}
+
+fn validate_stream_put_data(data: &StreamPutData) -> Result<(), validator::ValidationError> {
+    validate_stream_origin(&data.origin, &data.promise_id)
+}
+
+fn validate_stream_eos_data(data: &StreamEosData) -> Result<(), validator::ValidationError> {
+    validate_stream_origin(&data.origin, &data.promise_id)
+}
+
 // --- Response Data Structs ---
 // These mirror the `data` field of each successful (200) response in types.ts.
 

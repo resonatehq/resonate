@@ -214,6 +214,17 @@ impl ResonateServer for Server {
     }
 
     async fn process(&self, req: &RequestEnvelope) -> Result<ResponseEnvelope, Unavailable> {
+        // Streams are answered before the engine and never reach it. They are
+        // ephemeral by definition — no state to write, no deadline to arm — so
+        // there is nothing for a transition to do, and routing a chunk through
+        // one would put a database round trip on the one path that cannot
+        // afford it. Today that leaves a validated no-op; when delivery lands
+        // it belongs here, next to the router, which is the only thing a chunk
+        // actually needs.
+        if let Some(resp) = resonate_core::stream::process(req) {
+            return Ok(resp);
+        }
+
         // Debug-time overrides are gated by config, so a caller cannot move the
         // server's clock. The gate lives here rather than at the HTTP edge so
         // that every caller of the port is subject to it.

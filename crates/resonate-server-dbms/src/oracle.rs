@@ -2605,6 +2605,14 @@ impl Default for SharedOracle {
 #[async_trait]
 impl ResonateServer for SharedOracle {
     async fn process(&self, req: &RequestEnvelope) -> Result<ResponseEnvelope, Unavailable> {
+        // Answered before the model, and not by it. A stream touches no state,
+        // so the reference model has nothing to say about one — and the real
+        // server short-circuits streams ahead of its engine for the same
+        // reason. Both call the same function, so both answer identically,
+        // which is what makes the two interchangeable here as everywhere else.
+        if let Some(resp) = resonate_core::stream::process(req) {
+            return Ok(resp);
+        }
         // No await while the guard is held.
         let resp = {
             let mut oracle = self.lock();
@@ -2725,5 +2733,93 @@ mod determinism {
             vec!["o:root.c", "o:root.m", "o:root.z"],
             "preload must match the engines' ORDER BY id ASC"
         );
+    }
+}
+
+/// The stream operations, seen through the port that answers them.
+///
+/// [`resonate_core::stream`] owns what a stream request *is* and tests it
+/// there. What is left to check is the wiring: that a `ResonateServer` reaches
+/// that answer at all, and — the part a no-op can quietly stop being — that
+/// reaching it changes nothing.
+#[cfg(test)]
+mod streams {
+    use super::*;
+    use resonate_core::ResonateServer;
+    use serde_json::json;
+
+    fn req(kind: &str, data: serde_json::Value) -> RequestEnvelope {
+        RequestEnvelope {
+            kind: kind.to_string(),
+            head: RequestHead {
+                corr_id: "s1".to_string(),
+                version: "2026-04-01".to_string(),
+                auth: None,
+                debug_time: Some(1000),
+            },
+            data,
+        }
+    }
+
+    /// `SharedOracle` is both a server and an engine, and both spell the
+    /// method `process`. These tests are about the server port, so name it.
+    async fn ask(oracle: &SharedOracle, req: RequestEnvelope) -> ResponseEnvelope {
+        ResonateServer::process(oracle, &req)
+            .await
+            .expect("the model is always available")
+    }
+
+    async fn snapshot(oracle: &SharedOracle) -> serde_json::Value {
+        ask(oracle, req("debug.snap", json!({}))).await.data
+    }
+
+    #[tokio::test]
+    async fn a_stream_request_is_answered_and_leaves_no_trace() {
+        let oracle = SharedOracle::new();
+        // Something for a stream to be about, so "unchanged" means more than
+        // "still empty".
+        let created = ask(
+            &oracle,
+            req(
+                "promise.create",
+                json!({ "id": "f", "timeoutAt": 9_000_000, "tags": { "resonate:scope": "global" } }),
+            ),
+        )
+        .await;
+        assert_eq!(created.head.status, 200, "{:?}", created.data);
+        let before = snapshot(&oracle).await;
+
+        for (kind, data) in [
+            ("stream.bos", json!({ "origin": "f", "promiseId": "f" })),
+            (
+                "stream.put",
+                json!({ "origin": "f", "promiseId": "f", "offset": 0, "body": "aGk=" }),
+            ),
+            (
+                "stream.eos",
+                json!({ "origin": "f", "promiseId": "f", "count": 1 }),
+            ),
+        ] {
+            let resp = ask(&oracle, req(kind, data)).await;
+            assert_eq!(resp.head.status, 200, "{kind}: {:?}", resp.data);
+            assert_eq!(resp.kind, kind);
+        }
+
+        assert_eq!(
+            snapshot(&oracle).await,
+            before,
+            "a stream must not touch durable state"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_malformed_stream_request_is_refused_rather_than_ignored() {
+        let oracle = SharedOracle::new();
+        let resp = ask(
+            &oracle,
+            req("stream.put", json!({ "origin": "f", "promiseId": "g:1" })),
+        )
+        .await;
+        assert_eq!(resp.head.status, 400);
     }
 }
