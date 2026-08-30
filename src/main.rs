@@ -174,6 +174,16 @@ async fn run_server(config: Config) -> Result<(), String> {
         return Err("http_poll.max_connections must be at least 1".into());
     }
 
+    // The blob backend is not an engine behind `Server` — it is a complete
+    // `ResonateServer` of its own, so it takes its own wiring path and never
+    // reaches the `Arc::new_cyclic` knot below.
+    if config.storage.storage_type == "blob" {
+        #[cfg(feature = "blob")]
+        return run_blob_server(config).await;
+        #[cfg(not(feature = "blob"))]
+        return Err("storage backend 'blob' is not compiled into this build".into());
+    }
+
     // Backend selection. Each is a complete engine, not a storage handle
     // behind a shared one.
     let engine: Arc<dyn ResonateEngine> = match config.storage.storage_type.as_str() {
@@ -286,52 +296,7 @@ async fn run_server(config: Config) -> Result<(), String> {
             config.transports.http_poll.clone(),
         ));
 
-        // Scheme -> worker. A disabled transport is simply not registered, and
-        // the router reports its addresses as undeliverable.
-        let mut workers: HashMap<String, Arc<dyn ResonateWorker>> = HashMap::new();
-
-        if config.transports.http_push.enabled {
-            let worker: Arc<dyn ResonateWorker> =
-                Arc::new(resonate_transport_http_push::HttpPushTransport::new(
-                    server_handle.clone(),
-                    config.transports.http_push.clone(),
-                ));
-            for scheme in resonate_transport_http_push::SCHEMES {
-                workers.insert((*scheme).to_string(), Arc::clone(&worker));
-            }
-        } else {
-            tracing::info!("HTTP push transport disabled");
-        }
-
-        if config.transports.http_poll.enabled {
-            workers.insert(
-                resonate_transport_http_poll::SCHEME.to_string(),
-                poll_registry.clone(),
-            );
-        } else {
-            tracing::info!("HTTP poll transport disabled");
-        }
-
-        if config.transports.gcps.enabled {
-            workers.insert(
-                resonate_transport_gcps::SCHEME.to_string(),
-                Arc::new(resonate_transport_gcps::GcpsPubSubTransport::new(
-                    server_handle.clone(),
-                    config.transports.gcps.clone(),
-                )),
-            );
-        }
-
-        if config.transports.bash_exec.enabled {
-            workers.insert(
-                resonate_worker_bash::SCHEME.to_string(),
-                Arc::new(resonate_worker_bash::BashExecTransport::new(
-                    server_handle.clone(),
-                    config.transports.bash_exec.clone(),
-                    config.tasks.lease_timeout,
-                )),
-            );
-        }
+        let workers = build_workers(server_handle, &config, &poll_registry);
 
         transports = Some(Transports { poll_registry });
 
@@ -500,6 +465,256 @@ async fn run_server(config: Config) -> Result<(), String> {
         }
     };
 
+    if tokio::time::timeout(shutdown_timeout, drain).await.is_err() {
+        tracing::warn!("Background tasks did not finish within shutdown timeout, forcing exit");
+    }
+
+    tracing::info!("Resonate Server stopped");
+    Ok(())
+}
+
+/// Scheme -> worker, over a handle to whichever server implementation is
+/// active.
+///
+/// Shared by the SQL path (inside `Arc::new_cyclic`, where the handle is the
+/// not-yet-live `Weak<Server>`) and the blob path (after construction, where
+/// it is a downgraded `Arc<S3Server>`), so both build exactly the same
+/// transports. A disabled transport is simply not registered, and the router
+/// reports its addresses as undeliverable.
+fn build_workers(
+    server_handle: std::sync::Weak<dyn ResonateServer>,
+    config: &Config,
+    poll_registry: &Arc<PollRegistry>,
+) -> HashMap<String, Arc<dyn ResonateWorker>> {
+    let mut workers: HashMap<String, Arc<dyn ResonateWorker>> = HashMap::new();
+
+    if config.transports.http_push.enabled {
+        let worker: Arc<dyn ResonateWorker> =
+            Arc::new(resonate_transport_http_push::HttpPushTransport::new(
+                server_handle.clone(),
+                config.transports.http_push.clone(),
+            ));
+        for scheme in resonate_transport_http_push::SCHEMES {
+            workers.insert((*scheme).to_string(), Arc::clone(&worker));
+        }
+    } else {
+        tracing::info!("HTTP push transport disabled");
+    }
+
+    if config.transports.http_poll.enabled {
+        workers.insert(
+            resonate_transport_http_poll::SCHEME.to_string(),
+            poll_registry.clone(),
+        );
+    } else {
+        tracing::info!("HTTP poll transport disabled");
+    }
+
+    if config.transports.gcps.enabled {
+        workers.insert(
+            resonate_transport_gcps::SCHEME.to_string(),
+            Arc::new(resonate_transport_gcps::GcpsPubSubTransport::new(
+                server_handle.clone(),
+                config.transports.gcps.clone(),
+            )),
+        );
+    }
+
+    if config.transports.bash_exec.enabled {
+        workers.insert(
+            resonate_worker_bash::SCHEME.to_string(),
+            Arc::new(resonate_worker_bash::BashExecTransport::new(
+                server_handle.clone(),
+                config.transports.bash_exec.clone(),
+                config.tasks.lease_timeout,
+            )),
+        );
+    }
+
+    workers
+}
+
+/// Serve over the blob backend.
+///
+/// A parallel to the tail of `run_server` rather than a branch inside it. The
+/// SQL path closes its ownership ring with `Arc::new_cyclic` because `Server`
+/// takes the router as a constructor argument; the blob server binds the
+/// router after construction through its `LateRouter`, so nothing here needs
+/// the cyclic form. The two paths share the workers (`build_workers`) and the
+/// gateway, and differ in which background loop runs: the blob backend owns
+/// its own firing loop (`timerd`) and delivers messages from its own outbox,
+/// so neither the timer wheel nor the timeout sweep exists on this path.
+#[cfg(feature = "blob")]
+async fn run_blob_server(config: Config) -> Result<(), String> {
+    use resonate_server_blob::applier::{ApplierCfg, KeySpace};
+    use resonate_server_blob::kernel::state::KernelCfg;
+    use resonate_server_blob::outbox::LateRouter;
+    use resonate_server_blob::server::{S3Server, S3ServerCfg};
+    use resonate_server_blob::store::{ObjectStoreAdapter, Store};
+
+    let blob_cfg = config.storage.blob.clone();
+    let store: Arc<dyn Store> = match &blob_cfg.bucket {
+        Some(bucket) => {
+            tracing::info!(
+                bucket = %bucket,
+                prefix = %blob_cfg.prefix,
+                timer_shards = blob_cfg.timer_shards,
+                "Using blob backend"
+            );
+            tracing::warn!(
+                "The blob backend requires real conditional writes (If-Match / \
+                 If-None-Match). S3, R2, GCS and Azure qualify; MinIO, B2 and \
+                 Spaces do not, and lose writes silently."
+            );
+            let mut builder =
+                object_store::aws::AmazonS3Builder::from_env().with_bucket_name(bucket);
+            if let Some(region) = &blob_cfg.region {
+                builder = builder.with_region(region);
+            }
+            if let Some(endpoint) = &blob_cfg.endpoint {
+                builder = builder.with_endpoint(endpoint);
+            }
+            if blob_cfg.allow_http {
+                builder = builder.with_allow_http(true);
+            }
+            let s3 = builder
+                .build()
+                .map_err(|e| format!("Failed to configure S3 store: {e}"))?;
+            Arc::new(ObjectStoreAdapter::new(s3))
+        }
+        None => {
+            tracing::warn!(
+                "storage.blob.bucket is not set — using an in-process, in-memory \
+                 object store. Nothing survives this process."
+            );
+            Arc::new(ObjectStoreAdapter::in_memory())
+        }
+    };
+
+    let late_router = Arc::new(LateRouter::new());
+    let blob = S3Server::build(
+        store,
+        Some(Arc::clone(&late_router) as Arc<dyn ResonateRouter>),
+        S3ServerCfg {
+            keys: KeySpace::new(blob_cfg.prefix.clone(), blob_cfg.timer_shards),
+            applier: ApplierCfg {
+                max_cas_retries: blob_cfg.max_cas_retries,
+                kernel: KernelCfg {
+                    retry_timeout: config.tasks.retry_timeout,
+                    preload_limit: blob_cfg.preload_limit,
+                },
+                ..Default::default()
+            },
+            timerd: Default::default(),
+            cache_capacity: blob_cfg.cache_capacity,
+            debug: config.debug,
+            search: blob_cfg.search_enabled,
+            server_url: config.server.url.clone().unwrap_or_default(),
+        },
+    );
+
+    tracing::info!(
+        http_push_connect_timeout_ms = config.transports.http_push.connect_timeout,
+        http_push_request_timeout_ms = config.transports.http_push.request_timeout,
+        http_poll_max_connections = config.transports.http_poll.max_connections,
+        http_poll_buffer_size = config.transports.http_poll.buffer_size,
+        "Transport config"
+    );
+
+    // Every worker holds a weak handle to the server, exactly as on the SQL
+    // path — this owns the server, so nothing in the graph keeps it alive.
+    let server_handle: std::sync::Weak<dyn ResonateServer> = {
+        let weak: std::sync::Weak<S3Server> = Arc::downgrade(&blob);
+        weak
+    };
+    let poll_registry = Arc::new(PollRegistry::new(
+        server_handle.clone(),
+        config.transports.http_poll.clone(),
+    ));
+    let workers = build_workers(server_handle, &config, &poll_registry);
+    let router: Arc<dyn ResonateRouter> = Arc::new(transport::TransportDispatcher::new(workers));
+    // Close the knot: the outbox has held a placeholder since the server was
+    // built, and nothing has been delivered through it yet.
+    late_router.bind(Arc::clone(&router));
+
+    let debug = config.debug;
+    router.init(debug).await.map_err(|e| e.to_string())?;
+
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+    let mut handles = Vec::new();
+
+    // One loop, not two: the timer loop fires armed deadlines from memory,
+    // listing the store only to seed itself at startup, and the outbox
+    // delivers as it is written rather than being drained by a second loop.
+    handles.push(Arc::clone(blob.timerd()).spawn(blob.debug_mode(), shutdown_rx.clone()));
+    if debug {
+        tracing::warn!(
+            "Debug mode — the timer loop is paused and the outbox holds its \
+             queue. Time advances only through debug.tick, and debug.* \
+             operations are answered."
+        );
+    }
+
+    let metrics_port = config.observability.metrics_port;
+    if metrics_port > 0 {
+        let metrics_shutdown = shutdown_rx.clone();
+        handles.push(tokio::spawn(async move {
+            let metrics_app = Router::new().route("/metrics", get(metrics::metrics_handler));
+            match tokio::net::TcpListener::bind(format!("0.0.0.0:{}", metrics_port)).await {
+                Ok(listener) => {
+                    tracing::info!(port = metrics_port, "Metrics server listening");
+                    let _ = axum::serve(listener, metrics_app)
+                        .with_graceful_shutdown(async move {
+                            let mut rx = metrics_shutdown;
+                            let _ = rx.wait_for(|v| *v).await;
+                        })
+                        .await;
+                }
+                Err(e) => {
+                    tracing::error!(port = metrics_port, error = %e, "Failed to bind metrics port");
+                }
+            }
+        }));
+    }
+
+    if !config.server.cors.allow_origins.is_empty() {
+        tracing::info!(origins = ?config.server.cors.allow_origins, "CORS enabled");
+    }
+    let gateway: Arc<dyn ResonateGateway> = Arc::new(HttpGateway::new(
+        Arc::clone(&blob) as Arc<dyn ResonateServer>,
+        poll_registry,
+        GatewayConfig {
+            bind: config.server.bind.clone(),
+            port: config.server.port,
+            url: config.server.url.clone(),
+            cors_allow_origins: config.server.cors.allow_origins.clone(),
+            auth: config.auth.clone(),
+            // Unlike SQLite, the store is not an in-process transaction a
+            // poisoned handler could leave half-written: every write is one
+            // conditional PUT that lands whole or not at all.
+            abort_on_panic: false,
+        },
+    ));
+    gateway
+        .init(debug)
+        .await
+        .map_err(|e| format!("HTTP gateway failed to start: {e}"))?;
+
+    shutdown_signal().await;
+
+    tracing::info!("Shutting down, draining background tasks...");
+    let _ = shutdown_tx.send(true);
+
+    let shutdown_timeout = std::time::Duration::from_millis(config.server.shutdown_timeout);
+    let drain = async {
+        for handle in handles {
+            let _ = handle.await;
+        }
+        let _ = router.stop().await;
+        if let Err(e) = gateway.stop().await {
+            tracing::warn!(error = %e, "HTTP gateway did not stop cleanly");
+        }
+    };
     if tokio::time::timeout(shutdown_timeout, drain).await.is_err() {
         tracing::warn!("Background tasks did not finish within shutdown timeout, forcing exit");
     }
