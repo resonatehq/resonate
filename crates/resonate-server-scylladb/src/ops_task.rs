@@ -6,12 +6,11 @@
 //! a behavioral one, not a spelling one.
 
 use resonate_core::types::{
-    PromiseCreateData, PromiseRecord, PromiseSettleData, RequestEnvelope,
-    TaskAcquireData, TaskAcquireResponseData, TaskContinueData, TaskCreateData,
-    TaskCreateResponseData, TaskFenceData, TaskFulfillData, TaskFulfillResponseData,
-    TaskGetData, TaskHaltData, TaskHeartbeatData, TaskRecord, TaskReleaseData,
-    TaskResponseData, TaskSearchData, TaskSearchResponseData, TaskSuspendData,
-    TaskSuspendPreloadData, PROTOCOL_VERSION,
+    PromiseCreateData, PromiseRecord, PromiseSettleData, RequestEnvelope, TaskAcquireData,
+    TaskAcquireResponseData, TaskContinueData, TaskCreateData, TaskCreateResponseData,
+    TaskFenceData, TaskFulfillData, TaskFulfillResponseData, TaskGetData, TaskHaltData,
+    TaskHeartbeatData, TaskRecord, TaskReleaseData, TaskResponseData, TaskSearchData,
+    TaskSearchResponseData, TaskSuspendData, TaskSuspendPreloadData, PROTOCOL_VERSION,
 };
 use resonate_server_dbms::engine_port::{Outgoing, Output};
 use serde_json::json;
@@ -224,7 +223,11 @@ impl ScyllaEngine {
         let already_timedout = now >= action.timeout_at;
         let is_timer = action.tags.get("resonate:timer").map(String::as_str) == Some("true");
         let (p_state, created_at, settled_at) = if already_timedout {
-            let s = if is_timer { "resolved" } else { "rejected_timedout" };
+            let s = if is_timer {
+                "resolved"
+            } else {
+                "rejected_timedout"
+            };
             (s, action.timeout_at, Some(action.timeout_at))
         } else {
             ("pending", now, None)
@@ -287,7 +290,11 @@ impl ScyllaEngine {
             int(t_version),
             if already_timedout { None } else { big(r.ttl) },
             if already_timedout { None } else { text(&r.pid) },
-            if already_timedout { None } else { big(lease_at) },
+            if already_timedout {
+                None
+            } else {
+                big(lease_at)
+            },
         ];
         let (applied, lwt) = match self
             .cas(
@@ -1220,5 +1227,4 @@ impl ScyllaEngine {
             &TaskSearchResponseData { tasks, cursor },
         )
     }
-
 }

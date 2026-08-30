@@ -14,12 +14,12 @@
 //! goroutines. The queries underneath are the same queries.
 
 mod db;
-mod tls;
 mod ops_promise;
 mod ops_schedule;
 mod ops_task;
 mod snap;
 mod timeouts;
+mod tls;
 
 use std::collections::HashMap;
 use std::sync::Arc;

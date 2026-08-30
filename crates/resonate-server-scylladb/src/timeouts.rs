@@ -12,7 +12,7 @@ use resonate_server_dbms::StorageResult;
 use scylla::value::CqlValue;
 use serde_json::Value;
 
-use crate::db::{get_big, get_text, get_tags, PromiseRow};
+use crate::db::{get_big, get_tags, get_text, PromiseRow};
 use crate::ops_promise::err;
 use crate::{origin_of, Ctx, ScyllaEngine, Tags};
 
@@ -22,15 +22,12 @@ enum Cleanup {
 }
 
 impl ScyllaEngine {
-    pub(crate) async fn process_internal(
-        &self,
-        timeout: Timeout,
-        now: i64,
-    ) -> Output {
+    pub(crate) async fn process_internal(&self, timeout: Timeout, now: i64) -> Output {
         let mut ctx = Ctx::default();
         let result = match &timeout {
             Timeout::PromiseTimeout { promise_id } => {
-                self.internal_promise_timeout(&mut ctx, promise_id, now).await
+                self.internal_promise_timeout(&mut ctx, promise_id, now)
+                    .await
             }
             Timeout::TaskRetryTimeout { task_id } => {
                 self.internal_retry_timeout(&mut ctx, task_id, now).await
@@ -64,7 +61,8 @@ impl ScyllaEngine {
         let origin = origin_of(id).to_string();
         if let Some(row) = self.read_promise(&origin, id).await? {
             if row.state == "pending" && row.timeout_at <= now {
-                self.on_promise_timeout(ctx, &origin, id, row.timeout_at, now).await?;
+                self.on_promise_timeout(ctx, &origin, id, row.timeout_at, now)
+                    .await?;
             }
         }
         Ok(())
@@ -142,20 +140,14 @@ impl ScyllaEngine {
         let (cql, bucket, shard) = delete_entry(self.bucket_for(entry_at), self.shard_for(id));
         match self.read_promise(origin, id).await? {
             None => {
-                let _ = self
-                    .exec(cql, (bucket, shard, entry_at, origin, id))
-                    .await;
+                let _ = self.exec(cql, (bucket, shard, entry_at, origin, id)).await;
             }
             Some(row) if row.state != "pending" => {
-                let _ = self
-                    .exec(cql, (bucket, shard, entry_at, origin, id))
-                    .await;
+                let _ = self.exec(cql, (bucket, shard, entry_at, origin, id)).await;
             }
             Some(row) if row.timeout_at != entry_at => {
                 // Orphan: the row's deadline is not this entry's.
-                let _ = self
-                    .exec(cql, (bucket, shard, entry_at, origin, id))
-                    .await;
+                let _ = self.exec(cql, (bucket, shard, entry_at, origin, id)).await;
             }
             Some(row) => {
                 // Deliberate deviation from Go: the sweep's clock anchors a
@@ -533,7 +525,11 @@ impl ScyllaEngine {
         let already_timedout = now >= timeout_at;
         let (state, settled_at) = if already_timedout {
             (
-                if is_timer { "resolved" } else { "rejected_timedout" },
+                if is_timer {
+                    "resolved"
+                } else {
+                    "rejected_timedout"
+                },
                 Some(timeout_at),
             )
         } else {
@@ -750,7 +746,15 @@ impl ScyllaEngine {
     ) -> StorageResult<usize> {
         // promise_timeouts
         let mut promise_entries: Vec<(i64, String, String)> = Vec::new();
-        for m in self.scan_queue("promise_timeouts", "timeout_at, origin, promise_id", t, shards).await? {
+        for m in self
+            .scan_queue(
+                "promise_timeouts",
+                "timeout_at, origin, promise_id",
+                t,
+                shards,
+            )
+            .await?
+        {
             promise_entries.push((
                 get_big(&m, "timeout_at").unwrap_or(0),
                 get_text(&m, "origin").unwrap_or_default(),
@@ -759,7 +763,11 @@ impl ScyllaEngine {
         }
         promise_entries.sort_by(|a, b| a.2.cmp(&b.2).then_with(|| a.0.cmp(&b.0)));
         for (at, origin, id) in &promise_entries {
-            let origin = if origin.is_empty() { id.clone() } else { origin.clone() };
+            let origin = if origin.is_empty() {
+                id.clone()
+            } else {
+                origin.clone()
+            };
             self.on_promise_timeout(ctx, &origin, id, *at, t).await?;
         }
 
@@ -792,11 +800,17 @@ impl ScyllaEngine {
                 .then_with(|| a.0.cmp(&b.0))
         });
         for (at, ttype, origin, id, p_timeout) in &task_entries {
-            let origin = if origin.is_empty() { id.clone() } else { origin.clone() };
-            if *ttype == 0 {
-                self.on_task_retry(ctx, &origin, id, *at, *p_timeout, t).await?;
+            let origin = if origin.is_empty() {
+                id.clone()
             } else {
-                self.on_task_lease(ctx, &origin, id, *at, *p_timeout, t).await?;
+                origin.clone()
+            };
+            if *ttype == 0 {
+                self.on_task_retry(ctx, &origin, id, *at, *p_timeout, t)
+                    .await?;
+            } else {
+                self.on_task_lease(ctx, &origin, id, *at, *p_timeout, t)
+                    .await?;
             }
         }
 
@@ -829,7 +843,11 @@ impl ScyllaEngine {
         });
         let mut fired = 0usize;
         for (at, origin, id, token) in &schedule_entries {
-            let _origin = if origin.is_empty() { id.clone() } else { origin.clone() };
+            let _origin = if origin.is_empty() {
+                id.clone()
+            } else {
+                origin.clone()
+            };
             fired += self.on_schedule_due(ctx, id, *at, *token, t).await?;
         }
         Ok(fired)

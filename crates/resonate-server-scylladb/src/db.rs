@@ -13,9 +13,7 @@ use scylla::response::query_result::QueryResult;
 use scylla::statement::batch::{Batch, BatchType};
 use scylla::value::{CqlValue, Row};
 
-use resonate_core::types::{
-    PromiseRecord, PromiseState, PromiseValue, TaskRecord, TaskState,
-};
+use resonate_core::types::{PromiseRecord, PromiseState, PromiseValue, TaskRecord, TaskState};
 use resonate_server_dbms::engine_port::{Outgoing, Scheduled, Timeout};
 use resonate_server_dbms::{StorageError, StorageResult};
 
@@ -205,7 +203,11 @@ impl PromiseRow {
             version: self.task_version,
             resumes: self.task_resumes.len() as i64,
             ttl: if acquired { self.task_ttl } else { None },
-            pid: if acquired { self.task_pid.clone() } else { None },
+            pid: if acquired {
+                self.task_pid.clone()
+            } else {
+                None
+            },
         })
     }
 
@@ -403,7 +405,14 @@ impl ScyllaEngine {
         ];
 
         let outcome = self
-            .enqueue_resume(&row.id, &row.origin, &row.callbacks, now, settle_stmt, settle_args)
+            .enqueue_resume(
+                &row.id,
+                &row.origin,
+                &row.callbacks,
+                now,
+                settle_stmt,
+                settle_args,
+            )
             .await?;
 
         if let SettleOutcome::Won { resumed, retry_at } = outcome {
@@ -692,7 +701,6 @@ impl ScyllaEngine {
             });
         }
     }
-
 }
 
 pub(crate) fn rows_of(result: QueryResult) -> StorageResult<Vec<RowMap>> {

@@ -8,15 +8,15 @@
 use resonate_core::types::{
     format_validation_errors, PromiseCreateData, PromiseGetData, PromiseRecord,
     PromiseRegisterCallbackData, PromiseRegisterListenerData, PromiseResponseData,
-    PromiseSearchData, PromiseSearchResponseData, PromiseSettleData, PromiseValue,
-    RequestEnvelope, ResponseEnvelope,
+    PromiseSearchData, PromiseSearchResponseData, PromiseSettleData, PromiseValue, RequestEnvelope,
+    ResponseEnvelope,
 };
 use resonate_server_dbms::engine_port::{Outgoing, Output};
 use validator::Validate;
 
 use crate::db::{
-    big, cql_map, cql_set, get_big, int, opt_cql_map, opt_text, text, Args,
-    PromiseRow, SettleOutcome,
+    big, cql_map, cql_set, get_big, int, opt_cql_map, opt_text, text, Args, PromiseRow,
+    SettleOutcome,
 };
 use crate::{origin_of, Ctx, ScyllaEngine};
 
@@ -131,7 +131,11 @@ impl ScyllaEngine {
         let already_timedout = now >= r.timeout_at;
 
         let (state, created_at, settled_at) = if already_timedout {
-            let s = if is_timer { "resolved" } else { "rejected_timedout" };
+            let s = if is_timer {
+                "resolved"
+            } else {
+                "rejected_timedout"
+            };
             (s, r.timeout_at, Some(r.timeout_at))
         } else {
             ("pending", now, None)
@@ -374,7 +378,9 @@ impl ScyllaEngine {
                 settled.value_headers = r.value.headers.clone().unwrap_or_default();
                 settled.value_data = r.value.data.clone();
                 settled.settled_at = Some(settled_at_val);
-                if let Err(e) = self.after_settle_won(&mut ctx, &settled, resumed, retry_at).await
+                if let Err(e) = self
+                    .after_settle_won(&mut ctx, &settled, resumed, retry_at)
+                    .await
                 {
                     return storage_err(req, e);
                 }
@@ -649,10 +655,7 @@ impl ScyllaEngine {
             None => 100,
         };
         let rows = match self
-            .rows(
-                &format!("SELECT {} FROM promises", crate::db::P_COLS),
-                (),
-            )
+            .rows(&format!("SELECT {} FROM promises", crate::db::P_COLS), ())
             .await
         {
             Ok(rows) => rows,

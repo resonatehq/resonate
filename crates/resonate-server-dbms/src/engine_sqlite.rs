@@ -3809,14 +3809,13 @@ impl<'a> SqliteDb<'a> {
             r
         };
 
-        let mut stmt =
-            conn.prepare(
-                "SELECT promise_id, address FROM listeners
+        let mut stmt = conn.prepare(
+            "SELECT promise_id, address FROM listeners
                  WHERE EXISTS (
                    SELECT 1 FROM promises p WHERE p.id = promise_id
                      AND p.state = 'pending' AND p.timeout_at > ?1)
                  ORDER BY promise_id, address",
-            )?;
+        )?;
         let listeners: Vec<SnapshotListener> = {
             let mut rows = stmt.query(params![now])?;
             let mut r = Vec::new();
