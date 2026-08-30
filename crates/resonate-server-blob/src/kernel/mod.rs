@@ -11,9 +11,14 @@
 //! outside the document, and timers aggregate to one deadline per origin
 //! rather than one per entity.
 //!
-//! Where the semantics are ambiguous, `src/server.rs` and
-//! `src/persistence/persistence_sqlite.rs` are the source of truth — except
-//! `resonate:delay`, which follows `src/oracle.rs`.
+//! Where the semantics are ambiguous, main's engines are the source of truth,
+//! and the copy of their reference model in this crate's [`crate::oracle`] is
+//! how disagreements are found.
+//!
+//! Two pure models live in this crate, and they must not be merged: this
+//! kernel is written for the document shape and runs in production; the
+//! oracle carries main's semantics and runs only in tests. The value of the
+//! pair is that neither was derived from the other.
 //!
 //! # Dependencies
 //!

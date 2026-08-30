@@ -37,6 +37,18 @@ jobs:
       - name: Test
         run: cargo test --workspace --all-features
 
+      # The blob crate's oracle is a deliberate copy of the dbms oracle, and
+      # the extraction decision (plan.md, Phase 8) is read off this diff. It
+      # is printed, never failed on: the drift must be visible, not forbidden.
+      - name: Oracle drift ledger
+        run: |
+          if diff -u crates/resonate-server-dbms/src/oracle.rs \
+                     crates/resonate-server-blob/src/oracle.rs; then
+            echo "oracle copies are identical"
+          else
+            echo "oracle copies differ — expected while the cuts are structural; see plan.md"
+          fi
+
   differential:
     name: Differential (${{ matrix.backend }})
     runs-on: ubuntu-latest
@@ -129,7 +141,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [sqlite, postgres, mysql]
+        backend: [sqlite, postgres, mysql, blob]
 
     services:
       postgres:
@@ -199,6 +211,12 @@ jobs:
             mysql)
               export RESONATE_STORAGE__TYPE=mysql
               export RESONATE_STORAGE__MYSQL__URL=mysql://resonate:resonate@localhost:3306/resonate
+              ;;
+            blob)
+              # No bucket configured: the blob backend runs against its
+              # in-process, in-memory object store, which has real
+              # conditional-write semantics — the concurrency is still real.
+              export RESONATE_STORAGE__TYPE=blob
               ;;
             *)
               export RESONATE_STORAGE__TYPE=sqlite

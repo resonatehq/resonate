@@ -1,3 +1,19 @@
+//! The reference model — a verbatim copy of
+//! `crates/resonate-server-dbms/src/oracle.rs`, minus its engine port.
+//!
+//! The copy is deliberate and watched (CI prints the diff between the two
+//! files): while it stays true, matching it is matching main's semantics, and
+//! Phase 8 of plan.md reads the extraction decision off that diff. Every edit
+//! here is an edit to a specification — structural cuts (the `ResonateEngine`
+//! impl, the armed/emitted recording, `upcoming`) are recorded in the commits
+//! that made them; behavioural edits need a sentence saying why the model was
+//! wrong.
+//!
+//! Two pure models live in this crate, and they must not be merged: the
+//! kernel is written for the document shape and runs in production; this
+//! oracle carries main's semantics and runs only in tests. The value of the
+//! pair is that neither was derived from the other.
+
 // BTreeMap/BTreeSet, not Hash*: every traversal of oracle state is ordered by
 // key. These maps back the differential's request generator and its `preload`
 // response, and `HashMap` iteration order is randomized per process — so a
