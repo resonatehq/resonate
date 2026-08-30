@@ -48,7 +48,7 @@
 //! # Dependants
 //!
 //! `main` spawns the wall-clock loop; `S3Server` calls [`Timerd::round`]
-//! directly from `debug.tick` and pauses the loop from `debug.start`, so a
+//! directly from `debug.tick` and pauses the loop under the debug startup flag, so a
 //! test on a synthetic clock and a server on a real one take the same path.
 
 use std::collections::BTreeMap;
@@ -90,7 +90,7 @@ impl Default for TimerdCfg {
 /// How long a failed sweep's keys wait in memory before the loop looks again.
 const RETRY_DELAY_MS: i64 = 1_000;
 
-/// How long the loop naps between pause checks while `debug.start` holds it.
+/// How long the loop naps between pause checks while the debug startup flag holds it.
 const PAUSED_NAP: Duration = Duration::from_millis(100);
 
 pub struct Timerd {
@@ -278,7 +278,7 @@ impl Timerd {
 
     /// The wall-clock loop: seed once, then sleep until the nearest armed
     /// deadline and fire it. Paused while `paused` is set, which is what
-    /// `debug.start` does: with the loop stopped, `debug.tick` is the only
+    /// the debug startup flag does: with the loop stopped, `debug.tick` is the only
     /// thing that moves time.
     pub fn spawn(
         self: Arc<Self>,
@@ -311,7 +311,8 @@ impl Timerd {
                 } else {
                     match self.queue.next_deadline() {
                         Some(at) => Duration::from_millis(
-                            at.saturating_sub(resonate_core::util::system_time_ms()).max(0) as u64,
+                            at.saturating_sub(resonate_core::util::system_time_ms())
+                                .max(0) as u64,
                         ),
                         // Nothing armed: sleep until an arm wakes us.
                         None => Duration::from_secs(3_600),
@@ -341,13 +342,13 @@ impl Timerd {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use resonate_core::types::PromiseState;
-    use crate::kernel::state::Req;
     use crate::applier::ApplierCfg;
     use crate::cache::{DocCache, MemDocCache};
     use crate::codec;
+    use crate::kernel::state::Req;
     use crate::outbox::Outbox;
     use crate::store::ObjectStoreAdapter;
+    use resonate_core::types::PromiseState;
     use serde_json::json;
     use std::sync::Mutex;
 

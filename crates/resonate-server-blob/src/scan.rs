@@ -33,6 +33,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use crate::kernel::state::{OriginDoc, Reply};
 use resonate_core::types::{
     PromiseRecord, PromiseSearchData, PromiseSearchResponseData, ScheduleRecord,
     ScheduleSearchData, ScheduleSearchResponseData, Snapshot, SnapshotCallback, SnapshotListener,
@@ -40,7 +41,6 @@ use resonate_core::types::{
     TaskSearchResponseData,
 };
 use resonate_core::Unavailable;
-use crate::kernel::state::{OriginDoc, Reply};
 
 use super::applier::KeySpace;
 use super::cache::DocCache;
@@ -316,9 +316,9 @@ fn paginate<T>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::kernel::state::Req;
     use crate::applier::{ApplierCfg, ApplierPool};
     use crate::cache::MemDocCache;
+    use crate::kernel::state::Req;
     use crate::store::ObjectStoreAdapter;
     use serde_json::{json, Value};
 

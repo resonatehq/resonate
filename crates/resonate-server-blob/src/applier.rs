@@ -65,9 +65,9 @@ use std::time::Duration;
 
 use tokio::sync::{mpsc, oneshot, Mutex as AsyncMutex};
 
-use resonate_core::Unavailable;
 use crate::kernel::state::{apply_effects, Effect, KernelCfg, OriginDoc, Reply, Req};
 use crate::kernel::{drain, handle};
+use resonate_core::Unavailable;
 
 use super::cache::DocCache;
 use super::codec;

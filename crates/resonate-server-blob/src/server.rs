@@ -14,11 +14,13 @@
 //!   nothing costs no S3 operations at all on a cache hit, by the write law. So
 //!   there is nothing to gain from a separate read path and a correctness bug
 //!   waiting in one.
-//! - **Every operation is single-origin, `task.fence` included.** Its validator
+//! - **Every operation is single-origin, `task.fence` included.** This server
 //!   requires the fenced action's id to share the task's origin, so one
 //!   document always covers the check and the action and the fence is atomic.
 //!   Without that rule the fence would need a two-object commit, which the
-//!   single-document design deliberately does not have.
+//!   single-document design deliberately does not have. The rule is this
+//!   backend's, not the protocol's — the SQL engines accept a cross-origin
+//!   fence — so the check lives in `dispatch` rather than in core's validator.
 //!
 //! # Dependencies
 //!
@@ -32,7 +34,7 @@
 //! `main`'s backend selection, the differential suite, and the live-bucket
 //! smoke tests, all through the `ResonateServer` port.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -40,6 +42,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use validator::Validate;
 
+use crate::kernel::state::{KernelCfg, Reply, Req};
 use resonate_core::types::{
     format_validation_errors, PromiseCreateData, PromiseGetData, PromiseRegisterCallbackData,
     PromiseRegisterListenerData, PromiseSearchData, PromiseSettleData, RequestEnvelope,
@@ -47,9 +50,8 @@ use resonate_core::types::{
     TaskAcquireData, TaskContinueData, TaskCreateData, TaskFenceData, TaskFulfillData, TaskGetData,
     TaskHaltData, TaskHeartbeatData, TaskReleaseData, TaskSearchData, TaskSuspendData,
 };
-use resonate_core::{ResonateRouter, ResonateServer, Unavailable};
-use crate::kernel::state::{KernelCfg, Reply, Req};
 use resonate_core::util;
+use resonate_core::{ResonateRouter, ResonateServer, Unavailable};
 
 use super::applier::{ApplierCfg, ApplierPool, KeySpace};
 use super::cache::{DocCache, MemDocCache};
@@ -107,8 +109,10 @@ pub struct S3Server {
     keys: KeySpace,
     debug: bool,
     search: bool,
-    /// Set by `debug.start`. Shared with the timer poller, which is the point:
-    /// with the loop paused, `debug.tick` is the only thing that moves time.
+    /// True for the life of the process when `cfg.debug` is set. Shared with
+    /// the timer poller, which is the point: with the loop paused,
+    /// `debug.tick` is the only thing that moves time. The clock belongs to
+    /// the caller for the life of the process, or it never does.
     debug_mode: Arc<AtomicBool>,
 }
 
@@ -154,6 +158,12 @@ impl S3Server {
             Arc::clone(&outbox),
             cfg.keys.clone(),
         );
+        // Under the debug flag the outbox is paused for the life of the
+        // process — queued messages sit in `debug.snap` instead of leaving,
+        // which is what makes the snapshot's message list mean anything.
+        if cfg.debug {
+            outbox.set_paused(true);
+        }
         Arc::new(Self {
             applier,
             timerd,
@@ -164,7 +174,7 @@ impl S3Server {
             keys: cfg.keys,
             debug: cfg.debug,
             search: cfg.search,
-            debug_mode: Arc::new(AtomicBool::new(false)),
+            debug_mode: Arc::new(AtomicBool::new(cfg.debug)),
         })
     }
 
@@ -193,7 +203,8 @@ impl S3Server {
         }
     }
 
-    /// The flag the timer poller watches. `debug.start` sets it.
+    /// The flag the timer poller watches — set at construction from
+    /// `cfg.debug` and never afterwards.
     pub fn debug_mode(&self) -> Arc<AtomicBool> {
         Arc::clone(&self.debug_mode)
     }
@@ -349,25 +360,11 @@ impl S3Server {
             }
 
             // --- debug ------------------------------------------------------
-            "debug.start" | "debug.stop" | "debug.reset" | "debug.snap" | "debug.tick"
-                if !self.debug =>
-            {
+            // `debug.start` / `debug.stop` do not exist: debug is a startup
+            // flag, so they fall through to the unknown-operation 400 the way
+            // they do on every other backend.
+            "debug.reset" | "debug.snap" | "debug.tick" if !self.debug => {
                 Ok(Reply::err(403, "Debug operations are disabled"))
-            }
-            "debug.start" => {
-                self.debug_mode.store(true, Ordering::SeqCst);
-                self.outbox.set_paused(true);
-                tracing::info!("Debug mode started — background loops paused");
-                Ok(Reply::status(200, Value::Object(serde_json::Map::new())))
-            }
-            "debug.stop" => {
-                self.debug_mode.store(false, Ordering::SeqCst);
-                self.outbox.set_paused(false);
-                // Whatever queued up while paused goes now, rather than
-                // waiting for the next message to push it along.
-                self.outbox.deliver().await;
-                tracing::info!("Debug mode stopped — background loops resumed");
-                Ok(Reply::status(200, Value::Object(serde_json::Map::new())))
             }
             "debug.reset" => self.reset().await,
             "debug.snap" => {
@@ -479,6 +476,10 @@ impl ResonateServer for S3Server {
             reply.data,
         ))
     }
+
+    async fn ready(&self) -> bool {
+        self.store_reachable().await
+    }
 }
 
 #[cfg(test)]
@@ -520,12 +521,11 @@ mod tests {
         s.process(&req).await.expect("in-process backend answers")
     }
 
-    /// A debug server with the background loops paused, as the differential
-    /// suite drives it.
+    /// A debug server — born with the background loops paused, as the
+    /// differential suite drives it. Debug is a startup flag, so there is
+    /// nothing to start.
     async fn started() -> Arc<S3Server> {
-        let s = server(true);
-        assert_eq!(send(&s, "debug.start", json!({}), 0).await.head.status, 200);
-        s
+        server(true)
     }
 
     #[tokio::test]
@@ -860,16 +860,24 @@ mod tests {
     #[tokio::test]
     async fn debug_operations_are_refused_when_debug_is_off() {
         let s = server(false);
-        for kind in [
-            "debug.start",
-            "debug.stop",
-            "debug.reset",
-            "debug.snap",
-            "debug.tick",
-        ] {
+        for kind in ["debug.reset", "debug.snap", "debug.tick"] {
             let resp = send(&s, kind, json!({ "time": 1 }), 0).await;
             assert_eq!(resp.head.status, 403, "{kind}");
             assert_eq!(resp.data, json!("Debug operations are disabled"));
+        }
+    }
+
+    #[tokio::test]
+    async fn debug_start_and_stop_do_not_exist() {
+        // Debug is a startup flag on every backend; the mode-switching
+        // operations were removed deliberately, so they answer as unknown
+        // whether or not the flag is set.
+        for debug in [false, true] {
+            let s = server(debug);
+            for kind in ["debug.start", "debug.stop"] {
+                let resp = send(&s, kind, json!({}), 0).await;
+                assert_eq!(resp.head.status, 400, "{kind} debug={debug}");
+            }
         }
     }
 
@@ -977,7 +985,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stopping_debug_delivers_what_queued_up() {
+    async fn the_debug_pause_is_permanent() {
+        // The clock belongs to the caller for the life of the process, or it
+        // never does: there is no `debug.stop` to flush the queue, so what
+        // queued stays visible in the snapshot.
         let s = started().await;
         send(
             &s,
@@ -988,18 +999,15 @@ mod tests {
         )
         .await;
         assert_eq!(
+            send(&s, "debug.stop", json!({}), 1_000).await.head.status,
+            400
+        );
+        assert_eq!(
             send(&s, "debug.snap", json!({}), 1_000).await.data["messages"]
                 .as_array()
                 .unwrap()
                 .len(),
             1
-        );
-        send(&s, "debug.stop", json!({}), 1_000).await;
-        assert!(
-            send(&s, "debug.snap", json!({}), 1_000).await.data["messages"]
-                .as_array()
-                .unwrap()
-                .is_empty()
         );
     }
 

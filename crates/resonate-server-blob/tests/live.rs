@@ -224,14 +224,9 @@ async fn a_workflow_runs_end_to_end_against_a_live_store() {
             ..Default::default()
         },
     );
-    // Pause delivery so the queued messages are visible in the snapshot.
-    assert_eq!(
-        send(&server, "debug.start", json!({}), T0)
-            .await
-            .head
-            .status,
-        200
-    );
+    // Debug is a startup flag: the server above was built with `debug: true`,
+    // so delivery is already paused and queued messages stay visible in the
+    // snapshot.
 
     // Claim work by describing it.
     let created = send(

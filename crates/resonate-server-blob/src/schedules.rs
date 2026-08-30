@@ -42,11 +42,13 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use resonate_core::types::{PromiseValue, ScheduleCreateData, ScheduleRecord, ScheduleResponseData};
-use resonate_core::Unavailable;
 use crate::kernel::state::{Reply, Req, ScheduleFireData, TAG_TARGET};
 use crate::metrics;
+use resonate_core::types::{
+    PromiseValue, ScheduleCreateData, ScheduleRecord, ScheduleResponseData,
+};
 use resonate_core::util;
+use resonate_core::Unavailable;
 
 use super::applier::{ApplierPool, KeySpace};
 use super::store::{Etag, Store, StoreError};

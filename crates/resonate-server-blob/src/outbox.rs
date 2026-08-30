@@ -16,7 +16,7 @@
 //!   the pending set must collapse the same way or `debug.snap` diverges.
 //!   `outgoing_unblock`'s is `(promise_id, address)` and its insert is
 //!   `ON CONFLICT DO NOTHING`, so the first write wins.
-//! - **Delivery pauses.** `debug.start` stops the message-processing loop,
+//! - **Delivery pauses.** the debug startup flag stops the message-processing loop,
 //!   leaving rows queued for `debug.snap` to see. Pausing delivery here is
 //!   that, and it is what makes the differential suite's `messages` comparison
 //!   meaningful.
@@ -46,13 +46,13 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use async_trait::async_trait;
 
+use crate::kernel::state::OutEntry;
+use crate::metrics;
 use resonate_core::types::{
     ExecuteMsg, ExecuteMsgData, ExecuteMsgTask, Message, MessageHead, PromiseRecord,
     SnapshotMessage, UnblockMsg, UnblockMsgData, UnblockMsgHead,
 };
 use resonate_core::{ResonateRouter, Unavailable};
-use crate::kernel::state::OutEntry;
-use crate::metrics;
 
 /// A router registered after the thing that needs it was built.
 ///
@@ -125,7 +125,7 @@ impl Outbox {
         }
     }
 
-    /// Hold messages instead of delivering them — what `debug.start` does to
+    /// Hold messages instead of delivering them — what the debug startup flag does to
     /// the message-processing loop.
     pub fn set_paused(&self, paused: bool) {
         self.paused.store(paused, Ordering::SeqCst);
