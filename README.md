@@ -169,6 +169,38 @@ Or, you can run it as an executable using the following command:
 ./target/release/resonate serve
 ```
 
+## Storage backends
+
+The server stores its durable state in SQLite (the default), PostgreSQL,
+MySQL, or ScyllaDB, selected with `storage.type` in `resonate.toml` or
+`RESONATE_STORAGE__TYPE`. All four are held to the same behavior by a
+differential test that drives them in lock step against a reference model.
+
+ScyllaDB configuration, with its defaults:
+
+```toml
+[storage]
+type = "scylladb"
+
+[storage.scylladb]
+hosts = ["localhost"]      # seed hosts, bare or host:port
+port = 0                   # applied to bare hosts AND gossip-discovered peers (9142 for TLS clusters)
+username = ""
+password = ""
+keyspace = "resonate"
+replication = ""           # CREATE KEYSPACE clause; empty = NetworkTopologyStrategy, RF 1
+migrate = false            # apply the embedded schema (CREATE ... IF NOT EXISTS) on connect
+bucket_width = 3600000     # timeout-queue bucket width (ms)
+bucket_lookback = 1        # past buckets each sweep covers
+shards = 1                 # timeout-queue shard count, split among live server instances
+worker_ttl = 180000        # instance heartbeat TTL (ms); must exceed timeouts.poll_interval
+tls = { enabled = false, insecure = false }  # insecure = encrypt, skip verification (private CAs)
+# tls.ca_cert = "/path/to/ca.pem"            # or trust a specific CA, verified
+```
+
+The keyspace is created with tablets disabled — lightweight transactions,
+which this engine is built on, require it.
+
 ## Outbound authentication for HTTP push
 
 When the Resonate Server delivers execute messages to protected Cloud Functions or Cloud Run services, it can attach an outbound authentication header. Configure this under `[transports.http_push.auth]`.

@@ -45,10 +45,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [sqlite, postgres, mysql]
+        backend: [sqlite, postgres, mysql, scylladb]
 
     # Services cannot be selected per matrix leg, so both start everywhere
-    # and the step below picks the one this leg talks to.
+    # and the step below picks the one this leg talks to. ScyllaDB is not a
+    # service because services cannot pass container arguments, and it needs
+    # several; the scylladb leg starts it in a step instead.
     services:
       postgres:
         image: postgres:16
@@ -87,6 +89,23 @@ jobs:
       - name: Setup Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
 
+      # The flags are the ones LWT needs: single shard for a CI runner, and
+      # 127.0.0.1 broadcast so the driver follows the mapped port rather
+      # than the container's internal address. The keyspace opts out of
+      # tablets in the engine itself.
+      - name: Start ScyllaDB
+        if: matrix.backend == 'scylladb'
+        run: |
+          docker run -d --rm --name scylla -p 9042:9042 scylladb/scylla:6.2 \
+            --smp 1 --developer-mode 1 --overprovisioned 1 \
+            --broadcast-rpc-address 127.0.0.1
+          for _ in $(seq 1 90); do
+            docker exec scylla sh -c 'cqlsh $(hostname -i) -e "SELECT release_version FROM system.local"' >/dev/null 2>&1 && exit 0
+            sleep 2
+          done
+          echo "ScyllaDB did not become ready" >&2
+          exit 1
+
       # --release: the run walks to a coverage plateau or 200k steps, which
       # a debug build turns from minutes into an afternoon.
       - name: Differential
@@ -99,6 +118,9 @@ jobs:
               ;;
             mysql)
               export TEST_MYSQL_URL=mysql://resonate:resonate@localhost:3306/resonate
+              ;;
+            scylladb)
+              export TEST_SCYLLADB_HOSTS=127.0.0.1:9042
               ;;
           esac
           cargo test --release --test differential --all-features -- --nocapture
@@ -129,7 +151,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [sqlite, postgres, mysql]
+        backend: [sqlite, postgres, mysql, scylladb]
 
     services:
       postgres:
@@ -183,6 +205,19 @@ jobs:
       - name: Build
         run: cargo build --release --bin resonate --example conctrace
 
+      - name: Start ScyllaDB
+        if: matrix.backend == 'scylladb'
+        run: |
+          docker run -d --rm --name scylla -p 9042:9042 scylladb/scylla:6.2 \
+            --smp 1 --developer-mode 1 --overprovisioned 1 \
+            --broadcast-rpc-address 127.0.0.1
+          for _ in $(seq 1 90); do
+            docker exec scylla sh -c 'cqlsh $(hostname -i) -e "SELECT release_version FROM system.local"' >/dev/null 2>&1 && exit 0
+            sleep 2
+          done
+          echo "ScyllaDB did not become ready" >&2
+          exit 1
+
       # Debug mode is what makes a history checkable: the clock belongs to the
       # caller, so every request carries the `resonate:debug_time` the model's
       # non-decreasing clock needs, and no background sweep settles anything
@@ -199,6 +234,12 @@ jobs:
             mysql)
               export RESONATE_STORAGE__TYPE=mysql
               export RESONATE_STORAGE__MYSQL__URL=mysql://resonate:resonate@localhost:3306/resonate
+              ;;
+            scylladb)
+              export RESONATE_STORAGE__TYPE=scylladb
+              # figment parses env values as TOML, so a list is spelled as one.
+              export RESONATE_STORAGE__SCYLLADB__HOSTS='["127.0.0.1:9042"]'
+              export RESONATE_STORAGE__SCYLLADB__MIGRATE=true
               ;;
             *)
               export RESONATE_STORAGE__TYPE=sqlite

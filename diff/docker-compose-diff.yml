@@ -6,10 +6,13 @@ services:
     environment:
       TEST_POSTGRES_URL: postgres://resonate:resonate@postgres:5432/resonate
       TEST_MYSQL_URL: mysql://resonate:resonate@mysql:3306/resonate
+      TEST_SCYLLADB_HOSTS: scylladb:9042
     depends_on:
       postgres:
         condition: service_healthy
       mysql:
+        condition: service_healthy
+      scylladb:
         condition: service_healthy
 
   postgres:
@@ -27,6 +30,19 @@ services:
       resources:
         limits:
           memory: 512m
+
+  scylladb:
+    image: scylladb/scylla:6.2
+    command: --smp 1 --developer-mode 1 --overprovisioned 1
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh $(hostname -i) -e 'SELECT release_version FROM system.local'"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+    deploy:
+      resources:
+        limits:
+          memory: 1g
 
   mysql:
     image: mysql:8.0

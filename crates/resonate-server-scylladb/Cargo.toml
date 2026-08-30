@@ -9,7 +9,7 @@ description = "Resonate server storage over ScyllaDB: the Go resonate-on-scyllad
 resonate-core = { path = "../resonate-core" }
 # For the engine port and the shared StorageError only; no SQL engine is compiled.
 resonate-server-dbms = { path = "../resonate-server-dbms", default-features = false }
-scylla = "1.8"
+scylla = { version = "1.8", features = ["rustls-023"] }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -19,3 +19,6 @@ tracing = "0.1"
 cron = "0.12"
 chrono = "0.4"
 uuid = { version = "1", features = ["v4"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+rustls-pemfile = "2"
+webpki-roots = "0.26"
