@@ -719,10 +719,21 @@ fn gen_task_suspend(rng: &mut fastrand::Rng, oracle: &Oracle) -> RequestEnvelope
 fn gen_task_fence(rng: &mut fastrand::Rng, oracle: &Oracle, now: i64) -> RequestEnvelope {
     let acquired = oracle.tasks_by_state(TaskState::Acquired);
     let (task_id, version) = pick(rng, &acquired).unwrap_or_else(|| (random_task_id(rng), 1));
-    let pending_p = oracle.pending_promise_ids();
+    // Same-origin actions only: the blob server refuses a cross-origin fence
+    // by design (one CAS, one document), where the oracle — carrying main's
+    // semantics — accepts it. That deviation is deliberate and unit-tested in
+    // server.rs; the differential stays inside the envelope both agree on.
+    // Schedule-created promises (`sched-promise-*`) live in another origin,
+    // so they are filtered out here.
+    let pending_p: Vec<String> = oracle
+        .pending_promise_ids()
+        .into_iter()
+        .filter(|p| p.split(':').next() == task_id.split(':').next())
+        .collect();
     let do_settle = !pending_p.is_empty() && rng.u32(0..4) != 0;
     if !do_settle {
-        let new_promise_id = promise_id(rng.u32(0..8));
+        let task_origin = task_id.split(':').next().unwrap().to_string();
+        let new_promise_id = format!("{task_origin}:p{}", rng.u32(0..8));
         let timeout_at = now + rng.i64(30_000..300_000);
         req(
             "task.fence",

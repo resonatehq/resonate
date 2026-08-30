@@ -654,6 +654,7 @@ mod tests {
     fn cfg() -> KernelCfg {
         KernelCfg {
             retry_timeout: 30_000,
+            ..Default::default()
         }
     }
 
@@ -688,7 +689,8 @@ mod tests {
         );
         doc = apply(
             &doc,
-            json!({ "id": "diff:b", "timeoutAt": 200_000, "param": {}, "tags": {} }),
+            json!({ "id": "diff:b", "timeoutAt": 200_000, "param": {},
+                    "tags": { "resonate:external": "true" } }),
             "create",
             1_000,
         );

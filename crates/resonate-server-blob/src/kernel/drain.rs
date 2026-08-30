@@ -122,6 +122,7 @@ mod tests {
     fn cfg() -> KernelCfg {
         KernelCfg {
             retry_timeout: 30_000,
+            ..Default::default()
         }
     }
 

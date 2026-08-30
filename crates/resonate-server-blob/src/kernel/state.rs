@@ -109,6 +109,19 @@ impl PromiseDoc {
         self.tags.get(TAG_TARGET).map(|s| s.as_str())
     }
 
+    /// The awaitable-and-armed test, `resonate_core::types::is_external`.
+    ///
+    /// The classification has one home, in core; this only bridges the
+    /// document's ordered tags to the `HashMap` the predicate reads.
+    pub fn is_external(&self) -> bool {
+        let tags = self
+            .tags
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        resonate_core::types::is_external(&tags)
+    }
+
     /// The state an expiring promise settles into: a timer resolves, everything
     /// else times out.
     pub fn timeout_state(&self) -> PromiseState {
@@ -184,12 +197,17 @@ impl TaskDoc {
 pub struct KernelCfg {
     /// How long a pending task waits before its dispatch is re-sent.
     pub retry_timeout: i64,
+    /// How many branch siblings a task response may carry — the same knob the
+    /// SQL storage configs call `preload_limit`, so the truncation happens
+    /// where theirs does.
+    pub preload_limit: u32,
 }
 
 impl Default for KernelCfg {
     fn default() -> Self {
         Self {
             retry_timeout: 30_000,
+            preload_limit: 10,
         }
     }
 }

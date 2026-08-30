@@ -671,7 +671,8 @@ mod tests {
         send(
             &s,
             "promise.create",
-            json!({ "id": "o:a", "timeoutAt": 500_000, "param": {}, "tags": {} }),
+            json!({ "id": "o:a", "timeoutAt": 500_000, "param": {},
+                    "tags": { "resonate:external": "true" } }),
             1_000,
         )
         .await;

@@ -206,6 +206,9 @@ fn op_promise_register_callback(
     if !awaiter_has_target {
         return Reply::err(422, "Awaiter promise has no resonate:target tag");
     }
+    if !resonate_core::types::is_external(&awaited_record.tags) {
+        return Reply::err(422, "Awaited promise is not awaitable");
+    }
 
     let awaited_pending = awaited_record.state == PromiseState::Pending;
     let awaiter_pending = awaiter_state == PromiseState::Pending;
@@ -234,7 +237,14 @@ fn op_promise_register_listener(
     }
     try_timeout(tx, &[&r.awaited], now, cfg);
     let pending = match tx.doc.promises.get(&r.awaited) {
-        Some(p) => p.state == PromiseState::Pending,
+        Some(p) => {
+            // A listener is an obligation, and the server owes an observation
+            // only where someone can be blocked.
+            if !p.is_external() {
+                return Reply::err(422, "Awaited promise is not awaitable");
+            }
+            p.state == PromiseState::Pending
+        }
         None => return Reply::err(404, "Awaited promise not found"),
     };
     if pending {
@@ -297,7 +307,7 @@ fn op_task_create(
                 return Reply::ok(&TaskCreateResponseData {
                     task,
                     promise: tx.doc.promises[id].to_record(id),
-                    preload: preload(&tx.doc, id),
+                    preload: preload(&tx.doc, id, cfg),
                 });
             }
             TaskState::Fulfilled => {
@@ -345,7 +355,7 @@ fn op_task_create(
     Reply::ok(&TaskCreateResponseData {
         task,
         promise,
-        preload: preload(&tx.doc, id),
+        preload: preload(&tx.doc, id, cfg),
     })
 }
 
@@ -370,7 +380,7 @@ fn op_task_acquire(
     Reply::ok(&TaskAcquireResponseData {
         task,
         promise: tx.doc.promises[&r.id].to_record(&r.id),
-        preload: preload(&tx.doc, &r.id),
+        preload: preload(&tx.doc, &r.id, cfg),
     })
 }
 
@@ -457,12 +467,13 @@ fn op_task_suspend(
             return Reply::err(422, "Awaited promise not found");
         }
     }
-    let mut awaited: Vec<String> = Vec::new();
     for action in &r.actions {
-        if !awaited.contains(&action.data.awaited) {
-            awaited.push(action.data.awaited.clone());
+        if !tx.doc.promises[&action.data.awaited].is_external() {
+            return Reply::err(422, "Awaited promise is not awaitable");
         }
     }
+    // Duplicates are refused by validation, so the list is already unique.
+    let awaited: Vec<String> = r.actions.iter().map(|a| a.data.awaited.clone()).collect();
     let any_settled = awaited
         .iter()
         .any(|id| tx.doc.promises[id].state != PromiseState::Pending);
@@ -479,7 +490,7 @@ fn op_task_suspend(
         return Reply::status(
             300,
             serde_json::to_value(TaskSuspendPreloadData {
-                preload: preload(&tx.doc, &r.id),
+                preload: preload(&tx.doc, &r.id, cfg),
             })
             .expect("preload serializes"),
         );
@@ -546,6 +557,7 @@ fn op_task_fence(
                 corr_id,
                 200,
                 json!({ "promise": record }),
+                cfg,
             )
         }
         "promise.settle" => {
@@ -576,7 +588,7 @@ fn op_task_fence(
                 Some(p) => (200, json!({ "promise": p.to_record(&settle_data.id) })),
                 None => (404, json!("Promise not found")),
             };
-            fence_reply(tx, &r.id, &r.action.kind, corr_id, status, data)
+            fence_reply(tx, &r.id, &r.action.kind, corr_id, status, data, cfg)
         }
         _ => Reply::err(400, "Invalid fence action kind"),
     }
@@ -590,6 +602,7 @@ fn fence_reply(
     corr_id: &str,
     status: i32,
     data: serde_json::Value,
+    cfg: &KernelCfg,
 ) -> Reply {
     Reply::ok(&TaskFenceResponseData {
         action: json!({
@@ -597,7 +610,7 @@ fn fence_reply(
             "head": { "corrId": corr_id, "status": status, "version": PROTOCOL_VERSION },
             "data": data,
         }),
-        preload: preload(&tx.doc, task_id),
+        preload: preload(&tx.doc, task_id, cfg),
     })
 }
 
@@ -1074,17 +1087,20 @@ pub(crate) fn trigger_listeners(tx: &mut Tx, id: &str) {
 /// `Db::compute_preload` (`persistence_sqlite.rs:1176-1200`). A branch is
 /// always a prefix of the ids under it, so a branch never spans origins and
 /// this stays a single-document read.
-pub(crate) fn preload(doc: &OriginDoc, id: &str) -> Vec<PromiseRecord> {
+pub(crate) fn preload(doc: &OriginDoc, id: &str, cfg: &KernelCfg) -> Vec<PromiseRecord> {
     let branch = match doc.promises.get(id).and_then(|p| p.tags.get(TAG_BRANCH)) {
         Some(b) if !b.is_empty() => b.clone(),
         _ => return Vec::new(),
     };
+    // Ordered by id by construction (the document is a BTreeMap), truncated
+    // where the SQL backends truncate. `ORDER BY id ASC LIMIT ?`.
     doc.promises
         .iter()
         .filter(|(other, p)| {
             other.as_str() != id && p.tags.get(TAG_BRANCH).is_some_and(|b| *b == branch)
         })
         .map(|(other, p)| p.to_record(other))
+        .take(cfg.preload_limit as usize)
         .collect()
 }
 
@@ -1099,6 +1115,7 @@ mod tests {
     fn cfg() -> KernelCfg {
         KernelCfg {
             retry_timeout: 30_000,
+            ..Default::default()
         }
     }
 
@@ -1916,10 +1933,14 @@ mod tests {
 
     #[test]
     fn suspending_parks_the_task_and_registers_each_awaited_once() {
+        // Awaited promises are external: an internal promise is not awaitable.
+        // The list is duplicate-free because validation refuses duplicates
+        // before the kernel sees them.
         let doc = with_acquired("o:t");
-        let (doc, _, _) = step(&doc, create("o:a", 100_000, json!({})), 1);
-        let (doc, _, _) = step(&doc, create("o:b", 100_000, json!({})), 1);
-        let (next, sends, reply) = step(&doc, task_suspend("o:t", 1, &["o:a", "o:b", "o:a"]), 2);
+        let ext = json!({ "resonate:external": "true" });
+        let (doc, _, _) = step(&doc, create("o:a", 100_000, ext.clone()), 1);
+        let (doc, _, _) = step(&doc, create("o:b", 100_000, ext), 1);
+        let (next, sends, reply) = step(&doc, task_suspend("o:t", 1, &["o:a", "o:b"]), 2);
         assert_eq!(reply.status, 200);
         assert_eq!(reply.data, json!({}));
         assert!(sends.is_empty());
@@ -1936,7 +1957,8 @@ mod tests {
     #[test]
     fn suspending_on_an_already_settled_promise_tells_the_caller_to_carry_on() {
         let doc = with_acquired("o:t");
-        let (doc, _, _) = step(&doc, create("o:a", 100_000, json!({})), 1);
+        let ext = json!({ "resonate:external": "true" });
+        let (doc, _, _) = step(&doc, create("o:a", 100_000, ext), 1);
         let (doc, _, _) = step(&doc, settle_req("o:a", "resolved"), 2);
         let (next, _, reply) = step(&doc, task_suspend("o:t", 1, &["o:a"]), 3);
         assert_eq!(reply.status, 300);
@@ -1949,7 +1971,8 @@ mod tests {
     #[test]
     fn suspending_drops_the_resumes_a_previous_run_buffered() {
         let doc = with_acquired("o:t");
-        let (mut doc, _, _) = step(&doc, create("o:a", 100_000, json!({})), 1);
+        let ext = json!({ "resonate:external": "true" });
+        let (mut doc, _, _) = step(&doc, create("o:a", 100_000, ext), 1);
         doc.tasks
             .get_mut("o:t")
             .unwrap()
@@ -2008,7 +2031,8 @@ mod tests {
     #[test]
     fn a_fenced_settle_runs_the_settlement_chain() {
         let doc = with_acquired("o:t");
-        let (doc, _, _) = step(&doc, create("o:a", 100_000, json!({})), 1);
+        let ext = json!({ "resonate:external": "true" });
+        let (doc, _, _) = step(&doc, create("o:a", 100_000, ext), 1);
         let (doc, _, _) = step(&doc, listener("o:a", "http://one"), 2);
         let action = json!({ "kind": "promise.settle", "head": {},
                              "data": { "id": "o:a", "state": "rejected", "value": {} } });
@@ -2150,13 +2174,16 @@ mod tests {
         );
         let (doc, _, _) = step(&doc, create("o:b", 100_000, branch), 0);
         let (doc, _, _) = step(&doc, create("o:c", 100_000, json!({})), 0);
-        let ids: Vec<String> = preload(&doc, "o:a").into_iter().map(|p| p.id).collect();
+        let ids: Vec<String> = preload(&doc, "o:a", &cfg())
+            .into_iter()
+            .map(|p| p.id)
+            .collect();
         assert_eq!(ids, vec!["o:b"]);
     }
 
     #[test]
     fn a_promise_without_a_branch_preloads_nothing() {
         let doc = with_targeted("o:a", 100_000);
-        assert!(preload(&doc, "o:a").is_empty());
+        assert!(preload(&doc, "o:a", &cfg()).is_empty());
     }
 }
