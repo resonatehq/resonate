@@ -81,6 +81,32 @@ fn p_cols(alias: &str) -> String {
     )
 }
 
+/// The deadline projection, as an expression: an expired pending promise
+/// reads as its timeout verdict, whether or not anything has written that
+/// yet. `now` names the bind slot carrying the time.
+fn state_projected(now: &str) -> String {
+    format!(
+        "CASE WHEN state = 'pending' AND timeout_at <= {now} \
+              THEN (CASE WHEN is_timer THEN 'resolved' ELSE 'rejected_timedout' END) \
+              ELSE state END"
+    )
+}
+
+/// `P_COLS` with the deadline projection applied. The deadline is a
+/// projection every read applies, and search and snap are reads — which is
+/// what lets an engine that settles an expired promise eagerly and one that
+/// leaves the row pending until touched answer identically.
+fn p_cols_projected(now: &str) -> String {
+    format!(
+        "id, {state} AS state, \
+         NULLIF(param_headers, '{{}}'::jsonb)::text AS param_headers, param_data, \
+         NULLIF(value_headers, '{{}}'::jsonb)::text AS value_headers, value_data, \
+         tags::text, timeout_at, created_at, \
+         CASE WHEN state = 'pending' AND timeout_at <= {now} THEN timeout_at ELSE settled_at END AS settled_at",
+        state = state_projected(now)
+    )
+}
+
 /// The columns every emission CTE produces, so several can be `UNION ALL`ed
 /// into one list regardless of which kind they carry.
 const MSG_COLS: &str = "kind, address, task_id, version, promise";
@@ -358,7 +384,7 @@ impl PostgresEngine {
                 ))
             }
             "debug.reset" => self.op_debug_reset(req).await,
-            "debug.snap" => self.op_debug_snap(req).await,
+            "debug.snap" => self.op_debug_snap(req, now).await,
             "debug.tick" => self.op_debug_tick(req).await,
 
             _ => {
@@ -763,7 +789,7 @@ impl PostgresEngine {
             .await
     }
 
-    async fn op_promise_search(&self, req: &RequestEnvelope, _now: i64) -> Output {
+    async fn op_promise_search(&self, req: &RequestEnvelope, now: i64) -> Output {
         let data = req.data.clone();
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
@@ -806,6 +832,7 @@ impl PostgresEngine {
                 tags_json.as_deref(),
                 r.cursor.as_deref(),
                 limit + 1,
+                now,
             )?;
             let has_more = results.len() as i64 > limit;
             let promises: Vec<_> = results.into_iter().take(limit as usize).collect();
@@ -2254,8 +2281,8 @@ impl PostgresEngine {
         })
     }
 
-    async fn op_debug_snap(&self, req: &RequestEnvelope) -> Output {
-        Output::response(match self.query(move |db| db.snap()).await {
+    async fn op_debug_snap(&self, req: &RequestEnvelope, now: i64) -> Output {
+        Output::response(match self.query(move |db| db.snap(now)).await {
             Ok(snapshot) => {
                 let data = serde_json::to_value(snapshot).unwrap_or(Value::Null);
                 ResponseEnvelope::new(req.kind.clone(), req.head.corr_id.clone(), 200, data)
@@ -3112,19 +3139,25 @@ impl PostgresDb<'_> {
         tags: Option<&str>,
         cursor: Option<&str>,
         limit: i64,
+        time: i64,
     ) -> StorageResult<Vec<PromiseRecord>> {
+        // The state filter asks the projected state — a search for 'pending'
+        // must not surface what no reader may observe as pending.
         let rows = rt_block_on(
             sqlx::query(&format!(
-                "SELECT {P_COLS} FROM promises
-                 WHERE ($1::text IS NULL OR state = $1)
+                "SELECT {cols} FROM promises
+                 WHERE ($1::text IS NULL OR {st} = $1)
                    AND ($2::jsonb IS NULL OR tags @> $2::jsonb)
                    AND ($3::text IS NULL OR id > $3)
-                 ORDER BY id ASC LIMIT $4"
+                 ORDER BY id ASC LIMIT $4",
+                cols = p_cols_projected("$5"),
+                st = state_projected("$5"),
             ))
             .bind(state)
             .bind(tags)
             .bind(cursor)
             .bind(limit)
+            .bind(time)
             .fetch_all(self.tx().as_mut()),
         )?;
         Ok(rows.iter().map(row_to_promise).collect())
@@ -4208,10 +4241,17 @@ impl PostgresDb<'_> {
     }
 
     // D-04: debug.snap — every section is now a projection of the one table
-    fn snap(&self) -> StorageResult<Snapshot> {
+    fn snap(&self, now: i64) -> StorageResult<Snapshot> {
+        // The promise records project expiry, like every read; the queue
+        // sections stay physical — sweeps are tick-driven, so those agree
+        // across backends at every instant without projection.
         let promise_rows = rt_block_on(
-            sqlx::query(&format!("SELECT {P_COLS} FROM promises ORDER BY id"))
-                .fetch_all(self.tx().as_mut()),
+            sqlx::query(&format!(
+                "SELECT {} FROM promises ORDER BY id",
+                p_cols_projected("$1")
+            ))
+            .bind(now)
+            .fetch_all(self.tx().as_mut()),
         )?;
         let promises: Vec<PromiseRecord> = promise_rows.iter().map(row_to_promise).collect();
 
@@ -4230,13 +4270,18 @@ impl PostgresDb<'_> {
             })
             .collect();
 
-        // Non-ready callbacks only — the ready ones live in `resumes`.
+        // Non-ready callbacks only — the ready ones live in `resumes`. The
+        // obligation sections report where someone can still be blocked: a
+        // holder whose projected state is settled reports none — the
+        // read-side twin of settle clearing them.
         let cb_rows = rt_block_on(
             sqlx::query(
                 "SELECT aw AS awaiter_id, id AS awaited_id
                  FROM promises CROSS JOIN LATERAL unnest(callbacks) AS aw
+                 WHERE state = 'pending' AND timeout_at > $1
                  ORDER BY aw, id",
             )
+            .bind(now)
             .fetch_all(self.tx().as_mut()),
         )?;
         let callbacks: Vec<SnapshotCallback> = cb_rows
@@ -4251,8 +4296,10 @@ impl PostgresDb<'_> {
             sqlx::query(
                 "SELECT id AS promise_id, l AS address
                  FROM promises CROSS JOIN LATERAL unnest(listeners) AS l
+                 WHERE state = 'pending' AND timeout_at > $1
                  ORDER BY id, l",
             )
+            .bind(now)
             .fetch_all(self.tx().as_mut()),
         )?;
         let listeners: Vec<SnapshotListener> = li_rows

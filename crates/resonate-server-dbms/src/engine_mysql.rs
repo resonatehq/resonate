@@ -292,7 +292,7 @@ impl MysqlEngine {
                 ))
             }
             "debug.reset" => self.op_debug_reset(req).await,
-            "debug.snap" => self.op_debug_snap(req).await,
+            "debug.snap" => self.op_debug_snap(req, now).await,
             "debug.tick" => self.op_debug_tick(req).await,
 
             _ => {
@@ -697,7 +697,7 @@ impl MysqlEngine {
             .await
     }
 
-    async fn op_promise_search(&self, req: &RequestEnvelope, _now: i64) -> Output {
+    async fn op_promise_search(&self, req: &RequestEnvelope, now: i64) -> Output {
         let data = req.data.clone();
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
@@ -740,6 +740,7 @@ impl MysqlEngine {
                 tags_json.as_deref(),
                 r.cursor.as_deref(),
                 limit + 1,
+                now,
             )?;
             let has_more = results.len() as i64 > limit;
             let promises: Vec<_> = results.into_iter().take(limit as usize).collect();
@@ -2188,8 +2189,8 @@ impl MysqlEngine {
         })
     }
 
-    async fn op_debug_snap(&self, req: &RequestEnvelope) -> Output {
-        Output::response(match self.query(move |db| db.snap()).await {
+    async fn op_debug_snap(&self, req: &RequestEnvelope, now: i64) -> Output {
+        Output::response(match self.query(move |db| db.snap(now)).await {
             Ok(snapshot) => {
                 let data = serde_json::to_value(snapshot).unwrap_or(Value::Null);
                 ResponseEnvelope::new(req.kind.clone(), req.head.corr_id.clone(), 200, data)
@@ -3045,18 +3046,31 @@ impl MysqlDb<'_> {
         tags: Option<&str>,
         cursor: Option<&str>,
         limit: i64,
+        time: i64,
     ) -> StorageResult<Vec<PromiseRecord>> {
+        // The deadline is a projection every read applies, and search is a
+        // read: an expired pending promise reads as its timeout verdict.
+        // The state filter asks the projected state for the same reason.
         let rows = rt_block_on(
             sqlx::query(
-                "SELECT id, state, param_headers, param_data, value_headers, value_data, tags, timeout_at, created_at, settled_at
+                "SELECT id,
+                        CASE WHEN state = 'pending' AND timeout_at <= ?
+                             THEN (CASE WHEN is_timer THEN 'resolved' ELSE 'rejected_timedout' END)
+                             ELSE state END AS state,
+                        param_headers, param_data, value_headers, value_data, tags, timeout_at, created_at,
+                        CASE WHEN state = 'pending' AND timeout_at <= ?
+                             THEN timeout_at ELSE settled_at END AS settled_at
                  FROM promises
-                 WHERE (? IS NULL OR state = ?)
+                 WHERE (? IS NULL OR CASE WHEN state = 'pending' AND timeout_at <= ?
+                             THEN (CASE WHEN is_timer THEN 'resolved' ELSE 'rejected_timedout' END)
+                             ELSE state END = ?)
                    AND (? IS NULL OR JSON_CONTAINS(tags, ?))
                    AND (? IS NULL OR id > ?)
                  ORDER BY id ASC
                  LIMIT ?",
             )
-            .bind(state).bind(state)
+            .bind(time).bind(time)
+            .bind(state).bind(time).bind(state)
             .bind(tags).bind(tags)
             .bind(cursor).bind(cursor)
             .bind(limit)
@@ -4384,11 +4398,23 @@ impl MysqlDb<'_> {
         Ok(())
     }
 
-    fn snap(&self) -> StorageResult<Snapshot> {
+    fn snap(&self, now: i64) -> StorageResult<Snapshot> {
+        // The promise records project expiry, like every read; the queue
+        // sections stay physical — sweeps are tick-driven, so those agree
+        // across backends at every instant without projection.
         let promise_rows = rt_block_on(
             sqlx::query(
-                "SELECT id, state, param_headers, param_data, value_headers, value_data, tags, timeout_at, created_at, settled_at FROM promises ORDER BY id",
+                "SELECT id,
+                        CASE WHEN state = 'pending' AND timeout_at <= ?
+                             THEN (CASE WHEN is_timer THEN 'resolved' ELSE 'rejected_timedout' END)
+                             ELSE state END AS state,
+                        param_headers, param_data, value_headers, value_data, tags, timeout_at, created_at,
+                        CASE WHEN state = 'pending' AND timeout_at <= ?
+                             THEN timeout_at ELSE settled_at END AS settled_at
+                 FROM promises ORDER BY id",
             )
+            .bind(now)
+            .bind(now)
             .fetch_all(self.tx().as_mut()),
         )?;
         let promises: Vec<PromiseRecord> = promise_rows.iter().map(row_to_promise).collect();
@@ -4410,10 +4436,18 @@ impl MysqlDb<'_> {
             })
             .collect();
 
+        // The obligation sections report where someone can still be
+        // blocked: a holder whose projected state is settled reports none —
+        // the read-side twin of settle clearing them.
         let cb_rows = rt_block_on(
             sqlx::query(
-                "SELECT awaiter_id, awaited_id FROM callbacks WHERE NOT ready ORDER BY awaiter_id, awaited_id",
+                "SELECT awaiter_id, awaited_id FROM callbacks
+                 WHERE NOT ready AND EXISTS (
+                   SELECT 1 FROM promises p WHERE p.id = awaited_id
+                     AND p.state = 'pending' AND p.timeout_at > ?)
+                 ORDER BY awaiter_id, awaited_id",
             )
+            .bind(now)
             .fetch_all(self.tx().as_mut()),
         )?;
         let callbacks: Vec<SnapshotCallback> = cb_rows
@@ -4425,8 +4459,15 @@ impl MysqlDb<'_> {
             .collect();
 
         let li_rows = rt_block_on(
-            sqlx::query("SELECT promise_id, address FROM listeners ORDER BY promise_id, address")
-                .fetch_all(self.tx().as_mut()),
+            sqlx::query(
+                "SELECT promise_id, address FROM listeners
+                 WHERE EXISTS (
+                   SELECT 1 FROM promises p WHERE p.id = promise_id
+                     AND p.state = 'pending' AND p.timeout_at > ?)
+                 ORDER BY promise_id, address",
+            )
+            .bind(now)
+            .fetch_all(self.tx().as_mut()),
         )?;
         let listeners: Vec<SnapshotListener> = li_rows
             .iter()

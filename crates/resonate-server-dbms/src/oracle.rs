@@ -273,7 +273,7 @@ impl Oracle {
             "promise.settle" => self.op_promise_settle(req, now),
             "promise.register_callback" => self.op_promise_register_callback(req, now),
             "promise.register_listener" => self.op_promise_register_listener(req, now),
-            "promise.search" => self.op_promise_search(req),
+            "promise.search" => self.op_promise_search(req, now),
             "task.get" => self.op_task_get(req, now),
             "task.create" => self.op_task_create(req, now),
             "task.acquire" => self.op_task_acquire(req, now),
@@ -290,7 +290,7 @@ impl Oracle {
             "schedule.delete" => self.op_schedule_delete(req),
             "schedule.search" => self.op_schedule_search(req),
             "debug.reset" => self.op_debug_reset(req),
-            "debug.snap" => self.op_debug_snap(req),
+            "debug.snap" => self.op_debug_snap(req, now),
             "debug.tick" => self.op_debug_tick(req),
             _ => ResponseEnvelope::error(
                 req.kind.clone(),
@@ -668,7 +668,7 @@ impl Oracle {
         )
     }
 
-    fn op_promise_search(&self, req: &RequestEnvelope) -> ResponseEnvelope {
+    fn op_promise_search(&self, req: &RequestEnvelope, now: i64) -> ResponseEnvelope {
         let r: PromiseSearchData = match serde_json::from_value(req.data.clone()) {
             Ok(r) => r,
             Err(e) => {
@@ -700,11 +700,17 @@ impl Oracle {
             Some(n) => n as usize,
             None => 100,
         };
+        // Records are built before the state filter so the filter sees the
+        // projected state — an expired pending promise is its timeout
+        // verdict to a reader, whether or not anything has written that
+        // yet. The deadline is a projection every read applies; search is
+        // a read.
         let mut promises: Vec<PromiseRecord> = self
             .promises
             .iter()
-            .filter(|(_, p)| {
-                r.state.map(|s| p.state == s).unwrap_or(true)
+            .map(|(id, p)| (Self::to_promise_record(now, id, p), p))
+            .filter(|(record, p)| {
+                r.state.map(|s| record.state == s).unwrap_or(true)
                     && r.tags
                         .as_ref()
                         .map(|ft| {
@@ -713,7 +719,7 @@ impl Oracle {
                         })
                         .unwrap_or(true)
             })
-            .map(|(id, p)| Self::to_promise_record(0, id, p))
+            .map(|(record, _)| record)
             .collect();
         promises.sort_by(|a, b| a.id.cmp(&b.id));
         let start = r
@@ -1834,29 +1840,54 @@ impl Oracle {
         )
     }
 
-    fn op_debug_snap(&self, req: &RequestEnvelope) -> ResponseEnvelope {
+    fn op_debug_snap(&self, req: &RequestEnvelope, now: i64) -> ResponseEnvelope {
+        // The promise records project expiry, like every read: what the
+        // snapshot compares is what an observer could learn, so an engine
+        // that settles an expired promise eagerly and one that leaves the
+        // row pending until touched snap identically.
         let mut promises: Vec<PromiseRecord> = self
             .promises
             .iter()
-            .map(|(id, p)| Self::to_promise_record(0, id, p))
+            .map(|(id, p)| Self::to_promise_record(now, id, p))
             .collect();
         promises.sort_by(|a, b| a.id.cmp(&b.id));
+
+        // The obligation sections report where someone can still be
+        // blocked, in both directions. Holder-side: a promise whose
+        // PROJECTED state is settled reports no callbacks or listeners,
+        // whatever its physical sets hold — the read-side twin of settle
+        // clearing them. Member-side: a callbacks member whose task is
+        // fulfilled is inert (fulfilled is terminal, every fanout skips
+        // it), so it reports as absent — the read-side twin of the delete
+        // this model performs physically; an engine that leaves the member
+        // in place, as the Go mechanics do, snaps equal.
+        let holder_projects_empty =
+            |p: &Promise| -> bool { p.state != PromiseState::Pending || now >= p.timeout_at };
+        let member_is_inert = |awaiter: &str| -> bool {
+            self.tasks
+                .get(awaiter)
+                .map(|t| t.state == TaskState::Fulfilled)
+                .unwrap_or(false)
+        };
 
         let mut callbacks: Vec<SnapshotCallback> = self
             .promises
             .iter()
+            .filter(|(_, p)| !holder_projects_empty(p))
             .flat_map(|(id, p)| {
                 p.callbacks.iter().map(move |awaiter| SnapshotCallback {
                     awaiter: awaiter.clone(),
                     awaited: id.clone(),
                 })
             })
+            .filter(|cb| !member_is_inert(&cb.awaiter))
             .collect();
         callbacks.sort_by(|a, b| a.awaited.cmp(&b.awaited).then(a.awaiter.cmp(&b.awaiter)));
 
         let mut listeners: Vec<SnapshotListener> = self
             .promises
             .iter()
+            .filter(|(_, p)| !holder_projects_empty(p))
             .flat_map(|(id, p)| {
                 p.listeners.iter().map(move |addr| SnapshotListener {
                     promise_id: id.clone(),

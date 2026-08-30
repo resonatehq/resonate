@@ -254,7 +254,7 @@ impl SqliteEngine {
                 ))
             }
             "debug.reset" => self.op_debug_reset(req).await,
-            "debug.snap" => self.op_debug_snap(req).await,
+            "debug.snap" => self.op_debug_snap(req, now).await,
             "debug.tick" => self.op_debug_tick(req).await,
 
             _ => {
@@ -659,7 +659,7 @@ impl SqliteEngine {
             .await
     }
 
-    async fn op_promise_search(&self, req: &RequestEnvelope, _now: i64) -> Output {
+    async fn op_promise_search(&self, req: &RequestEnvelope, now: i64) -> Output {
         let data = req.data.clone();
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
@@ -702,6 +702,7 @@ impl SqliteEngine {
                 tags_json.as_deref(),
                 r.cursor.as_deref(),
                 limit + 1,
+                now,
             )?;
             let has_more = results.len() as i64 > limit;
             let promises: Vec<_> = results.into_iter().take(limit as usize).collect();
@@ -2150,8 +2151,8 @@ impl SqliteEngine {
         })
     }
 
-    async fn op_debug_snap(&self, req: &RequestEnvelope) -> Output {
-        Output::response(match self.query(move |db| db.snap()).await {
+    async fn op_debug_snap(&self, req: &RequestEnvelope, now: i64) -> Output {
+        Output::response(match self.query(move |db| db.snap(now)).await {
             Ok(snapshot) => {
                 let data = serde_json::to_value(snapshot).unwrap_or(Value::Null);
                 ResponseEnvelope::new(req.kind.clone(), req.head.corr_id.clone(), 200, data)
@@ -2748,18 +2749,32 @@ impl<'a> SqliteDb<'a> {
         tags: Option<&str>,
         cursor: Option<&str>,
         limit: i64,
+        time: i64,
     ) -> StorageResult<Vec<PromiseRecord>> {
+        // The deadline is a projection every read applies, and search is a
+        // read: an expired pending promise reads as its timeout verdict,
+        // whether or not anything has written that yet — which is what lets
+        // a lazy engine and one that settles eagerly answer identically.
+        // The state filter asks the projected state for the same reason.
         let mut stmt = self.conn.prepare(
-            "SELECT id, state, param_headers, param_data, value_headers, value_data, tags, timeout_at, created_at, settled_at
+            "SELECT id,
+                    CASE WHEN state = 'pending' AND timeout_at <= ?5
+                         THEN (CASE WHEN is_timer THEN 'resolved' ELSE 'rejected_timedout' END)
+                         ELSE state END AS state,
+                    param_headers, param_data, value_headers, value_data, tags, timeout_at, created_at,
+                    CASE WHEN state = 'pending' AND timeout_at <= ?5
+                         THEN timeout_at ELSE settled_at END AS settled_at
              FROM promises
-             WHERE (?1 IS NULL OR state = ?1)
+             WHERE (?1 IS NULL OR CASE WHEN state = 'pending' AND timeout_at <= ?5
+                         THEN (CASE WHEN is_timer THEN 'resolved' ELSE 'rejected_timedout' END)
+                         ELSE state END = ?1)
                AND (?2 IS NULL OR NOT EXISTS (
                  SELECT key, value FROM json_each(?2) EXCEPT SELECT key, value FROM json_each(tags)
                ))
                AND (?3 IS NULL OR id > ?3)
              ORDER BY id ASC LIMIT ?4",
         )?;
-        let mut rows = stmt.query(params![state, tags, cursor, limit])?;
+        let mut rows = stmt.query(params![state, tags, cursor, limit, time])?;
         let mut results = Vec::new();
         while let Some(row) = rows.next()? {
             results.push(row_to_promise(row)?);
@@ -3727,12 +3742,26 @@ impl<'a> SqliteDb<'a> {
         Ok(())
     }
 
-    fn snap(&self) -> StorageResult<Snapshot> {
+    fn snap(&self, now: i64) -> StorageResult<Snapshot> {
         let conn = self.conn;
 
-        let mut stmt = conn.prepare("SELECT id, state, param_headers, param_data, value_headers, value_data, tags, timeout_at, created_at, settled_at FROM promises ORDER BY id")?;
+        // The promise records project expiry, like every read: what the
+        // snapshot compares is what an observer could learn, so an engine
+        // that settles an expired promise eagerly and one that leaves the
+        // row pending until touched snap identically. The queue sections
+        // stay physical — sweeps are tick-driven, so those agree across
+        // backends at every instant without projection.
+        let mut stmt = conn.prepare(
+            "SELECT id,
+                    CASE WHEN state = 'pending' AND timeout_at <= ?1
+                         THEN (CASE WHEN is_timer THEN 'resolved' ELSE 'rejected_timedout' END)
+                         ELSE state END AS state,
+                    param_headers, param_data, value_headers, value_data, tags, timeout_at, created_at,
+                    CASE WHEN state = 'pending' AND timeout_at <= ?1
+                         THEN timeout_at ELSE settled_at END AS settled_at
+             FROM promises ORDER BY id")?;
         let promises: Vec<PromiseRecord> = {
-            let mut rows = stmt.query([])?;
+            let mut rows = stmt.query(params![now])?;
             let mut r = Vec::new();
             while let Some(row) = rows.next()? {
                 r.push(row_to_promise(row)?);
@@ -3758,9 +3787,18 @@ impl<'a> SqliteDb<'a> {
             r
         };
 
-        let mut stmt = conn.prepare("SELECT awaiter_id, awaited_id FROM callbacks WHERE NOT ready ORDER BY awaiter_id, awaited_id")?;
+        // Obligations report where someone can still be blocked: a holder
+        // whose projected state is settled reports none, whatever the rows
+        // physically hold — the read-side twin of settle clearing them.
+        let mut stmt = conn.prepare(
+            "SELECT awaiter_id, awaited_id FROM callbacks
+             WHERE NOT ready AND EXISTS (
+               SELECT 1 FROM promises p WHERE p.id = awaited_id
+                 AND p.state = 'pending' AND p.timeout_at > ?1)
+             ORDER BY awaiter_id, awaited_id",
+        )?;
         let callbacks: Vec<SnapshotCallback> = {
-            let mut rows = stmt.query([])?;
+            let mut rows = stmt.query(params![now])?;
             let mut r = Vec::new();
             while let Some(row) = rows.next()? {
                 r.push(SnapshotCallback {
@@ -3772,9 +3810,15 @@ impl<'a> SqliteDb<'a> {
         };
 
         let mut stmt =
-            conn.prepare("SELECT promise_id, address FROM listeners ORDER BY promise_id, address")?;
+            conn.prepare(
+                "SELECT promise_id, address FROM listeners
+                 WHERE EXISTS (
+                   SELECT 1 FROM promises p WHERE p.id = promise_id
+                     AND p.state = 'pending' AND p.timeout_at > ?1)
+                 ORDER BY promise_id, address",
+            )?;
         let listeners: Vec<SnapshotListener> = {
-            let mut rows = stmt.query([])?;
+            let mut rows = stmt.query(params![now])?;
             let mut r = Vec::new();
             while let Some(row) = rows.next()? {
                 r.push(SnapshotListener {
