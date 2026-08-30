@@ -14,23 +14,53 @@ One crate, `crates/resonate-server-blob`, that:
   binary. It is a complete server, not a storage engine behind one;
 - is selected at startup like any other backend, and feature-gated so a
   deployment that does not run it does not compile `object_store`;
-- **ships its own oracle.** Every `ResonateServer` gets one: an independent
-  in-memory model of that server's observable behaviour, living in the same
-  crate as the server it models.
+- **carries an oracle.** Every `ResonateServer` gets one: an in-memory model of
+  that server's observable behaviour, which the server is held against at full
+  fidelity without a bucket, a database, or another backend in the room.
 
 Independence is the point: the blob backend keeps its own state machine, its
 own timers, its own outgoing messages, its own snapshot and its own reference
 model. It shares the *vocabulary* in `resonate-core` and nothing else.
 
-The oracle is what makes that affordable. A backend held only against other
-backends has to behave identically to them in every observable, which is a
-claim the storage shapes do not support — the document design aggregates
-deadlines per origin, the SQL schema carries them per entity, and neither is
-wrong. Pairing each server with its own oracle puts the specification where the
-server is: the in-crate differential holds the server to *its* model at full
-fidelity, and the cross-server differential holds every model to the protocol.
-Divergences that used to have to be argued away become two lines in two
-different oracles.
+### The oracle is copied first and factored out later, on evidence
+
+Whether the oracle belongs *above* all servers — one specification every
+implementation is judged against — or *beside* each one is a real question, and
+it is settled by measurement rather than by argument.
+
+So: **copy `crates/resonate-server-dbms/src/oracle.rs` into the blob crate
+verbatim, and drive the whole port against the copy.** Land the backend
+end to end. Then read the diff between the copy and the original. That diff is
+the answer:
+
+- **Only structural edits** — the `ResonateEngine` impl stripped, namespaces
+  rewritten, nothing about what the model *decides* — means the two models are
+  one model in two files, and it is extracted into a `resonate-oracle` crate
+  over `resonate-core`, which the blob crate takes as a **dev-dependency**. The
+  production graph stays core plus `object_store`; only the tests gain a
+  dependency, so nothing about the crate's independence changes.
+- **Behavioural edits that read as deployment options** — a limit, a flag, a
+  timeout a user could set — extract too, as parameters. `with_preload_limit`
+  is the precedent: three engines legitimately differed there and the answer
+  was one oracle with a knob, not three oracles.
+- **Behavioural edits that read as backend identity** — anything that amounts
+  to `if this is the blob backend` — means one oracle would have been a
+  disjunction pretending to be a specification. The copy stays, per-server
+  oracles are the design, and the diff is the written reason.
+
+Two rules keep the experiment honest, because a copy nobody watches is just a
+fork with extra steps:
+
+1. **Every edit to the copy is deliberate and reviewed as an edit to a
+   specification.** The temptation this design has to resist is fixing a
+   disagreement between server and oracle by editing the oracle — which is
+   always available, since nothing else depends on this copy. A model you can
+   edit to make your test pass is a snapshot, not a specification.
+2. **The drift is visible in CI.** A check that diffs the copy against
+   `crates/resonate-server-dbms/src/oracle.rs` and prints the result — not
+   failing the build, just refusing to let the divergence be invisible. It is
+   the ledger the extraction decision gets read off at the end, and it is ten
+   lines of shell.
 
 ## What is being ported
 
@@ -178,45 +208,44 @@ between two effects).
 Checkpoint: the crate's own tests still pass, with `debug.start` removed from
 them.
 
-### Phase 4 — Write the oracle
+### Phase 4 — Copy the oracle
 
-An in-memory model of the blob server, implementing `ResonateServer`, in
-`src/oracle.rs`. `crates/resonate-server-dbms/src/oracle.rs` is the worked
-example of the form — plain `BTreeMap`s behind a `Mutex`, one `match` on
-`kind`, and an `impl ResonateServer` at the end — and 2729 lines is the honest
-budget. Less, here, because this one answers only what the port makes
-observable.
+`crates/resonate-server-dbms/src/oracle.rs`, verbatim, into `src/oracle.rs`.
+2729 lines, and the only edits allowed in this phase are the ones that make it
+compile in a crate that does not depend on `resonate-server-dbms`:
 
-Three rules, and the value of the whole exercise rests on them:
+- **Strip the `ResonateEngine` impl** (`oracle.rs:2623` to the end) and the
+  engine-shaped helpers it needs — `take_emitted`, `take_armed`, `apply_timeout`,
+  `sweep`, `upcoming`, and the `Input` / `Output` / `Outgoing` / `Scheduled` /
+  `Timeout` / `StorageResult` types they carry. About 72 of 2729 lines mention
+  them, so this is a small, bounded cut. Nothing is lost at this port: firing
+  goes through `debug.tick`, which is `op_debug_tick` and self-contained.
+- **Keep the `ResonateServer` impl** at `oracle.rs:2606`. It is already there
+  and already right — `SharedOracle` exists precisely because the orphan rule
+  rejects `impl ResonateServer for Mutex<Oracle>`.
+- **Rewrite namespaces.** Nothing else.
 
-1. **Write it from the protocol, never from the kernel.** Read `main`'s
-   engines, `main`'s oracle and the request types; do not read `handle.rs` while
-   writing `oracle.rs`. Two implementations derived from one reading agree on
-   its mistakes.
-2. **Ordered containers throughout.** `BTreeMap`/`BTreeSet`, for the reason
-   stated at the top of the dbms oracle: `HashMap` iteration is randomized per
-   process, so a seeded run stops reproducing its trajectory and an unordered
-   `preload` differs from `ORDER BY id ASC` at random. Ordering by construction
-   removes the class; sorting at the call site removes one instance.
-3. **Model this server, not a generic one.** Where the blob backend's behaviour
-   is legitimately its own — deadlines aggregated per origin, an at-most-once
-   outbox, search behind a flag — the oracle says so. That is the point of a
-   per-server oracle: the specification is allowed to be specific.
+Record the cut as the first entry in the ledger, marked structural. Then leave
+the file alone unless a disagreement genuinely proves the model wrong, and mark
+every such edit behavioural, with a sentence saying why.
 
-Checkpoint: `cargo test -p resonate-server-blob --test differential` — the
-server and its oracle in lock step over a seeded trajectory.
+Checkpoint: `cargo test -p resonate-server-blob --test differential` — the blob
+server and the copied oracle in lock step over a seeded trajectory, in process,
+no bucket.
 
 ### Phase 5 — Absorb the semantic drift
 
 The branch forked before ~50 commits on `main`. `main`'s reference model
 diverged by ~560 lines and `core::types` by ~380. See *Semantic deltas*.
 
-The oracle is what makes this tractable rather than archaeological. It is
-written from `main`'s spec while the kernel was ported from the spec as it stood
-in August, so the in-crate differential lights up the drift directly: every
-place the two disagree is either drift the kernel has not absorbed or a place
-the oracle is wrong, and both are worth finding. Work the failures until they
-are gone.
+The copied oracle is what makes this tractable rather than archaeological, and
+copying rather than writing it is what makes it *sharp*: it carries `main`'s
+semantics exactly, while the kernel was ported from the spec as it stood in
+August. Every disagreement the in-crate differential reports is therefore drift,
+not a difference of opinion between two authors reading the same document. Work
+the failures until they are gone — and when one of them genuinely indicts the
+oracle rather than the kernel, that is a behavioural edit and it goes in the
+ledger.
 
 ### Phase 6 — Wire it into the binary
 
@@ -241,6 +270,23 @@ in-process store, and against a real bucket.
 ### Phase 7 — Prove it against the other servers
 
 See **Testing**.
+
+### Phase 8 — Read the ledger and decide the oracle's home
+
+The port is done, the differentials are green, and the two oracles have been
+byte-identical in behaviour for however long that took. Now read the diff
+between `crates/resonate-server-blob/src/oracle.rs` and
+`crates/resonate-server-dbms/src/oracle.rs` and sort every hunk into the three
+buckets in *Goal and constraints*: structural, deployment option, backend
+identity.
+
+If the third bucket is empty — which is what "100% byte identical" would
+predict — extract `resonate-oracle` over `resonate-core`, make both server
+crates take it as a dev-dependency, and delete both copies in one commit. If it
+is not empty, the copies stay and the hunks in it are the documentation of why.
+
+Either way the decision is made from a diff rather than from a position, which
+is the whole reason the copy came first.
 
 ## Mechanical deltas
 
@@ -329,9 +375,11 @@ tested, not asserted.
 blob server and the blob oracle, both `Arc<dyn ResonateServer>`, driven through
 a seeded trajectory and compared at every step: response, then `debug.snap`.
 This runs in process against the in-memory store, needs no bucket and no
-database, and is the loop to develop in. It is full fidelity for this backend,
-because the oracle is free to model the backend exactly — including what it
-arms, what it queues, and when it fires.
+database, and is the loop to develop in — it is where nearly all the work of
+Phase 5 happens. While the oracle is a verbatim copy this is also the
+cross-backend check in disguise, which is the point: matching the copy is
+matching `main`'s semantics, and the day it stops being true the ledger records
+why.
 
 **Cross-server differential — do the servers agree on the protocol?** The blob
 server against the SQL engines composed into servers, at the port. Responses and
@@ -368,31 +416,31 @@ blob backend is described as horizontally scalable. Worth deciding now whether
 that is in scope for the first landing or explicitly deferred with the
 limitation documented.
 
-**2. Two pure models in one crate, on purpose.** The kernel and the oracle are
-both complete in-memory implementations of the protocol, sitting side by side.
-That looks like duplication and is not: the kernel is written for the document
-shape and runs in production, the oracle is written from the protocol and runs
-only in tests, and the whole value of the pair is that neither was derived from
-the other. Say so in both module comments, or someone will helpfully unify them
-and delete the evidence.
+**2. Two pure models in one crate, for now.** The kernel and the copied oracle
+are both complete in-memory implementations of the protocol, sitting side by
+side. They are not the same thing and must not be merged: the kernel is written
+for the document shape and runs in production, the oracle carries `main`'s
+semantics and runs only in tests, and the value of the pair is that neither was
+derived from the other. Say so in both module comments. Whether the oracle
+half stays in this crate is Phase 8's question, not this one's.
 
-**3. Firing granularity, now specified rather than argued.** The kernel
-aggregates deadlines to one per origin; `main`'s SQL engines carry them per
-entity, so `drain(origin)` fires everything due in that origin where an engine
-fires exactly the one named. Nothing at the `ResonateServer` port names a
-timeout, so this is invisible there — and where it does surface, in what
-`debug.snap` shows after time moves, the blob oracle models the blob behaviour
-and the cross-server differential is where the two must be reconciled against
-the protocol. If it ever has to be reconciled in code instead, the fix is a
-narrow `drain_one(doc, timeout, now)` in the kernel, which is pure-function
-work.
+**3. Firing granularity.** The kernel aggregates deadlines to one per origin;
+`main`'s SQL engines carry them per entity, so `drain(origin)` fires everything
+due in that origin where an engine fires exactly the one named. Nothing at the
+`ResonateServer` port names a timeout — `debug.tick` is a bulk sweep on both
+sides (`oracle.rs:1927` collects every expired promise timeout and every expired
+lease at `time`), and the narrow single-timeout firing is `Input::Internal`,
+which exists only at the engine port. So this should not surface at all here. If
+it does, that is a finding worth understanding before it is worked around, and
+the workaround if one is needed is a narrow `drain_one(doc, timeout, now)` in
+the kernel — pure-function work.
 
-**4. Does the dbms oracle stay shared?** "Every `ResonateServer` gets an oracle"
-raises the question of what `crates/resonate-server-dbms/src/oracle.rs` becomes:
-today one model serves three SQL engines, which is right while those three are
-meant to be indistinguishable. Nothing in this port needs that to change — but
-if the three ever diverge legitimately the way blob and SQL do, the same split
-applies there. Out of scope here; worth naming so the pattern is deliberate.
+**4. Does the dbms oracle stay shared?** Today one model serves three SQL
+engines, which is right while those three are meant to be indistinguishable.
+Phase 8 answers the blob half of this question with a diff; if the three SQL
+engines ever diverge legitimately the way blob and SQL might, the same reading
+applies there. Out of scope here, and named so the pattern stays deliberate
+rather than accidental.
 
 ## Not in scope
 
