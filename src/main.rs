@@ -197,6 +197,23 @@ async fn run_server(config: Config) -> Result<(), String> {
             tracing::info!("PostgreSQL initialized");
             Arc::new(pg)
         }
+        #[cfg(feature = "scylladb")]
+        "scylladb" => {
+            tracing::info!(
+                hosts = ?config.storage.scylladb.hosts,
+                keyspace = %config.storage.scylladb.keyspace,
+                "Using ScyllaDB backend"
+            );
+            let sc = resonate_server_scylladb::ScyllaEngine::connect(
+                &config.storage.scylladb,
+                config.tasks.retry_timeout,
+                config.debug,
+            )
+            .await
+            .map_err(|e| format!("Failed to connect to ScyllaDB: {e}"))?;
+            tracing::info!("ScyllaDB initialized");
+            Arc::new(sc)
+        }
         #[cfg(feature = "mysql")]
         "mysql" => {
             let url = config.storage.mysql.url.as_deref().unwrap();

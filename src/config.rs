@@ -142,6 +142,13 @@ pub struct StorageConfig {
     /// MySQL-specific configuration
     #[serde(default)]
     pub mysql: MysqlConfig,
+
+    /// ScyllaDB-specific configuration — the crate's own type, like every
+    /// transport's: `resonate-server-scylladb` describes its configuration
+    /// and this only carries the section from the file to it.
+    #[cfg(feature = "scylladb")]
+    #[serde(default)]
+    pub scylladb: resonate_server_scylladb::Config,
 }
 
 fn default_storage_type() -> String {
@@ -254,6 +261,8 @@ impl Default for StorageConfig {
             sqlite: SqliteConfig::default(),
             postgres: PostgresConfig::default(),
             mysql: MysqlConfig::default(),
+            #[cfg(feature = "scylladb")]
+            scylladb: resonate_server_scylladb::Config::default(),
         }
     }
 }
@@ -437,10 +446,10 @@ impl Config {
     fn validate(&self) -> Result<(), String> {
         // Validate storage type
         match self.storage.storage_type.as_str() {
-            "sqlite" | "postgres" | "mysql" => {}
+            "sqlite" | "postgres" | "mysql" | "scylladb" => {}
             other => {
                 return Err(format!(
-                    "Unknown storage backend: '{}'. Valid options are 'sqlite', 'postgres', and 'mysql'.",
+                    "Unknown storage backend: '{}'. Valid options are 'sqlite', 'postgres', 'mysql', and 'scylladb'.",
                     other
                 ));
             }

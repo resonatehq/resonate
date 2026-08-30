@@ -1,0 +1,21 @@
+[package]
+name = "resonate-server-scylladb"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Resonate server storage over ScyllaDB: the Go resonate-on-scylladb mechanics — origin-partitioned promises, LWT transitions, bucketed timeout queues — behind the ResonateEngine port."
+
+[dependencies]
+resonate-core = { path = "../resonate-core" }
+# For the engine port and the shared StorageError only; no SQL engine is compiled.
+resonate-server-dbms = { path = "../resonate-server-dbms", default-features = false }
+scylla = "1.8"
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+validator = { workspace = true }
+tokio = { version = "1", features = ["rt", "sync", "macros", "time"] }
+tracing = "0.1"
+cron = "0.12"
+chrono = "0.4"
+uuid = { version = "1", features = ["v4"] }

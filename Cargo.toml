@@ -4,6 +4,7 @@ members = [
     "crates/resonate-core",
     "crates/resonate-gateway-http",
     "crates/resonate-server-dbms",
+    "crates/resonate-server-scylladb",
     "crates/resonate-timer-wheel",
     "crates/resonate-transport-gcps",
     "crates/resonate-transport-http-poll",
@@ -43,14 +44,16 @@ name = "differential"
 path = "diff/differential.rs"
 # It compares the engines against each other, so it needs all of them; with any
 # turned off cargo skips the target rather than failing to build it.
-required-features = ["sqlite", "postgres", "mysql"]
+required-features = ["sqlite", "postgres", "mysql", "scylladb"]
 
 [features]
-# All forwarded: the cfg'd code lives in resonate-server-dbms.
-default = ["sqlite", "postgres", "mysql"]
+# All forwarded: the cfg'd code lives in resonate-server-dbms, except the
+# ScyllaDB engine, which is its own crate.
+default = ["sqlite", "postgres", "mysql", "scylladb"]
 sqlite = ["resonate-server-dbms/sqlite"]
 postgres = ["resonate-server-dbms/postgres"]
 mysql = ["resonate-server-dbms/mysql"]
+scylladb = ["dep:resonate-server-scylladb"]
 concurrency-stress = ["resonate-server-dbms/concurrency-stress"]
 
 [dependencies]
@@ -58,6 +61,7 @@ resonate-auth = { path = "crates/resonate-auth" }
 resonate-core = { path = "crates/resonate-core" }
 resonate-gateway-http = { path = "crates/resonate-gateway-http" }
 resonate-server-dbms = { path = "crates/resonate-server-dbms", default-features = false }
+resonate-server-scylladb = { path = "crates/resonate-server-scylladb", optional = true }
 resonate-timer-wheel = { path = "crates/resonate-timer-wheel" }
 resonate-transport-gcps = { path = "crates/resonate-transport-gcps" }
 resonate-transport-http-poll = { path = "crates/resonate-transport-http-poll" }

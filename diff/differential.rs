@@ -279,6 +279,34 @@ async fn differential_random() {
         }
     };
 
+    // ScyllaDB is opt-in the same way. It is the deliberately EAGER engine —
+    // the Go implementation's mechanics — running against the lazy relational
+    // ones: the comparison is the experiment.
+    let scylla_backend: Option<Backend> = match std::env::var("TEST_SCYLLADB_HOSTS").ok() {
+        Some(hosts) => {
+            let cfg = resonate_server_scylladb::Config {
+                hosts: hosts.split(',').map(|s| s.trim().to_string()).collect(),
+                keyspace: std::env::var("TEST_SCYLLADB_KEYSPACE")
+                    .unwrap_or_else(|_| "resonate_diff".to_string()),
+                migrate: true,
+                preload_limit: PRELOAD_LIMIT,
+                ..Default::default()
+            };
+            let sc = resonate_server_scylladb::ScyllaEngine::connect(
+                &cfg,
+                TASK_RETRY_TIMEOUT_MS,
+                true,
+            )
+            .await
+            .expect("scylladb connect");
+            Some(Arc::new(sc) as Backend)
+        }
+        None => {
+            eprintln!("[diff] TEST_SCYLLADB_HOSTS not set — ScyllaDB skipped");
+            None
+        }
+    };
+
     let mut backends: Vec<(String, Backend)> = vec![
         ("sqlite".into(), sqlite),
         ("oracle".into(), Arc::clone(&oracle) as Backend),
@@ -288,6 +316,9 @@ async fn differential_random() {
     }
     if let Some(my) = my_backend {
         backends.push(("mysql".into(), my));
+    }
+    if let Some(sc) = scylla_backend {
+        backends.push(("scylladb".into(), sc));
     }
 
     // Iterating on one backend does not need all of them, and a full run is
