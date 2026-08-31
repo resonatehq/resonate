@@ -90,7 +90,7 @@ selector:
 [[triggers.slack.commands]]
 command = "/backfill"                    # selector
 func    = "backfill"                     #  ┐
-args    = "{{ text | words }}"           #  ├ param
+args    = ["{{ text }}"]                 #  ├ param
 version = 1                              #  ┘
 id      = "backfill-{{ trigger_id }}"    # id
 timeout = "1h"                           # timeout_at
@@ -140,6 +140,65 @@ id = "backfill-{{ channel_id }}-{{ text | hash }}"
 
 `hash` yields a fixed-charset digest, so it is safe by construction and honest
 about being a content key rather than an identity.
+
+### Slack is not structured. Discord is.
+
+This is the sharpest difference between the two, and it lands squarely on the
+mapping.
+
+A Slack slash command has **no parameter schema at all**. `text` is one raw
+string — everything the user typed after the command, unparsed, unvalidated,
+untyped. Slack does not know that `/backfill` takes a collection and a date,
+and cannot tell the user when they forget one. Every framework in the ecosystem
+rolls its own parser on top: argparse wrappers, Zod schemas, bespoke splitters.
+
+A Discord application command is **declared** — named options with types
+(`STRING`, `INTEGER`, `BOOLEAN`, `USER`, `CHANNEL`, `NUMBER`, …), required or
+not, and Discord validates and autocompletes them *before* delivery. The
+interaction carries `data.options: [{name, type, value}]`, already parsed:
+
+```
+Slack     text = "orders 2024-01-01"                       ← one string, ours to split
+Discord   options = [{name:"collection", type:3, value:"orders"},
+                     {name:"date",       type:3, value:"2024-01-01"}]
+```
+
+So `["orders", "2024-01-01"]` is **not something Slack gives us.** It is
+something we would produce by splitting, and splitting free text into positional
+arguments is guessing at a function's arity: `/backfill orders` yields one
+argument where the function wanted two, and the failure surfaces deep inside the
+worker rather than at the edge.
+
+Which is why the default above is `args = ["{{ text }}"]` — one string, passed
+through, the worker parses its own grammar — and `| words` is opt-in for people
+who know their command is positional. Producing plausibly-wrong arity silently
+is worse than handing over exactly what arrived.
+
+Two ways to get real structure on the Slack side, both better than a smarter
+splitter:
+
+- **Declare the parameters in the binding**, and validate at the edge:
+
+  ```toml
+  params = [ { name = "collection", type = "string", required = true },
+             { name = "date",       type = "string", required = true } ]
+  ```
+
+  This buys the thing Slack cannot do for us — an ephemeral `usage:
+  /backfill <collection> <date>` inside the three-second ack, instead of a
+  workflow that starts and fails. It is a small argument parser expressed in
+  TOML, and it is worth writing precisely because Discord's equivalent comes
+  free.
+- **Open a modal.** `trigger_id` — which the id already depends on — opens a
+  Block Kit view with typed inputs, and the submission arrives as structured
+  `view.state.values`. For any command with more than one or two parameters
+  this is the better Slack pattern, and it is a second event type the same
+  trigger handles rather than a different mechanism.
+
+Note what this does to the ordering argument. Discord's mapping is trivial and
+total; Slack's needs a parser we own, or modals, or an honest single string.
+That is a real point for building Discord first, and it partly offsets the
+reach argument below.
 
 ### `param` — the fixed field
 
@@ -362,9 +421,11 @@ and developer-shaped, and the Gateway is again an outbound websocket.
 - **Cheapest onboarding of anything on this list.** Create an app, invite the
   bot, paste one token. No workspace admin, no business verification, no
   billing, no tunnel.
-- Application commands are *typed* — declared options with names and types —
-  so the mapping to `{func, args}` is even tighter than Slack's free-text
-  `text` field.
+- Application commands are *typed* — declared options with names, types and a
+  required flag, validated by Discord before delivery — so the mapping to
+  `{func, args}` needs no parser at all, where Slack's free-text `text` field
+  needs one we write and maintain. See the mapping section: this is a bigger
+  difference than it first looks.
 - Cost: the Gateway is more protocol than Socket Mode (heartbeats, resume with
   a session id, eventually sharding), and less enterprise pull. Its users are
   building bots and agents rather than ops tooling.
