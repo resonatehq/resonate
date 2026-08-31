@@ -73,32 +73,168 @@ HTTP gateway's. Nothing downstream has to learn what a Slack request is.
 So: a crate next to `resonate-gateway-http`, plain-data config out of
 `resonate.toml`, constructed in `run_server`, `init`ed alongside the gateway.
 
-## Mapping an event to a workflow
+## The mapping
 
-The one open question — which function does an event start, with what
-arguments, under what id — is the question `promiseParam` and `promiseTags`
-already answer for schedules. The trigger's config is a schedule's, minus the
-cron:
+A trigger is one function:
+
+```
+Event -> PromiseCreateData { id, timeout_at, param, tags }
+```
+
+Four fields, and they have genuinely different rules, so it is worth taking
+them one at a time rather than reaching for a general-purpose transform. The
+config that describes one is a schedule's record with the cron replaced by a
+selector:
 
 ```toml
 [[triggers.slack.commands]]
-command      = "/backfill"
-promise_id   = "backfill-{{.trigger_id}}"
-promise_tags = { "resonate:target" = "poll://any@default" }
-func         = "backfill"
-args         = ["{{.text}}"]
+command = "/backfill"                    # selector
+func    = "backfill"                     #  ┐
+args    = "{{ text | words }}"           #  ├ param
+version = 1                              #  ┘
+id      = "backfill-{{ trigger_id }}"    # id
+timeout = "1h"                           # timeout_at
+target  = "poll://any@default"           # tags: resonate:target
 ```
 
-Inngest answers the same question with a per-webhook JavaScript transform that
-normalizes a raw payload into a typed event. That is a language, an editor and
-a sandbox, for a server that otherwise decides nothing about what an operation
-does. The template substitution already in the engine is the cheaper half of it
-and covers the cases that matter.
+### `id` — the strict field, and the only one worth being strict about
 
-Where a payload needs real reshaping, the honest default is to not reshape it:
-invoke one configured function with the event passed through verbatim and let
-the worker dispatch. Policy lives in the user's code, where the rest of their
-policy already is.
+An id a trigger mints is not a name. It is three things at once:
+
+1. **The dedupe key**, per the section above.
+2. **The `resonate:origin` of an entire call graph.** Every promise the
+   workflow goes on to create is `<this>:1`, `<this>:1.1`, and so on.
+3. **A value in a reserved grammar.** `origin()` splits an id at its first
+   `':'`; lineage segments below that are `'.'`-separated
+   (`types.rs:399`). `validate_schedule_create_data` already rejects a `':'`
+   in a schedule id for exactly this reason, and says so: an origin holding a
+   colon "is unrepresentable: no id could ever split back to it".
+
+So free text must not reach it. Not sanitized — *excluded*, and for a reason
+better than escaping: an id built from what someone typed is semantically
+wrong. Two people running `/backfill orders` would mint the same id, and the
+second would silently receive the first's promise instead of starting their
+own. That is the dedupe mechanism working exactly as designed, on the wrong
+key.
+
+Three rules, then:
+
+- **Default to `{{ trigger_id }}`**, so the common case needs no config and is
+  correct by construction.
+- **Only identifier-shaped fields may be interpolated into `id`** — for Slack:
+  `trigger_id`, `team_id`, `channel_id`, `user_id`, `api_app_id`, `command`.
+  Not `text`. Not `channel_name`, `team_domain` or `user_name` either: those
+  are renameable, so they are not identity, and `user_name` is deprecated
+  besides.
+- **Check the charset anyway**, `[A-Za-z0-9._-]`, and reject otherwise. Every
+  Slack identifier already satisfies it, so the check never fires in practice.
+  It is there so that a provider changing a format cannot smuggle a `':'` into
+  an origin.
+
+The escape hatch for the one legitimate want — "one backfill per channel per
+day, no matter who asks" — is a filter, not an exception:
+
+```toml
+id = "backfill-{{ channel_id }}-{{ text | hash }}"
+```
+
+`hash` yields a fixed-charset digest, so it is safe by construction and honest
+about being a content key rather than an identity.
+
+### `param` — the fixed field
+
+The shape is not ours to invent; it is what `resonate invoke` already sends and
+what the SDKs already decode:
+
+```
+param.data = base64(json { func, args, version })
+```
+
+`args` is a JSON array, which is the one place a template engine has to think
+about types. Two config shapes, deliberately distinguishable:
+
+- `args = ["a", "{{ user_id }}", 3]` — a **literal array**; string elements are
+  interpolated in place.
+- `args = "{{ text | words }}"` — **the whole array from one expression**.
+
+And one interpolation rule, the standard one: an element that is *entirely* one
+`{{ … }}` takes the field's native JSON type; an interpolation embedded in
+surrounding text stringifies. Slack sends everything as strings so this rarely
+shows, but Discord's application commands carry declared option types, and the
+rule is what lets an integer option arrive as an integer.
+
+`param.headers` is `Option<HashMap<String, String>>` and the CLI leaves it
+empty. It is the natural home for provenance the *worker* needs but the
+function *signature* should not carry — `slack.response_url` above all, since
+that is how a result gets posted back half an hour later.
+
+> **Open question.** Whether the SDKs surface `param.headers` to a function.
+> If they do not, `response_url` has to travel as an argument or a tag instead,
+> and the answer changes the config's shape. Worth settling before writing the
+> crate.
+
+### `tags` — the free field
+
+`resonate:target` is required — the same rule `validate_schedule_create_data`
+already enforces for schedules, and `op_promise_create` validates the address
+besides. Optional `resonate:delay`.
+
+Everything else is ours, and worth spending: tags are searchable, so stamping
+provenance
+
+```
+slack:command = "/backfill"   slack:channel_id = "C214…"   slack:user_id = "U214…"
+```
+
+makes "every workflow anyone started from #ops this week" a `promise.search`
+rather than a feature. That falls out of the mapping for free and is a good
+reason to make provenance tags the default rather than an option.
+
+### `timeout_at`
+
+`now + timeout`, with `parse_duration` from `cli.rs` reading the config.
+
+### Which binding handles an event
+
+Exact match on the provider's selector field — `command` for Slack, the
+application command name for Discord. One binding per selector value,
+duplicates refused at startup rather than resolved by order. An event matching
+nothing is acked and dropped with a log line; silently doing nothing to a
+command a human typed is worse than saying so.
+
+### What happens when it goes wrong
+
+Three outcomes, and only one of them is an error:
+
+- **`promise.create` returns 200.** Note that this is *also* what a duplicate
+  delivery returns: `op_promise_create` finds the existing promise and returns
+  its record rather than conflicting (`oracle.rs:373`). So the trigger never
+  special-cases dedupe — it always gets a promise back, and can tell a repeat
+  from a first run by whether `createdAt` is this delivery's. "Already running,
+  id `backfill-…`" is a better answer to a double-tapped command than a second
+  workflow.
+- **The binding fails to render** — a field the payload did not carry, a filter
+  that rejected its input. Ack, and reply to the user ephemerally with what was
+  missing. No promise.
+- **`Unavailable`.** Do not ack. Slack retries, and the retry is safe precisely
+  because the id is derived from the interaction rather than the delivery. The
+  provider's retry becomes ours, for free, and that is worth choosing on
+  purpose rather than discovering.
+
+### What this deliberately is not
+
+A substitution engine with a fixed, small filter set — `words`, `json`, `hash`,
+`lower` — and no conditionals, no loops, no arithmetic. The moment a mapping
+wants those, the right answer is not a bigger template language. It is
+pass-through mode: omit `args` entirely, and the whole event arrives as one
+JSON argument to a function that dispatches in the user's own code, in the
+user's own language, where the rest of their policy already lives.
+
+Inngest answers this same question with a per-webhook JavaScript transform.
+That is a language, an editor and a sandbox — a lot of machinery for a server
+whose `core` module is defined by deciding nothing about what an operation
+does. Templating covers the cases that are actually common, and code covers the
+rest. There is no middle to build.
 
 ## Idempotency is the pitch
 
