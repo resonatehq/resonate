@@ -313,6 +313,39 @@ a `response_url` / interaction token the worker can post the real result to,
 minutes or hours later. The awkward shape for everyone else is the natural
 shape for us.
 
+## Answering a slash command
+
+Three ways back, and they belong to two different answerers.
+
+**The ack — the trigger's.** Within three seconds. Over Socket Mode the ack
+envelope may itself carry a `payload` when Slack sets `accepts_response_payload`
+on the request; over HTTP it is the response body. Either way it is a message
+with a `response_type` of `ephemeral` (only the person who typed it) or
+`in_channel` (everyone). This is where "started, id `backfill-…`" goes, and
+where a repeat delivery says "already running" instead.
+
+**The result — the worker's**, and it has two options:
+
+- **`response_url`**, posted to as JSON. No token needed — the URL is the
+  credential — which makes it the easy one. But it is valid for **30 minutes
+  and at most 5 posts**.
+- **`chat.postMessage`** with the bot token and a `channel_id`. No expiry, no
+  limit.
+
+That 30-minute window is the wrinkle, and it points the wrong way for us:
+Resonate exists to run functions that outlive it. A workflow that sleeps for a
+day and then reports cannot use `response_url` at all. So the provenance a
+trigger stamps should be the parts that never expire — `channel_id`, `user_id`,
+`command` — with `response_url` carried as a convenience for the fast cases
+rather than as the mechanism.
+
+Which also means the worker needs a Slack token to answer at all. Two ways to
+give it one, and the boring one is right: the worker calls `chat.postMessage`
+itself, with its own token, in its own code — the same way it would call any
+other API. An outbound `slack://` worker behind the router would make posting
+durable and retried, and is worth wanting eventually, but it is a second crate
+and a second decision. Not this one.
+
 ## The candidates
 
 The deciding criterion is not audience size on its own. It is **how long from
