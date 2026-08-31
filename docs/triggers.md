@@ -73,7 +73,7 @@ HTTP gateway's. Nothing downstream has to learn what a Slack request is.
 So: a crate next to `resonate-gateway-http`, plain-data config out of
 `resonate.toml`, constructed in `run_server`, `init`ed alongside the gateway.
 
-## The mapping
+## The chat mapping
 
 A trigger is one function:
 
@@ -219,6 +219,143 @@ error:
 There is deliberately no third case for a malformed command, because with the
 text passed through whole there is nothing left to malform.
 
+
+## The queue trigger: filter, then transform
+
+A queue is a different trigger from a chat command, and the differences run
+deep enough that the pass-through rule above does **not** carry over.
+
+|                | slash command            | queue record                       |
+|----------------|--------------------------|------------------------------------|
+| which function | the command names it     | nothing in the record names it     |
+| relevance      | every command is for us  | most of the topic is not           |
+| payload        | one unparsed string      | structured, schema'd, nested       |
+| arrival        | a human, occasionally    | a firehose, continuously           |
+
+Splitting Slack's `text` was brittle because it invented structure that was
+never sent. A Kafka or JetStream record *has* structure — the producer put it
+there deliberately — so reading fields out of it is not a guess. And a topic
+carries messages that are none of our business, so a filter is not a
+convenience here; without one the trigger is wrong.
+
+So: **filter, then transform.** Both belong.
+
+### The language: CEL for both
+
+```toml
+[[triggers.nats]]
+stream   = "ORDERS"
+consumer = "resonate-fulfil"          # durable, JetStream
+
+filter = 'data.type == "order.placed" && data.amount > 100'
+func   = '"fulfil"'
+args   = '[data.order_id, data.amount]'
+
+target  = "poll://any@default"
+timeout = "24h"
+```
+
+CEL — Google's Common Expression Language, `cel-interpreter` — rather than jq,
+Rhai, Lua or a template engine, for four reasons that are specific to this
+being a queue:
+
+1. **It is not Turing-complete and is guaranteed to terminate**, in linear
+   time. The filter runs on *every message at topic throughput*; an expression
+   that can loop is an expression that can wedge a partition. jq can
+   (`until`, `repeat`, `recurse`), so embedding jaq means a step budget and a
+   watchdog per message. CEL structurally cannot.
+2. **It compiles at startup.** A malformed expression is a startup failure that
+   names itself — the same discipline as the gateway reading its key material
+   in `init`, so "a bad key path stops the process here rather than surfacing
+   later as a request nobody can authenticate".
+3. **It constructs.** CEL builds lists and maps, so the transform needs no
+   second language: `func` and `args` are just more expressions.
+4. **It is side-effect free**, so a filter cannot reach the network or the
+   disk, and there is no sandbox to get wrong.
+
+> **Caveat.** `cel-interpreter` is at 0.10 and was last published in July 2025
+> — healthy download numbers, but a year without a release. Worth reading the
+> repository before committing to it. `jaq-core` is the fallback, with the
+> termination cost above accepted deliberately.
+
+### The hard part is the offset, not the language
+
+There are two systems here — the queue's cursor and Resonate's store — and no
+way to move both atomically. So the order is the design:
+
+```
+poll → filter → transform → promise.create → ack / commit
+                                      ↑
+                    a crash here redelivers, and the id makes it a no-op
+```
+
+**Create, then commit.** Committing first is at-most-once and silently drops
+work on any crash. Creating first is at-least-once, and at-least-once plus an
+id derived from the message is exactly-once *execution*.
+
+Note what that does to the idempotency argument below. For a webhook it is a
+nice property. Here it is load-bearing: it is the only thing standing between a
+consumer restart and a duplicate workflow.
+
+### Which id
+
+- **Kafka**: `topic-partition-offset`. Unique by construction, needs no config,
+  and correct without the user thinking about it.
+- **JetStream**: the stream sequence, which plays the same role.
+- **Override**: a business key from the payload, `"order-" + data.order_id`.
+  This is a *different* guarantee, not a nicer spelling of the same one — it
+  additionally collapses a producer that published the same event twice at two
+  offsets. Some teams want exactly that and some would call it lost data, so it
+  is a deliberate choice rather than a default.
+
+### Four things that will bite
+
+**Core NATS cannot do this.** It has no message id and no redelivery — publish
+and hope. The trigger should require **JetStream** and refuse a core-NATS
+subject at startup, rather than quietly losing every message it was mid-way
+through when the process died.
+
+**Ordering does not survive.** Kafka orders within a partition; promises, once
+created, run concurrently and finish in whatever order they finish. The trigger
+preserves no ordering into execution, and people will assume otherwise unless
+it is written down. A workflow needing per-key serialization owns that itself.
+
+**There is no batch create.** The protocol dispatches one operation per request
+(`oracle.rs:271`), so every message is a round trip and a database write. The
+consumer therefore has to be bounded and to **pause on backpressure rather than
+buffer** — a topic faster than the engine's write rate is a misconfiguration to
+report, not a backlog to absorb. A batched `promise.create` is the obvious
+optimization and it is a protocol change, so: noted, not done.
+
+**Poison messages must not block a partition.** A record that fails the
+transform gets skipped, logged and counted, with a config knob for teams that
+would rather stop than skip. The alternative is one malformed message halting a
+topic forever.
+
+And the standing rule from `ResonateWorker::init` applies unchanged: under
+`debug` the clock belongs to the caller, so a polling consumer must not start.
+
+### NATS first, then Kafka
+
+An ecosystem fact decides this one, and it is not close:
+
+| | crate | 90-day downloads | |
+|---|---|---|---|
+| NATS  | `async-nats` 0.50 | 5.9M | official, **pure Rust** |
+| Kafka | `rdkafka` 0.39    | 6.3M | wraps **librdkafka (C)** |
+| Kafka | `rskafka` 0.6     | 416k | pure Rust, but **no consumer groups, no offset tracking** |
+
+Resonate ships as a single binary people install with `brew`. `rdkafka` puts a
+C library in that build and in every cross-compilation target, and the pure-Rust
+alternative explicitly does not do the two things a trigger needs most. NATS has
+no such trade: `async-nats` is first-party, pure Rust, and JetStream gives
+sequence numbers, durable consumers and redelivery semantics that map onto the
+design above without adaptation.
+
+So NATS first — and it is the smaller, cheaper implementation as well as the
+better-behaved dependency. Kafka second, once the consumer core exists and only
+the client differs, at which point the librdkafka cost is a considered decision
+rather than the price of entry.
 
 ## Idempotency is the pitch
 
@@ -385,20 +522,22 @@ and developer-shaped, and the Gateway is again an outbound websocket.
   a session id, eventually sharding), and less enterprise pull. Its users are
   building bots and agents rather than ops tooling.
 
-### Why not WhatsApp, and why not Kafka first
+### Why not WhatsApp
 
-**WhatsApp** has the largest raw audience and the worst first run: a Meta
-Business account, a verified phone number, a publicly reachable HTTPS callback,
-and a 24-hour messaging window outside which only pre-approved templates may be
-sent. Nobody evaluates it on a Tuesday afternoon. Good second year, bad first
-trigger.
+The largest raw audience and the worst first run: a Meta Business account, a
+verified phone number, a publicly reachable HTTPS callback, and a 24-hour
+messaging window outside which only pre-approved templates may be sent. Nobody
+evaluates it on a Tuesday afternoon. Good second year, bad first trigger.
 
-**Kafka** is the most enterprise-legible and the easiest to test — a local
-broker and a topic. But it reaches the fewest *new* people per unit of work,
-because a team with Kafka already has a way to consume it. It is also the one
-where "one record, one workflow" needs real answers about offsets, consumer
-groups and partition ordering, none of which the chat platforms make us solve
-on day one. Worth building. Not worth building first.
+### The queues are not on this list
+
+Kafka and NATS are a separate axis, not a third chat platform, and comparing
+them here would be comparing the wrong things. A chat trigger is judged on how
+fast someone can try it; a queue trigger is judged on whether its offset
+semantics are right, and it carries the filter and transform that the chat
+mapping deliberately does without. They share the crate shape and the
+`promise.create` at the end of it, and nothing else. See the queue section
+above.
 
 ## Recommendation
 
