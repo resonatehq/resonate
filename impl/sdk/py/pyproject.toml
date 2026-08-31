@@ -36,11 +36,12 @@ build-backend = "uv_build"
 module-name = "resonate"
 
 [tool.uv.workspace]
-members = ["packages/resonate-sdk-aws", "packages/resonate-base", "packages/resonate-nats"]
+members = ["packages/resonate-sdk-aws", "packages/resonate-base", "packages/resonate-nats", "packages/resonate-pg"]
 
 [tool.uv.sources]
 resonate-base = { workspace = true }
 resonate-nats = { workspace = true }
+resonate-pg = { workspace = true }
 resonate-testing = { path = "packages/resonate-testing", editable = true }
 resonate-sdk = { workspace = true }
 
@@ -57,9 +58,10 @@ dev = [
     "pydantic-ai-slim[mcp]>=2.8",
     "aws-lambda-typing>=2.20.0",
     "resonate-testing",
-    # Dev-only so the workspace suite can exercise the connector; deliberately
-    # not an extra (see the note above [project.optional-dependencies]).
+    # Dev-only so the workspace suite can exercise the connectors; deliberately
+    # not extras (see the note above [project.optional-dependencies]).
     "resonate-nats",
+    "resonate-pg",
 ]
 
 [tool.pytest.ini_options]

@@ -108,3 +108,56 @@ jobs:
         run: just examples
         env:
           RESONATE_URL: http://localhost:8080
+
+  # The gated end-to-end tests against a real resonate-pg database. Ubuntu
+  # only: it is the runner with docker, and the connector is OS-agnostic (its
+  # unit tests run in the test matrix, against fakes). These are the only
+  # tests that prove the addresses and tags this connector mints are the ones
+  # the database actually delivers on -- everything else in the suite runs
+  # against in-memory fakes, and the resonate server exercises the wire
+  # differently. No pg_cron: the connector's own pump drives timers, which is
+  # exactly what we want proven.
+  integration-pg:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: resonate
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: 0.11.21
+
+      - name: set up python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
+
+      - name: install
+        run: uv sync --locked --all-extras --all-packages
+
+      # Fetches resonate-pg's schema from its main branch; the file is
+      # deliberately not vendored here. Pin by ref if upstream ever drifts.
+      - name: apply resonate.sql
+        run: |
+          curl -sSL https://raw.githubusercontent.com/resonatehq/resonate-pg/main/resonate.sql -o resonate.sql
+          psql postgresql://postgres:resonate@localhost:5433/postgres -v ON_ERROR_STOP=1 -f resonate.sql
+
+      - name: run the end-to-end tests
+        run: uv run pytest packages/resonate-pg/tests/test_integration.py -v
+        env:
+          RESONATE_PG_DSN: postgresql://postgres:resonate@localhost:5433/postgres

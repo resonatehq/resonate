@@ -27,17 +27,18 @@ The Resonate Python SDK enables developers to build reliable and scalable cloud 
 | `resonate-sdk` | `resonate` | The SDK: durable functions, context, the HTTP/SSE/local transports. |
 | `resonate-base` | `resonate_base` | Connector seam: the `Network`/`Source` protocols and `ConnectorError`. Nothing else — a connector moves opaque strings and never parses ids or invents address formats. No third-party dependencies. |
 | `resonate-nats` | `resonate_nats` | NATS connector. Install with `pip install resonate-nats`. |
+| `resonate-pg` | `resonate_pg` | Postgres connector — the server is a [resonate-pg](https://github.com/resonatehq/resonate-pg) schema, no server process. Install with `pip install resonate-pg`. |
 | `resonate-sdk-aws` | `resonate_aws` | AWS Lambda worker shim. |
 
 Connectors depend on `resonate-base` alone, never on `resonate-sdk` — and they
 are **not** extras of `resonate-sdk`. Installing one is `pip install
-resonate-nats`, so the SDK's dependency metadata never names a connector and
-the arrow only ever points one way.
+resonate-nats` or `pip install resonate-pg`, so the SDK's dependency metadata
+never names a connector and the arrow only ever points one way.
 
 ## Requirements
 
 - **Python ≥3.12**
-- **Resonate Server**: The Python SDK works with the latest **[Resonate server](https://github.com/resonatehq/resonate)** (v0.9.x and up).
+- **A Resonate server**: either the **[Resonate server](https://github.com/resonatehq/resonate)** (v0.9.x and up), or **[resonate-pg](https://github.com/resonatehq/resonate-pg)** — one SQL file on Postgres 16+ — via `resonate-pg`.
 
 ## Quickstart
 

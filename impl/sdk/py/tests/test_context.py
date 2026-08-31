@@ -1777,13 +1777,15 @@ async def test_promise_request_tags_and_empty_param() -> None:
 
     [req] = captured
     assert req.id == "root:1"
-    # A DI promise carries the standard scope/lineage tags only -- no timer
-    # flag (unlike sleep) and no target (unlike rpc).
+    # A DI promise carries the standard scope/lineage tags plus
+    # ``resonate:external`` -- settleable from outside the substrate -- but no
+    # timer flag (unlike sleep) and no target (unlike rpc).
     assert req.tags == {
         "resonate:scope": "global",
         "resonate:branch": "root:1",
         "resonate:parent": "root",
         "resonate:origin": "root",
+        "resonate:external": "true",
     }
     assert "resonate:timer" not in req.tags
     assert "resonate:target" not in req.tags

@@ -203,7 +203,11 @@ async def test_child_promise_tags_for_each_durable_op() -> None:
     requests: list[PromiseCreateReq] = [
         ctx._global_req("wf-1.1", timedelta(minutes=5), target="poll://any@w"),
         ctx._global_req("wf-1.2", timedelta(seconds=30), timer=True, target="poll://x"),
-        ctx._global_req("wf-1.3", None),
+        # The bare global promise (:meth:`Context.promise`): settleable from
+        # outside the substrate, so it carries ``resonate:external`` -- the
+        # marker a substrate like resonate-pg requires before it lets a task
+        # suspend on the promise or enforces its timeout.
+        ctx._global_req("wf-1.3", None, external=True),
         ctx._global_req("wf-1:dabc", timedelta(hours=1), parent="wf-1"),
     ]
     rendered = json.dumps(

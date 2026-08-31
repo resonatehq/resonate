@@ -1,0 +1,27 @@
+[project]
+name = "resonate-pg"
+version = "0.8.0"
+description = "Postgres connector for the Resonate SDK by Resonate HQ, Inc"
+readme = "README.md"
+authors = [{ name = "Resonate HQ, Inc", email = "contact@resonatehq.io" }]
+requires-python = ">=3.12"
+dependencies = [
+    "psycopg[binary]>=3.1,<4",
+    "psycopg-pool>=3.2,<4",
+    "resonate-base>=0.8.0,<0.9",
+]
+
+[project.urls]
+Documentation = "https://github.com/resonatehq/resonate-sdk-py#readme"
+Issues = "https://github.com/resonatehq/resonate-sdk-py/issues"
+Source = "https://github.com/resonatehq/resonate-sdk-py"
+
+[tool.uv.sources]
+resonate-base = { workspace = true }
+
+[build-system]
+requires = ["uv_build>=0.11.7,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "resonate_pg"

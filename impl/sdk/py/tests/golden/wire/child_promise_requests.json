@@ -29,6 +29,7 @@
     "param": {},
     "tags": {
       "resonate:branch": "wf-1.3",
+      "resonate:external": "true",
       "resonate:origin": "wf-1",
       "resonate:parent": "wf-1",
       "resonate:scope": "global"

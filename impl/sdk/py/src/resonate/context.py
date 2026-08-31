@@ -481,6 +481,7 @@ class Context:
         data: TaskData | None = None,
         target: str | None = None,
         timer: bool = False,
+        external: bool = False,
         parent: str | None = None,
     ) -> PromiseCreateReq:
         """Build a global-scope promise request.
@@ -490,8 +491,13 @@ class Context:
         :meth:`promise`). ``data`` carries a ``TaskData`` payload for function
         dispatch (empty otherwise); ``target`` adds the routing tag for remote
         dispatch; ``timer`` adds the ``resonate:timer`` tag that distinguishes a
-        sleep from a bare promise. Tags are inserted in a fixed order so the
-        serialized form is deterministic.
+        sleep from a bare promise; ``external`` adds the ``resonate:external``
+        tag that marks a promise as settleable from outside the substrate and
+        awaitable by other tasks (``resonate-pg`` refuses to suspend on a
+        promise without it -- the awaitable test is ``tags->>'resonate:target'
+        IS NOT NULL OR tags->>'resonate:timer' = 'true' OR
+        tags->>'resonate:external' = 'true'``). Tags are inserted in a fixed
+        order so the serialized form is deterministic.
 
         ``resonate:origin`` is *always* this context's :attr:`origin_id` -- the
         origin is set once at the top (``resonate.run``/``rpc``) and propagates
@@ -511,6 +517,8 @@ class Context:
         tags["resonate:origin"] = self._state.origin_id
         if timer:
             tags["resonate:timer"] = "true"
+        if external:
+            tags["resonate:external"] = "true"
         return PromiseCreateReq(
             id=id,
             timeout_at=self._child_timeout(timeout),
@@ -798,7 +806,11 @@ class Context:
 
         link = self._state.chain.link()
 
-        req = self._global_req(self._next_id(), timeout)
+        # A bare global promise, settleable from outside the substrate (any
+        # process with the id can resolve it). ``external=True`` stamps the
+        # ``resonate:external`` tag: substrates like resonate-pg require it to
+        # allow a task to suspend on this promise and to enforce its timeout.
+        req = self._global_req(self._next_id(), timeout, external=True)
 
         return self._remote_future(req, link)
 
