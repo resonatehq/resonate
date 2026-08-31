@@ -93,11 +93,93 @@ pub fn init_db(conn: &mut Connection, migrate: bool) -> rusqlite::Result<()> {
 /// see [`crate::migrate`] for why the executor differs and nothing else does.
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/sqlite");
 
+/// Which promises the eager sweep is responsible for.
+///
+/// Two implementations of one transition, over one database. The abstract
+/// machine's `processPromiseTimeout` is a materialising read of the promise —
+/// the same thing a request does on its way past — so *when* it runs is a
+/// schedule the specification leaves free, and both schedules below are
+/// admissible. What differs is which promises a fair scheduler is obliged to
+/// look at, and that is the arming rule:
+///
+/// - [`Sweep::Targeted`] arms `resonate:target` — a promise that carries a
+///   task. Everything else times out lazily, when a request next touches it.
+/// - [`Sweep::Awaitable`] arms every promise anyone can block on, which is
+///   [`resonate_core::types::is_external`]: a target, `resonate:scope=global`,
+///   `resonate:external=true`, or `resonate:timer=true`. This is the rule the
+///   specification states (`04-theorems/liveness.lean`, `enabledInternal`, on
+///   `otype.awaitable`) and the rule `otype`'s own doc comment already claims
+///   — "an external promise may be awaited, and an external promise is armed".
+///
+/// An `.internal` promise is on neither queue under either mode, and that is
+/// not an omission: nobody may await it, so nobody is owed the observation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Sweep {
+    /// Targeted promises only — the narrow queue.
+    Targeted,
+    /// Every awaitable promise — the specification's arming rule.
+    Awaitable,
+}
+
+impl Sweep {
+    /// The membership test, as SQL over the `promises` row.
+    ///
+    /// One string, used by the sweep, by `upcoming` and by the snapshot's
+    /// projection, so the three cannot drift: a queue whose sweep, backfill
+    /// and self-report disagree is the divergence hardest to see.
+    ///
+    /// `target` and `is_timer` are stored generated columns; the other two
+    /// tags are read out of `tags` here rather than made columns of their own,
+    /// because the partial index on `(timeout_at) WHERE state = 'pending'` is
+    /// what makes this scan cheap and neither tag narrows it further.
+    fn predicate(self) -> &'static str {
+        match self {
+            Sweep::Targeted => "state = 'pending' AND target IS NOT NULL",
+            Sweep::Awaitable => {
+                "state = 'pending' AND (target IS NOT NULL OR is_timer
+                   OR json_extract(tags, '$.resonate:scope') = 'global'
+                   OR json_extract(tags, '$.resonate:external') = 'true')"
+            }
+        }
+    }
+
+    /// Does this promise, as the engine holds it in Rust, join the sweep?
+    ///
+    /// The same test as [`Sweep::predicate`], for the arming side — every
+    /// announcement is made with the row in hand, so it never goes back to SQL
+    /// to ask.
+    fn arms(self, tags: &std::collections::HashMap<String, String>) -> bool {
+        match self {
+            Sweep::Targeted => tags.contains_key("resonate:target"),
+            Sweep::Awaitable => resonate_core::types::is_external(tags),
+        }
+    }
+
+    /// The same question where the caller holds the tags only as the JSON it
+    /// is about to insert, and already knows whether they carry a target.
+    ///
+    /// Short-circuited so the shipped mode never parses: `Targeted` has its
+    /// answer in the boolean, and `Awaitable` needs the tags only for the
+    /// untargeted rows, which are the ones the two modes disagree about.
+    fn arms_json(self, targeted: bool, tags_json: &str) -> bool {
+        match self {
+            Sweep::Targeted => targeted,
+            Sweep::Awaitable => {
+                targeted
+                    || resonate_core::types::is_external(
+                        &serde_json::from_str(tags_json).unwrap_or_default(),
+                    )
+            }
+        }
+    }
+}
+
 pub struct SqliteEngine {
     conn: Arc<Mutex<Connection>>,
     task_retry_timeout: i64,
     preload_limit: u32,
     debug: bool,
+    sweep: Sweep,
 }
 
 impl SqliteEngine {
@@ -108,6 +190,30 @@ impl SqliteEngine {
         migrate: bool,
         debug: bool,
     ) -> rusqlite::Result<Self> {
+        Self::open_with_sweep(
+            path,
+            task_retry_timeout,
+            preload_limit,
+            migrate,
+            debug,
+            Sweep::Targeted,
+        )
+    }
+
+    /// The same engine, over the same schema, under a named arming rule.
+    ///
+    /// Split from `open` rather than replacing it because the mode is not a
+    /// deployment knob: it is the axis the differential varies to check that
+    /// two admissible schedules of one machine agree wherever the
+    /// specification says they must. See [`Sweep`].
+    pub fn open_with_sweep(
+        path: &str,
+        task_retry_timeout: i64,
+        preload_limit: u32,
+        migrate: bool,
+        debug: bool,
+        sweep: Sweep,
+    ) -> rusqlite::Result<Self> {
         let mut conn = Connection::open(path)?;
         init_db(&mut conn, migrate)?;
         Ok(Self {
@@ -115,6 +221,7 @@ impl SqliteEngine {
             task_retry_timeout,
             preload_limit,
             debug,
+            sweep,
         })
     }
 
@@ -137,6 +244,7 @@ impl SqliteEngine {
         let conn = Arc::clone(&self.conn);
         let task_retry_timeout = self.task_retry_timeout;
         let preload_limit = self.preload_limit;
+        let sweep = self.sweep;
         tokio::task::block_in_place(|| {
             // Use unwrap_or_else to recover from poisoned mutex (a prior panic
             // while holding the lock). The connection itself is still valid.
@@ -146,6 +254,7 @@ impl SqliteEngine {
                 conn: &tx,
                 task_retry_timeout,
                 preload_limit,
+                sweep,
                 emitted: RefCell::new(Vec::new()),
                 armed: RefCell::new(Vec::new()),
             };
@@ -200,12 +309,14 @@ impl SqliteEngine {
         let conn = Arc::clone(&self.conn);
         let task_retry_timeout = self.task_retry_timeout;
         let preload_limit = self.preload_limit;
+        let sweep = self.sweep;
         tokio::task::block_in_place(|| {
             let conn = conn.lock().unwrap_or_else(|e| e.into_inner());
             let db = SqliteDb {
                 conn: &conn,
                 task_retry_timeout,
                 preload_limit,
+                sweep,
                 emitted: RefCell::new(Vec::new()),
                 armed: RefCell::new(Vec::new()),
             };
@@ -2220,6 +2331,8 @@ struct SqliteDb<'a> {
     conn: &'a rusqlite::Connection,
     task_retry_timeout: i64,
     preload_limit: u32,
+    /// Which promises this engine sweeps eagerly. See [`Sweep`].
+    sweep: Sweep,
     /// What this transition has emitted so far.
     ///
     /// `RefCell` because every operation takes `&SqliteDb` — an emission is a
@@ -2252,11 +2365,21 @@ impl SqliteDb<'_> {
         self.armed.borrow_mut().push(Scheduled { at, timeout });
     }
 
-    /// A promise joins the eager sweep only when it is targeted — the queue is
-    /// `state = 'pending' AND target IS NOT NULL`, so an untargeted promise
-    /// times out lazily through `try_timeout` and has no deadline to announce.
-    fn arm_promise_timeout(&self, promise_id: &str, timeout_at: i64, targeted: bool) {
-        if targeted {
+    /// Announce a promise deadline, if this engine's queue holds it.
+    ///
+    /// [`Sweep`] decides. Under `Targeted` the queue is `state = 'pending' AND
+    /// target IS NOT NULL`, so an untargeted promise times out lazily through
+    /// `try_timeout` and has no deadline to announce; under `Awaitable` every
+    /// promise anyone can block on is announced. The tags are passed rather
+    /// than a precomputed flag because the two modes ask different questions
+    /// of them.
+    fn arm_promise_timeout(
+        &self,
+        promise_id: &str,
+        timeout_at: i64,
+        tags: &std::collections::HashMap<String, String>,
+    ) {
+        if self.sweep.arms(tags) {
             self.arm(
                 timeout_at,
                 Timeout::PromiseTimeout {
@@ -2592,8 +2715,21 @@ impl<'a> SqliteDb<'a> {
             // inserted, and `task_state IS NULL` is the guard that used to be
             // `INSERT OR IGNORE INTO tasks`: a promise carries at most one task,
             // and only the first writer gets to install it. No promise timeout
-            // is written either way — `state = 'pending' AND target IS NOT NULL`
-            // is the queue, and the INSERT above already put the row in it.
+            // is written either way — the queue is a predicate over this row,
+            // and the INSERT above already put the row in it.
+            //
+            // The announcement is made here rather than on the targeted branch
+            // below, because which promises the queue holds is [`Sweep`]'s
+            // answer and not this statement's. A row that is already past its
+            // deadline is settled, so it joins no queue and announces nothing.
+            if !already_timedout && self.sweep.arms_json(address.is_some(), tags) {
+                self.arm(
+                    timeout_at,
+                    Timeout::PromiseTimeout {
+                        promise_id: id.to_string(),
+                    },
+                );
+            }
             if already_timedout {
                 // Already timed out — create fulfilled task if resonate:target
                 if address.is_some() {
@@ -2604,7 +2740,6 @@ impl<'a> SqliteDb<'a> {
                     )?;
                 }
             } else if let Some(addr) = address {
-                self.arm_promise_timeout(id, timeout_at, true);
                 // TaskInfraCreated
                 let created = self.conn.execute(
                     "UPDATE promises SET task_state = 'pending', task_version = 0, retry_timeout_at = ?2
@@ -2841,11 +2976,7 @@ impl<'a> SqliteDb<'a> {
             };
             if inserted {
                 if !already_timedout {
-                    self.arm_promise_timeout(
-                        promise_id,
-                        timeout_at,
-                        promise.tags.contains_key("resonate:target"),
-                    );
+                    self.arm_promise_timeout(promise_id, timeout_at, &promise.tags);
                     self.arm_lease(promise_id, pid, created_at + ttl);
                 }
                 return Ok(TaskCreateResult {
@@ -3401,10 +3532,10 @@ impl<'a> SqliteDb<'a> {
     /// Overdue rows are not excluded. They sort first, and a restarting timer
     /// wants exactly those.
     fn upcoming(&self, limit: usize) -> StorageResult<Vec<Scheduled>> {
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare(&format!(
             "SELECT deadline, kind, id, pid FROM (
                  SELECT timeout_at AS deadline, 'promise' AS kind, id AS id, NULL AS pid
-                   FROM promises WHERE state = 'pending' AND target IS NOT NULL
+                   FROM promises WHERE {queue}
                  UNION ALL
                  SELECT retry_timeout_at, 'retry', id, NULL
                    FROM promises WHERE task_state = 'pending' AND retry_timeout_at IS NOT NULL
@@ -3416,7 +3547,8 @@ impl<'a> SqliteDb<'a> {
              )
              ORDER BY deadline ASC, id ASC
              LIMIT ?1",
-        )?;
+            queue = self.sweep.predicate(),
+        ))?;
         let mut rows = stmt.query(params![limit as i64])?;
         let mut out = Vec::new();
         while let Some(row) = rows.next()? {
@@ -3515,7 +3647,10 @@ impl<'a> SqliteDb<'a> {
 
         if promise_inserted {
             // Step 6 is gone with `promise_timeouts`; the INSERT above already
-            // put a pending, targeted promise on the queue.
+            // put the row on whichever queue [`Sweep`] says holds it.
+            if !already_timedout {
+                self.arm_promise_timeout(&promise_id, promise_timeout_at, promise_tags);
+            }
             if already_timedout {
                 // Promise is immediately settled — create fulfilled task if resonate:target is set
                 if address.is_some() {
@@ -3527,7 +3662,6 @@ impl<'a> SqliteDb<'a> {
                 }
             } else if let Some(addr) = &address {
                 // Step 7: Create task infrastructure if resonate:target is set
-                self.arm_promise_timeout(&promise_id, promise_timeout_at, true);
                 let created = self.conn.execute(
                     "UPDATE promises SET task_state = 'pending', task_version = 0, retry_timeout_at = ?2
                      WHERE id = ?1 AND task_state IS NULL",
@@ -3597,19 +3731,21 @@ impl<'a> SqliteDb<'a> {
 
         // Statement 1: Process expired promise timeouts.
         //
-        // `state = 'pending' AND target IS NOT NULL` is the whole of what
-        // `promise_timeouts` held: rows entered on create and left on settle,
-        // and only a targeted promise was ever swept eagerly. Untargeted ones
-        // still time out lazily, through `try_timeout`.
+        // The predicate is the whole of what `promise_timeouts` held: rows
+        // entered on create and left on settle. Which rows those are is
+        // [`Sweep`]'s to say — targeted promises only, or every awaitable one.
+        // Whatever this queue does not hold still times out lazily, through
+        // `try_timeout`, which is the same transition read off a request.
         let expired_ids: Vec<String> = match selected("promise") {
             None => Vec::new(),
             Some(id) => {
-                let mut stmt = self.conn.prepare(
+                let mut stmt = self.conn.prepare(&format!(
                     "SELECT id FROM promises
-                     WHERE state = 'pending' AND target IS NOT NULL AND timeout_at <= ?1
+                     WHERE {queue} AND timeout_at <= ?1
                        AND (?2 IS NULL OR id = ?2)
                      ORDER BY id",
-                )?;
+                    queue = self.sweep.predicate(),
+                ))?;
                 let mut rows = stmt.query(params![time, id])?;
                 let mut r = Vec::new();
                 while let Some(row) = rows.next()? {
@@ -3726,10 +3862,10 @@ impl<'a> SqliteDb<'a> {
 
         // Every section below is a projection of the one table now. The
         // predicates are the membership rules the deleted tables carried.
-        let mut stmt = conn.prepare(
-            "SELECT id, timeout_at FROM promises
-             WHERE state = 'pending' AND target IS NOT NULL ORDER BY id",
-        )?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT id, timeout_at FROM promises WHERE {queue} ORDER BY id",
+            queue = self.sweep.predicate(),
+        ))?;
         let promise_timeouts: Vec<SnapshotPromiseTimeout> = {
             let mut rows = stmt.query([])?;
             let mut r = Vec::new();
@@ -3916,12 +4052,13 @@ fn row_to_schedule(row: &rusqlite::Row) -> rusqlite::Result<ScheduleRecord> {
 //                     other — which is why fulfilling a task, dropping its
 //                     timeout and clearing its lease are one UPDATE here.
 //
-//   promise_timeouts  Gone. The queue is `state = 'pending' AND target IS NOT
-//                     NULL`, which is what rows entering on create and leaving
-//                     on settle amounted to; idx_promises_timeout_at is the
-//                     index the table carried. Untargeted promises were never
-//                     swept eagerly and still are not — they time out lazily,
-//                     through try_timeout.
+//   promise_timeouts  Gone. The queue is a predicate over the promise row —
+//                     [`Sweep::predicate`] — which is what rows entering on
+//                     create and leaving on settle amounted to;
+//                     idx_promises_timeout_at is the index the table carried.
+//                     Whatever the predicate excludes is not left out of the
+//                     protocol, only out of the sweep: it times out lazily,
+//                     through try_timeout, on the next request that names it.
 //
 //   schedule_timeouts Gone: `next_run_at` already is the queue, and
 //                     process_schedule_timeout's idempotency guard reads the

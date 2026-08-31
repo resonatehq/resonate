@@ -39,7 +39,7 @@ use resonate_server_dbms::{
     engine_mysql::MysqlEngine,
     engine_port::{Input, Outgoing, ResonateEngine, Scheduled, Timeout},
     engine_postgres::PostgresEngine,
-    engine_sqlite::SqliteEngine,
+    engine_sqlite::{SqliteEngine, Sweep},
     oracle::{Oracle, SharedOracle},
 };
 use serde_json::{json, Value};
@@ -1386,4 +1386,674 @@ fn promise_id_different_from(rng: &mut fastrand::Rng, other: &str) -> String {
     } else {
         candidate
     }
+}
+
+// ---------------------------------------------------------------------------
+// Two sweeps, one database
+// ---------------------------------------------------------------------------
+//
+// `differential_random` above holds four engines to one behaviour. This holds
+// ONE engine to two, and asks a different question.
+//
+// The abstract machine's promise timeout is `touchObject id now` — a
+// materialising read, the same thing a request performs on its way past the
+// row. So *when* it runs is a schedule the specification leaves free, and
+// `valid/lean/real.lean` shows the trace checker accepting both an eager
+// server and a lazy one on the same recorded run. What is NOT free is which
+// promises a fair scheduler is obliged to look at:
+// `04-theorems/liveness.lean` keys `enabledInternal` on `otype.awaitable`,
+// and `resonate_core::types::otype` says the same thing in prose — "an
+// external promise may be awaited, and an external promise is armed".
+//
+// `Sweep::Targeted` is the queue every engine here ships: `resonate:target`,
+// which is `okind == Task`, strictly narrower than awaitable.
+// `Sweep::Awaitable` is the specification's rule. Both are the same
+// transition over the same schema; they differ only in when it fires and on
+// which rows.
+//
+// So this test does not assert agreement — it MEASURES disagreement, and
+// asserts the two things that must hold anyway:
+//
+//   * each engine announces every deadline it wrote (`assert_arms_announced`);
+//   * once every promise has been touched at the same instant, both engines
+//     hold the same promises. Schedule freedom is transient by definition; a
+//     settled promise that differs after quiescence would be a real bug.
+//
+// Run:
+//   cargo test --release --test differential sweep -- --nocapture
+
+/// One class of difference, and the first time it was seen.
+#[derive(Default)]
+struct Divergence {
+    count: usize,
+    first_step: usize,
+    sample: String,
+}
+
+#[derive(Default)]
+struct Report {
+    classes: std::collections::BTreeMap<(String, String), Divergence>,
+}
+
+impl Report {
+    /// Compare one section of one step. Records rather than panics.
+    fn check(&mut self, section: &str, op: &str, step: usize, a: &Value, b: &Value) {
+        if a == b {
+            return;
+        }
+        let e = self
+            .classes
+            .entry((section.to_string(), op.to_string()))
+            .or_default();
+        e.count += 1;
+        if e.count == 1 {
+            e.first_step = step;
+            e.sample = format!("targeted: {}\n           awaitable: {}", trim(a), trim(b));
+        }
+    }
+}
+
+/// Enough of a value to see what moved, not enough to drown the log.
+fn trim(v: &Value) -> String {
+    let s = v.to_string();
+    if s.len() > 220 {
+        format!("{}…", &s[..220])
+    } else {
+        s
+    }
+}
+
+/// Every promise, read at `now` on both engines.
+///
+/// A read materialises — `try_timeout` is the lazy engine's copy of the very
+/// transition the eager sweep fires — so this is what brings two admissible
+/// schedules to the same point. It is the experiment's control: whatever still
+/// differs afterwards is not schedule freedom.
+async fn quiesce(backends: &[(String, Backend)], ids: &[String], now: i64) {
+    for id in ids {
+        let envelope = req("promise.get", json!({ "id": id }));
+        for (_, b) in backends {
+            let _ = send(b, &envelope, now).await;
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn differential_sweep_modes() {
+    let targeted = Arc::new(
+        SqliteEngine::open_with_sweep(
+            ":memory:",
+            TASK_RETRY_TIMEOUT_MS,
+            PRELOAD_LIMIT,
+            true,
+            true,
+            Sweep::Targeted,
+        )
+        .expect("sqlite targeted"),
+    ) as Backend;
+    let awaitable = Arc::new(
+        SqliteEngine::open_with_sweep(
+            ":memory:",
+            TASK_RETRY_TIMEOUT_MS,
+            PRELOAD_LIMIT,
+            true,
+            true,
+            Sweep::Awaitable,
+        )
+        .expect("sqlite awaitable"),
+    ) as Backend;
+
+    let backends: Vec<(String, Backend)> = vec![
+        ("targeted".into(), targeted),
+        ("awaitable".into(), awaitable),
+    ];
+
+    // The oracle plans the run and is never compared: `task.acquire` needs a
+    // pending task's current version, and only a model of the state knows it.
+    // It follows the shipped (targeted) rule, which is fine — the plan has to
+    // come from somewhere, and both engines receive the same requests.
+    let oracle = Arc::new(SharedOracle::with_preload_limit(PRELOAD_LIMIT));
+    let generator = Arc::clone(&oracle) as Backend;
+
+    const MAX_STEPS: usize = 40_000;
+    const BATCH_SIZE: usize = 200;
+    const PLATEAU_BATCHES: usize = 10;
+
+    let mut rng = fastrand::Rng::with_seed(0x00c0_ffee_dead_beef);
+    let mut now = T0;
+    let mut covered: HashMap<String, usize> = HashMap::new();
+    let mut total_steps = 0usize;
+    let mut seen_sigs: HashSet<(String, u16, u8)> = HashSet::new();
+    let mut plateau_count = 0usize;
+    let mut timings: HashMap<(String, String), Vec<u64>> = HashMap::new();
+    let mut emissions: Vec<(String, Value)> = Vec::new();
+    let mut armed: Vec<(String, Vec<Scheduled>)> = Vec::new();
+    let mut report = Report::default();
+    let mut quiesced_batches = 0usize;
+    let mut post_quiesce_promise_diffs = 0usize;
+
+    const SECTIONS: &[&str] = &[
+        "promises",
+        "tasks",
+        "callbacks",
+        "listeners",
+        "taskTimeouts",
+        "promiseTimeouts",
+        "schedules",
+    ];
+
+    'outer: loop {
+        reset_all(&backends, now).await;
+        reset_all(
+            std::slice::from_ref(&("oracle".to_string(), Arc::clone(&generator))),
+            now,
+        )
+        .await;
+        now = T0;
+
+        let sigs_before = seen_sigs.len();
+
+        for _ in 0..BATCH_SIZE {
+            if total_steps >= MAX_STEPS {
+                break 'outer;
+            }
+
+            let (envelope, now_after) = {
+                let o = oracle.lock();
+                let op = pick_op(&mut rng, &o, &covered);
+                build_envelope(op, &mut rng, &o, now)
+            };
+            now = now_after;
+            total_steps += 1;
+
+            let kind = envelope.kind.clone();
+            let ctx = format!("step={total_steps} op={kind}");
+
+            let (pre_snaps, _) = snap_all(&backends, now).await;
+
+            let mut results = send_all(
+                &backends,
+                &envelope,
+                now,
+                &mut timings,
+                &mut emissions,
+                &mut armed,
+            )
+            .await;
+            let _ = send(&generator, &envelope, now).await;
+            for (_, _, data) in &mut results {
+                normalize_resp(data);
+            }
+
+            report.check(
+                "response.status",
+                &kind,
+                total_steps,
+                &json!(results[0].1),
+                &json!(results[1].1),
+            );
+            report.check(
+                "response.data",
+                &kind,
+                total_steps,
+                &results[0].2,
+                &results[1].2,
+            );
+            report.check(
+                "emitted messages",
+                &kind,
+                total_steps,
+                &emissions[0].1,
+                &emissions[1].1,
+            );
+
+            if results[0].1 < 300 {
+                covered.entry(kind.clone()).or_insert(total_steps);
+            }
+            let sc = state_class(&pre_snaps[0].1);
+            seen_sigs.insert((kind.clone(), results[0].1 as u16, sc));
+
+            // Announced deadlines. Compared between the two, and — the hard
+            // assertion — checked against what each engine's own rows say.
+            // A queue that sweeps rows it never announced is a timer that
+            // sleeps through its own work.
+            let armed_json: Vec<(String, Value)> = armed
+                .iter()
+                .map(|(n, ts)| {
+                    let mut keys: Vec<Value> = ts
+                        .iter()
+                        .map(|t| {
+                            let (kind, id, at) = armed_key(t);
+                            json!([kind, id, at])
+                        })
+                        .collect();
+                    sort_by_json(&mut keys);
+                    (n.clone(), Value::Array(keys))
+                })
+                .collect();
+
+            let (post_snaps, _) = snap_all(&backends, now).await;
+            for ((name, ts), (pre, post)) in armed.iter().zip(pre_snaps.iter().zip(&post_snaps)) {
+                assert_arms_announced(name, &pre.1, &post.1, ts, &format!("ARM {ctx}"));
+            }
+            report.check(
+                "armed timeouts",
+                &kind,
+                total_steps,
+                &armed_json[0].1,
+                &armed_json[1].1,
+            );
+
+            for section in SECTIONS {
+                report.check(
+                    &format!("snapshot.{section}"),
+                    &kind,
+                    total_steps,
+                    &post_snaps[0]
+                        .1
+                        .get(*section)
+                        .cloned()
+                        .unwrap_or(Value::Null),
+                    &post_snaps[1]
+                        .1
+                        .get(*section)
+                        .cloned()
+                        .unwrap_or(Value::Null),
+                );
+            }
+
+            let mut ups: Vec<Value> = Vec::new();
+            for (_, b) in &backends {
+                let u = b.upcoming(16).await.expect("upcoming");
+                ups.push(Value::Array(
+                    u.iter()
+                        .map(|t| {
+                            let (kind, id, at) = armed_key(t);
+                            json!([kind, id, at])
+                        })
+                        .collect(),
+                ));
+            }
+            report.check("upcoming", &kind, total_steps, &ups[0], &ups[1]);
+
+            // Then fire one deadline the narrow way, as a timer would.
+            //
+            // Drawn from the AWAITABLE engine's queue, not the oracle's: the
+            // oracle holds the narrow rule, so planning from it would never
+            // name a deadline only the wide queue has, and the case that
+            // matters most — one engine doing work while the other's
+            // `Internal` matches nothing — would never be reached. Firing a
+            // timeout an engine does not hold must be a no-op, which is what
+            // the port promises, so the same pick is legal on both.
+            let candidates = backends[1].1.upcoming(8).await.expect("upcoming");
+            if let Some(pick) = pick(&mut rng, &candidates) {
+                let mut fired: Vec<Value> = Vec::new();
+                for (_, b) in &backends {
+                    let out = b.process(Input::Internal(pick.timeout.clone()), now).await;
+                    let mut msgs: Vec<Value> = out
+                        .messages
+                        .iter()
+                        .map(|m| json!({ "address": m.address(), "message": m.to_json() }))
+                        .collect();
+                    sort_messages(&mut msgs);
+                    fired.push(Value::Array(msgs));
+                }
+                let _ = generator
+                    .process(Input::Internal(pick.timeout.clone()), now)
+                    .await;
+                let fire_op = format!("internal:{}", pick.timeout.kind());
+                report.check(
+                    "fired messages",
+                    &fire_op,
+                    total_steps,
+                    &fired[0],
+                    &fired[1],
+                );
+                // What the firing itself DID, as a per-engine delta rather
+                // than as two states — by this point the two stores have
+                // already drifted, so comparing them after the fire would
+                // credit the fire with drift it did not cause. Comparing
+                // "did this section move" is the clean measurement: a narrow
+                // `Internal` naming a deadline the targeted engine's queue
+                // does not hold is a no-op, while the awaitable engine settles
+                // a promise and discharges what was waiting on it.
+                let (fire_snaps, _) = snap_all(&backends, now).await;
+                for section in SECTIONS {
+                    let moved = |i: usize| {
+                        json!(post_snaps[i].1.get(*section) != fire_snaps[i].1.get(*section))
+                    };
+                    report.check(
+                        &format!("fire moved: {section}"),
+                        &fire_op,
+                        total_steps,
+                        &moved(0),
+                        &moved(1),
+                    );
+                }
+            }
+        }
+
+        // Quiescence. Every promise read at the same instant on both engines,
+        // which is the lazy engine performing exactly the transition the eager
+        // one already fired.
+        let ids = {
+            let o = oracle.lock();
+            o.all_promise_ids()
+        };
+        quiesce(&backends, &ids, now).await;
+        quiesced_batches += 1;
+        let (q_snaps, _) = snap_all(&backends, now).await;
+        for section in SECTIONS {
+            report.check(
+                &format!("after quiescence: {section}"),
+                "—",
+                total_steps,
+                &q_snaps[0].1.get(*section).cloned().unwrap_or(Value::Null),
+                &q_snaps[1].1.get(*section).cloned().unwrap_or(Value::Null),
+            );
+        }
+        if q_snaps[0].1.get("promises") != q_snaps[1].1.get("promises") {
+            post_quiesce_promise_diffs += 1;
+        }
+
+        let new_sigs = seen_sigs.len().saturating_sub(sigs_before);
+        if covered.len() == ALL_OPS.len() {
+            if new_sigs == 0 {
+                plateau_count += 1;
+            } else {
+                plateau_count = 0;
+            }
+            if plateau_count >= PLATEAU_BATCHES {
+                break 'outer;
+            }
+        }
+    }
+
+    let missing: Vec<&&str> = ALL_OPS
+        .iter()
+        .filter(|op| !covered.contains_key(**op))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "Coverage incomplete after {total_steps} steps: {missing:?}"
+    );
+
+    eprintln!(
+        "\n[sweep] {total_steps} steps, {} signatures, {quiesced_batches} quiescence points, \
+         all {} ops covered",
+        seen_sigs.len(),
+        ALL_OPS.len(),
+    );
+    eprintln!("[sweep] Sweep::Targeted (shipped) vs Sweep::Awaitable (specification)\n");
+
+    if report.classes.is_empty() {
+        eprintln!("[sweep] no divergence recorded.");
+    } else {
+        let sw = report
+            .classes
+            .keys()
+            .map(|(s, _)| s.len())
+            .max()
+            .unwrap_or(10);
+        let ow = report
+            .classes
+            .keys()
+            .map(|(_, o)| o.len())
+            .max()
+            .unwrap_or(10);
+        eprintln!(
+            "[sweep] {:<sw$}  {:<ow$}  {:>8}  {:>10}",
+            "section", "operation", "count", "first@step"
+        );
+        eprintln!("[sweep] {}", "─".repeat(sw + ow + 24));
+        for ((section, op), d) in &report.classes {
+            eprintln!(
+                "[sweep] {:<sw$}  {:<ow$}  {:>8}  {:>10}",
+                section, op, d.count, d.first_step
+            );
+        }
+        eprintln!("\n[sweep] first sample per class:");
+        for ((section, op), d) in &report.classes {
+            eprintln!(
+                "[sweep]   {section} / {op} @{}\n           {}",
+                d.first_step, d.sample
+            );
+        }
+    }
+
+    eprintln!(
+        "\n[sweep] promises disagreeing after quiescence: {post_quiesce_promise_diffs}/{quiesced_batches} batches"
+    );
+
+    // The one thing schedule freedom may not buy. Both engines fire the same
+    // transition and stamp settlement at `timeout_at`, never at the instant it
+    // was noticed, so once every promise has been read the two stores must
+    // hold the same promises. A difference here is not a schedule, it is a bug.
+    assert_eq!(
+        post_quiesce_promise_diffs, 0,
+        "the two sweeps left different promises behind after every promise was read"
+    );
+
+    print_timing_summary(&mut timings, &backends);
+}
+
+/// The divergence, in nine steps, with nothing left to chance.
+///
+/// `differential_sweep_modes` measures how often the two rules disagree over a
+/// random walk. This says exactly what the disagreement IS, on the one shape
+/// that matters: a task suspended on an `resonate:external` promise that
+/// carries no `resonate:target`, with a listener on it too.
+///
+/// That promise is `otype.awaitable` and not `okind == Task`, which is the gap
+/// between the specification's arming rule and the shipped queue. Nothing else
+/// in the protocol distinguishes the two.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_suspended_task_waits_on_a_reader_under_the_narrow_queue() {
+    let open = |sweep| {
+        Arc::new(
+            SqliteEngine::open_with_sweep(
+                ":memory:",
+                TASK_RETRY_TIMEOUT_MS,
+                PRELOAD_LIMIT,
+                true,
+                true,
+                sweep,
+            )
+            .expect("sqlite"),
+        ) as Backend
+    };
+    let backends: Vec<(String, Backend)> = vec![
+        ("targeted".into(), open(Sweep::Targeted)),
+        ("awaitable".into(), open(Sweep::Awaitable)),
+    ];
+
+    let t = T0;
+    let deadline = t + 1_000;
+
+    // `o:a` — awaitable, untargeted. On the specification's queue, on neither
+    // engine's `tasks`, and on only one engine's sweep.
+    let create_a = req(
+        "promise.create",
+        json!({ "id": "o:a", "timeoutAt": deadline, "param": {},
+                "tags": { "resonate:external": "true" } }),
+    );
+    // `o:x` — a task, so targeted, so on both queues.
+    let create_x = req(
+        "task.create",
+        json!({ "pid": PID, "ttl": TTL, "action": {
+            "kind": "promise.create", "head": {},
+            "data": { "id": "o:x", "timeoutAt": t + 900_000, "param": {},
+                      "tags": { "resonate:target": WORKER_URL } } } }),
+    );
+    // `task.create` hands the task back already acquired at version 1, so
+    // there is no acquire step: the worker that created it holds it.
+    let suspend = req(
+        "task.suspend",
+        json!({ "id": "o:x", "version": 1, "actions": [{
+            "kind": "promise.register_callback", "head": {},
+            "data": { "awaited": "o:a", "awaiter": "o:x" } }] }),
+    );
+    let listen = req(
+        "promise.register_listener",
+        json!({ "awaited": "o:a", "address": WORKER_URL }),
+    );
+
+    for envelope in [&create_a, &create_x, &suspend, &listen] {
+        for (name, b) in &backends {
+            let resp = send(b, envelope, t).await;
+            assert_eq!(resp.head.status, 200, "{name}: {} failed", envelope.kind);
+        }
+    }
+
+    // Both hold the same suspended task and the same ledger. Everything but
+    // the queue itself: `promiseTimeouts` is the queue, and the two engines
+    // disagree about it by construction — that is the mode, not a divergence.
+    let (before, _) = snap_all(&backends, t).await;
+    assert_no_divergence(
+        &before,
+        &[
+            "promises",
+            "tasks",
+            "callbacks",
+            "listeners",
+            "taskTimeouts",
+        ],
+        "before the deadline",
+    );
+
+    // The queue, though, already differs — and it is what a timer is told to
+    // wake for.
+    let ups: Vec<Vec<String>> = {
+        let mut v = Vec::new();
+        for (_, b) in &backends {
+            v.push(
+                b.upcoming(16)
+                    .await
+                    .expect("upcoming")
+                    .iter()
+                    .map(|s| format!("{}:{}", s.timeout.kind(), s.timeout.id()))
+                    .collect(),
+            );
+        }
+        v
+    };
+    assert!(
+        !ups[0].contains(&"promise:o:a".to_string()),
+        "targeted should not arm an untargeted promise, got {:?}",
+        ups[0]
+    );
+    assert!(
+        ups[1].contains(&"promise:o:a".to_string()),
+        "awaitable must arm every promise anyone can block on, got {:?}",
+        ups[1]
+    );
+
+    // Past the deadline, fire the timeout by name — the precise form, what a
+    // timer does. Same input, same instant, both engines.
+    let after = deadline + 1;
+    let timeout = Timeout::PromiseTimeout {
+        promise_id: "o:a".to_string(),
+    };
+    let mut emitted: Vec<Vec<String>> = Vec::new();
+    for (_, b) in &backends {
+        let out = b.process(Input::Internal(timeout.clone()), after).await;
+        emitted.push(
+            out.messages
+                .iter()
+                .map(|m| {
+                    m.to_json()
+                        .get("kind")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?")
+                        .to_string()
+                })
+                .collect(),
+        );
+    }
+    // A whole sweep, too, in case the narrow engine finds it there.
+    for (_, b) in &backends {
+        let _ = b.tick(after).await.expect("tick");
+    }
+
+    let (fired, _) = snap_all(&backends, after).await;
+    let task_state = |snap: &Value| {
+        snap.pointer("/tasks/0/state")
+            .and_then(|v| v.as_str())
+            .unwrap_or("?")
+            .to_string()
+    };
+
+    assert!(
+        emitted[0].is_empty(),
+        "targeted should have nothing to fire, got {:?}",
+        emitted[0]
+    );
+    assert_eq!(task_state(&fired[0].1), "suspended");
+    assert_eq!(
+        fired[0].1.pointer("/promises/0/state").unwrap(),
+        "pending",
+        "targeted leaves the promise pending in store past its deadline"
+    );
+    assert_eq!(
+        fired[0]
+            .1
+            .pointer("/callbacks")
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .len(),
+        1,
+        "targeted still owes the resume"
+    );
+
+    // One firing, two messages: the listener learns the promise settled, and
+    // the task it was blocking goes back out to its worker.
+    let mut kinds = emitted[1].clone();
+    kinds.sort();
+    assert_eq!(kinds, vec!["execute".to_string(), "unblock".to_string()]);
+    assert_eq!(task_state(&fired[1].1), "pending");
+    assert_eq!(
+        fired[1].1.pointer("/promises/0/state").unwrap(),
+        "rejected_timedout"
+    );
+    assert!(fired[1]
+        .1
+        .pointer("/callbacks")
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .is_empty());
+
+    // The narrow engine is not wrong, only late: it owes the work to whoever
+    // reads next. One read, and the two agree on everything the protocol says
+    // is state — the settlement is stamped at `timeout_at`, not at the instant
+    // it was noticed, so even `settledAt` matches.
+    let read_at = after + 5_000;
+    quiesce(&backends, &["o:a".to_string(), "o:x".to_string()], read_at).await;
+    let (settled, _) = snap_all(&backends, read_at).await;
+    assert_eq!(
+        settled[0].1.get("promises"),
+        settled[1].1.get("promises"),
+        "a read must bring the narrow engine to where the wide one already was"
+    );
+    assert_eq!(task_state(&settled[0].1), "pending");
+    assert_eq!(task_state(&settled[1].1), "pending");
+
+    // What does NOT converge, and cannot: a settlement is stamped at
+    // `timeout_at`, but the RESUME it triggers is stamped at the instant it
+    // was discharged. The wide queue discharged at the deadline; the narrow
+    // one discharged when a reader turned up five seconds later, and the
+    // redispatch clock it armed is five seconds later to match. Nothing reads
+    // that back to a common value — it is the latency the eager sweep exists
+    // to remove, made durable.
+    let retry = |snap: &Value| {
+        snap.pointer("/taskTimeouts/0/timeout")
+            .and_then(|v| v.as_i64())
+            .expect("a resumed task is on the retry queue")
+    };
+    assert_eq!(
+        retry(&settled[0].1) - retry(&settled[1].1),
+        read_at - after,
+        "the narrow engine's redispatch clock lags by exactly the read delay"
+    );
 }
