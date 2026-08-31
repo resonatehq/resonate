@@ -81,146 +81,93 @@ A trigger is one function:
 Event -> PromiseCreateData { id, timeout_at, param, tags }
 ```
 
-Four fields, and they have genuinely different rules, so it is worth taking
-them one at a time rather than reaching for a general-purpose transform. The
-config that describes one is a schedule's record with the cron replaced by a
-selector:
+There is no template language, no filters, and no argument parsing. The whole
+mapping is fixed:
+
+```
+     command ──trim '/'──►  func
+        text ──verbatim──►  args[0]
+  trigger_id ───────────►   id
+      config ───────────►   version, timeout, target
+```
+
+### Why the text is not parsed
+
+A Slack slash command has **no parameter schema**. `text` is one raw string —
+everything typed after the command, unparsed, unvalidated, untyped. Slack does
+not know that `/backfill` takes a collection and a date, and cannot tell a user
+when they leave one out.
+
+So `["orders", "2024-01-01"]` is not something Slack hands over. It is
+something a trigger would *invent*, by splitting on whitespace and hoping. That
+guesses at a function's arity — `/backfill orders` yields one argument where
+two were wanted — and the failure surfaces deep inside the worker instead of at
+the edge. Quoting, flags, and empty trailing fields each make it worse.
+
+Everything built on top of that guess inherits its brittleness: a `words`
+filter, a literal-array config with native JSON types, a parameter schema
+declared in TOML, a modal opened to collect typed inputs. Each is more
+machinery defending a split that should not happen.
+
+**The string goes through whole.** The worker parses its own grammar, in its
+own language, where it can also test it.
+
+The same rule settles Discord, which *does* deliver typed options: the options
+object goes through as one argument, unflattened. Two providers, one rule —
+hand the user's content to the worker as it arrived and decide nothing about
+it. Which also means the structured/unstructured difference between the two
+platforms stops being an argument about which to build first.
+
+### What is left to configure
+
+Almost nothing, and that is the point:
 
 ```toml
-[[triggers.slack.commands]]
-command = "/backfill"                    # selector
-func    = "backfill"                     #  ┐
-args    = ["{{ text }}"]                 #  ├ param
-version = 1                              #  ┘
-id      = "backfill-{{ trigger_id }}"    # id
-timeout = "1h"                           # timeout_at
-target  = "poll://any@default"           # tags: resonate:target
+[triggers.slack]
+app_token = "xapp-..."          # Socket Mode
+bot_token = "xoxb-..."
+target    = "poll://any@default"
+timeout   = "1h"
 ```
 
-### `id` — the strict field, and the only one worth being strict about
+Every command the Slack app declares invokes the function of the same name.
+There is no per-command block to write and no registry to keep in sync, because
+Slack already holds one: an app only receives the commands its own manifest
+declares, so the manifest *is* the allowlist. A per-command override —
+a different `func`, a longer `timeout` — stays available for the cases that
+need it, and is expected to be rare.
 
-An id a trigger mints is not a name. It is three things at once:
+### `id`
 
-1. **The dedupe key**, per the section above.
-2. **The `resonate:origin` of an entire call graph.** Every promise the
-   workflow goes on to create is `<this>:1`, `<this>:1.1`, and so on.
-3. **A value in a reserved grammar.** `origin()` splits an id at its first
-   `':'`; lineage segments below that are `'.'`-separated
-   (`types.rs:399`). `validate_schedule_create_data` already rejects a `':'`
-   in a schedule id for exactly this reason, and says so: an origin holding a
-   colon "is unrepresentable: no id could ever split back to it".
+Always `trigger_id`, and it is worth saying why the trigger does not let this
+be templated from the payload.
 
-So free text must not reach it. Not sanitized — *excluded*, and for a reason
-better than escaping: an id built from what someone typed is semantically
-wrong. Two people running `/backfill orders` would mint the same id, and the
-second would silently receive the first's promise instead of starting their
-own. That is the dedupe mechanism working exactly as designed, on the wrong
-key.
+An id a trigger mints is three things at once: the dedupe key; the
+`resonate:origin` of an entire call graph (`<this>:1`, `<this>:1.1`, …); and a
+value in a reserved grammar, since `origin()` splits an id at its first `':'`
+(`types.rs:399`). `validate_schedule_create_data` already refuses a `':'` in a
+schedule id for exactly this reason, and says so: an origin holding a colon
+"is unrepresentable: no id could ever split back to it".
 
-Three rules, then:
+`text` therefore must not reach it — and for a better reason than escaping.
+An id built from what someone typed is *semantically* wrong: two people running
+`/backfill orders` would mint the same id, and the second would silently
+receive the first's promise instead of starting their own. That is the dedupe
+mechanism working exactly as designed, on the wrong key.
 
-- **Default to `{{ trigger_id }}`**, so the common case needs no config and is
-  correct by construction.
-- **Only identifier-shaped fields may be interpolated into `id`** — for Slack:
-  `trigger_id`, `team_id`, `channel_id`, `user_id`, `api_app_id`, `command`.
-  Not `text`. Not `channel_name`, `team_domain` or `user_name` either: those
-  are renameable, so they are not identity, and `user_name` is deprecated
-  besides.
-- **Check the charset anyway**, `[A-Za-z0-9._-]`, and reject otherwise. Every
-  Slack identifier already satisfies it, so the check never fires in practice.
-  It is there so that a provider changing a format cannot smuggle a `':'` into
-  an origin.
+`trigger_id` is Slack's own identifier for the interaction, and it is
+already `[A-Za-z0-9.]`. Check the charset anyway before using it — the check
+never fires today, and it is there so that a provider changing a format cannot
+smuggle a `':'` into an origin.
 
-The escape hatch for the one legitimate want — "one backfill per channel per
-day, no matter who asks" — is a filter, not an exception:
+### `param`
 
-```toml
-id = "backfill-{{ channel_id }}-{{ text | hash }}"
-```
-
-`hash` yields a fixed-charset digest, so it is safe by construction and honest
-about being a content key rather than an identity.
-
-### Slack is not structured. Discord is.
-
-This is the sharpest difference between the two, and it lands squarely on the
-mapping.
-
-A Slack slash command has **no parameter schema at all**. `text` is one raw
-string — everything the user typed after the command, unparsed, unvalidated,
-untyped. Slack does not know that `/backfill` takes a collection and a date,
-and cannot tell the user when they forget one. Every framework in the ecosystem
-rolls its own parser on top: argparse wrappers, Zod schemas, bespoke splitters.
-
-A Discord application command is **declared** — named options with types
-(`STRING`, `INTEGER`, `BOOLEAN`, `USER`, `CHANNEL`, `NUMBER`, …), required or
-not, and Discord validates and autocompletes them *before* delivery. The
-interaction carries `data.options: [{name, type, value}]`, already parsed:
+The shape is what `resonate invoke` already sends and what the SDKs already
+decode:
 
 ```
-Slack     text = "orders 2024-01-01"                       ← one string, ours to split
-Discord   options = [{name:"collection", type:3, value:"orders"},
-                     {name:"date",       type:3, value:"2024-01-01"}]
+param.data = base64(json { func: "backfill", args: ["orders 2024-01-01"], version: 1 })
 ```
-
-So `["orders", "2024-01-01"]` is **not something Slack gives us.** It is
-something we would produce by splitting, and splitting free text into positional
-arguments is guessing at a function's arity: `/backfill orders` yields one
-argument where the function wanted two, and the failure surfaces deep inside the
-worker rather than at the edge.
-
-Which is why the default above is `args = ["{{ text }}"]` — one string, passed
-through, the worker parses its own grammar — and `| words` is opt-in for people
-who know their command is positional. Producing plausibly-wrong arity silently
-is worse than handing over exactly what arrived.
-
-Two ways to get real structure on the Slack side, both better than a smarter
-splitter:
-
-- **Declare the parameters in the binding**, and validate at the edge:
-
-  ```toml
-  params = [ { name = "collection", type = "string", required = true },
-             { name = "date",       type = "string", required = true } ]
-  ```
-
-  This buys the thing Slack cannot do for us — an ephemeral `usage:
-  /backfill <collection> <date>` inside the three-second ack, instead of a
-  workflow that starts and fails. It is a small argument parser expressed in
-  TOML, and it is worth writing precisely because Discord's equivalent comes
-  free.
-- **Open a modal.** `trigger_id` — which the id already depends on — opens a
-  Block Kit view with typed inputs, and the submission arrives as structured
-  `view.state.values`. For any command with more than one or two parameters
-  this is the better Slack pattern, and it is a second event type the same
-  trigger handles rather than a different mechanism.
-
-Note what this does to the ordering argument. Discord's mapping is trivial and
-total; Slack's needs a parser we own, or modals, or an honest single string.
-That is a real point for building Discord first, and it partly offsets the
-reach argument below.
-
-### `param` — the fixed field
-
-The shape is not ours to invent; it is what `resonate invoke` already sends and
-what the SDKs already decode:
-
-```
-param.data = base64(json { func, args, version })
-```
-
-`args` is a JSON array, which is the one place a template engine has to think
-about types. Two config shapes, deliberately distinguishable:
-
-- `args = ["a", "{{ user_id }}", 3]` — a **literal array**; string elements are
-  interpolated in place.
-- `args = "{{ text | words }}"` — **the whole array from one expression**.
-
-And one interpolation rule, the standard one: an element that is *entirely* one
-`{{ … }}` takes the field's native JSON type; an interpolation embedded in
-surrounding text stringifies. Slack sends everything as strings so this rarely
-shows, but Discord's application commands carry declared option types, and the
-rule is what lets an integer option arrive as an integer.
 
 `param.headers` is `Option<HashMap<String, String>>` and the CLI leaves it
 empty. It is the natural home for provenance the *worker* needs but the
@@ -228,15 +175,14 @@ function *signature* should not carry — `slack.response_url` above all, since
 that is how a result gets posted back half an hour later.
 
 > **Open question.** Whether the SDKs surface `param.headers` to a function.
-> If they do not, `response_url` has to travel as an argument or a tag instead,
-> and the answer changes the config's shape. Worth settling before writing the
-> crate.
+> If they do not, `response_url` has to travel as an argument or a tag instead.
+> Worth settling before writing the crate.
 
-### `tags` — the free field
+### `tags`
 
-`resonate:target` is required — the same rule `validate_schedule_create_data`
+`resonate:target` is required — the rule `validate_schedule_create_data`
 already enforces for schedules, and `op_promise_create` validates the address
-besides. Optional `resonate:delay`.
+besides.
 
 Everything else is ours, and worth spending: tags are searchable, so stamping
 provenance
@@ -246,54 +192,33 @@ slack:command = "/backfill"   slack:channel_id = "C214…"   slack:user_id = "U2
 ```
 
 makes "every workflow anyone started from #ops this week" a `promise.search`
-rather than a feature. That falls out of the mapping for free and is a good
-reason to make provenance tags the default rather than an option.
+rather than a feature. It falls out of the mapping for free, which is reason
+enough to make it the default rather than an option.
 
 ### `timeout_at`
 
 `now + timeout`, with `parse_duration` from `cli.rs` reading the config.
 
-### Which binding handles an event
-
-Exact match on the provider's selector field — `command` for Slack, the
-application command name for Discord. One binding per selector value,
-duplicates refused at startup rather than resolved by order. An event matching
-nothing is acked and dropped with a log line; silently doing nothing to a
-command a human typed is worse than saying so.
-
 ### What happens when it goes wrong
 
-Three outcomes, and only one of them is an error:
+With no parsing left, there are only two outcomes, and one of them is not an
+error:
 
-- **`promise.create` returns 200.** Note that this is *also* what a duplicate
-  delivery returns: `op_promise_create` finds the existing promise and returns
-  its record rather than conflicting (`oracle.rs:373`). So the trigger never
-  special-cases dedupe — it always gets a promise back, and can tell a repeat
-  from a first run by whether `createdAt` is this delivery's. "Already running,
-  id `backfill-…`" is a better answer to a double-tapped command than a second
+- **`promise.create` returns 200.** This is also what a *duplicate* delivery
+  returns: `op_promise_create` finds the existing promise and returns its record
+  rather than conflicting (`oracle.rs:373`). So the trigger never special-cases
+  dedupe — it always gets a promise back, and tells a repeat from a first run by
+  whether `createdAt` belongs to this delivery. "Already running, id
+  `backfill-…`" is a better answer to a double-tapped command than a second
   workflow.
-- **The binding fails to render** — a field the payload did not carry, a filter
-  that rejected its input. Ack, and reply to the user ephemerally with what was
-  missing. No promise.
 - **`Unavailable`.** Do not ack. Slack retries, and the retry is safe precisely
-  because the id is derived from the interaction rather than the delivery. The
-  provider's retry becomes ours, for free, and that is worth choosing on
-  purpose rather than discovering.
+  because the id names the interaction rather than the delivery. The provider's
+  retry becomes ours, for free, and that is worth choosing on purpose rather
+  than discovering.
 
-### What this deliberately is not
+There is deliberately no third case for a malformed command, because with the
+text passed through whole there is nothing left to malform.
 
-A substitution engine with a fixed, small filter set — `words`, `json`, `hash`,
-`lower` — and no conditionals, no loops, no arithmetic. The moment a mapping
-wants those, the right answer is not a bigger template language. It is
-pass-through mode: omit `args` entirely, and the whole event arrives as one
-JSON argument to a function that dispatches in the user's own code, in the
-user's own language, where the rest of their policy already lives.
-
-Inngest answers this same question with a per-webhook JavaScript transform.
-That is a language, an editor and a sandbox — a lot of machinery for a server
-whose `core` module is defined by deciding nothing about what an operation
-does. Templating covers the cases that are actually common, and code covers the
-rest. There is no middle to build.
 
 ## Idempotency is the pitch
 
@@ -302,20 +227,18 @@ timeout. The usual answer is a dedupe table with a TTL. For a trigger, a
 duplicate delivery is a duplicate *workflow* — the failure everyone
 immediately understands.
 
-`promise.create` is idempotent on the promise id. So a `promiseId` template
-that draws on the provider's own identifier for the interaction —
-`slack-{{.trigger_id}}`, `gh-{{.delivery}}` — makes at-least-once delivery into
-exactly-once kickoff, with no extra state anywhere. The store the server
-already has is the dedupe table, and `{{.timestamp}}` proves the templating
-hook exists.
+`promise.create` is idempotent on the promise id. So an id taken from the
+provider's own identifier for the interaction makes at-least-once delivery into
+exactly-once kickoff, with no extra state anywhere. The store the server already
+has is the dedupe table.
 
-One caveat, because it is easy to get wrong: **a slash command has no
-`event_id`.** That field belongs to the Events API. What a command carries is
+Which identifier, precisely, because it is easy to get wrong: **a slash command
+has no `event_id`.** That field belongs to the Events API. A command carries
 `trigger_id`, unique per invocation, and — over Socket Mode — an `envelope_id`
-on the wrapper. `trigger_id` is the better key of the two, because it names the
-user's interaction rather than one delivery attempt of it. Whether Slack reuses
-it across a retried delivery is the one thing here worth confirming
-empirically before the pitch depends on it.
+on the wrapper. `trigger_id` is the right one, because it names the user's
+interaction rather than one delivery attempt of it. Whether Slack reuses it
+across a retried delivery is the one thing here worth confirming empirically
+before the pitch depends on it.
 
 That is one sentence in a README, and it is the strongest thing we can say
 about triggers on a durable execution engine specifically.
@@ -421,11 +344,10 @@ and developer-shaped, and the Gateway is again an outbound websocket.
 - **Cheapest onboarding of anything on this list.** Create an app, invite the
   bot, paste one token. No workspace admin, no business verification, no
   billing, no tunnel.
-- Application commands are *typed* — declared options with names, types and a
-  required flag, validated by Discord before delivery — so the mapping to
-  `{func, args}` needs no parser at all, where Slack's free-text `text` field
-  needs one we write and maintain. See the mapping section: this is a bigger
-  difference than it first looks.
+- Application commands are *typed*, where Slack's `text` is one raw string.
+  Under the pass-through rule this stops mattering — both hand the user's
+  content to the worker as it arrived — so it is no longer an argument for
+  building Discord first.
 - Cost: the Gateway is more protocol than Socket Mode (heartbeats, resume with
   a session id, eventually sharding), and less enterprise pull. Its users are
   building bots and agents rather than ops tooling.
