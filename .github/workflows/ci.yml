@@ -103,6 +103,97 @@ jobs:
           esac
           cargo test --release --test differential --all-features -- --nocapture
 
+  # The same comparison as the differential, generated two other ways.
+  #
+  # `fuzz` keeps a corpus of byte tapes and mutates the ones whose runs showed
+  # behaviour no earlier run showed, so coverage decides what it generates
+  # next; a failure comes back as a minimized tape you can replay by hand.
+  # `prop` generates transition sequences through proptest and shrinks a
+  # failing one to the few steps that still fail.
+  #
+  # Neither replaces the differential: it is the one that runs to a coverage
+  # plateau. These two are the ones that hand you a small repro.
+  generative:
+    name: Generative (${{ matrix.backend }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [sqlite, postgres, mysql]
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: resonate
+          POSTGRES_PASSWORD: resonate
+          POSTGRES_DB: resonate
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U resonate"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: resonate
+          MYSQL_USER: resonate
+          MYSQL_PASSWORD: resonate
+          MYSQL_DATABASE: resonate
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uresonate -presonate"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Fuzz
+        env:
+          BACKEND: ${{ matrix.backend }}
+          FUZZ_SECS: 300
+        run: |
+          case "$BACKEND" in
+            postgres)
+              export TEST_POSTGRES_URL=postgres://resonate:resonate@localhost:5432/resonate
+              ;;
+            mysql)
+              export TEST_MYSQL_URL=mysql://resonate:resonate@localhost:3306/resonate
+              ;;
+          esac
+          cargo test --release --test fuzz --all-features -- --nocapture
+
+      # Runs even when the fuzzer failed: they generate differently, so which
+      # of them found something, and which repro is smaller, is information.
+      - name: Property
+        if: ${{ !cancelled() }}
+        env:
+          BACKEND: ${{ matrix.backend }}
+          PROP_CASES: 100
+        run: |
+          case "$BACKEND" in
+            postgres)
+              export TEST_POSTGRES_URL=postgres://resonate:resonate@localhost:5432/resonate
+              ;;
+            mysql)
+              export TEST_MYSQL_URL=mysql://resonate:resonate@localhost:3306/resonate
+              ;;
+          esac
+          cargo test --release --test prop --all-features -- --nocapture
+
   # Porcupine, from the specification repository, against a live server under
   # real concurrency.
   #

@@ -45,6 +45,16 @@ path = "diff/differential.rs"
 # turned off cargo skips the target rather than failing to build it.
 required-features = ["sqlite", "postgres", "mysql"]
 
+[[test]]
+name = "fuzz"
+path = "diff/fuzz.rs"
+required-features = ["sqlite", "postgres", "mysql"]
+
+[[test]]
+name = "prop"
+path = "diff/prop.rs"
+required-features = ["sqlite", "postgres", "mysql"]
+
 [features]
 # All forwarded: the cfg'd code lives in resonate-server-dbms.
 default = ["sqlite", "postgres", "mysql"]
@@ -85,3 +95,7 @@ validator = { workspace = true }
 url = { workspace = true }
 base64 = "0.22"
 tower-http = { version = "0.6", features = ["trace", "catch-panic", "cors"] }
+
+[dev-dependencies]
+proptest = "1.11.0"
+proptest-state-machine = "0.8.0"
