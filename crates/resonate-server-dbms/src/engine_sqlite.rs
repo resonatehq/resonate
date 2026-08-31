@@ -3402,29 +3402,35 @@ impl<'a> SqliteDb<'a> {
     /// wants exactly those.
     fn upcoming(&self, limit: usize) -> StorageResult<Vec<Scheduled>> {
         let mut stmt = self.conn.prepare(
+            // `kind` is `Timeout::rank`. Ordering by it as well is what makes
+            // the result total: one promise row can carry a promise deadline
+            // and a task deadline at the same instant, so (deadline, id) is not
+            // unique, and an undefined tie is a different answer per engine —
+            // including across the LIMIT, where the tie decides which deadline
+            // the caller is told about at all.
             "SELECT deadline, kind, id, pid FROM (
-                 SELECT timeout_at AS deadline, 'promise' AS kind, id AS id, NULL AS pid
+                 SELECT timeout_at AS deadline, 0 AS kind, id AS id, NULL AS pid
                    FROM promises WHERE state = 'pending' AND target IS NOT NULL
                  UNION ALL
-                 SELECT retry_timeout_at, 'retry', id, NULL
+                 SELECT retry_timeout_at, 1, id, NULL
                    FROM promises WHERE task_state = 'pending' AND retry_timeout_at IS NOT NULL
                  UNION ALL
-                 SELECT lease_timeout_at, 'lease', id, pid
+                 SELECT lease_timeout_at, 2, id, pid
                    FROM promises WHERE task_state = 'acquired' AND lease_timeout_at IS NOT NULL
                  UNION ALL
-                 SELECT next_run_at, 'schedule', id, NULL FROM schedules
+                 SELECT next_run_at, 3, id, NULL FROM schedules
              )
-             ORDER BY deadline ASC, id ASC
+             ORDER BY deadline ASC, id ASC, kind ASC
              LIMIT ?1",
         )?;
         let mut rows = stmt.query(params![limit as i64])?;
         let mut out = Vec::new();
         while let Some(row) = rows.next()? {
             let at: i64 = row.get(0)?;
-            let kind: String = row.get(1)?;
+            let kind: i64 = row.get(1)?;
             let id: String = row.get(2)?;
             let pid: Option<String> = row.get(3)?;
-            if let Some(timeout) = Timeout::from_parts(&kind, id, pid) {
+            if let Some(timeout) = Timeout::from_rank(kind, id, pid) {
                 out.push(Scheduled { at, timeout });
             }
         }

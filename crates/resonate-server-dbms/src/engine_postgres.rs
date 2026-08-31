@@ -3923,19 +3923,21 @@ impl PostgresDb<'_> {
     fn upcoming(&self, limit: usize) -> StorageResult<Vec<Scheduled>> {
         let rows = rt_block_on(
             sqlx::query(
+                // See `engine_sqlite.rs` for why `kind` is a number and why it
+                // is part of the ordering.
                 "SELECT deadline, kind, id, pid FROM (
-                     SELECT timeout_at AS deadline, 'promise' AS kind, id AS id, NULL::text AS pid
+                     SELECT timeout_at AS deadline, 0 AS kind, id AS id, NULL::text AS pid
                        FROM promises WHERE state = 'pending' AND target IS NOT NULL
                      UNION ALL
-                     SELECT retry_timeout_at, 'retry', id, NULL
+                     SELECT retry_timeout_at, 1, id, NULL
                        FROM promises WHERE task_state = 'pending' AND retry_timeout_at IS NOT NULL
                      UNION ALL
-                     SELECT lease_timeout_at, 'lease', id, pid
+                     SELECT lease_timeout_at, 2, id, pid
                        FROM promises WHERE task_state = 'acquired' AND lease_timeout_at IS NOT NULL
                      UNION ALL
-                     SELECT next_run_at, 'schedule', id, NULL FROM schedules
+                     SELECT next_run_at, 3, id, NULL FROM schedules
                  ) d
-                 ORDER BY deadline ASC, id ASC
+                 ORDER BY deadline ASC, id ASC, kind ASC
                  LIMIT $1",
             )
             .bind(limit as i64)
@@ -3945,10 +3947,10 @@ impl PostgresDb<'_> {
             .iter()
             .filter_map(|r| {
                 let at: i64 = r.get("deadline");
-                let kind: String = r.get("kind");
+                let kind: i32 = r.get("kind");
                 let id: String = r.get("id");
                 let pid: Option<String> = r.get("pid");
-                Timeout::from_parts(&kind, id, pid).map(|timeout| Scheduled { at, timeout })
+                Timeout::from_rank(kind.into(), id, pid).map(|timeout| Scheduled { at, timeout })
             })
             .collect())
     }

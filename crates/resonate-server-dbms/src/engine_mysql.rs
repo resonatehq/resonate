@@ -3988,12 +3988,11 @@ impl MysqlDb<'_> {
     fn upcoming(&self, limit: usize) -> StorageResult<Vec<Scheduled>> {
         let rows = rt_block_on(
             sqlx::query(
-                // The kind is an integer, not the label the other two backends
-                // select. A string literal in a UNION carries the connection's
-                // collation, the columns carry the table's, and MySQL refuses
-                // to unify them — "Illegal mix of collations". An integer has
-                // no collation, so the discriminant travels as a number and is
-                // named on the Rust side.
+                // See `engine_sqlite.rs` for why `kind` is a number and why it
+                // is part of the ordering. MySQL could not have it any other
+                // way regardless: a string literal in a UNION carries the
+                // connection's collation and the columns carry the table's, and
+                // MySQL refuses to unify them — "Illegal mix of collations".
                 //
                 // `pid` is a bare NULL for the same reason: `CAST(NULL AS
                 // CHAR)` would introduce a collation of its own, where an
@@ -4010,7 +4009,7 @@ impl MysqlDb<'_> {
                      UNION ALL
                      SELECT next_run_at, 3, id, NULL FROM schedules
                  ) d
-                 ORDER BY deadline ASC, id ASC
+                 ORDER BY deadline ASC, id ASC, kind ASC
                  LIMIT ?",
             )
             .bind(limit as i64)
@@ -4020,15 +4019,10 @@ impl MysqlDb<'_> {
             .iter()
             .filter_map(|r| {
                 let at: i64 = r.get("deadline");
-                let kind = match r.get::<i64, _>("kind") {
-                    0 => "promise",
-                    1 => "retry",
-                    2 => "lease",
-                    _ => "schedule",
-                };
+                let kind: i64 = r.get("kind");
                 let id: String = r.get("id");
                 let pid: Option<String> = r.get("pid");
-                Timeout::from_parts(kind, id, pid).map(|timeout| Scheduled { at, timeout })
+                Timeout::from_rank(kind, id, pid).map(|timeout| Scheduled { at, timeout })
             })
             .collect())
     }

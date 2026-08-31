@@ -97,20 +97,37 @@ impl Timeout {
         }
     }
 
+    /// The kind as a number, which is how the union in
+    /// [`ResonateEngine::upcoming`] carries it.
+    ///
+    /// A number rather than the label, for two reasons. MySQL will not unify a
+    /// string literal with a table column in a `UNION` — the literal carries
+    /// the connection's collation and the column the table's — and every
+    /// backend has to order by this column, so it has to sort the same
+    /// everywhere; the label's alphabetical order is not the union's order.
+    pub fn rank(&self) -> i64 {
+        match self {
+            Timeout::PromiseTimeout { .. } => 0,
+            Timeout::TaskRetryTimeout { .. } => 1,
+            Timeout::TaskLeaseTimeout { .. } => 2,
+            Timeout::ScheduleDue { .. } => 3,
+        }
+    }
+
     /// Rebuild a timeout from the columns [`ResonateEngine::upcoming`] selects.
     ///
-    /// The inverse of [`Timeout::kind`] and [`Timeout::id`], so the four
+    /// The inverse of [`Timeout::rank`] and [`Timeout::id`], so the four
     /// backends can share one shape for a query that is otherwise four
     /// dialects of the same union.
-    pub fn from_parts(kind: &str, id: String, pid: Option<String>) -> Option<Timeout> {
-        match kind {
-            "promise" => Some(Timeout::PromiseTimeout { promise_id: id }),
-            "retry" => Some(Timeout::TaskRetryTimeout { task_id: id }),
-            "lease" => Some(Timeout::TaskLeaseTimeout {
+    pub fn from_rank(rank: i64, id: String, pid: Option<String>) -> Option<Timeout> {
+        match rank {
+            0 => Some(Timeout::PromiseTimeout { promise_id: id }),
+            1 => Some(Timeout::TaskRetryTimeout { task_id: id }),
+            2 => Some(Timeout::TaskLeaseTimeout {
                 task_id: id,
                 pid: pid.unwrap_or_default(),
             }),
-            "schedule" => Some(Timeout::ScheduleDue { schedule_id: id }),
+            3 => Some(Timeout::ScheduleDue { schedule_id: id }),
             _ => None,
         }
     }

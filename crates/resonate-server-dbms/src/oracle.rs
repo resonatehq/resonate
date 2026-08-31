@@ -255,9 +255,13 @@ impl Oracle {
             });
         }
 
+        // By rank as well as id: one promise row can carry a promise deadline
+        // and a task deadline at the same instant, so (at, id) is not a total
+        // order and the truncation below would keep an arbitrary one of them.
         out.sort_by(|a, b| {
             a.at.cmp(&b.at)
                 .then_with(|| a.timeout.id().cmp(b.timeout.id()))
+                .then_with(|| a.timeout.rank().cmp(&b.timeout.rank()))
         });
         out.truncate(limit);
         out
@@ -2588,8 +2592,12 @@ impl SharedOracle {
     }
 
     /// Borrow the model directly, for tests that inspect or seed its state.
+    ///
+    /// Poisoning is ignored. A test that panics mid-step is a test that is
+    /// about to re-run the same step to shrink it, and refusing the lock would
+    /// turn the first failure into the only one it can ever report.
     pub fn lock(&self) -> std::sync::MutexGuard<'_, Oracle> {
-        self.0.lock().expect("oracle mutex poisoned")
+        self.0.lock().unwrap_or_else(|e| e.into_inner())
     }
 }
 
