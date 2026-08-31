@@ -83,7 +83,7 @@ cron:
 ```toml
 [[triggers.slack.commands]]
 command      = "/backfill"
-promise_id   = "backfill-{{.event.id}}"
+promise_id   = "backfill-{{.trigger_id}}"
 promise_tags = { "resonate:target" = "poll://any@default" }
 func         = "backfill"
 args         = ["{{.text}}"]
@@ -108,13 +108,82 @@ duplicate delivery is a duplicate *workflow* — the failure everyone
 immediately understands.
 
 `promise.create` is idempotent on the promise id. So a `promiseId` template
-that draws on the provider's own event id — `slack-{{.event.id}}`,
-`gh-{{.delivery}}` — makes at-least-once delivery into exactly-once kickoff,
-with no extra state anywhere. The store the server already has is the dedupe
-table, and `{{.timestamp}}` proves the templating hook exists.
+that draws on the provider's own identifier for the interaction —
+`slack-{{.trigger_id}}`, `gh-{{.delivery}}` — makes at-least-once delivery into
+exactly-once kickoff, with no extra state anywhere. The store the server
+already has is the dedupe table, and `{{.timestamp}}` proves the templating
+hook exists.
+
+One caveat, because it is easy to get wrong: **a slash command has no
+`event_id`.** That field belongs to the Events API. What a command carries is
+`trigger_id`, unique per invocation, and — over Socket Mode — an `envelope_id`
+on the wrapper. `trigger_id` is the better key of the two, because it names the
+user's interaction rather than one delivery attempt of it. Whether Slack reuses
+it across a retried delivery is the one thing here worth confirming
+empirically before the pitch depends on it.
 
 That is one sentence in a README, and it is the strongest thing we can say
 about triggers on a durable execution engine specifically.
+
+## How a Slack command actually arrives
+
+Two delivery modes, and the choice between them is most of what the crate looks
+like.
+
+**Over HTTP, to a Request URL.** A `POST`, and — unlike the Events API, which
+is JSON — the body is `application/x-www-form-urlencoded`:
+
+```
+POST /slack/commands
+Content-Type: application/x-www-form-urlencoded
+X-Slack-Request-Timestamp: 1712345678
+X-Slack-Signature: v0=a2114d57b48eac39b9ad189dd8316235a7b4a8d21a10bd27519666489c69b503
+
+token=deprecated&team_id=T0001&team_domain=acme
+&channel_id=C2147483705&channel_name=ops
+&user_id=U2147483697&user_name=deprecated
+&command=%2Fbackfill&text=orders+2024-01-01
+&api_app_id=A123&is_enterprise_install=false
+&response_url=https%3A%2F%2Fhooks.slack.com%2Fcommands%2F1234%2F5678
+&trigger_id=13345224609.738474920.8088930838d88f008e0
+```
+
+Verification is the trust-boundary work: HMAC-SHA256 over the literal string
+`v0:{timestamp}:{raw_body}` keyed by the signing secret, hex, prefixed `v0=`,
+compared in constant time — and reject a timestamp more than five minutes old,
+which is the replay defence. It has to run on the **raw** bytes, before any
+form parsing, which is worth knowing early because it constrains how the
+handler is written.
+
+Then: 3 seconds to respond, `response_url` good for 30 minutes and five posts,
+`trigger_id` good for about 3 seconds and only for opening a modal.
+
+**Over Socket Mode, on a websocket we dial.** `apps.connections.open` with an
+app-level token (`xapp-`, scope `connections:write`) returns a `wss://` URL;
+connect to it and the same payload arrives wrapped:
+
+```json
+{
+  "envelope_id": "57d6a792-4d35-4d0b-b6aa-3361493e1caf",
+  "type": "slash_commands",
+  "accepts_response_payload": true,
+  "payload": { "command": "/backfill", "text": "orders 2024-01-01",
+               "trigger_id": "1334...", "channel_id": "C2147483705", "...": "..." }
+}
+```
+
+Acknowledge by sending the `envelope_id` back over the socket within 3 seconds,
+or Slack retries. Slack also sends `hello` on connect and `disconnect` when it
+wants the client to reconnect, so a real implementation needs a reconnect loop
+with backoff.
+
+**Socket Mode is the one to build.** No public URL and no tunnel, so it runs on
+a laptop; and the websocket is authenticated by the app-level token, so there
+is no signature verification, no five-minute clock skew window, and no raw-body
+handling. It also fits `ResonateGateway` exactly as written — `init` dials and
+holds, `stop` drains — where the HTTP mode would want to mount routes on a
+listener the gateway crate already owns, and inverting that dependency is a
+design argument we do not have to have yet.
 
 ## The three-second ack
 
