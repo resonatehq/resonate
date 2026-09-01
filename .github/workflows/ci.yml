@@ -224,10 +224,18 @@ jobs:
               ;;
           esac
           RESONATE_DEBUG=true RESONATE_SERVER__PORT=8021 ./target/release/resonate serve &
+          ready=false
           for _ in $(seq 1 40); do
-            curl -sf -o /dev/null -X POST http://127.0.0.1:8021/ -d '{}' && break
+            if curl -sf -o /dev/null http://127.0.0.1:8021/health; then
+              ready=true
+              break
+            fi
             sleep 1
           done
+          if [ "$ready" != true ]; then
+            echo "server did not become ready"
+            exit 1
+          fi
 
       # The producer exits non-zero on a history with no successes or no
       # overlap, so a server that refuses everything, or a run that failed to

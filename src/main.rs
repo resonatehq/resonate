@@ -17,9 +17,14 @@ use config::Config;
 // as an unreachable statement and an unused binding rather than as the
 // configuration mistake it is. The library has no such requirement: with every
 // engine off it still carries the oracle.
-#[cfg(not(any(feature = "sqlite", feature = "postgres", feature = "mysql")))]
+#[cfg(not(any(
+    feature = "sqlite",
+    feature = "postgres",
+    feature = "mysql",
+    feature = "blob"
+)))]
 compile_error!(
-    "at least one storage engine must be enabled: --features sqlite, postgres, or mysql"
+    "at least one storage engine must be enabled: --features sqlite, postgres, mysql, or blob"
 );
 
 use resonate_core::{ResonateGateway, ResonateRouter, ResonateServer, ResonateWorker};
