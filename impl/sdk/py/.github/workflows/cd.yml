@@ -11,9 +11,6 @@ jobs:
   # ships if any of them fail. The publish step ships exactly the dist/ this
   # job built and tested.
   release:
-    permissions:
-      id-token: write
-
     runs-on: ubuntu-latest
 
     steps:
@@ -63,7 +60,13 @@ jobs:
       # unchanged member rides along a root release without republishing and a
       # re-run finishes a partial publish. The checks above reject a changed
       # member whose version is already out, so a skip here is always a
-      # deliberate ride-along. Trusted publishing (OIDC) is picked up
-      # automatically from the id-token permission.
+      # deliberate ride-along.
+      #
+      # Publishing uses the PYPI_TOKEN API token, not trusted publishing
+      # (OIDC): a single OIDC publisher identity maps to exactly one PyPI
+      # project, so it cannot cover the whole workspace. The token is taken
+      # from the UV_PUBLISH_TOKEN env var to keep it out of the logs.
       - name: publish to PyPI
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
         run: uv publish --check-url https://pypi.org/simple/
