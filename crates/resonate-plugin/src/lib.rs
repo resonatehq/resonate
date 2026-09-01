@@ -1,34 +1,9 @@
-//! The Resonate plugin surface.
+//! The Resonate worker plugin surface.
 //!
-//! What a plugin announces, how it is configured, and how a binary assembles
-//! one. This is the crate four hundred plugins pin, so it is deliberately
-//! small and deliberately boring: manifests, four plugin shapes, a registry,
-//! and the configuration loader. No transport, no storage, no runtime.
-//!
-//! # The ring
-//!
-//! Resonate is four ports in one cycle:
-//!
-//! ```text
-//!    N                1              1              N
-//! ┌─────────┐    ┌────────┐    ┌────────┐    ┌─────────┐
-//! │ Gateway │───▶│ Server │───▶│ Router │───▶│ Worker  │
-//! └─────────┘    └────────┘    └────────┘    └─────────┘
-//!                     ▲                            │
-//!                     └────────────────────────────┘
-//!                          Weak — the one back-edge
-//! ```
-//!
-//! [`ResonateServer`](resonate_core::ResonateServer) appears twice because it
-//! is the only port that is both an entry and a return. Everything else
-//! follows from that, which is why a plugin declares only which port it *is*:
-//!
-//! - what it is handed, and whether that handle is strong or weak
-//!   ([`Port::consumes`], [`Port::holds_weakly`]);
-//! - whether the binary has one of it or many ([`Port::is_singleton`]) — which
-//!   is why a server is *selected* by name and workers are *registered* by
-//!   scheme;
-//! - where its configuration lives ([`Manifest::config_key`]).
+//! What a worker plugin announces, how it is configured, and how a binary
+//! assembles one. This is the crate every plugin pins, so it is deliberately
+//! small: a manifest, a plugin, a registry, and the configuration loader. No
+//! transport, no storage, no runtime.
 //!
 //! # Writing one
 //!
@@ -52,12 +27,10 @@
 //! );
 //! ```
 //!
-//! The [`Manifest`] is pure data and the factory is behaviour, split so that
-//! reading a plugin never requires running it: `resonate plugins` prints a row
-//! for a plugin whose configuration is wrong, which is exactly when someone is
-//! looking. The typed `Config` is captured by the closure and never named
-//! outside the plugin's own crate — the framework holds a port trait object
-//! and nothing else.
+//! The [`Manifest`] is data and the factory is behaviour, split so that reading
+//! a plugin never requires running it. The typed `Config` is captured by the
+//! closure and never named outside the plugin's own crate — the framework holds
+//! a [`ResonateWorker`] and nothing else.
 //!
 //! # Assembling a binary
 //!
@@ -68,30 +41,25 @@
 //! ```ignore
 //! fn main() -> ExitCode {
 //!     resonate::run(Registry::new()
-//!         .worker(&resonate_worker_kafka::PLUGIN)
-//!         .server(&resonate_server_dbms::SQLITE))
+//!         .worker(&resonate_worker_kafka::PLUGIN))
 //! }
 //! ```
 
 pub mod config;
 pub mod error;
-pub mod handle;
 pub mod manifest;
 pub mod plugin;
 pub mod registry;
 
-pub use config::{Loaded, Loader, OwnedSettings, Settings, ACTIVE, ENABLED};
-pub use error::{ConfigError, RegistryError, StartupError};
-pub use handle::ServerHandle;
-pub use manifest::{Manifest, Port};
-pub use plugin::{
-    BoxFuture, Env, GatewayCtx, GatewayFactory, GatewayPlugin, RouterCtx, RouterFactory,
-    RouterPlugin, ServerConnect, ServerCtx, ServerFactory, ServerPlugin, WorkerCtx, WorkerFactory,
-    WorkerPlugin,
-};
-pub use registry::{Entry, Registry};
+/// The configuration section every worker plugin lives under.
+pub const SECTION: &str = "transports";
+
+pub use config::{Loaded, Loader, Settings, ENABLED};
+pub use error::{ConfigError, RegistryError};
+pub use manifest::Manifest;
+pub use plugin::{WorkerCtx, WorkerFactory, WorkerPlugin};
+pub use registry::Registry;
 
 // The port traits a plugin implements, re-exported so a plugin crate names one
-// dependency rather than two — and so the pair that makes up the plugin ABI
-// versions together.
-pub use resonate_core::{ResonateGateway, ResonateRouter, ResonateServer, ResonateWorker};
+// dependency rather than two.
+pub use resonate_core::{ResonateServer, ResonateWorker};
