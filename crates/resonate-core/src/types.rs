@@ -288,7 +288,10 @@ pub struct ScheduleRecord {
 // --- Request Data Structs ---
 // These mirror the `data` field of each request kind in types.ts.
 
-#[derive(Debug, Deserialize, Validate)]
+// Serialize as well as Deserialize: an in-process worker builds this rather
+// than parsing it, and a hand-written `json!` of the same shape is a field
+// name nothing checks.
+#[derive(Debug, Serialize, Deserialize, Validate)]
 pub struct PromiseGetData {
     #[validate(length(min = 1, message = "Promise ID is required"))]
     pub id: String,
@@ -800,7 +803,9 @@ pub struct ScheduleSearchData {
 // --- Response Data Structs ---
 // These mirror the `data` field of each successful (200) response in types.ts.
 
-#[derive(Debug, Serialize)]
+// Deserialize as well as Serialize: an in-process worker reads this back off
+// its own `promise.get` response.
+#[derive(Debug, Serialize, Deserialize)]
 pub struct PromiseResponseData {
     pub promise: PromiseRecord,
 }

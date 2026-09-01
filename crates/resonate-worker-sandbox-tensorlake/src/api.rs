@@ -11,26 +11,106 @@ use serde::Deserialize;
 use serde_json::json;
 
 /// A sandbox, as much of one as this worker reads.
-#[derive(Debug, Clone)]
+///
+/// One type for three endpoints: `create` answers with `sandbox_id` where
+/// `get` and `list` answer with `id`, which the alias reconciles in the one
+/// place it is true rather than at each call site.
+#[derive(Debug, Clone, Deserialize)]
 pub struct Sandbox {
+    #[serde(rename = "id", alias = "sandbox_id")]
     pub id: String,
-    pub status: String,
+    #[serde(default)]
+    pub status: SandboxStatus,
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+/// Where a sandbox is in its lifecycle.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SandboxStatus {
+    Pending,
+    Running,
+    Snapshotting,
+    Suspending,
+    Suspended,
+    Terminated,
+    /// A status this build has not been taught. Total on purpose: a service
+    /// that grows a state must not turn every task into an error.
+    #[default]
+    Unknown,
+}
+
+/// Written out rather than derived because `#[serde(other)]` is not allowed on
+/// an enum deserialized from a plain string, and the alternative — matching
+/// the strings at each use — is the thing being avoided.
+impl<'de> Deserialize<'de> for SandboxStatus {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Ok(match String::deserialize(d)?.as_str() {
+            "pending" => Self::Pending,
+            "running" => Self::Running,
+            "snapshotting" => Self::Snapshotting,
+            "suspending" => Self::Suspending,
+            "suspended" => Self::Suspended,
+            "terminated" => Self::Terminated,
+            _ => Self::Unknown,
+        })
+    }
+}
+
+/// One page of `GET /sandboxes`.
+#[derive(Debug, Deserialize)]
+struct SandboxPage {
+    #[serde(default)]
+    sandboxes: Vec<Sandbox>,
+    #[serde(default)]
+    next_cursor: Option<String>,
+}
+
+/// What `POST /processes` answers with.
+#[derive(Debug, Deserialize)]
+struct StartedProcess {
+    pid: i64,
+    /// Absent on a service that does not report it; only `Some(false)` means
+    /// the tunnel has no write half.
+    #[serde(default)]
+    stdin_writable: Option<bool>,
 }
 
 /// What a process is doing, the moment it was asked.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ProcessStatus {
     #[serde(default)]
-    pub status: String,
+    pub status: ProcessState,
     #[serde(default)]
     pub exit_code: Option<i64>,
     #[serde(default)]
     pub signal: Option<i64>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ProcessState {
+    /// The default for a process the service will not describe: assuming it is
+    /// still running is the safe half, since the alternative deletes a sandbox
+    /// out from under it.
+    #[default]
+    Running,
+    Exited,
+    Signaled,
+}
+
+impl<'de> Deserialize<'de> for ProcessState {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Ok(match String::deserialize(d)?.as_str() {
+            "exited" => Self::Exited,
+            "signaled" => Self::Signaled,
+            _ => Self::Running,
+        })
+    }
+}
+
 impl ProcessStatus {
     pub fn running(&self) -> bool {
-        !matches!(self.status.as_str(), "exited" | "signaled")
+        self.status == ProcessState::Running
     }
 }
 
@@ -92,14 +172,10 @@ impl Api {
             .await
             .map_err(|e| format!("get sandbox: {e}"))?;
         if resp.status().is_success() {
-            let v: serde_json::Value = resp
-                .json()
-                .await
-                .map_err(|e| format!("get sandbox: bad json: {e}"))?;
             // A name lookup that silently resolved to something else is worse
             // than no lookup: only accept an answer that names it back.
-            if v.get("name").and_then(|n| n.as_str()) == Some(name) {
-                if let Some(sb) = sandbox_from(&v) {
+            if let Ok(sb) = resp.json::<Sandbox>().await {
+                if sb.name.as_deref() == Some(name) {
                     return Ok(Some(sb));
                 }
             }
@@ -116,7 +192,7 @@ impl Api {
             if let Some(c) = &cursor {
                 url.push_str(&format!("&cursor={c}"));
             }
-            let v: serde_json::Value = self
+            let page: SandboxPage = self
                 .http
                 .get(&url)
                 .bearer_auth(&self.api_key)
@@ -126,16 +202,15 @@ impl Api {
                 .json()
                 .await
                 .map_err(|e| format!("list sandboxes: bad json: {e}"))?;
-            let page = v.get("sandboxes").and_then(|s| s.as_array());
-            for entry in page.into_iter().flatten() {
-                if entry.get("name").and_then(|n| n.as_str()) == Some(name) {
-                    if let Some(sb) = sandbox_from(entry) {
-                        return Ok(Some(sb));
-                    }
-                }
+            if let Some(sb) = page
+                .sandboxes
+                .into_iter()
+                .find(|sb| sb.name.as_deref() == Some(name))
+            {
+                return Ok(Some(sb));
             }
-            match v.get("next_cursor").and_then(|c| c.as_str()) {
-                Some(c) if !c.is_empty() => cursor = Some(c.to_string()),
+            match page.next_cursor {
+                Some(c) if !c.is_empty() => cursor = Some(c),
                 _ => return Ok(None),
             }
         }
@@ -175,11 +250,9 @@ impl Api {
                 resp.text().await.unwrap_or_default()
             ));
         }
-        let v: serde_json::Value = resp
-            .json()
+        resp.json::<Sandbox>()
             .await
-            .map_err(|e| format!("create sandbox: bad json: {e}"))?;
-        sandbox_from(&v).ok_or_else(|| format!("create sandbox: no id in {v}"))
+            .map_err(|e| format!("create sandbox: bad json: {e}"))
     }
 
     pub async fn resume_sandbox(&self, id: &str) -> Result<(), String> {
@@ -206,8 +279,8 @@ impl Api {
         .await
     }
 
-    pub async fn sandbox_status(&self, id: &str) -> Result<String, String> {
-        let v: serde_json::Value = self
+    pub async fn sandbox_status(&self, id: &str) -> Result<SandboxStatus, String> {
+        let sb: Sandbox = self
             .http
             .get(format!("{}/{id}", self.api_url))
             .bearer_auth(&self.api_key)
@@ -217,10 +290,7 @@ impl Api {
             .json()
             .await
             .map_err(|e| format!("get sandbox: bad json: {e}"))?;
-        Ok(v.get("status")
-            .and_then(|s| s.as_str())
-            .unwrap_or_default()
-            .to_string())
+        Ok(sb.status)
     }
 
     // ─── Processes ────────────────────────────────────────────────────────
@@ -259,18 +329,16 @@ impl Api {
                 resp.text().await.unwrap_or_default()
             ));
         }
-        let v: serde_json::Value = resp
+        let started: StartedProcess = resp
             .json()
             .await
             .map_err(|e| format!("start process: bad json: {e}"))?;
         // Nothing can be tunnelled to a process that will not take stdin, and
         // the API reports that per process rather than refusing the start.
-        if v.get("stdin_writable").and_then(|w| w.as_bool()) == Some(false) {
+        if started.stdin_writable == Some(false) {
             return Err("start process: stdin is not writable".to_string());
         }
-        v.get("pid")
-            .and_then(|p| p.as_i64())
-            .ok_or_else(|| format!("start process: no pid in {v}"))
+        Ok(started.pid)
     }
 
     pub async fn process_status(
@@ -367,22 +435,6 @@ impl Api {
     }
 }
 
-fn sandbox_from(v: &serde_json::Value) -> Option<Sandbox> {
-    // `create` answers with `sandbox_id`, `get` and `list` with `id`.
-    let id = v
-        .get("sandbox_id")
-        .or_else(|| v.get("id"))
-        .and_then(|i| i.as_str())?;
-    Some(Sandbox {
-        id: id.to_string(),
-        status: v
-            .get("status")
-            .and_then(|s| s.as_str())
-            .unwrap_or_default()
-            .to_string(),
-    })
-}
-
 // ─── The stdout stream ────────────────────────────────────────────────────
 
 /// One line of the process's stdout, or the end of it.
@@ -443,6 +495,13 @@ impl Output {
     }
 }
 
+/// The payload of an `output` event.
+#[derive(Debug, Deserialize)]
+struct OutputEvent {
+    #[serde(default)]
+    line: String,
+}
+
 enum Event {
     Output(String),
     Eof,
@@ -483,13 +542,8 @@ fn parse_event(event: &[u8]) -> Option<Event> {
     }
     match name.as_str() {
         "eof" => Some(Event::Eof),
-        "output" => match serde_json::from_str::<serde_json::Value>(&data) {
-            Ok(v) => Some(Event::Output(
-                v.get("line")
-                    .and_then(|l| l.as_str())
-                    .unwrap_or_default()
-                    .to_string(),
-            )),
+        "output" => match serde_json::from_str::<OutputEvent>(&data) {
+            Ok(e) => Some(Event::Output(e.line)),
             Err(e) => Some(Event::Malformed(format!("output event: bad json: {e}"))),
         },
         _ => None,

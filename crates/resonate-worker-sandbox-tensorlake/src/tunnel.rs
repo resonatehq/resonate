@@ -78,33 +78,27 @@ enum Inbound {
     Log,
 }
 
-/// A line is a request only if it carries both a `kind` and a `head.corrId`.
-/// Anything else the process prints — a log line, a stack trace, structured
-/// logging that happens to have a `kind` field of its own — is output, and
-/// answering it with a protocol error would be noise on the process's stdin.
+/// A line is a request only if `core` can salvage both a `kind` and a
+/// `corrId` from it. Anything else the process prints — a log line, a stack
+/// trace, structured logging that happens to have a `kind` field of its own —
+/// is output, and answering it with a protocol error would be noise on the
+/// process's stdin.
 ///
-/// `corrId` is the half that makes the test safe to rely on: without one there
-/// is nothing to correlate a rejection to, so a line missing it could not be
-/// usefully answered even if it were meant as a request.
+/// `salvage_context` is the same reading the HTTP gateway gives a body that
+/// would not parse, so the two edges agree on what counts as addressed to the
+/// protocol. Its fallbacks are the test: `("unknown", "0")` for bytes that are
+/// not an envelope at all, and a request needs both halves to be answerable —
+/// without a `corrId` there is nothing to correlate a rejection to.
 fn classify(line: &str) -> Inbound {
     let bytes = line.as_bytes();
-    let addressed = serde_json::from_slice::<serde_json::Value>(bytes)
-        .ok()
-        .is_some_and(|v| {
-            v.get("kind").is_some_and(|k| k.is_string())
-                && v.get("head")
-                    .and_then(|h| h.get("corrId"))
-                    .is_some_and(|c| c.is_string())
-        });
-    if !addressed {
-        return Inbound::Log;
-    }
     match types::parse_and_validate(bytes) {
         Ok(req) => Inbound::Request(req),
-        Err(invalid) => {
-            let (kind, corr_id) = types::salvage_context(bytes);
-            Inbound::Rejected(invalid.to_response(kind, corr_id))
-        }
+        Err(invalid) => match types::salvage_context(bytes) {
+            (kind, corr_id) if kind != "unknown" && corr_id != "0" => {
+                Inbound::Rejected(invalid.to_response(kind, corr_id))
+            }
+            _ => Inbound::Log,
+        },
     }
 }
 

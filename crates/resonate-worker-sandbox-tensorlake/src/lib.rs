@@ -47,15 +47,15 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use serde_json::json;
 use tokio::sync::Mutex;
 
 use resonate_core::types::{
-    Message, RequestEnvelope, RequestHead, ResponseEnvelope, PROTOCOL_VERSION,
+    Message, PromiseGetData, PromiseResponseData, PromiseState, RequestEnvelope, RequestHead,
+    ResponseEnvelope, PROTOCOL_VERSION,
 };
 use resonate_core::{ResonateServer, ResonateWorker, Unavailable};
 
-use api::{Api, ProcessSpec};
+use api::{Api, ProcessSpec, ProcessState, SandboxStatus};
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 
@@ -478,14 +478,14 @@ async fn ensure_sandbox(
     let sandbox = match api.find_sandbox(name).await? {
         // A terminated sandbox is a name and nothing else — the state it held
         // is gone, so there is nothing to reattach to.
-        Some(sb) if sb.status != "terminated" => sb,
+        Some(sb) if sb.status != SandboxStatus::Terminated => sb,
         _ => api.create_sandbox(name, image, timeout_secs).await?,
     };
 
-    if sandbox.status == "running" {
+    if sandbox.status == SandboxStatus::Running {
         return Ok(sandbox.id);
     }
-    if sandbox.status == "suspended" {
+    if sandbox.status == SandboxStatus::Suspended {
         api.resume_sandbox(&sandbox.id).await?;
     }
     wait_running(api, &sandbox.id).await?;
@@ -495,13 +495,13 @@ async fn ensure_sandbox(
 async fn wait_running(api: &Api, sandbox_id: &str) -> Result<(), String> {
     let mut waited = 0;
     loop {
-        match api.sandbox_status(sandbox_id).await?.as_str() {
-            "running" => return Ok(()),
-            "terminated" => {
+        match api.sandbox_status(sandbox_id).await? {
+            SandboxStatus::Running => return Ok(()),
+            SandboxStatus::Terminated => {
                 return Err(format!("sandbox {sandbox_id} is terminated"));
             }
             // The idle timer can win a race against a resume. Ask again.
-            "suspended" => api.resume_sandbox(sandbox_id).await?,
+            SandboxStatus::Suspended => api.resume_sandbox(sandbox_id).await?,
             _ => {}
         }
         if waited >= READY_TIMEOUT_MS {
@@ -546,7 +546,7 @@ async fn release(
     // settling its promise is the failure this worker cannot report any other
     // way, having no promise of its own to reject.
     match api.process_status(sandbox_id, pid).await {
-        Ok(status) if status.status == "signaled" => {
+        Ok(status) if status.status == ProcessState::Signaled => {
             tracing::warn!(
                 task_id,
                 sandbox_id,
@@ -586,32 +586,44 @@ async fn release(
 /// state worth keeping, and an unanswerable server is not a reason to hold a
 /// sandbox open indefinitely.
 async fn promise_pending(server: &Arc<dyn ResonateServer>, promise_id: &str) -> bool {
-    let resp = request(server, "promise.get", json!({ "id": promise_id })).await;
-    match resp {
-        Ok(r) if r.head.status == 200 => {
-            // `promise.get` answers with the record under `promise`, not
-            // inline: reading `data.state` finds nothing and reports every
-            // promise settled, which would delete every sandbox.
-            r.data
-                .get("promise")
-                .and_then(|p| p.get("state"))
-                .and_then(|s| s.as_str())
-                == Some("pending")
-        }
-        Ok(_) => false,
+    let resp = request(
+        server,
+        "promise.get",
+        &PromiseGetData {
+            id: promise_id.to_string(),
+        },
+    )
+    .await;
+    let data = match resp {
+        Ok(r) if r.head.status == 200 => r.data,
+        Ok(_) => return false,
         Err(e) => {
             tracing::warn!(promise_id, error = %e, "tensorlake: promise state unknown");
+            return false;
+        }
+    };
+    match serde_json::from_value::<PromiseResponseData>(data) {
+        Ok(d) => d.promise.state == PromiseState::Pending,
+        Err(e) => {
+            // The server answered 200 with something that is not a promise.
+            tracing::warn!(promise_id, error = %e, "tensorlake: malformed promise.get response");
             false
         }
     }
 }
 
 /// Issue one protocol request at the server this worker is attached to.
-async fn request(
+///
+/// `data` is one of `core`'s request structs rather than a `json!` of the same
+/// shape: a field name spelled by hand is one nothing checks, which is how the
+/// wrong one gets read.
+async fn request<T: serde::Serialize>(
     server: &Arc<dyn ResonateServer>,
     kind: &str,
-    data: serde_json::Value,
+    data: &T,
 ) -> Result<ResponseEnvelope, Unavailable> {
+    let data = serde_json::to_value(data)
+        .map_err(|e| Unavailable::new(format!("tensorlake: cannot encode {kind}: {e}")))?;
     server
         .process(&RequestEnvelope {
             kind: kind.to_string(),
@@ -707,6 +719,72 @@ mod tests {
         };
         let err = account.api_key().unwrap_err();
         assert!(err.contains("NO_SUCH_VARIABLE_FOR_THIS_TEST"), "{err}");
+    }
+
+    // ─── Reading a promise back ───────────────────────────────────────────
+    //
+    // The response is built exactly as the engine builds it — `success` over
+    // `PromiseResponseData` — so a change to either side fails here rather
+    // than at run time, quietly deleting sandboxes.
+
+    struct PromiseServer(Option<PromiseState>);
+
+    #[async_trait]
+    impl ResonateServer for PromiseServer {
+        async fn process(&self, req: &RequestEnvelope) -> Result<ResponseEnvelope, Unavailable> {
+            // The request has to be one `promise.get` would accept.
+            let asked: PromiseGetData = serde_json::from_value(req.data.clone())
+                .expect("the request is a promise.get");
+            let Some(state) = self.0 else {
+                return Ok(ResponseEnvelope::error(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    404,
+                    "Promise not found",
+                ));
+            };
+            Ok(ResponseEnvelope::success(
+                req.kind.clone(),
+                req.head.corr_id.clone(),
+                &PromiseResponseData {
+                    promise: resonate_core::types::PromiseRecord {
+                        id: asked.id,
+                        state,
+                        param: Default::default(),
+                        value: Default::default(),
+                        tags: HashMap::new(),
+                        timeout_at: 0,
+                        created_at: 0,
+                        settled_at: None,
+                    },
+                },
+            ))
+        }
+    }
+
+    #[tokio::test]
+    async fn a_pending_promise_keeps_its_sandbox() {
+        let server: Arc<dyn ResonateServer> = Arc::new(PromiseServer(Some(PromiseState::Pending)));
+        assert!(promise_pending(&server, "p1").await);
+    }
+
+    #[tokio::test]
+    async fn a_settled_promise_does_not() {
+        for state in [
+            PromiseState::Resolved,
+            PromiseState::Rejected,
+            PromiseState::RejectedCanceled,
+            PromiseState::RejectedTimedout,
+        ] {
+            let server: Arc<dyn ResonateServer> = Arc::new(PromiseServer(Some(state)));
+            assert!(!promise_pending(&server, "p1").await, "{state}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_promise_that_is_gone_keeps_nothing() {
+        let server: Arc<dyn ResonateServer> = Arc::new(PromiseServer(None));
+        assert!(!promise_pending(&server, "p1").await);
     }
 
     #[test]
