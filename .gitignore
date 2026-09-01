@@ -33,3 +33,9 @@
 # Cloned test repos
 test/resonate-test
 test/resonate-perf
+
+# The console's toolchain and intermediate output. `assets/` — the built app —
+# is committed on purpose: it is what `cargo build` embeds.
+crates/resonate-gateway-web/ui/node_modules/
+crates/resonate-gateway-web/ui/.svelte-kit/
+crates/resonate-gateway-web/ui/build/

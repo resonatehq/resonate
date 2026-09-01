@@ -1,0 +1,252 @@
+/*
+ * The design's tokens, verbatim, and the handful of primitives that are not
+ * worth scoping to a component.
+ *
+ * The neutral scale is cool, not warm — the one deliberate departure from
+ * `resonate-ui`'s brand file. Accent, ok/warn/late/idle and the tinted `-bg`
+ * values are that file's, carried over unchanged; dark `--err` is a muted
+ * brick rather than the brand's pink, which read as friendly on a failure.
+ *
+ * Self-hosted Inter, deliberately: the console has to work on air-gapped and
+ * on-prem installs, so nothing here reaches for a CDN.
+ */
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/console/fonts/inter-latin.woff2') format('woff2');
+}
+
+:root {
+  --bg: #ffffff;
+  --panel: #fafbfc;
+  --elev: #f1f3f6;
+  --line: #e4e7ec;
+  --line2: #d2d7de;
+  --text: #14171c;
+  --dim: #535a65;
+  --faint: #858c96;
+  --accent: #0a6b61;
+  --accent-fill: #0fb3a1;
+  --ok: #0fb3a1;
+  --ok-fg: #115e59;
+  --ok-bg: rgba(15, 179, 161, 0.13);
+  --err: #831843;
+  --err-fg: #831843;
+  --err-bg: rgba(131, 24, 67, 0.13);
+  --warn: #d97706;
+  --warn-fg: #92400e;
+  --warn-bg: rgba(217, 119, 6, 0.13);
+  --late: #451a03;
+  --late-fg: #451a03;
+  --late-bg: rgba(69, 26, 3, 0.13);
+  --idle: #7a828d;
+  --idle-fg: #565d68;
+  --idle-bg: rgba(122, 130, 141, 0.13);
+  --tint: rgba(15, 179, 161, 0.13);
+  --tint-soft: rgba(15, 179, 161, 0.08);
+  --row: 40px;
+  --mono: 'SF Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace;
+}
+
+html[data-theme='dark'] {
+  --bg: #080a0e;
+  --panel: #0f1115;
+  --elev: #1a1e26;
+  --line: #2a2f3a;
+  --line2: #3a3f4a;
+  --text: #e4e7eb;
+  --dim: #94a3b8;
+  --faint: #7a8699;
+  --accent: #1ee3cf;
+  --accent-fill: #1ee3cf;
+  --ok: #6ee7b7;
+  --ok-fg: #6ee7b7;
+  --ok-bg: rgba(110, 231, 183, 0.15);
+  --err: #b8433c;
+  --err-fg: #d9776d;
+  --err-bg: rgba(184, 67, 60, 0.16);
+  --warn: #fcd34d;
+  --warn-fg: #fcd34d;
+  --warn-bg: rgba(252, 211, 77, 0.15);
+  --late: #d88917;
+  --late-fg: #d88917;
+  --late-bg: rgba(216, 137, 23, 0.15);
+  --idle: #b5b2ab;
+  --idle-fg: #b5b2ab;
+  --idle-bg: rgba(181, 178, 171, 0.15);
+  --tint: rgba(30, 227, 207, 0.15);
+  --tint-soft: rgba(30, 227, 207, 0.1);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+a:hover {
+  color: var(--text);
+}
+
+pre {
+  margin: 0;
+}
+
+input,
+button,
+select {
+  font-family: inherit;
+}
+input:focus {
+  outline: none;
+}
+
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--line2);
+  border-radius: 9px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* --- primitives ---------------------------------------------------------- */
+
+/* Status is dot + word, everywhere. Three channels and no more: hollow for
+   unsettled, solid for settled, red for rejected. Timed out and canceled are
+   solid like resolved — the word disambiguates. */
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
+  box-sizing: border-box;
+  display: inline-block;
+}
+.dot.ring {
+  border: 1.5px solid var(--text);
+}
+.dot.disc {
+  background: var(--text);
+}
+.dot.disc.err {
+  background: var(--err);
+}
+
+.mono {
+  font-family: var(--mono);
+}
+
+/* An identifier, a timestamp or a duration: mono, verbatim, never coloured by
+   state. */
+.ts {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.btn {
+  border: 1px solid var(--line2);
+  background: var(--elev);
+  color: var(--dim);
+  border-radius: 6px;
+  padding: 6px 11px;
+  font-size: 12.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn:hover {
+  color: var(--text);
+  border-color: var(--dim);
+}
+.btn[disabled] {
+  cursor: default;
+  opacity: 0.55;
+}
+.btn[disabled]:hover {
+  color: var(--dim);
+  border-color: var(--line2);
+}
+
+/* Cancel. Destructive, so it is outlined until you are on it. */
+.btn-danger {
+  border: 1px solid var(--err);
+  background: transparent;
+  color: var(--err);
+  border-radius: 6px;
+  padding: 6px 11px;
+  font-size: 12.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn-danger:hover {
+  background: var(--err);
+  color: #fff;
+  border-color: var(--err);
+}
+.btn-danger[disabled] {
+  opacity: 0.55;
+  cursor: default;
+}
+.btn-danger[disabled]:hover {
+  background: transparent;
+  color: var(--err);
+}
+
+/* Invoke. The affirmative counterpart to `.btn-danger`, and deliberately the
+   same shape: outlined in its colour until you are on it, then filled. The
+   fill's text is `--bg` rather than white, because the dark accent is a bright
+   cyan that white cannot sit on. */
+.btn-accent {
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  border-radius: 6px;
+  padding: 6px 11px;
+  font-size: 12.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn-accent:hover {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+}
+.btn-accent[disabled] {
+  opacity: 0.55;
+  cursor: default;
+}
+.btn-accent[disabled]:hover {
+  background: transparent;
+  color: var(--accent);
+}
+
+@media (max-width: 860px) {
+  .wrap-narrow {
+    padding-left: 14px !important;
+    padding-right: 14px !important;
+  }
+}

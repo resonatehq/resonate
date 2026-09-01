@@ -23,7 +23,29 @@ pub mod engine_sqlite;
 pub mod migrate;
 pub mod oracle;
 
-use resonate_core::types::{PromiseRecord, TaskState};
+use resonate_core::types::{PromiseRecord, ResponseEnvelope, TaskState};
+use resonate_core::ui::UiError;
+
+/// Parse and resolve a `ui.*` request's `data`, rendering either failure as
+/// the response it is.
+///
+/// Shared by the four engines because the answer must not differ between them:
+/// a limit one backend clamps and another refuses would be a protocol with two
+/// meanings. What is left per engine is the one statement its dialect needs.
+pub fn ui_resolve<T, Q>(
+    data: &serde_json::Value,
+    kind: &str,
+    corr_id: &str,
+    resolve: impl FnOnce(T) -> Result<Q, UiError>,
+) -> Result<Q, ResponseEnvelope>
+where
+    T: serde::de::DeserializeOwned,
+{
+    let parsed: T = serde_json::from_value(data.clone()).map_err(|e| {
+        UiError::InvalidRequest(e.to_string()).to_response(kind.into(), corr_id.into())
+    })?;
+    resolve(parsed).map_err(|e| e.to_response(kind.into(), corr_id.into()))
+}
 
 pub type StorageResult<T> = Result<T, StorageError>;
 

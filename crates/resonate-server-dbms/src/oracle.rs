@@ -25,6 +25,7 @@ use resonate_core::types::{
     TaskHaltData, TaskHeartbeatData, TaskRecord, TaskReleaseData, TaskResponseData, TaskSearchData,
     TaskSearchResponseData, TaskState, TaskSuspendData, TaskSuspendPreloadData, PROTOCOL_VERSION,
 };
+use resonate_core::ui;
 use resonate_core::util;
 use resonate_core::{ResonateServer, Unavailable};
 use std::sync::Mutex;
@@ -289,6 +290,9 @@ impl Oracle {
             "schedule.create" => self.op_schedule_create(req, now),
             "schedule.delete" => self.op_schedule_delete(req),
             "schedule.search" => self.op_schedule_search(req),
+            "ui.executions.search" => self.op_ui_executions_search(req),
+            "ui.execution.get" => self.op_ui_execution_get(req),
+            "ui.schedules.search" => self.op_ui_schedules_search(req),
             "debug.reset" => self.op_debug_reset(req),
             "debug.snap" => self.op_debug_snap(req),
             "debug.tick" => self.op_debug_tick(req),
@@ -737,6 +741,171 @@ impl Oracle {
                 cursor,
             },
         )
+    }
+
+    // ─── Console operations ────────────────────────────────────────────────────
+    //
+    // The model's answers to the `ui.*` requests. Read-only, so nothing here
+    // touches state, arms a deadline or emits a message — and none of them
+    // takes `now`: a console reads what is stored, it does not move the clock.
+    // A pending promise past its deadline therefore reads as pending here
+    // exactly as it does from a SELECT in the SQL engines; it is the sweep, or
+    // a worker operation, that settles it.
+
+    fn op_ui_executions_search(&self, req: &RequestEnvelope) -> ResponseEnvelope {
+        let q = match crate::ui_resolve::<ui::ExecutionsSearchData, _>(
+            &req.data,
+            &req.kind,
+            &req.head.corr_id,
+            |d| d.resolve(),
+        ) {
+            Ok(q) => q,
+            Err(resp) => return resp,
+        };
+
+        let matches = |id: &String, p: &Promise| -> bool {
+            // Root-ness: an id is `<origin>:<lineage>`, so a root is an id
+            // with no lineage.
+            ui::origin_of(id) == id.as_str()
+                && (q.states.is_empty() || q.states.contains(&p.state))
+                && q.id_from.as_ref().map(|lo| id >= lo).unwrap_or(true)
+                && q.id_to.as_ref().map(|hi| id < hi).unwrap_or(true)
+                && q.created_from.map(|f| p.created_at >= f).unwrap_or(true)
+                && q.created_to.map(|t| p.created_at <= t).unwrap_or(true)
+                && tags_match(q.tags_json.as_deref(), &p.tags)
+        };
+
+        let mut rows: Vec<PromiseRecord> = self
+            .promises
+            .iter()
+            .filter(|(id, p)| matches(id, p))
+            .map(|(id, p)| Self::to_promise_record(0, id, p))
+            .collect();
+
+        let key = |p: &PromiseRecord| (q.sort.key.key_of(p), p.id.clone());
+        rows.sort_by(|a, b| match q.sort.dir {
+            ui::Dir::Asc => key(a).cmp(&key(b)),
+            ui::Dir::Desc => key(b).cmp(&key(a)),
+        });
+        let total = if q.count_total {
+            Some(rows.len() as i64)
+        } else {
+            None
+        };
+        if let Some(after) = &q.after {
+            let at = (after.key, after.id.clone());
+            rows.retain(|p| match q.sort.dir {
+                ui::Dir::Asc => key(p) > at,
+                ui::Dir::Desc => key(p) < at,
+            });
+        }
+        rows.truncate((q.fetch + 1) as usize);
+
+        ResponseEnvelope::success(
+            req.kind.clone(),
+            req.head.corr_id.clone(),
+            &ui::finish_executions_page(&q, rows, total),
+        )
+    }
+
+    fn op_ui_execution_get(&self, req: &RequestEnvelope) -> ResponseEnvelope {
+        let q = match crate::ui_resolve::<ui::ExecutionGetData, _>(
+            &req.data,
+            &req.kind,
+            &req.head.corr_id,
+            |d| d.resolve(),
+        ) {
+            Ok(q) => q,
+            Err(resp) => return resp,
+        };
+        let mut rows: Vec<ui::NodeRow> = self
+            .promises
+            .iter()
+            .filter(|(id, _)| ui::origin_of(id) == q.root_id)
+            .map(|(id, p)| {
+                let task = self.tasks.get(id);
+                ui::NodeRow {
+                    promise: Self::to_promise_record(0, id, p),
+                    task_state: task.map(|t| t.state),
+                    task_version: task.map(|t| t.version).unwrap_or(0),
+                    resumes: task.map(|t| t.resumes.len() as i64).unwrap_or(0),
+                    ttl: task.and_then(|t| t.ttl),
+                    pid: task.and_then(|t| t.pid.clone()),
+                    retry_timeout_at: self.t_timeout_at(id, TTimeoutKind::Retry),
+                    lease_timeout_at: self.t_timeout_at(id, TTimeoutKind::Lease),
+                }
+            })
+            .collect();
+        // The display order, and the order every backend returns.
+        rows.sort_by(|a, b| {
+            a.promise
+                .created_at
+                .cmp(&b.promise.created_at)
+                .then_with(|| a.promise.id.cmp(&b.promise.id))
+        });
+        rows.truncate((q.max_nodes + 1) as usize);
+
+        match ui::build_execution(&q, rows) {
+            Ok(view) => {
+                ResponseEnvelope::success(req.kind.clone(), req.head.corr_id.clone(), &view)
+            }
+            Err(e) => e.to_response(req.kind.clone(), req.head.corr_id.clone()),
+        }
+    }
+
+    fn op_ui_schedules_search(&self, req: &RequestEnvelope) -> ResponseEnvelope {
+        let q = match crate::ui_resolve::<ui::SchedulesSearchData, _>(
+            &req.data,
+            &req.kind,
+            &req.head.corr_id,
+            |d| d.resolve(),
+        ) {
+            Ok(q) => q,
+            Err(resp) => return resp,
+        };
+        let mut rows: Vec<ScheduleRecord> = self
+            .schedules
+            .iter()
+            .filter(|(id, s)| {
+                q.id_from.as_ref().map(|lo| *id >= lo).unwrap_or(true)
+                    && q.id_to.as_ref().map(|hi| *id < hi).unwrap_or(true)
+                    && tags_match(q.tags_json.as_deref(), &s.promise_tags)
+            })
+            .map(|(id, s)| self.to_schedule_record(id, s))
+            .collect();
+
+        let key = |s: &ScheduleRecord| (q.sort.key.key_of(s), s.id.clone());
+        rows.sort_by(|a, b| match q.sort.dir {
+            ui::Dir::Asc => key(a).cmp(&key(b)),
+            ui::Dir::Desc => key(b).cmp(&key(a)),
+        });
+        let total = if q.count_total {
+            Some(rows.len() as i64)
+        } else {
+            None
+        };
+        if let Some(after) = &q.after {
+            let at = (after.key, after.id.clone());
+            rows.retain(|s| match q.sort.dir {
+                ui::Dir::Asc => key(s) > at,
+                ui::Dir::Desc => key(s) < at,
+            });
+        }
+        rows.truncate((q.limit + 1) as usize);
+
+        ResponseEnvelope::success(
+            req.kind.clone(),
+            req.head.corr_id.clone(),
+            &ui::finish_schedules_page(&q, rows, total),
+        )
+    }
+
+    /// When this task's deadline of the given kind falls, if it has one.
+    fn t_timeout_at(&self, id: &str, kind: TTimeoutKind) -> Option<i64> {
+        self.t_timeouts
+            .iter()
+            .find(|t| t.id == id && t.kind as i32 == kind as i32)
+            .map(|t| t.timeout)
     }
 
     // ─── Task operations ───────────────────────────────────────────────────────
@@ -2670,6 +2839,21 @@ impl ResonateEngine for SharedOracle {
     fn returns_messages(&self) -> bool {
         true
     }
+}
+
+/// The tag filter, as the SQL engines' containment operators read it: every
+/// pair in the filter must be present with the same value.
+///
+/// The filter arrives as JSON because that is what a `@>` / `JSON_CONTAINS`
+/// bind takes; the model reads it back rather than being handed a second form
+/// nobody else uses.
+fn tags_match(filter_json: Option<&str>, tags: &HashMap<String, String>) -> bool {
+    let Some(json) = filter_json else { return true };
+    let filter: HashMap<String, String> =
+        serde_json::from_str(json).expect("the filter was serialized from a string map");
+    filter
+        .iter()
+        .all(|(k, v)| tags.get(k).map(|t| t == v).unwrap_or(false))
 }
 
 #[cfg(test)]

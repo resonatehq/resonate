@@ -24,7 +24,7 @@ use prometheus::{register_counter_vec, register_histogram_vec, CounterVec, Histo
 
 use resonate_auth::{auth_check, auth_check_token, AuthConfig};
 use resonate_core::types::{self, RequestEnvelope, ResponseEnvelope};
-use resonate_core::ResonateServer;
+use resonate_core::{ui, ResonateServer};
 use resonate_transport_http_poll::PollRegistry;
 
 lazy_static! {
@@ -175,6 +175,24 @@ async fn handle_api(
 
     let kind = req.kind.clone();
     let corr_id = req.head.corr_id.clone();
+
+    // The console's namespace is not served here.
+    //
+    // `ui.*` is a read model shaped for one screen at a time, answered on the
+    // console's own route (`resonate_gateway_web`). Refusing it at the worker
+    // endpoint is what keeps the two apart: an SDK cannot come to depend on a
+    // request that exists to draw a table, and the read model can change
+    // without touching the protocol workers speak. The engines would answer it
+    // — this is the boundary, not a missing implementation, so it says so.
+    if ui::is_ui_kind(&kind) {
+        tracing::warn!(kind = %kind, corr_id = %corr_id, "Console request refused on the worker endpoint");
+        return into_response(ResponseEnvelope::error(
+            kind,
+            corr_id,
+            404,
+            "Console requests ('ui.*') are served on the console's own endpoint, not here",
+        ));
+    }
 
     // Log incoming request at the application protocol level
     tracing::info!(

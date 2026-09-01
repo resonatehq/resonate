@@ -1,0 +1,34 @@
+[package]
+name = "resonate-gateway-web"
+description = "The web console: the built single-page app, embedded, and the route that answers its ui.* requests."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "resonate_gateway_web"
+path = "src/lib.rs"
+
+[dependencies]
+resonate-auth = { path = "../resonate-auth" }
+resonate-core = { path = "../resonate-core" }
+axum = { version = "0.7", features = ["json"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = "0.1"
+# `debug-embed`: the assets are compiled in for every profile, not read off the
+# disk in dev. A console that is embedded in release and a directory read in
+# debug is two different programs, and only one of them ships.
+rust-embed = { version = "8", features = ["debug-embed"] }
+
+[dev-dependencies]
+# The composition test merges the console into the gateway's router, the way
+# the binary does. The dependency runs one way only: the gateway knows nothing
+# about a console.
+resonate-gateway-http = { path = "../resonate-gateway-http" }
+resonate-transport-http-poll = { path = "../resonate-transport-http-poll" }
+resonate-server-dbms = { path = "../resonate-server-dbms", default-features = false, features = ["sqlite"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+async-trait = { workspace = true }

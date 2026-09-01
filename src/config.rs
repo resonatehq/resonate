@@ -54,6 +54,13 @@ pub struct Config {
     /// Observability configuration
     #[serde(default)]
     pub observability: ObservabilityConfig,
+
+    /// The web console.
+    ///
+    /// The crate's own type, like auth and every transport: this only carries
+    /// the section from the file to the thing that reads it.
+    #[serde(default)]
+    pub console: resonate_gateway_web::Config,
 }
 
 fn default_level() -> String {
@@ -399,6 +406,7 @@ impl Default for Config {
             timeouts: TimeoutsConfig::default(),
             transports: TransportsConfig::default(),
             observability: ObservabilityConfig::default(),
+            console: resonate_gateway_web::Config::default(),
         }
     }
 }

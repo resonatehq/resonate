@@ -3,6 +3,7 @@ members = [
     "crates/resonate-auth",
     "crates/resonate-core",
     "crates/resonate-gateway-http",
+    "crates/resonate-gateway-web",
     "crates/resonate-server-dbms",
     "crates/resonate-timer-wheel",
     "crates/resonate-transport-gcps",
@@ -57,6 +58,7 @@ concurrency-stress = ["resonate-server-dbms/concurrency-stress"]
 resonate-auth = { path = "crates/resonate-auth" }
 resonate-core = { path = "crates/resonate-core" }
 resonate-gateway-http = { path = "crates/resonate-gateway-http" }
+resonate-gateway-web = { path = "crates/resonate-gateway-web" }
 resonate-server-dbms = { path = "crates/resonate-server-dbms", default-features = false }
 resonate-timer-wheel = { path = "crates/resonate-timer-wheel" }
 resonate-transport-gcps = { path = "crates/resonate-transport-gcps" }

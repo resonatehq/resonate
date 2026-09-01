@@ -43,6 +43,7 @@ use std::cell::{RefCell, UnsafeCell};
 use validator::Validate;
 
 use crate::engine_port::{Input, Outgoing, Output, ResonateEngine, Scheduled, Timeout};
+use resonate_core::ui;
 use resonate_core::util;
 
 pub struct MysqlEngine {
@@ -281,6 +282,11 @@ impl MysqlEngine {
             "schedule.create" => self.op_schedule_create(req, now).await,
             "schedule.delete" => self.op_schedule_delete(req).await,
             "schedule.search" => self.op_schedule_search(req).await,
+
+            // === Console operations (read-only) ===
+            "ui.executions.search" => self.op_ui_executions_search(req, now).await,
+            "ui.execution.get" => self.op_ui_execution_get(req, now).await,
+            "ui.schedules.search" => self.op_ui_schedules_search(req, now).await,
 
             // === Debug operations ===
             "debug.reset" | "debug.snap" | "debug.tick" if !self.debug => {
@@ -2160,6 +2166,99 @@ impl MysqlEngine {
     }
 
     // ============================================================================
+    // Console operations — the read-only `ui.*` namespace
+    // ============================================================================
+    //
+    // Additive: remove these three arms and the server still serves. What they
+    // add is read *shape* — root-ness, sorting, one tree in one answer — none
+    // of which the worker protocol was written to express.
+
+    async fn op_ui_executions_search(&self, req: &RequestEnvelope, _now: i64) -> Output {
+        let data = req.data.clone();
+        let kind_str = req.kind.clone();
+        let corr_id = req.head.corr_id.clone();
+        self.run(req, move |db| {
+            let q = match crate::ui_resolve::<ui::ExecutionsSearchData, _>(
+                &data,
+                &kind_str,
+                &corr_id,
+                |d| d.resolve(),
+            ) {
+                Ok(q) => q,
+                Err(resp) => return Ok(resp),
+            };
+            let rows = db.ui_executions_search(&q)?;
+            let total = if q.count_total {
+                Some(db.ui_executions_count(&q)?)
+            } else {
+                None
+            };
+            Ok(ResponseEnvelope::success(
+                kind_str.clone(),
+                corr_id.clone(),
+                &ui::finish_executions_page(&q, rows, total),
+            ))
+        })
+        .await
+    }
+
+    async fn op_ui_execution_get(&self, req: &RequestEnvelope, _now: i64) -> Output {
+        let data = req.data.clone();
+        let kind_str = req.kind.clone();
+        let corr_id = req.head.corr_id.clone();
+        self.run(req, move |db| {
+            let q = match crate::ui_resolve::<ui::ExecutionGetData, _>(
+                &data,
+                &kind_str,
+                &corr_id,
+                |d| d.resolve(),
+            ) {
+                Ok(q) => q,
+                Err(resp) => return Ok(resp),
+            };
+            let rows = db.ui_execution_nodes(&q)?;
+            match ui::build_execution(&q, rows) {
+                Ok(view) => Ok(ResponseEnvelope::success(
+                    kind_str.clone(),
+                    corr_id.clone(),
+                    &view,
+                )),
+                Err(e) => Ok(e.to_response(kind_str.clone(), corr_id.clone())),
+            }
+        })
+        .await
+    }
+
+    async fn op_ui_schedules_search(&self, req: &RequestEnvelope, _now: i64) -> Output {
+        let data = req.data.clone();
+        let kind_str = req.kind.clone();
+        let corr_id = req.head.corr_id.clone();
+        self.run(req, move |db| {
+            let q = match crate::ui_resolve::<ui::SchedulesSearchData, _>(
+                &data,
+                &kind_str,
+                &corr_id,
+                |d| d.resolve(),
+            ) {
+                Ok(q) => q,
+                Err(resp) => return Ok(resp),
+            };
+            let rows = db.ui_schedules_search(&q)?;
+            let total = if q.count_total {
+                Some(db.ui_schedules_count(&q)?)
+            } else {
+                None
+            };
+            Ok(ResponseEnvelope::success(
+                kind_str.clone(),
+                corr_id.clone(),
+                &ui::finish_schedules_page(&q, rows, total),
+            ))
+        })
+        .await
+    }
+
+    // ============================================================================
     // Debug operations
     // ============================================================================
 
@@ -2604,6 +2703,15 @@ fn parse_promise_state(s: &str) -> PromiseState {
 fn parse_task_state(s: &str) -> TaskState {
     s.parse()
         .unwrap_or_else(|e| panic!("corrupt task state in DB: {}", e))
+}
+
+/// A keyset cursor as two bindable halves. `None` for both when there is no
+/// cursor, which is what the `IS NULL OR` in every keyset predicate reads.
+fn split_keyset(after: Option<&ui::Keyset>) -> (Option<i64>, Option<String>) {
+    match after {
+        Some(k) => (Some(k.key), Some(k.id.clone())),
+        None => (None, None),
+    }
 }
 
 fn row_to_promise(row: &MySqlRow) -> PromiseRecord {
@@ -3973,6 +4081,184 @@ impl MysqlDb<'_> {
             .fetch_all(self.tx().as_mut()),
         )?;
         Ok(rows.iter().map(row_to_schedule).collect())
+    }
+
+    // === Console reads ===
+    //
+    // Three statements, one per screen. Everything a client can vary — sort,
+    // direction, cursor, limits — is resolved in `resonate_core::ui` before it
+    // gets here, so what these build is a `format!` over constants and a bind
+    // list, never caller text. MySQL's placeholders are positional, so a value
+    // read twice is bound twice.
+
+    /// The executions list: root promises, sorted, one keyset page.
+    ///
+    /// `id = origin_id` is root-ness — an id is `<origin>:<lineage>`, so a
+    /// promise with no lineage is a root. `origin_id` is a stored generated
+    /// column, so this is a comparison rather than a scan of the tags.
+    fn ui_executions_search(&self, q: &ui::ExecutionsQuery) -> StorageResult<Vec<PromiseRecord>> {
+        let (expr, cmp, dir) = (q.sort.key.expr(), q.sort.dir.cmp_sql(), q.sort.dir.sql());
+        let sql = format!(
+            "SELECT id, state, param_headers, param_data, value_headers, value_data, tags,
+                    timeout_at, created_at, settled_at
+             FROM promises
+             WHERE id = origin_id{states}
+               AND (? IS NULL OR id >= ?)
+               AND (? IS NULL OR id < ?)
+               AND (? IS NULL OR JSON_CONTAINS(tags, ?))
+               AND (? IS NULL OR created_at >= ?)
+               AND (? IS NULL OR created_at <= ?)
+               AND (? IS NULL OR {expr} {cmp} ? OR ({expr} = ? AND id {cmp} ?))
+             ORDER BY {expr} {dir}, id {dir}
+             LIMIT ?",
+            states = q.states_sql(),
+        );
+        let (after_key, after_id) = split_keyset(q.after.as_ref());
+        let rows = rt_block_on(
+            sqlx::query(&sql)
+                .bind(q.id_from.as_deref())
+                .bind(q.id_from.as_deref())
+                .bind(q.id_to.as_deref())
+                .bind(q.id_to.as_deref())
+                .bind(q.tags_json.as_deref())
+                .bind(q.tags_json.as_deref())
+                .bind(q.created_from)
+                .bind(q.created_from)
+                .bind(q.created_to)
+                .bind(q.created_to)
+                .bind(after_key)
+                .bind(after_key)
+                .bind(after_key)
+                .bind(after_id)
+                .bind(q.fetch + 1)
+                .fetch_all(self.tx().as_mut()),
+        )?;
+        Ok(rows.iter().map(row_to_promise).collect())
+    }
+
+    /// How many executions match, ignoring the cursor — the "of 240" a page
+    /// number is useless without.
+    fn ui_executions_count(&self, q: &ui::ExecutionsQuery) -> StorageResult<i64> {
+        let sql = format!(
+            "SELECT COUNT(*) AS n FROM promises
+             WHERE id = origin_id{states}
+               AND (? IS NULL OR id >= ?)
+               AND (? IS NULL OR id < ?)
+               AND (? IS NULL OR JSON_CONTAINS(tags, ?))
+               AND (? IS NULL OR created_at >= ?)
+               AND (? IS NULL OR created_at <= ?)",
+            states = q.states_sql(),
+        );
+        let row = rt_block_on(
+            sqlx::query(&sql)
+                .bind(q.id_from.as_deref())
+                .bind(q.id_from.as_deref())
+                .bind(q.id_to.as_deref())
+                .bind(q.id_to.as_deref())
+                .bind(q.tags_json.as_deref())
+                .bind(q.tags_json.as_deref())
+                .bind(q.created_from)
+                .bind(q.created_from)
+                .bind(q.created_to)
+                .bind(q.created_to)
+                .fetch_one(self.tx().as_mut()),
+        )?;
+        Ok(row.get::<i64, _>("n"))
+    }
+
+    /// One execution, whole: every promise sharing the root's origin, with the
+    /// task columns that sit on the same row.
+    ///
+    /// This is the request that replaces `resonate-ui`'s recursive fan-out —
+    /// one read on `origin_id` instead of one round trip per level, re-run
+    /// every 5s.
+    fn ui_execution_nodes(&self, q: &ui::ExecutionQuery) -> StorageResult<Vec<ui::NodeRow>> {
+        let rows = rt_block_on(
+            sqlx::query(
+                "SELECT p.id, p.state, p.param_headers, p.param_data, p.value_headers,
+                        p.value_data, p.tags, p.timeout_at, p.created_at, p.settled_at,
+                        p.task_state, p.task_version,
+                        COALESCE((SELECT CAST(COUNT(*) AS SIGNED) FROM callbacks c
+                                  WHERE c.awaiter_id = p.id AND c.ready = true), 0) AS resumes,
+                        CASE WHEN p.task_state = 'acquired' THEN p.ttl ELSE NULL END AS ttl,
+                        CASE WHEN p.task_state = 'acquired' THEN p.pid ELSE NULL END AS pid,
+                        p.retry_timeout_at, p.lease_timeout_at
+                 FROM promises p
+                 WHERE p.origin_id = ?
+                 ORDER BY p.created_at ASC, p.id ASC
+                 LIMIT ?",
+            )
+            .bind(&q.root_id)
+            .bind(q.max_nodes + 1)
+            .fetch_all(self.tx().as_mut()),
+        )?;
+        Ok(rows
+            .iter()
+            .map(|row| {
+                let task_state: Option<String> = row.get("task_state");
+                ui::NodeRow {
+                    promise: row_to_promise(row),
+                    task_state: task_state.as_deref().map(parse_task_state),
+                    task_version: row.get::<i32, _>("task_version") as i64,
+                    resumes: row.get("resumes"),
+                    ttl: row.get("ttl"),
+                    pid: row.get("pid"),
+                    retry_timeout_at: row.get("retry_timeout_at"),
+                    lease_timeout_at: row.get("lease_timeout_at"),
+                }
+            })
+            .collect())
+    }
+
+    fn ui_schedules_search(&self, q: &ui::SchedulesQuery) -> StorageResult<Vec<ScheduleRecord>> {
+        let (expr, cmp, dir) = (q.sort.key.expr(), q.sort.dir.cmp_sql(), q.sort.dir.sql());
+        let sql = format!(
+            "SELECT id, cron, promise_id, promise_timeout, promise_param_headers,
+                    promise_param_data, promise_tags, created_at, next_run_at, last_run_at
+             FROM schedules
+             WHERE (? IS NULL OR id >= ?)
+               AND (? IS NULL OR id < ?)
+               AND (? IS NULL OR JSON_CONTAINS(promise_tags, ?))
+               AND (? IS NULL OR {expr} {cmp} ? OR ({expr} = ? AND id {cmp} ?))
+             ORDER BY {expr} {dir}, id {dir}
+             LIMIT ?"
+        );
+        let (after_key, after_id) = split_keyset(q.after.as_ref());
+        let rows = rt_block_on(
+            sqlx::query(&sql)
+                .bind(q.id_from.as_deref())
+                .bind(q.id_from.as_deref())
+                .bind(q.id_to.as_deref())
+                .bind(q.id_to.as_deref())
+                .bind(q.tags_json.as_deref())
+                .bind(q.tags_json.as_deref())
+                .bind(after_key)
+                .bind(after_key)
+                .bind(after_key)
+                .bind(after_id)
+                .bind(q.limit + 1)
+                .fetch_all(self.tx().as_mut()),
+        )?;
+        Ok(rows.iter().map(row_to_schedule).collect())
+    }
+
+    fn ui_schedules_count(&self, q: &ui::SchedulesQuery) -> StorageResult<i64> {
+        let row = rt_block_on(
+            sqlx::query(
+                "SELECT COUNT(*) AS n FROM schedules
+                 WHERE (? IS NULL OR id >= ?)
+                   AND (? IS NULL OR id < ?)
+                   AND (? IS NULL OR JSON_CONTAINS(promise_tags, ?))",
+            )
+            .bind(q.id_from.as_deref())
+            .bind(q.id_from.as_deref())
+            .bind(q.id_to.as_deref())
+            .bind(q.id_to.as_deref())
+            .bind(q.tags_json.as_deref())
+            .bind(q.tags_json.as_deref())
+            .fetch_one(self.tx().as_mut()),
+        )?;
+        Ok(row.get::<i64, _>("n"))
     }
 
     /// The nearest deadlines the tables hold, soonest first.

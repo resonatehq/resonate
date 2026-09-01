@@ -7,6 +7,7 @@ description = "Resonate's ports and the vocabulary they speak: the traits a serv
 
 [dependencies]
 async-trait = { workspace = true }
+base64 = "0.22"
 chrono = "0.4"
 tracing = "0.1"
 cron = "0.12"

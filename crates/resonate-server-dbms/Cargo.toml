@@ -30,3 +30,7 @@ rusqlite = { version = "0.31", features = ["bundled"], optional = true }
 # Not optional even with every engine off: `migrate` carries the `Migrator`
 # type, which the SQLite path also uses — see `crate::migrate`.
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "macros", "migrate"] }
+
+[dev-dependencies]
+base64 = "0.22"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

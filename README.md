@@ -97,6 +97,29 @@ Countdown: 1
 Done!
 ```
 
+### 8. Watch it in the console
+
+The server serves a web console on its own port. Open it at
+[http://localhost:8001/console/](http://localhost:8001/console/) — `http://localhost:8001/`
+redirects there — and `countdown.1` is on the list.
+
+The console is three screens: **Durable Executions** (every root promise,
+newest first), an execution's **detail** (its whole promise tree on a timeline,
+with task boundaries drawn, and a step's param and value in the inspector), and
+**Schedules**. It reads; the two things it writes are **Invoke** — the same
+`promise.create` that `resonate invoke` sends, so you can start a function from
+the browser — and **Cancel execution**.
+
+Nothing to install: the app is compiled into the binary, fonts included, so it
+works on an air-gapped or on-prem host. Turn it off with
+
+```toml
+[console]
+enabled = false
+```
+
+or `RESONATE_CONSOLE__ENABLED=false`.
+
 ### What to try
 
 ## More ways to install the server

@@ -24,6 +24,7 @@ compile_error!(
 
 use resonate_core::{ResonateGateway, ResonateRouter, ResonateServer, ResonateWorker};
 use resonate_gateway_http::{Config as GatewayConfig, HttpGateway};
+use resonate_gateway_web as console;
 #[cfg(feature = "mysql")]
 use resonate_server_dbms::engine_mysql::MysqlEngine;
 use resonate_server_dbms::engine_port::ResonateEngine;
@@ -422,7 +423,28 @@ async fn run_server(config: Config) -> Result<(), String> {
     if !state.config.server.cors.allow_origins.is_empty() {
         tracing::info!(origins = ?state.config.server.cors.allow_origins, "CORS enabled");
     }
-    let gateway: Arc<dyn ResonateGateway> = Arc::new(HttpGateway::new(
+    // The console is routes, not a gateway: it binds nothing and has no
+    // lifecycle of its own, so it is merged into the listener that already
+    // exists rather than opening a second one. One port, one origin — which is
+    // also why it needs no CORS.
+    // Built during the gateway's `init`, which is when the auth key has been
+    // read: the console applies the same policy as the worker endpoint, so it
+    // cannot be a way around it.
+    let console_config = state.config.console.clone();
+    let console_server = Arc::clone(&state) as Arc<dyn ResonateServer>;
+    let console_enabled = console_config.enabled;
+    let build_console = move |auth| {
+        console::routes(
+            &console_config,
+            console::ConsoleState {
+                server: console_server,
+                auth,
+            },
+        )
+        .unwrap_or_default()
+    };
+
+    let mut gateway_impl = HttpGateway::new(
         Arc::clone(&state) as Arc<dyn ResonateServer>,
         poll_registry,
         GatewayConfig {
@@ -437,7 +459,11 @@ async fn run_server(config: Config) -> Result<(), String> {
             // leave state the next request would read.
             abort_on_panic: is_sqlite,
         },
-    ));
+    );
+    if console_enabled {
+        gateway_impl = gateway_impl.with_routes(build_console);
+    }
+    let gateway: Arc<dyn ResonateGateway> = Arc::new(gateway_impl);
     gateway
         .init(debug)
         .await

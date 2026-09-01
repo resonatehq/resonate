@@ -11,6 +11,7 @@ pub mod gateway;
 pub mod router;
 pub mod server;
 pub mod types;
+pub mod ui;
 pub mod util;
 pub mod worker;
 

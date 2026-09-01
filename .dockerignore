@@ -1,0 +1,13 @@
+# The build context is `COPY crates ./crates`, so anything under a crate that
+# the Rust build does not read is bytes shipped to the daemon for nothing.
+#
+# The console's toolchain is the whole reason this file exists: `node_modules`
+# is hundreds of megabytes and the image needs none of it. What the build *does*
+# need is `crates/resonate-gateway-web/assets` — the built app, committed — and
+# that is not excluded.
+crates/resonate-gateway-web/ui/node_modules/
+crates/resonate-gateway-web/ui/.svelte-kit/
+crates/resonate-gateway-web/ui/build/
+
+target/
+.git/

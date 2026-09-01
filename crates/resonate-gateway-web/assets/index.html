@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" href="/console/favicon.svg" type="image/svg+xml" />
+    <title>Resonate Console</title>
+    <script>
+      // Before first paint, or the console flashes light on the way to dark.
+      try {
+        var t = localStorage.getItem('resonate.console.theme');
+        if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        document.documentElement.dataset.theme = t;
+      } catch (e) {
+        document.documentElement.dataset.theme = 'light';
+      }
+    </script>
+    <link href="/console/app/immutable/entry/start.U5fsNrNH.js" rel="modulepreload">
+		<link href="/console/app/immutable/chunks/-yjF4C8Y.js" rel="modulepreload">
+		<link href="/console/app/immutable/chunks/Dcg49T0u.js" rel="modulepreload">
+		<link href="/console/app/immutable/chunks/DB-WyGTP.js" rel="modulepreload">
+		<link href="/console/app/immutable/chunks/-UyI9lYi.js" rel="modulepreload">
+		<link href="/console/app/immutable/entry/app.D9xLLlvc.js" rel="modulepreload">
+		<link href="/console/app/immutable/chunks/BNMoJmDo.js" rel="modulepreload">
+		<link href="/console/app/immutable/chunks/CWUj_aFe.js" rel="modulepreload">
+		<link href="/console/app/immutable/chunks/CR-Ullt2.js" rel="modulepreload">
+		<link href="/console/app/immutable/chunks/C_MPijE4.js" rel="modulepreload">
+		<link href="/console/app/immutable/nodes/0.cNxvxqf1.js" rel="modulepreload">
+		<link href="/console/app/immutable/chunks/cSDYIJQN.js" rel="modulepreload">
+		<link href="/console/app/immutable/chunks/DyUubjGc.js" rel="modulepreload">
+		<link href="/console/app/immutable/chunks/Bodcevmm.js" rel="modulepreload">
+		<link href="/console/app/immutable/chunks/DCakJuFU.js" rel="modulepreload">
+		
+		<link href="/console/app/immutable/assets/0.XuRlKoxb.css" rel="stylesheet">
+  </head>
+  <body data-sveltekit-preload-data="hover">
+    <div style="display: contents">
+			<script>
+				{
+					__sveltekit_da53xm = {
+						base: "/console",
+						assets: "/console"
+					};
+
+					const element = document.currentScript.parentElement;
+
+					Promise.all([
+						import("/console/app/immutable/entry/start.U5fsNrNH.js"),
+						import("/console/app/immutable/entry/app.D9xLLlvc.js")
+					]).then(([kit, app]) => {
+						kit.start(app, element);
+					});
+				}
+			</script>
+		</div>
+  </body>
+</html>

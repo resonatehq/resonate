@@ -91,9 +91,28 @@ impl Default for Config {
     }
 }
 
+/// A router built once the gateway's auth policy is known. See
+/// [`HttpGateway::with_routes`].
+type ExtraRoutes = Box<
+    dyn FnOnce(Option<Arc<resonate_auth::AuthConfig>>) -> axum::Router<routes::AppState> + Send,
+>;
+
 /// axum, hosting the Resonate protocol over HTTP.
 pub struct HttpGateway {
     config: Config,
+    /// Routes merged in beside the protocol's own — the web console, and
+    /// nothing else today.
+    ///
+    /// Handed in rather than reached for: this crate serves the protocol and
+    /// knows nothing about a console, and the console knows nothing about a
+    /// listener. What connects them is the composition root, which owns both.
+    ///
+    /// A builder, not a router, because of *when* auth exists. The key is read
+    /// in `init` — that is the whole reason `init` is fallible — so routes that
+    /// must authenticate the same way cannot be built before it. Handing over
+    /// the loaded policy is what keeps the merged routes from being a hole in
+    /// it.
+    extra: Mutex<Option<ExtraRoutes>>,
     /// Held so the server outlives every request it can still accept, and
     /// handed to the routes when `init` builds them. Strong, unlike a worker's
     /// handle: nothing points back at a gateway, so there is no cycle to break.
@@ -123,18 +142,47 @@ impl HttpGateway {
             config,
             server,
             poll_registry,
+            extra: Mutex::new(None),
             app: Mutex::new(None),
             shutdown: Mutex::new(None),
             task: Mutex::new(None),
         }
     }
+
+    /// Serve these routes alongside the protocol's, on the same port.
+    ///
+    /// Merged before the layers, so they get the same panic guard, the same
+    /// tracing and the same CORS as everything else. Paths must not collide
+    /// with the protocol's — axum refuses two handlers for one method on one
+    /// path, loudly, at startup.
+    ///
+    /// The closure is called during `init`, with the auth policy this gateway
+    /// just loaded — `None` when auth is disabled. Anything that answers
+    /// requests here has to be able to apply it.
+    pub fn with_routes(
+        self,
+        build: impl FnOnce(Option<Arc<resonate_auth::AuthConfig>>) -> axum::Router<routes::AppState>
+            + Send
+            + 'static,
+    ) -> Self {
+        *self
+            .extra
+            .try_lock()
+            .expect("nothing else holds the gateway during construction") = Some(Box::new(build));
+        self
+    }
 }
 
 /// Routes, state and layers, in the order a request meets them.
-fn build_app(state: routes::AppState, config: &Config) -> axum::Router {
+fn build_app(
+    state: routes::AppState,
+    config: &Config,
+    extra: Option<axum::Router<routes::AppState>>,
+) -> axum::Router {
     let abort_on_panic = config.abort_on_panic;
     let mut app = routes::api_routes()
         .merge(routes::poll_routes())
+        .merge(extra.unwrap_or_default())
         .layer(tower_http::catch_panic::CatchPanicLayer::custom(
             move |err: Box<dyn std::any::Any + Send + 'static>| {
                 let message = if let Some(s) = err.downcast_ref::<&str>() {
@@ -217,6 +265,12 @@ impl ResonateGateway for HttpGateway {
                     None
                 }
             };
+            let extra = self
+                .extra
+                .lock()
+                .await
+                .take()
+                .map(|build| build(auth.clone()));
             *app = Some(build_app(
                 routes::AppState {
                     server: Arc::clone(&self.server),
@@ -224,6 +278,7 @@ impl ResonateGateway for HttpGateway {
                     poll_registry: Arc::clone(&self.poll_registry),
                 },
                 &self.config,
+                extra,
             ));
         }
         let app = self

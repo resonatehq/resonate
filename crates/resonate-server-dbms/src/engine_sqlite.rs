@@ -42,6 +42,7 @@ use resonate_core::types::{
     TaskResponseData, TaskSearchData, TaskSearchResponseData, TaskSuspendData,
     TaskSuspendPreloadData,
 };
+use resonate_core::ui;
 use resonate_core::util;
 
 use crate::engine_port::{Input, Outgoing, Output, ResonateEngine, Scheduled, Timeout};
@@ -243,6 +244,11 @@ impl SqliteEngine {
             "schedule.create" => self.op_schedule_create(req, now).await,
             "schedule.delete" => self.op_schedule_delete(req).await,
             "schedule.search" => self.op_schedule_search(req).await,
+
+            // === Console operations (read-only) ===
+            "ui.executions.search" => self.op_ui_executions_search(req, now).await,
+            "ui.execution.get" => self.op_ui_execution_get(req, now).await,
+            "ui.schedules.search" => self.op_ui_schedules_search(req, now).await,
 
             // === Debug operations ===
             "debug.reset" | "debug.snap" | "debug.tick" if !self.debug => {
@@ -2122,6 +2128,99 @@ impl SqliteEngine {
     }
 
     // ============================================================================
+    // Console operations — the read-only `ui.*` namespace
+    // ============================================================================
+    //
+    // Additive: remove these three arms and the server still serves. What they
+    // add is read *shape* — root-ness, sorting, one tree in one answer — none
+    // of which the worker protocol was written to express.
+
+    async fn op_ui_executions_search(&self, req: &RequestEnvelope, _now: i64) -> Output {
+        let data = req.data.clone();
+        let kind_str = req.kind.clone();
+        let corr_id = req.head.corr_id.clone();
+        self.run(req, move |db| {
+            let q = match crate::ui_resolve::<ui::ExecutionsSearchData, _>(
+                &data,
+                &kind_str,
+                &corr_id,
+                |d| d.resolve(),
+            ) {
+                Ok(q) => q,
+                Err(resp) => return Ok(resp),
+            };
+            let rows = db.ui_executions_search(&q)?;
+            let total = if q.count_total {
+                Some(db.ui_executions_count(&q)?)
+            } else {
+                None
+            };
+            Ok(ResponseEnvelope::success(
+                kind_str.clone(),
+                corr_id.clone(),
+                &ui::finish_executions_page(&q, rows, total),
+            ))
+        })
+        .await
+    }
+
+    async fn op_ui_execution_get(&self, req: &RequestEnvelope, _now: i64) -> Output {
+        let data = req.data.clone();
+        let kind_str = req.kind.clone();
+        let corr_id = req.head.corr_id.clone();
+        self.run(req, move |db| {
+            let q = match crate::ui_resolve::<ui::ExecutionGetData, _>(
+                &data,
+                &kind_str,
+                &corr_id,
+                |d| d.resolve(),
+            ) {
+                Ok(q) => q,
+                Err(resp) => return Ok(resp),
+            };
+            let rows = db.ui_execution_nodes(&q)?;
+            match ui::build_execution(&q, rows) {
+                Ok(view) => Ok(ResponseEnvelope::success(
+                    kind_str.clone(),
+                    corr_id.clone(),
+                    &view,
+                )),
+                Err(e) => Ok(e.to_response(kind_str.clone(), corr_id.clone())),
+            }
+        })
+        .await
+    }
+
+    async fn op_ui_schedules_search(&self, req: &RequestEnvelope, _now: i64) -> Output {
+        let data = req.data.clone();
+        let kind_str = req.kind.clone();
+        let corr_id = req.head.corr_id.clone();
+        self.run(req, move |db| {
+            let q = match crate::ui_resolve::<ui::SchedulesSearchData, _>(
+                &data,
+                &kind_str,
+                &corr_id,
+                |d| d.resolve(),
+            ) {
+                Ok(q) => q,
+                Err(resp) => return Ok(resp),
+            };
+            let rows = db.ui_schedules_search(&q)?;
+            let total = if q.count_total {
+                Some(db.ui_schedules_count(&q)?)
+            } else {
+                None
+            };
+            Ok(ResponseEnvelope::success(
+                kind_str.clone(),
+                corr_id.clone(),
+                &ui::finish_schedules_page(&q, rows, total),
+            ))
+        })
+        .await
+    }
+
+    // ============================================================================
     // Debug operations
     // ============================================================================
 
@@ -3390,6 +3489,166 @@ impl<'a> SqliteDb<'a> {
         Ok(results)
     }
 
+    // === Console reads ===
+    //
+    // Three statements, one per screen. Everything a client can vary — sort,
+    // direction, cursor, limits — is resolved in `resonate_core::ui` before it
+    // gets here, so what these build is a `format!` over constants and a bind
+    // list, never caller text.
+
+    /// The executions list: root promises, sorted, one keyset page.
+    ///
+    /// `id = origin_id` is root-ness — an id is `<origin>:<lineage>`, so a
+    /// promise with no lineage is a root. It is a generated, stored column, so
+    /// this is a column comparison rather than a scan of the tags.
+    fn ui_executions_search(&self, q: &ui::ExecutionsQuery) -> StorageResult<Vec<PromiseRecord>> {
+        let (expr, cmp, dir) = (q.sort.key.expr(), q.sort.dir.cmp_sql(), q.sort.dir.sql());
+        let sql = format!(
+            "SELECT id, state, param_headers, param_data, value_headers, value_data, tags, timeout_at, created_at, settled_at
+             FROM promises
+             WHERE id = origin_id{states}
+               AND (?1 IS NULL OR id >= ?1)
+               AND (?2 IS NULL OR id < ?2)
+               AND (?3 IS NULL OR NOT EXISTS (
+                 SELECT key, value FROM json_each(?3) EXCEPT SELECT key, value FROM json_each(tags)
+               ))
+               AND (?4 IS NULL OR created_at >= ?4)
+               AND (?5 IS NULL OR created_at <= ?5)
+               AND (?6 IS NULL OR {expr} {cmp} ?6 OR ({expr} = ?6 AND id {cmp} ?7))
+             ORDER BY {expr} {dir}, id {dir}
+             LIMIT ?8",
+            states = q.states_sql(),
+        );
+        let (after_key, after_id) = split_keyset(q.after.as_ref());
+        let mut stmt = self.conn.prepare(&sql)?;
+        let mut rows = stmt.query(params![
+            q.id_from,
+            q.id_to,
+            q.tags_json,
+            q.created_from,
+            q.created_to,
+            after_key,
+            after_id,
+            q.fetch + 1,
+        ])?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next()? {
+            out.push(row_to_promise(row)?);
+        }
+        Ok(out)
+    }
+
+    /// How many executions match, ignoring the cursor — the "of 240" a page
+    /// number is useless without.
+    fn ui_executions_count(&self, q: &ui::ExecutionsQuery) -> StorageResult<i64> {
+        let sql = format!(
+            "SELECT COUNT(*) FROM promises
+             WHERE id = origin_id{states}
+               AND (?1 IS NULL OR id >= ?1)
+               AND (?2 IS NULL OR id < ?2)
+               AND (?3 IS NULL OR NOT EXISTS (
+                 SELECT key, value FROM json_each(?3) EXCEPT SELECT key, value FROM json_each(tags)
+               ))
+               AND (?4 IS NULL OR created_at >= ?4)
+               AND (?5 IS NULL OR created_at <= ?5)",
+            states = q.states_sql(),
+        );
+        Ok(self.conn.query_row(
+            &sql,
+            params![
+                q.id_from,
+                q.id_to,
+                q.tags_json,
+                q.created_from,
+                q.created_to
+            ],
+            |r| r.get(0),
+        )?)
+    }
+
+    /// One execution, whole: every promise sharing the root's origin, with the
+    /// task columns that sit on the same row.
+    ///
+    /// This is the request that replaces `resonate-ui`'s recursive fan-out —
+    /// one indexed read instead of one round trip per level, re-run every 5s.
+    fn ui_execution_nodes(&self, q: &ui::ExecutionQuery) -> StorageResult<Vec<ui::NodeRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT p.id, p.state, p.param_headers, p.param_data, p.value_headers, p.value_data,
+                    p.tags, p.timeout_at, p.created_at, p.settled_at,
+                    p.task_state, p.task_version,
+                    COALESCE((SELECT COUNT(*) FROM callbacks c
+                              WHERE c.awaiter_id = p.id AND c.ready = true), 0),
+                    CASE WHEN p.task_state = 'acquired' THEN p.ttl ELSE NULL END,
+                    CASE WHEN p.task_state = 'acquired' THEN p.pid ELSE NULL END,
+                    p.retry_timeout_at, p.lease_timeout_at
+             FROM promises p
+             WHERE p.origin_id = ?1
+             ORDER BY p.created_at ASC, p.id ASC
+             LIMIT ?2",
+        )?;
+        let mut rows = stmt.query(params![q.root_id, q.max_nodes + 1])?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next()? {
+            let task_state: Option<String> = row.get(10)?;
+            out.push(ui::NodeRow {
+                promise: row_to_promise(row)?,
+                task_state: task_state.as_deref().map(parse_task_state),
+                task_version: row.get(11)?,
+                resumes: row.get(12)?,
+                ttl: row.get(13)?,
+                pid: row.get(14)?,
+                retry_timeout_at: row.get(15)?,
+                lease_timeout_at: row.get(16)?,
+            });
+        }
+        Ok(out)
+    }
+
+    fn ui_schedules_search(&self, q: &ui::SchedulesQuery) -> StorageResult<Vec<ScheduleRecord>> {
+        let (expr, cmp, dir) = (q.sort.key.expr(), q.sort.dir.cmp_sql(), q.sort.dir.sql());
+        let sql = format!(
+            "SELECT id, cron, promise_id, promise_timeout, promise_param_headers, promise_param_data,
+                    promise_tags, created_at, next_run_at, last_run_at
+             FROM schedules
+             WHERE (?1 IS NULL OR id >= ?1)
+               AND (?2 IS NULL OR id < ?2)
+               AND (?3 IS NULL OR NOT EXISTS (
+                 SELECT key, value FROM json_each(?3) EXCEPT SELECT key, value FROM json_each(promise_tags)
+               ))
+               AND (?4 IS NULL OR {expr} {cmp} ?4 OR ({expr} = ?4 AND id {cmp} ?5))
+             ORDER BY {expr} {dir}, id {dir}
+             LIMIT ?6"
+        );
+        let (after_key, after_id) = split_keyset(q.after.as_ref());
+        let mut stmt = self.conn.prepare(&sql)?;
+        let mut rows = stmt.query(params![
+            q.id_from,
+            q.id_to,
+            q.tags_json,
+            after_key,
+            after_id,
+            q.limit + 1,
+        ])?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next()? {
+            out.push(row_to_schedule(row)?);
+        }
+        Ok(out)
+    }
+
+    fn ui_schedules_count(&self, q: &ui::SchedulesQuery) -> StorageResult<i64> {
+        Ok(self.conn.query_row(
+            "SELECT COUNT(*) FROM schedules
+             WHERE (?1 IS NULL OR id >= ?1)
+               AND (?2 IS NULL OR id < ?2)
+               AND (?3 IS NULL OR NOT EXISTS (
+                 SELECT key, value FROM json_each(?3) EXCEPT SELECT key, value FROM json_each(promise_tags)
+               ))",
+            params![q.id_from, q.id_to, q.tags_json],
+            |r| r.get(0),
+        )?)
+    }
+
     /// The nearest deadlines the tables hold, soonest first.
     ///
     /// The four queues are four columns, so this is a union of four index
@@ -3845,6 +4104,15 @@ fn get_resumes(tx: &rusqlite::Connection, task_id: &str) -> rusqlite::Result<i64
 }
 
 // === Row mapping helpers ===
+
+/// A keyset cursor as two bindable halves. `None` for both when there is no
+/// cursor, which is what the `IS NULL OR` in every keyset predicate reads.
+fn split_keyset(after: Option<&ui::Keyset>) -> (Option<i64>, Option<String>) {
+    match after {
+        Some(k) => (Some(k.key), Some(k.id.clone())),
+        None => (None, None),
+    }
+}
 
 fn row_to_promise(row: &rusqlite::Row) -> rusqlite::Result<PromiseRecord> {
     row_to_promise_offset(row, 0)

@@ -1,0 +1,1 @@
+import{s as a,a as d,f as m}from"./BNMoJmDo.js";import{v as c,o as i,s as f,w as n,t as _}from"./Dcg49T0u.js";var h=m('<div class="empty svelte-1m5lo4h"><div class="title svelte-1m5lo4h"> </div> <div class="line svelte-1m5lo4h"> </div></div>');function u(l,e){var t=h(),s=c(t),v=i(s,!0),r=f(s,2),o=i(r,!0);n(t),_(()=>{a(v,e.title),a(o,e.line)}),d(l,t)}export{u as E};
