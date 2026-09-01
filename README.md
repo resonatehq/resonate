@@ -2,12 +2,6 @@
 
 ![Resonate](./assets/resonate-banner.png)
 
-# Resonate
-
-### Distributed async await. One binary. Absolute orchestration powerhouse.
-
-**Write ordinary functions. Get durable, distributed execution that survives crashes, restarts, and everything else.**
-
 [![License](https://img.shields.io/badge/license-Apache--2.0-1EE3CF?style=flat-square)](./LICENSE)
 [![Rust](https://img.shields.io/badge/built%20with-Rust-1EE3CF?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![Discord](https://img.shields.io/badge/Discord-join-1EE3CF?style=flat-square&logo=discord&logoColor=white)](https://resonatehq.io/discord)
@@ -19,13 +13,13 @@
 
 ---
 
-[Resonate](https://resonatehq.io/)'s durable async await replaces queues, state machines, and schedulers to enable any developer to write reliable distributed applications faster without touching infrastructure.
+[Resonate](https://resonatehq.io/) is durable async await. Call a function, await a promise — and get an execution that outlives the process that started it. A crash, a deploy, or a machine that never comes back is a resume, not a lost workflow.
 
-1. Write durable functions in ordinary code using any of [our language SDKs](#sdks)
-2. Run Resonate — one binary, one command — for a complete local development experience, with production parity
-3. Deploy your workers to your own infrastructure, in-process or out-of-process
-4. Point Resonate at the database you already run — SQLite, PostgreSQL, or MySQL — and keep operating the stack you have
-5. Resonate invokes your functions over HTTP or Pub/Sub and persists every step, so a crash is a resume, not a loss
+1. Write durable functions in ordinary code with any of [our language SDKs](#sdks)
+2. Run `resonate dev` while you build — one binary, in memory, nothing else to install
+3. Deploy your workers wherever your code already runs, in-process or out-of-process
+4. Point Resonate at the database you already operate — SQLite, PostgreSQL, or MySQL
+5. Resonate invokes your functions over HTTP or Pub/Sub, persisting every step along the way
 
 No DAGs. No YAML. No new language. You write a function; Resonate makes sure it finishes.
 
@@ -103,6 +97,9 @@ One binary in the middle. Your database underneath, your workers wherever they l
 ```shell
 brew install resonatehq/tap/resonate
 ```
+
+Or, with Node already on the machine, skip the install: every `resonate` command
+below also runs as `npx resonate-cli@latest`.
 
 **2. Install an SDK**
 
@@ -222,6 +219,21 @@ resonate serve
 ```
 
 Every release and its artifacts are on the [releases page](https://github.com/resonatehq/resonate/releases).
+
+### npm
+
+```shell
+npx resonate-cli@latest dev
+```
+
+[`resonate-cli`](./npm) carries no implementation. It downloads the release
+binary for your platform — the same artifact Homebrew installs, checked against
+the `.sha256` published beside it — and hands your arguments to it. For a
+JavaScript project that wants Resonate on hand:
+
+```shell
+npm install --save-dev resonate-cli
+```
 
 On start you will see:
 
