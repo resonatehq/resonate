@@ -268,13 +268,6 @@ impl<'a> Settings<'a> {
         self.extract_at::<bool>(ENABLED).unwrap_or(default)
     }
 
-    /// Where a value was read from — a file, an environment variable, a
-    /// `--set` — so an error can send someone to the right place rather than
-    /// naming a number.
-    pub fn source_of(&self, field: &str) -> Option<String> {
-        source_of(self.figment, &format!("{}.{}", self.key, field))
-    }
-
     /// Reject a value the plugin's own rules refuse, naming where it came from.
     pub fn reject(&self, field: &str, message: impl Into<String>) -> ConfigError {
         let key = format!("{}.{}", self.key, field);
