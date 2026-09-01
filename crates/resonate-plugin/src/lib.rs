@@ -75,12 +75,14 @@
 
 pub mod config;
 pub mod error;
+pub mod handle;
 pub mod manifest;
 pub mod plugin;
 pub mod registry;
 
 pub use config::{Loaded, Loader, OwnedSettings, Settings, ACTIVE, ENABLED};
 pub use error::{ConfigError, RegistryError, StartupError};
+pub use handle::ServerHandle;
 pub use manifest::{Manifest, Port};
 pub use plugin::{
     BoxFuture, Env, GatewayCtx, GatewayFactory, GatewayPlugin, RouterCtx, RouterFactory,

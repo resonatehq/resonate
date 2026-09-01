@@ -7,6 +7,7 @@ description = "The Resonate plugin surface: what a plugin announces, how it is c
 
 [dependencies]
 resonate-core = { path = "../resonate-core" }
+async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 # An implementation detail, deliberately: no figment type appears in this
@@ -14,4 +15,4 @@ serde_json = { workspace = true }
 figment = { version = "0.10", features = ["toml", "env"] }
 
 [dev-dependencies]
-async-trait = { workspace = true }
+tokio = { version = "1", features = ["rt", "macros"] }
