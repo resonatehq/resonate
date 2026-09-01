@@ -1,0 +1,12 @@
+level = "debug"
+debug = true
+
+[storage]
+type = "sqlite"
+
+[storage.sqlite]
+path = ":memory:"
+
+[workos]
+api_key = "sk_server_secret"
+org_id = "org_abc"

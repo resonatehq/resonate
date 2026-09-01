@@ -455,6 +455,7 @@ async fn run_server(config: Config) -> Result<(), String> {
             // Carried through, not interpreted: the gateway reads the key in
             // `init`, and a bad path fails startup there.
             auth: state.config.auth.clone(),
+            workos: state.config.workos.clone(),
             // SQLite lives in this process, so a panic mid-transaction can
             // leave state the next request would read.
             abort_on_panic: is_sqlite,

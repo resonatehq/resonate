@@ -82,6 +82,23 @@ pub struct CommonArgs {
     #[arg(long = "auth-aud", value_name = "AUD")]
     pub auth_aud: Option<String>,
 
+    // --- WorkOS Auth ---
+    /// Enable WorkOS auth mode — every request must carry a WorkOS API key as bearer token
+    #[arg(long = "workos")]
+    pub workos: bool,
+
+    /// Server's WorkOS secret key (sk_…) used to call POST /api_keys/validations
+    #[arg(long = "workos-api-key", value_name = "KEY")]
+    pub workos_api_key: Option<String>,
+
+    /// Organization ID the client token must belong to (required when WorkOS is enabled)
+    #[arg(long = "workos-org-id", value_name = "ORG")]
+    pub workos_org_id: Option<String>,
+
+    /// WorkOS API base URL [default: https://api.workos.com]
+    #[arg(long = "workos-base-url", value_name = "URL")]
+    pub workos_base_url: Option<String>,
+
     // --- Tasks ---
     /// Task lease timeout (ms) [default: 15000]
     #[arg(long = "tasks-lease-timeout", value_name = "MS")]
@@ -245,6 +262,30 @@ impl CommonArgs {
             if let Some(v) = self.auth_aud {
                 auth.aud = Some(v);
             }
+        }
+
+        if self.workos {
+            config
+                .workos
+                .get_or_insert_with(resonate_auth::workos::Config::default);
+        }
+        if let Some(key) = self.workos_api_key {
+            let w = config
+                .workos
+                .get_or_insert_with(resonate_auth::workos::Config::default);
+            w.api_key = Some(key);
+        }
+        if let Some(oid) = self.workos_org_id {
+            let w = config
+                .workos
+                .get_or_insert_with(resonate_auth::workos::Config::default);
+            w.org_id = Some(oid);
+        }
+        if let Some(url) = self.workos_base_url {
+            let w = config
+                .workos
+                .get_or_insert_with(resonate_auth::workos::Config::default);
+            w.base_url = url;
         }
 
         if let Some(v) = self.tasks_lease_timeout {
