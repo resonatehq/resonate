@@ -8,9 +8,10 @@
 #   1. check-version — Validates Cargo.toml matches release tag
 #   2. publish-dockerhub — Multi-platform Docker images → DockerHub
 #   3. publish-github-image — Multi-platform Docker images → GHCR
-#   4. publish-github-artifacts — Cross-platform binary artifacts
-#   5. update-homebrew — Opens PR to update resonatehq/homebrew-tap formula
-#   6. verify-artifacts — Post-publication verification
+#   4. publish-gcr-image — Multi-platform Docker images → GCR (Artifact Registry)
+#   5. publish-github-artifacts — Cross-platform binary artifacts
+#   6. update-homebrew — Opens PR to update resonatehq/homebrew-tap formula
+#   7. verify-artifacts — Post-publication verification
 #
 # See .github/CD_PIPELINE.md for full documentation.
 
@@ -202,6 +203,68 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository }}
+          tags: |
+            type=raw,value=${{ needs.check-version.outputs.tag }}
+            type=raw,value=latest
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: true
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # PHASE 2.7: GOOGLE ARTIFACT REGISTRY PUBLISHING
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  publish-gcr-image:
+    name: Publish GCR Image
+    needs: [check-version]
+
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.check-version.outputs.tag }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Authenticate to Google Cloud
+        id: gcp-auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+          token_format: access_token
+
+      - name: Log in to Google Artifact Registry
+        uses: docker/login-action@v4
+        with:
+          registry: us-west1-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.gcp-auth.outputs.access_token }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: us-west1-docker.pkg.dev/resonate-cloud/resonate/resonate
           tags: |
             type=raw,value=${{ needs.check-version.outputs.tag }}
             type=raw,value=latest
