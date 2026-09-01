@@ -66,10 +66,6 @@ fn hash(parts: &[u64]) -> Feature {
     h
 }
 
-fn str_key(s: &str) -> u64 {
-    hash(&s.bytes().map(u64::from).collect::<Vec<_>>())
-}
-
 // ---------------------------------------------------------------------------
 // Execution
 // ---------------------------------------------------------------------------
@@ -77,19 +73,27 @@ fn str_key(s: &str) -> u64 {
 #[derive(Default)]
 struct Run {
     features: Vec<Feature>,
-    /// `kind` and status of each step, for the report and the repro listing.
-    trace: Vec<(String, u16)>,
     consumed: usize,
 }
 
-/// The byte span of each completed step of the last execution.
-///
-/// Kept outside the `Run` because the run that matters is the one that
-/// panicked, and a panic takes its return value with it.
-static MARKS: Mutex<Vec<(usize, usize)>> = Mutex::new(Vec::new());
+/// One completed step: the bytes it read, and what it did.
+#[derive(Clone)]
+struct Step {
+    start: usize,
+    end: usize,
+    kind: String,
+    status: u16,
+}
 
-fn marks() -> Vec<(usize, usize)> {
-    MARKS.lock().unwrap_or_else(|e| e.into_inner()).clone()
+/// The steps of the last execution.
+///
+/// Outside the `Run` because the run that matters is the one that panicked,
+/// and a panic takes its return value with it. Minimization needs the spans
+/// and the report needs the kinds, and both are wanted after a failure.
+static STEPS: Mutex<Vec<Step>> = Mutex::new(Vec::new());
+
+fn steps() -> Vec<Step> {
+    STEPS.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
 /// Drive one tape through every backend.
@@ -101,15 +105,16 @@ fn execute(rt: &Runtime, h: &mut Harness, bytes: &[u8]) -> Run {
         // Per-tape numbering: the step labels in a divergence should line up
         // with the trace printed beside them, not with the campaign.
         h.steps = 0;
-        MARKS.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        STEPS.lock().unwrap_or_else(|e| e.into_inner()).clear();
         let mut tape = Tape::new(bytes);
         let mut run = Run::default();
+        let mut taken = 0usize;
         // The previous step, so a feature can be a pair of steps rather than
         // one: reaching `task.fulfill` after `task.acquire` is a different
         // thing from reaching it cold, and only the pair says so.
         let mut prev: u64 = 0;
 
-        while !tape.exhausted() && run.trace.len() < MAX_STEPS {
+        while !tape.exhausted() && taken < MAX_STEPS {
             let start = tape.consumed();
             let idx = Entropy::usize(&mut tape, 0..Op::ALL.len());
             if tape.exhausted() {
@@ -117,10 +122,6 @@ fn execute(rt: &Runtime, h: &mut Harness, bytes: &[u8]) -> Run {
             }
             let op = Op::ALL[idx];
             let out = h.step(&mut tape, op).await;
-            MARKS
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .push((start, tape.consumed()));
 
             let o = idx as u64;
             let s = out.status as u64;
@@ -129,11 +130,18 @@ fn execute(rt: &Runtime, h: &mut Harness, bytes: &[u8]) -> Run {
             run.features.push(hash(&[3, o, s, out.post_census as u64]));
             run.features
                 .push(hash(&[4, o, out.pre_class as u64, out.post_class as u64]));
-            if let Some(kind) = out.fired {
-                run.features.push(hash(&[5, o, str_key(kind)]));
+            if let Some(rank) = out.fired {
+                run.features.push(hash(&[5, o, rank as u64]));
             }
             prev = hash(&[o, s]);
-            run.trace.push((out.kind, out.status));
+
+            STEPS.lock().unwrap_or_else(|e| e.into_inner()).push(Step {
+                start,
+                end: tape.consumed(),
+                kind: out.kind,
+                status: out.status,
+            });
+            taken += 1;
         }
         run.consumed = tape.consumed();
         run
@@ -197,6 +205,11 @@ fn choose(rng: &mut fastrand::Rng, corpus: &[Entry]) -> usize {
 /// matters most here: two tapes that each reached somewhere interesting can
 /// produce one that reaches both, which is how the loop composes progress it
 /// made separately.
+///
+/// The four in-place byte edits look redundant, since every read folds through
+/// `% span`. Measured against a four-arm set — set, insert, delete, splice —
+/// over three seeds: eight arms run a quarter fewer executions in the same
+/// time and still find ~3% more features, 36% more per execution. Keep them.
 fn mutate(rng: &mut fastrand::Rng, base: &[u8], other: &[u8]) -> Vec<u8> {
     let mut t = base.to_vec();
     if t.is_empty() {
@@ -263,17 +276,16 @@ const MAX_TRIALS: usize = 600;
 
 /// Cut a failing tape down to what the failure needs.
 ///
-/// Three passes, in the order that pays off. Deleting a whole step is the one
-/// that matters: a step occupies a known byte span, so removing that span
-/// leaves every other step decoding from the same bytes it did before. Deleting
-/// an arbitrary byte range instead shifts every decision after it, which
-/// produces a different run that happens to also fail — smaller, but no longer
-/// an explanation of anything.
+/// Deleting a whole step is the pass that matters: a step occupies a known byte
+/// span, so removing that span leaves every other step decoding from the same
+/// bytes it did before. Deleting an arbitrary byte range instead shifts every
+/// decision after it, which produces a different run that happens to also fail
+/// — smaller, but no longer an explanation of anything.
 fn minimize(rt: &Runtime, h: &mut Harness, bytes: &[u8]) -> Vec<u8> {
     let mut trials = 0;
     let mut best = drop_steps(rt, h, bytes.to_vec(), &mut trials);
     best = zero_bytes(rt, h, best, &mut trials);
-    best = drop_chunks(rt, h, best, &mut trials);
+    best = drop_tail(rt, h, best, &mut trials);
     drop_steps(rt, h, best, &mut trials)
 }
 
@@ -285,12 +297,12 @@ fn drop_steps(rt: &Runtime, h: &mut Harness, mut best: Vec<u8>, trials: &mut usi
         if try_execute(rt, h, &best).is_ok() {
             break;
         }
-        for (start, end) in marks().into_iter().rev() {
-            if end > best.len() {
+        for step in steps().into_iter().rev() {
+            if step.end > best.len() {
                 continue;
             }
             let mut candidate = best.clone();
-            candidate.drain(start..end);
+            candidate.drain(step.start..step.end);
             *trials += 1;
             if try_execute(rt, h, &candidate).is_err() {
                 best = candidate;
@@ -324,22 +336,29 @@ fn zero_bytes(rt: &Runtime, h: &mut Harness, mut best: Vec<u8>, trials: &mut usi
     best
 }
 
-/// Delta debugging on halving chunk sizes, for the bytes no step claimed.
-fn drop_chunks(rt: &Runtime, h: &mut Harness, mut best: Vec<u8>, trials: &mut usize) -> Vec<u8> {
+/// Cut the tail the run never read.
+///
+/// Halving from the end, because there is no number to truncate to: a step
+/// whose reads run past the end still executes, on zeros, so cutting back to
+/// the last completed step changes the failing step rather than keeping it.
+///
+/// This pass is what makes a repro small. Measured on three seeds: with it,
+/// every one minimized to the same 19 bytes; without, 25, 103 and 146.
+/// Deleting arbitrary interior ranges as well reached the same 19 bytes and
+/// took ~15% more trials to do it, so the interior deletions are not here.
+fn drop_tail(rt: &Runtime, h: &mut Harness, mut best: Vec<u8>, trials: &mut usize) -> Vec<u8> {
     let mut chunk = (best.len() / 2).max(1);
-    loop {
-        let mut i = 0;
-        while i + chunk <= best.len() && *trials < MAX_TRIALS {
+    while *trials < MAX_TRIALS {
+        if chunk <= best.len() {
             let mut candidate = best.clone();
-            candidate.drain(i..i + chunk);
+            candidate.truncate(best.len() - chunk);
             *trials += 1;
             if try_execute(rt, h, &candidate).is_err() {
                 best = candidate;
-            } else {
-                i += chunk;
+                continue;
             }
         }
-        if chunk == 1 || *trials >= MAX_TRIALS {
+        if chunk == 1 {
             break;
         }
         chunk /= 2;
@@ -359,7 +378,7 @@ fn unhex(s: &str) -> Vec<u8> {
 }
 
 /// Print a failure the way you would want to receive it.
-fn report_failure(tape: &[u8], run: &Run, message: &str) -> ! {
+fn report_failure(tape: &[u8], trace: &[Step], message: &str) -> ! {
     // Put the default hook back, or the panic below is swallowed by the one
     // installed to keep minimization quiet.
     let _ = std::panic::take_hook();
@@ -369,9 +388,9 @@ fn report_failure(tape: &[u8], run: &Run, message: &str) -> ! {
         "[fuzz]   FUZZ_REPLAY={} cargo test --test fuzz -- --nocapture\n",
         hex(tape)
     );
-    eprintln!("[fuzz] {} steps before the failure:", run.trace.len());
-    for (i, (kind, status)) in run.trace.iter().enumerate() {
-        eprintln!("[fuzz]   {i:>3}. {kind} -> {status}");
+    eprintln!("[fuzz] {} steps before the failure:", trace.len());
+    for (i, step) in trace.iter().enumerate() {
+        eprintln!("[fuzz]   {i:>3}. {} -> {}", step.kind, step.status);
     }
     panic!("{message}");
 }
@@ -406,13 +425,11 @@ fn fuzz_guided() {
         eprintln!("[fuzz] replaying {} bytes", tape.len());
         let outcome = try_execute(&rt, &mut h, &tape);
         let _ = std::panic::take_hook();
+        for (i, step) in steps().iter().enumerate() {
+            eprintln!("[fuzz]   {i:>3}. {} -> {}", step.kind, step.status);
+        }
         match outcome {
-            Ok(run) => {
-                for (i, (kind, status)) in run.trace.iter().enumerate() {
-                    eprintln!("[fuzz]   {i:>3}. {kind} -> {status}");
-                }
-                eprintln!("[fuzz] replay agreed on all {} steps", run.trace.len());
-            }
+            Ok(_) => eprintln!("[fuzz] replay agreed on all {} steps", steps().len()),
             Err(message) => panic!("{message}"),
         }
         return;
@@ -434,7 +451,7 @@ fn fuzz_guided() {
     let mut corpus: Vec<Entry> = Vec::new();
     let mut covered: HashMap<String, usize> = HashMap::new();
     let mut execs = 0usize;
-    let mut steps = 0usize;
+    let mut total_steps = 0usize;
 
     // Seeds are random tapes, run once each before any mutation. Everything
     // the corpus holds after that is descended from one of them.
@@ -472,19 +489,18 @@ fn fuzz_guided() {
             Err(message) => {
                 eprintln!("\n[fuzz] failure after {execs} executions — minimizing");
                 let small = minimize(&rt, &mut h, &tape);
-                let (run, message) = match try_execute(&rt, &mut h, &small) {
-                    Ok(_) => (Run::default(), message),
-                    Err(m) => (execute_trace(&rt, &mut h, &small), m),
-                };
-                report_failure(&small, &run, &message);
+                // One last run, so `STEPS` describes the tape being reported.
+                let message = try_execute(&rt, &mut h, &small).err().unwrap_or(message);
+                report_failure(&small, &steps(), &message);
             }
         };
 
+        let trace = steps();
         execs += 1;
-        steps += run.trace.len();
-        for (kind, status) in &run.trace {
-            if *status < 300 {
-                covered.entry(kind.clone()).or_insert(execs);
+        total_steps += trace.len();
+        for step in &trace {
+            if step.status < 300 {
+                covered.entry(step.kind.clone()).or_insert(execs);
             }
         }
 
@@ -521,7 +537,7 @@ fn fuzz_guided() {
 
         if start.elapsed() > next_report {
             eprintln!(
-                "[fuzz] {:>3}s  execs {execs:>5}  steps {steps:>6}  features {:>4}  corpus {:>3}  ops {}/{}",
+                "[fuzz] {:>3}s  execs {execs:>5}  steps {total_steps:>6}  features {:>4}  corpus {:>3}  ops {}/{}",
                 start.elapsed().as_secs(),
                 seen.len(),
                 corpus.len(),
@@ -537,7 +553,7 @@ fn fuzz_guided() {
     let max_generation = corpus.iter().map(|e| e.generation).max().unwrap_or(0);
     let descended = corpus.iter().filter(|e| e.generation > 0).count();
 
-    eprintln!("\n[fuzz] coverage after {execs} executions ({steps} steps):");
+    eprintln!("\n[fuzz] coverage after {execs} executions ({total_steps} steps):");
     let mut missing = Vec::new();
     for op in ALL_OPS {
         match covered.get(*op) {
@@ -561,22 +577,9 @@ fn fuzz_guided() {
     );
 
     eprintln!(
-        "\n[fuzz] PASSED — {execs} executions, {steps} steps, {} features, \
+        "\n[fuzz] PASSED — {execs} executions, {total_steps} steps, {} features, \
          corpus {} ({descended} found by mutation, deepest {max_generation} mutations from a seed)",
         seen.len(),
         corpus.len(),
     );
-}
-
-/// Re-run a tape that is known to fail, keeping the trace it produced.
-///
-/// `execute` panics part-way through, so the trace has to be rebuilt from the
-/// steps that did complete: run it one step shorter until it survives.
-fn execute_trace(rt: &Runtime, h: &mut Harness, bytes: &[u8]) -> Run {
-    for cut in (1..=bytes.len()).rev() {
-        if let Ok(run) = try_execute(rt, h, &bytes[..cut]) {
-            return run;
-        }
-    }
-    Run::default()
 }

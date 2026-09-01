@@ -1232,7 +1232,8 @@ pub struct StepOutcome {
     pub post_class: u8,
     pub pre_census: u32,
     pub post_census: u32,
-    pub fired: Option<&'static str>,
+    /// The `Timeout::rank` of the deadline this step fired, if it fired one.
+    pub fired: Option<u8>,
 }
 
 /// The size of every collection, in log2 buckets, packed into one word.
@@ -1509,7 +1510,7 @@ impl Harness {
                     .await;
             }
             self.fired += 1;
-            fired = Some(armed_key(&chosen).0);
+            fired = Some(chosen.timeout.rank() as u8);
 
             let (fire_snaps, fire_queued) = snap_all(&self.backends, now).await;
             assert_snaps_agree(&fire_snaps, &fire_ctx);
