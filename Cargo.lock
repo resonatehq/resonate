@@ -2778,6 +2778,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "resonate-plugin"
+version = "0.9.8"
+dependencies = [
+ "async-trait",
+ "figment",
+ "resonate-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "resonate-server-dbms"
 version = "0.9.8"
 dependencies = [

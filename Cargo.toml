@@ -4,6 +4,7 @@ members = [
     "crates/resonate-core",
     "crates/resonate-gateway-http",
     "crates/resonate-gateway-web",
+    "crates/resonate-plugin",
     "crates/resonate-server-dbms",
     "crates/resonate-timer-wheel",
     "crates/resonate-transport-gcps",

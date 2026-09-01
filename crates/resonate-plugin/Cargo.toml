@@ -1,0 +1,17 @@
+[package]
+name = "resonate-plugin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The Resonate plugin surface: what a plugin announces, how it is configured, and how a binary assembles one."
+
+[dependencies]
+resonate-core = { path = "../resonate-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# An implementation detail, deliberately: no figment type appears in this
+# crate's public API, so a figment major can land without moving every plugin.
+figment = { version = "0.10", features = ["toml", "env"] }
+
+[dev-dependencies]
+async-trait = { workspace = true }
