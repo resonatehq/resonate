@@ -332,6 +332,18 @@ async fn run_server(config: Config) -> Result<(), String> {
             );
         }
 
+        if config.transports.tensorlake.enabled {
+            workers.insert(
+                resonate_worker_sandbox_tensorlake::SCHEME.to_string(),
+                Arc::new(
+                    resonate_worker_sandbox_tensorlake::TensorlakeSandboxTransport::new(
+                        server_handle.clone(),
+                        config.transports.tensorlake.clone(),
+                    ),
+                ),
+            );
+        }
+
         transports = Some(Transports { poll_registry });
 
         let router: Arc<dyn ResonateRouter> =

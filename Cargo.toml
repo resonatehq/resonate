@@ -9,6 +9,7 @@ members = [
     "crates/resonate-transport-http-poll",
     "crates/resonate-transport-http-push",
     "crates/resonate-worker-bash",
+    "crates/resonate-worker-sandbox-tensorlake",
 ]
 
 [workspace.package]
@@ -63,6 +64,7 @@ resonate-transport-gcps = { path = "crates/resonate-transport-gcps" }
 resonate-transport-http-poll = { path = "crates/resonate-transport-http-poll" }
 resonate-transport-http-push = { path = "crates/resonate-transport-http-push" }
 resonate-worker-bash = { path = "crates/resonate-worker-bash" }
+resonate-worker-sandbox-tensorlake = { path = "crates/resonate-worker-sandbox-tensorlake" }
 jsonwebtoken = "9"
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.7", features = ["json"] }

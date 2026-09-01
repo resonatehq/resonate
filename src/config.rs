@@ -358,6 +358,10 @@ pub struct TransportsConfig {
     /// Bash execution transport configuration
     #[serde(default)]
     pub bash_exec: resonate_worker_bash::Config,
+
+    /// Tensorlake sandbox worker configuration
+    #[serde(default)]
+    pub tensorlake: resonate_worker_sandbox_tensorlake::Config,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

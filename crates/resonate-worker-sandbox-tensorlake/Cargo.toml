@@ -1,0 +1,19 @@
+[package]
+name = "resonate-worker-sandbox-tensorlake"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Resonate worker: runs a task's SDK inside a Tensorlake sandbox, tunnelling the protocol over the sandbox process's stdio."
+
+[dependencies]
+resonate-core = { path = "../resonate-core" }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+url = { workspace = true }
+tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
+tracing = "0.1"
+reqwest = { version = "0.12", features = ["json", "stream"] }
+futures-util = "0.3"
+bytes = "1"
+fastrand = "2"
