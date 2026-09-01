@@ -1,4 +1,42 @@
-//! The SQLite engine.
+//! The SQLite engine, sweeping eagerly.
+//!
+//! A second complete implementation of the protocol over SQLite, on the same
+//! schema, differing from [`crate::engine_sqlite`] in one thing: which
+//! promises the timeout sweep is responsible for. It is a copy of that file,
+//! kept a copy on purpose — `diff engine_sqlite.rs engine_sqlite_eager.rs` is
+//! how the difference between two admissible schedules is meant to be read,
+//! and a shared abstraction with a mode flag would hide exactly what is being
+//! compared. The cost is that a change to one must be made to the other; the
+//! differential is what notices when it was not.
+//!
+//! # What differs, and why it is allowed to
+//!
+//! The abstract machine's `processPromiseTimeout` is `touchObject id now` — a
+//! materialising read, the same thing a request performs on its way past the
+//! row. So *when* it fires is a schedule the specification leaves free:
+//! `valid/lean/real.lean` records the trace checker accepting both an eager
+//! server and a lazy one on the same run.
+//!
+//! What is not free is *which* promises a fair scheduler is obliged to look
+//! at. `04-theorems/liveness.lean` keys `enabledInternal` on
+//! `otype.awaitable` — "a deadline is owed an observation exactly when someone
+//! can be blocked on it". [`crate::engine_sqlite`] arms `resonate:target`
+//! instead, which is `okind == Task` and strictly narrower: an external,
+//! untargeted promise — the kind a task suspends on — is on no queue there and
+//! times out only when a request next names it. This file arms
+//! [`resonate_core::types::is_external`], which is the specification's rule.
+//!
+//! An `.internal` promise is on neither queue in either file, and that is not
+//! an omission: nobody may await it, so nobody is owed the observation.
+//!
+//! # The whole of the difference
+//!
+//! Four `WHERE` clauses and three arming sites. The clauses are the queue —
+//! for the sweep, for `upcoming`, and for the snapshot's own report of it, so
+//! the three cannot drift. The arming sites are what a transition announces to
+//! a timer, which must match the rows it wrote.
+//!
+//! Everything below this header is [`crate::engine_sqlite`] verbatim.
 //!
 //! A complete implementation of the protocol over SQLite: it parses and
 //! validates a request, applies the transition in its own SQL, and shapes the
@@ -60,6 +98,17 @@ use resonate_core::types::{
     TaskState,
 };
 
+/// `is_external` where the caller holds the tags as the JSON it is about to
+/// insert rather than as a map.
+///
+/// The one function this file has that `engine_sqlite` does not, and it exists
+/// only because `promise_create` takes its tags as a `&str`. Malformed JSON
+/// answers `false`, which is the narrow queue's answer — the INSERT beside it
+/// would have failed the same way.
+fn awaitable_json(tags: &str) -> bool {
+    resonate_core::types::is_external(&serde_json::from_str(tags).unwrap_or_default())
+}
+
 fn parse_promise_state(s: &str) -> PromiseState {
     s.parse()
         .unwrap_or_else(|e| panic!("corrupt promise state in DB: {}", e))
@@ -93,14 +142,14 @@ pub fn init_db(conn: &mut Connection, migrate: bool) -> rusqlite::Result<()> {
 /// see [`crate::migrate`] for why the executor differs and nothing else does.
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/sqlite");
 
-pub struct SqliteEngine {
+pub struct SqliteEagerEngine {
     conn: Arc<Mutex<Connection>>,
     task_retry_timeout: i64,
     preload_limit: u32,
     debug: bool,
 }
 
-impl SqliteEngine {
+impl SqliteEagerEngine {
     pub fn open(
         path: &str,
         task_retry_timeout: i64,
@@ -2252,11 +2301,14 @@ impl SqliteDb<'_> {
         self.armed.borrow_mut().push(Scheduled { at, timeout });
     }
 
-    /// A promise joins the eager sweep only when it is targeted — the queue is
-    /// `state = 'pending' AND target IS NOT NULL`, so an untargeted promise
-    /// times out lazily through `try_timeout` and has no deadline to announce.
-    fn arm_promise_timeout(&self, promise_id: &str, timeout_at: i64, targeted: bool) {
-        if targeted {
+    /// A promise joins the eager sweep when anyone can block on it — the queue
+    /// is `state = 'pending' AND <awaitable>`, so an `.internal` promise times
+    /// out lazily through `try_timeout` and has no deadline to announce.
+    ///
+    /// `engine_sqlite` passes `targeted` here; this file passes `awaitable`.
+    /// That is the parameter, and the whole of the arming difference.
+    fn arm_promise_timeout(&self, promise_id: &str, timeout_at: i64, awaitable: bool) {
+        if awaitable {
             self.arm(
                 timeout_at,
                 Timeout::PromiseTimeout {
@@ -2484,7 +2536,7 @@ impl<'a> SqliteDb<'a> {
     ///
     /// Postgres and MySQL run a statement here so the transition sees callbacks
     /// a concurrent transaction registered after its own snapshot opened. A
-    /// `SqliteEngine` holds one `Connection` behind a `Mutex`, so no other
+    /// `SqliteEagerEngine` holds one `Connection` behind a `Mutex`, so no other
     /// transaction can have committed anything while this one runs — there is
     /// nothing for a second look to find.
     fn process_callbacks(&self, promise_id: &str, time: i64) -> StorageResult<()> {
@@ -2592,8 +2644,17 @@ impl<'a> SqliteDb<'a> {
             // inserted, and `task_state IS NULL` is the guard that used to be
             // `INSERT OR IGNORE INTO tasks`: a promise carries at most one task,
             // and only the first writer gets to install it. No promise timeout
-            // is written either way — `state = 'pending' AND target IS NOT NULL`
-            // is the queue, and the INSERT above already put the row in it.
+            // is written either way — `state = 'pending' AND <awaitable>` is
+            // the queue, and the INSERT above already put the row in it.
+            //
+            // The announcement stands here rather than on the targeted branch
+            // below, which is where `engine_sqlite` makes it: an untargeted
+            // external promise never reaches that branch, and on this queue it
+            // has a deadline to announce. A row already past its deadline is
+            // settled, so it joins no queue and announces nothing.
+            if !already_timedout {
+                self.arm_promise_timeout(id, timeout_at, awaitable_json(tags));
+            }
             if already_timedout {
                 // Already timed out — create fulfilled task if resonate:target
                 if address.is_some() {
@@ -2604,7 +2665,6 @@ impl<'a> SqliteDb<'a> {
                     )?;
                 }
             } else if let Some(addr) = address {
-                self.arm_promise_timeout(id, timeout_at, true);
                 // TaskInfraCreated
                 let created = self.conn.execute(
                     "UPDATE promises SET task_state = 'pending', task_version = 0, retry_timeout_at = ?2
@@ -2844,7 +2904,7 @@ impl<'a> SqliteDb<'a> {
                     self.arm_promise_timeout(
                         promise_id,
                         timeout_at,
-                        promise.tags.contains_key("resonate:target"),
+                        resonate_core::types::is_external(&promise.tags),
                     );
                     self.arm_lease(promise_id, pid, created_at + ttl);
                 }
@@ -3404,7 +3464,10 @@ impl<'a> SqliteDb<'a> {
         let mut stmt = self.conn.prepare(
             "SELECT deadline, kind, id, pid FROM (
                  SELECT timeout_at AS deadline, 'promise' AS kind, id AS id, NULL AS pid
-                   FROM promises WHERE state = 'pending' AND target IS NOT NULL
+                   FROM promises WHERE state = 'pending'
+                     AND (target IS NOT NULL OR is_timer
+                          OR json_extract(tags, '$.resonate:scope') = 'global'
+                          OR json_extract(tags, '$.resonate:external') = 'true')
                  UNION ALL
                  SELECT retry_timeout_at, 'retry', id, NULL
                    FROM promises WHERE task_state = 'pending' AND retry_timeout_at IS NOT NULL
@@ -3515,7 +3578,14 @@ impl<'a> SqliteDb<'a> {
 
         if promise_inserted {
             // Step 6 is gone with `promise_timeouts`; the INSERT above already
-            // put a pending, targeted promise on the queue.
+            // put a pending, awaitable promise on the queue.
+            if !already_timedout {
+                self.arm_promise_timeout(
+                    &promise_id,
+                    promise_timeout_at,
+                    resonate_core::types::is_external(promise_tags),
+                );
+            }
             if already_timedout {
                 // Promise is immediately settled — create fulfilled task if resonate:target is set
                 if address.is_some() {
@@ -3527,7 +3597,6 @@ impl<'a> SqliteDb<'a> {
                 }
             } else if let Some(addr) = &address {
                 // Step 7: Create task infrastructure if resonate:target is set
-                self.arm_promise_timeout(&promise_id, promise_timeout_at, true);
                 let created = self.conn.execute(
                     "UPDATE promises SET task_state = 'pending', task_version = 0, retry_timeout_at = ?2
                      WHERE id = ?1 AND task_state IS NULL",
@@ -3597,16 +3666,26 @@ impl<'a> SqliteDb<'a> {
 
         // Statement 1: Process expired promise timeouts.
         //
-        // `state = 'pending' AND target IS NOT NULL` is the whole of what
-        // `promise_timeouts` held: rows entered on create and left on settle,
-        // and only a targeted promise was ever swept eagerly. Untargeted ones
-        // still time out lazily, through `try_timeout`.
+        // The predicate is the whole of what `promise_timeouts` held: rows
+        // entered on create and left on settle. Here it is every promise
+        // anyone can block on — `is_external`'s four tags, as SQL — where
+        // `engine_sqlite` restricts it to `target IS NOT NULL`. `target` and
+        // `is_timer` are stored generated columns; the other two are read out
+        // of `tags`, which costs nothing the partial index on
+        // `(timeout_at) WHERE state = 'pending'` was not already paying.
+        //
+        // An `.internal` promise is still excluded, and still times out
+        // lazily through `try_timeout` — the same transition, read off a
+        // request instead of off the sweep.
         let expired_ids: Vec<String> = match selected("promise") {
             None => Vec::new(),
             Some(id) => {
                 let mut stmt = self.conn.prepare(
                     "SELECT id FROM promises
-                     WHERE state = 'pending' AND target IS NOT NULL AND timeout_at <= ?1
+                     WHERE state = 'pending'
+                       AND (target IS NOT NULL OR is_timer
+                            OR json_extract(tags, '$.resonate:scope') = 'global'
+                            OR json_extract(tags, '$.resonate:external') = 'true') AND timeout_at <= ?1
                        AND (?2 IS NULL OR id = ?2)
                      ORDER BY id",
                 )?;
@@ -3728,7 +3807,11 @@ impl<'a> SqliteDb<'a> {
         // predicates are the membership rules the deleted tables carried.
         let mut stmt = conn.prepare(
             "SELECT id, timeout_at FROM promises
-             WHERE state = 'pending' AND target IS NOT NULL ORDER BY id",
+             WHERE state = 'pending'
+               AND (target IS NOT NULL OR is_timer
+                    OR json_extract(tags, '$.resonate:scope') = 'global'
+                    OR json_extract(tags, '$.resonate:external') = 'true')
+             ORDER BY id",
         )?;
         let promise_timeouts: Vec<SnapshotPromiseTimeout> = {
             let mut rows = stmt.query([])?;
@@ -3916,12 +3999,12 @@ fn row_to_schedule(row: &rusqlite::Row) -> rusqlite::Result<ScheduleRecord> {
 //                     other — which is why fulfilling a task, dropping its
 //                     timeout and clearing its lease are one UPDATE here.
 //
-//   promise_timeouts  Gone. The queue is `state = 'pending' AND target IS NOT
-//                     NULL`, which is what rows entering on create and leaving
-//                     on settle amounted to; idx_promises_timeout_at is the
-//                     index the table carried. Untargeted promises were never
-//                     swept eagerly and still are not — they time out lazily,
-//                     through try_timeout.
+//   promise_timeouts  Gone. The queue is `state = 'pending' AND <awaitable>`,
+//                     which is what rows entering on create and leaving on
+//                     settle amounted to; idx_promises_timeout_at is the
+//                     index the table carried. Internal promises are not on
+//                     it and never were — they time out lazily, through
+//                     try_timeout.
 //
 //   schedule_timeouts Gone: `next_run_at` already is the queue, and
 //                     process_schedule_timeout's idempotency guard reads the
@@ -3986,7 +4069,7 @@ fn process_schedule_timeouts(db: &SqliteDb, time: i64, only: Option<&str>) -> St
 }
 
 #[async_trait]
-impl ResonateEngine for SqliteEngine {
+impl ResonateEngine for SqliteEagerEngine {
     async fn process(&self, input: Input<'_>, now: i64) -> Output {
         match input {
             Input::External(req) => self.dispatch(req, now).await,
@@ -4011,7 +4094,7 @@ impl ResonateEngine for SqliteEngine {
     }
 }
 
-impl SqliteEngine {
+impl SqliteEagerEngine {
     /// Fire one timeout the system asked of itself.
     ///
     /// Per-timeout rather than a sweep: each variant runs only the statement

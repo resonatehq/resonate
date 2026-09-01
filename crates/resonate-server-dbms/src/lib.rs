@@ -1,9 +1,17 @@
 //! Resonate's durable state, over a relational database.
 //!
 //! Holds the [`engine_port::ResonateEngine`] contract — every transition the
-//! system makes — and the three implementations of it, one per SQL dialect.
-//! Each is complete on its own: it parses a request, applies the transition in
-//! its own SQL, shapes the response, and returns the messages it emitted.
+//! system makes — and the implementations of it, one per SQL dialect and, for
+//! SQLite, two. Each is complete on its own: it parses a request, applies the
+//! transition in its own SQL, shapes the response, and returns the messages it
+//! emitted.
+//!
+//! [`engine_sqlite`] and [`engine_sqlite_eager`] are the same protocol over
+//! the same schema under two arming rules — which promises the timeout sweep
+//! is responsible for. The specification leaves that schedule free, so the
+//! second file is not a fix for the first; it is the other admissible reading,
+//! kept as a copy so `diff` between the two is the statement of what differs.
+//! `engine_sqlite_eager`'s header says which rule is whose.
 //!
 //! There is no shared engine over a storage trait. Lifting the state machine
 //! into shared Rust would cost Postgres its single-round-trip CTE, which is
@@ -20,6 +28,8 @@ pub mod engine_port;
 pub mod engine_postgres;
 #[cfg(feature = "sqlite")]
 pub mod engine_sqlite;
+#[cfg(feature = "sqlite")]
+pub mod engine_sqlite_eager;
 pub mod migrate;
 pub mod oracle;
 

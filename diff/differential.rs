@@ -39,7 +39,8 @@ use resonate_server_dbms::{
     engine_mysql::MysqlEngine,
     engine_port::{Input, Outgoing, ResonateEngine, Scheduled, Timeout},
     engine_postgres::PostgresEngine,
-    engine_sqlite::{SqliteEngine, Sweep},
+    engine_sqlite::SqliteEngine,
+    engine_sqlite_eager::SqliteEagerEngine,
     oracle::{Oracle, SharedOracle},
 };
 use serde_json::{json, Value};
@@ -1405,11 +1406,11 @@ fn promise_id_different_from(rng: &mut fastrand::Rng, other: &str) -> String {
 // and `resonate_core::types::otype` says the same thing in prose — "an
 // external promise may be awaited, and an external promise is armed".
 //
-// `Sweep::Targeted` is the queue every engine here ships: `resonate:target`,
+// `engine_sqlite` is the queue every engine here ships: `resonate:target`,
 // which is `okind == Task`, strictly narrower than awaitable.
-// `Sweep::Awaitable` is the specification's rule. Both are the same
-// transition over the same schema; they differ only in when it fires and on
-// which rows.
+// `engine_sqlite_eager` is the specification's rule. Two files, kept as
+// copies of each other so the difference is a `diff` — the same transition
+// over the same schema, differing only in when it fires and on which rows.
 //
 // So this test does not assert agreement — it MEASURES disagreement, and
 // asserts the two things that must hold anyway:
@@ -1481,26 +1482,12 @@ async fn quiesce(backends: &[(String, Backend)], ids: &[String], now: i64) {
 #[tokio::test(flavor = "multi_thread")]
 async fn differential_sweep_modes() {
     let targeted = Arc::new(
-        SqliteEngine::open_with_sweep(
-            ":memory:",
-            TASK_RETRY_TIMEOUT_MS,
-            PRELOAD_LIMIT,
-            true,
-            true,
-            Sweep::Targeted,
-        )
-        .expect("sqlite targeted"),
+        SqliteEngine::open(":memory:", TASK_RETRY_TIMEOUT_MS, PRELOAD_LIMIT, true, true)
+            .expect("sqlite"),
     ) as Backend;
     let awaitable = Arc::new(
-        SqliteEngine::open_with_sweep(
-            ":memory:",
-            TASK_RETRY_TIMEOUT_MS,
-            PRELOAD_LIMIT,
-            true,
-            true,
-            Sweep::Awaitable,
-        )
-        .expect("sqlite awaitable"),
+        SqliteEagerEngine::open(":memory:", TASK_RETRY_TIMEOUT_MS, PRELOAD_LIMIT, true, true)
+            .expect("sqlite eager"),
     ) as Backend;
 
     let backends: Vec<(String, Backend)> = vec![
@@ -1784,7 +1771,10 @@ async fn differential_sweep_modes() {
         seen_sigs.len(),
         ALL_OPS.len(),
     );
-    eprintln!("[sweep] Sweep::Targeted (shipped) vs Sweep::Awaitable (specification)\n");
+    eprintln!(
+        "[sweep] engine_sqlite (targeted, shipped) vs \
+         engine_sqlite_eager (awaitable, specification)\n"
+    );
 
     if report.classes.is_empty() {
         eprintln!("[sweep] no divergence recorded.");
@@ -1849,22 +1839,27 @@ async fn differential_sweep_modes() {
 /// in the protocol distinguishes the two.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_suspended_task_waits_on_a_reader_under_the_narrow_queue() {
-    let open = |sweep| {
-        Arc::new(
-            SqliteEngine::open_with_sweep(
-                ":memory:",
-                TASK_RETRY_TIMEOUT_MS,
-                PRELOAD_LIMIT,
-                true,
-                true,
-                sweep,
-            )
-            .expect("sqlite"),
-        ) as Backend
-    };
     let backends: Vec<(String, Backend)> = vec![
-        ("targeted".into(), open(Sweep::Targeted)),
-        ("awaitable".into(), open(Sweep::Awaitable)),
+        (
+            "targeted".into(),
+            Arc::new(
+                SqliteEngine::open(":memory:", TASK_RETRY_TIMEOUT_MS, PRELOAD_LIMIT, true, true)
+                    .expect("sqlite"),
+            ) as Backend,
+        ),
+        (
+            "awaitable".into(),
+            Arc::new(
+                SqliteEagerEngine::open(
+                    ":memory:",
+                    TASK_RETRY_TIMEOUT_MS,
+                    PRELOAD_LIMIT,
+                    true,
+                    true,
+                )
+                .expect("sqlite eager"),
+            ) as Backend,
+        ),
     ];
 
     let t = T0;
