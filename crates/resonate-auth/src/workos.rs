@@ -132,7 +132,7 @@ impl WorkOsClient {
             .bearer_auth(api_key)
             .send()
             .await
-           .map_err(|e| format!("WorkOS request failed: {e}"))?;
+            .map_err(|e| format!("WorkOS request failed: {e}"))?;
 
         if resp.status().as_u16() == 401 {
             return Err("WorkOS returned 401: invalid API key".into());
@@ -272,9 +272,11 @@ mod tests {
         let mock = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/organizations"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(
-                serde_json::json!({"data": [{"id": "org_abc", "name": "test"}]}),
-            ))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(
+                    serde_json::json!({"data": [{"id": "org_abc", "name": "test"}]}),
+                ),
+            )
             .mount(&mock)
             .await;
 
@@ -287,9 +289,11 @@ mod tests {
         let mock = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/organizations"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(
-                serde_json::json!({"data": [{"id": "org_abc", "name": "test"}]}),
-            ))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(
+                    serde_json::json!({"data": [{"id": "org_abc", "name": "test"}]}),
+                ),
+            )
             .mount(&mock)
             .await;
 
@@ -305,9 +309,7 @@ mod tests {
         let mock = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/organizations"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(
-                serde_json::json!({"data": []}),
-            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": []})))
             .mount(&mock)
             .await;
 
@@ -322,9 +324,11 @@ mod tests {
         let mock = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/organizations"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(
-                serde_json::json!({"data": [{"id": "org_xyz", "name": "other"}]}),
-            ))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(
+                    serde_json::json!({"data": [{"id": "org_xyz", "name": "other"}]}),
+                ),
+            )
             .mount(&mock)
             .await;
 
@@ -342,9 +346,10 @@ mod tests {
         let mock = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/organizations"))
-            .respond_with(ResponseTemplate::new(401).set_body_json(
-                serde_json::json!({"message": "Invalid API key"}),
-            ))
+            .respond_with(
+                ResponseTemplate::new(401)
+                    .set_body_json(serde_json::json!({"message": "Invalid API key"})),
+            )
             .mount(&mock)
             .await;
 
@@ -362,9 +367,7 @@ mod tests {
         let mock = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/organizations"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(
-                serde_json::json!({"data": []}),
-            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": []})))
             .mount(&mock)
             .await;
 

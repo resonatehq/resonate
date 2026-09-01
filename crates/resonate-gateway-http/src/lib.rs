@@ -100,9 +100,8 @@ impl Default for Config {
 
 /// A router built once the gateway's auth policy is known. See
 /// [`HttpGateway::with_routes`].
-type ExtraRoutes = Box<
-    dyn FnOnce(Option<resonate_auth::AuthMode>) -> axum::Router<routes::AppState> + Send,
->;
+type ExtraRoutes =
+    Box<dyn FnOnce(Option<resonate_auth::AuthMode>) -> axum::Router<routes::AppState> + Send>;
 
 /// axum, hosting the Resonate protocol over HTTP.
 pub struct HttpGateway {
@@ -265,26 +264,27 @@ impl ResonateGateway for HttpGateway {
             // touches the disk and it can fail, which is what `init` is for. A
             // bad key path stops the process here rather than surfacing later
             // as a request nobody can authenticate.
-            let auth: Option<resonate_auth::AuthMode> = match (&self.config.auth, &self.config.workos) {
-                (Some(_), Some(_)) => {
-                    return Err(Unavailable::new(
-                        "auth and workos cannot both be configured — choose exactly one mode",
-                    ));
-                }
-                (Some(cfg), None) => {
-                    let ac = cfg.load().map_err(Unavailable::new)?;
-                    Some(resonate_auth::AuthMode::Jwt(Arc::new(ac)))
-                }
-                (None, Some(cfg)) => {
-                    let wc = cfg.load().map_err(Unavailable::new)?;
-                    let client = resonate_auth::workos::WorkOsClient::new(wc);
-                    Some(resonate_auth::AuthMode::WorkOs(client))
-                }
-                (None, None) => {
-                    tracing::info!("Auth disabled — all requests accepted");
-                    None
-                }
-            };
+            let auth: Option<resonate_auth::AuthMode> =
+                match (&self.config.auth, &self.config.workos) {
+                    (Some(_), Some(_)) => {
+                        return Err(Unavailable::new(
+                            "auth and workos cannot both be configured — choose exactly one mode",
+                        ));
+                    }
+                    (Some(cfg), None) => {
+                        let ac = cfg.load().map_err(Unavailable::new)?;
+                        Some(resonate_auth::AuthMode::Jwt(Arc::new(ac)))
+                    }
+                    (None, Some(cfg)) => {
+                        let wc = cfg.load().map_err(Unavailable::new)?;
+                        let client = resonate_auth::workos::WorkOsClient::new(wc);
+                        Some(resonate_auth::AuthMode::WorkOs(client))
+                    }
+                    (None, None) => {
+                        tracing::info!("Auth disabled — all requests accepted");
+                        None
+                    }
+                };
             let extra = self
                 .extra
                 .lock()

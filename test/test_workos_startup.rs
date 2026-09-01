@@ -4,7 +4,6 @@
 /// This validates the shape of the config, not the loader.
 /// Use `toml::from_str` directly to test deserialization without
 /// touching the filesystem loader or env vars.
-
 use resonate::config::Config;
 
 #[test]

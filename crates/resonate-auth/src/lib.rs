@@ -54,10 +54,7 @@ impl AuthMode {
     /// Dispatches to JWT verification or WorkOS token validation, depending
     /// on which mode is active. The caller gets back a ready-to-render error
     /// envelope on failure.
-    pub async fn check_envelope(
-        &self,
-        req: &RequestEnvelope,
-    ) -> Result<(), Box<ResponseEnvelope>> {
+    pub async fn check_envelope(&self, req: &RequestEnvelope) -> Result<(), Box<ResponseEnvelope>> {
         match self {
             AuthMode::Jwt(cfg) => auth_check(cfg, req),
             AuthMode::WorkOs(client) => {
@@ -83,9 +80,9 @@ impl AuthMode {
     pub async fn check_token(&self, token: Option<&str>) -> Result<(), ()> {
         match self {
             AuthMode::Jwt(cfg) => auth_check_token(cfg, token),
-            AuthMode::WorkOs(client) => {
-                workos::auth_check_workos(client, token).await.map_err(|_| ())
-            }
+            AuthMode::WorkOs(client) => workos::auth_check_workos(client, token)
+                .await
+                .map_err(|_| ()),
         }
     }
 }
@@ -499,9 +496,10 @@ mod tests {
         let mock = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/organizations"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(
-                serde_json::json!({"data": [{"id": "org_x", "name": "test"}]}),
-            ))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"data": [{"id": "org_x", "name": "test"}]})),
+            )
             .mount(&mock)
             .await;
 
@@ -515,9 +513,10 @@ mod tests {
     async fn check_envelope_workos_missing_token() {
         let mock = MockServer::start().await;
         Mock::given(method("POST"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(
-                serde_json::json!({"data": [{"id": "org_x", "name": "test"}]}),
-            ))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"data": [{"id": "org_x", "name": "test"}]})),
+            )
             .mount(&mock)
             .await;
 
@@ -539,9 +538,10 @@ mod tests {
         let mock = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/organizations"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(
-                serde_json::json!({"data": [{"id": "org_x", "name": "test"}]}),
-            ))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"data": [{"id": "org_x", "name": "test"}]})),
+            )
             .mount(&mock)
             .await;
 

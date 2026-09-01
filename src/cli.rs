@@ -261,14 +261,20 @@ impl CommonArgs {
         }
 
         if self.workos {
-            config.workos.get_or_insert_with(resonate_auth::workos::Config::default);
+            config
+                .workos
+                .get_or_insert_with(resonate_auth::workos::Config::default);
         }
         if let Some(oid) = self.workos_org_id {
-            let w = config.workos.get_or_insert_with(resonate_auth::workos::Config::default);
+            let w = config
+                .workos
+                .get_or_insert_with(resonate_auth::workos::Config::default);
             w.org_id = Some(oid);
         }
         if let Some(url) = self.workos_base_url {
-            let w = config.workos.get_or_insert_with(resonate_auth::workos::Config::default);
+            let w = config
+                .workos
+                .get_or_insert_with(resonate_auth::workos::Config::default);
             w.base_url = url;
         }
 
