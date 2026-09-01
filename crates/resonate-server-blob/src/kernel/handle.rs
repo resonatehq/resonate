@@ -86,7 +86,10 @@ impl Tx {
             }
         }
         for (address, msg) in self.sends {
-            fx.push(Effect::Send { address, msg });
+            fx.push(Effect::Send {
+                address,
+                msg: Box::new(msg),
+            });
         }
         fx
     }
@@ -1168,7 +1171,7 @@ mod tests {
         let sends = fx
             .into_iter()
             .filter_map(|e| match e {
-                Effect::Send { address, msg } => Some((address, msg)),
+                Effect::Send { address, msg } => Some((address, *msg)),
                 _ => None,
             })
             .collect();

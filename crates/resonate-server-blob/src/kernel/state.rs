@@ -283,7 +283,7 @@ pub enum Effect {
     /// one — so the shell routes it without translating anything.
     Send {
         address: String,
-        msg: resonate_core::types::Message,
+        msg: Box<resonate_core::types::Message>,
     },
 }
 

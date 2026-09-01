@@ -503,7 +503,7 @@ async fn run_batch(origin: &str, batch: Vec<Work>, shared: &Arc<Shared>) {
             Ok(()) => {
                 for effect in &decision.sends {
                     if let Effect::Send { address, msg } = effect {
-                        shared.sender.dispatch(address, msg.clone()).await;
+                        shared.sender.dispatch(address, (**msg).clone()).await;
                     }
                 }
                 return answer(batch, decision.replies);

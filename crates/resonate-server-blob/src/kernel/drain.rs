@@ -146,7 +146,7 @@ mod tests {
         let sends = fx
             .into_iter()
             .filter_map(|e| match e {
-                Effect::Send { address, msg } => Some((address, msg)),
+                Effect::Send { address, msg } => Some((address, *msg)),
                 _ => None,
             })
             .collect();
