@@ -152,8 +152,21 @@ fn into_response(resp: ResponseEnvelope) -> (axum::http::StatusCode, Json<Respon
     (code, Json(resp))
 }
 
+/// The bearer token from the `Authorization` header, when one is present.
+///
+/// Exact `Bearer ` prefix, the same shape the SDKs send. A missing header or
+/// a non-bearer scheme yields `None`; an empty value yields `Some("")`, which
+/// verification rejects downstream.
+fn bearer_token(headers: &axum::http::HeaderMap) -> Option<&str> {
+    headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+}
+
 async fn handle_api(
     State(api_state): State<ApiState>,
+    headers: axum::http::HeaderMap,
     body: axum::body::Bytes,
 ) -> (axum::http::StatusCode, Json<ResponseEnvelope>) {
     let server = &api_state.server;
@@ -164,7 +177,7 @@ async fn handle_api(
     // rejection reads, and this renders it — which is the only part that is
     // HTTP's. `salvage_context` digs out what it can from bytes that would not
     // parse, so even that answer can be correlated.
-    let req: RequestEnvelope = match types::parse_and_validate(&body) {
+    let mut req: RequestEnvelope = match types::parse_and_validate(&body) {
         Ok(req) => req,
         Err(invalid) => {
             let (kind, corr_id) = types::salvage_context(&body);
@@ -172,6 +185,15 @@ async fn handle_api(
             return into_response(invalid.to_response(kind, corr_id));
         }
     };
+
+    // Auth: envelope first, HTTP header second. The SDKs send the token in
+    // both places, so the envelope normally wins; the header is the fallback
+    // for callers that carry only a bearer token and no `head.auth`.
+    if req.head.auth.is_none() {
+        if let Some(token) = bearer_token(&headers) {
+            req.head.auth = Some(token.to_string());
+        }
+    }
 
     let kind = req.kind.clone();
     let corr_id = req.head.corr_id.clone();
@@ -271,10 +293,7 @@ async fn handle_poll(
 ) -> Response {
     // Authenticate when auth is configured.
     if let Some(mode) = &poll_state.auth {
-        let token = headers
-            .get(axum::http::header::AUTHORIZATION)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.strip_prefix("Bearer "));
+        let token = bearer_token(&headers);
 
         if !mode.check_token(token).await {
             tracing::warn!(group = %group, id = %id, "Poll connection rejected: unauthorized");
@@ -338,5 +357,31 @@ impl Drop for PollGuard {
         tokio::spawn(async move {
             registry.deregister(&group, conn_id).await;
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bearer_token;
+    use axum::http::header::AUTHORIZATION;
+    use axum::http::HeaderMap;
+
+    #[test]
+    fn bearer_token_extracts_exact_prefix() {
+        let mut headers = HeaderMap::new();
+        headers.insert(AUTHORIZATION, "Bearer abc123".parse().unwrap());
+        assert_eq!(bearer_token(&headers), Some("abc123"));
+    }
+
+    #[test]
+    fn bearer_token_rejects_non_bearer_schemes() {
+        let mut headers = HeaderMap::new();
+        headers.insert(AUTHORIZATION, "Basic abc123".parse().unwrap());
+        assert_eq!(bearer_token(&headers), None);
+    }
+
+    #[test]
+    fn bearer_token_is_none_when_absent() {
+        assert_eq!(bearer_token(&HeaderMap::new()), None);
     }
 }
