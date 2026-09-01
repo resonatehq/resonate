@@ -15,7 +15,6 @@ fn workos_config_loads_with_memory_storage() {
 
     assert!(config.workos.is_some(), "workos field should be present");
     let w = config.workos.as_ref().unwrap();
-    // api_key removed — clients send their own key
-    // client_id removed — clients send their own
+    assert_eq!(w.api_key.as_deref(), Some("sk_server_secret"));
     assert_eq!(w.org_id.as_deref(), Some("org_abc"));
 }

@@ -87,7 +87,11 @@ pub struct CommonArgs {
     #[arg(long = "workos")]
     pub workos: bool,
 
-    /// Organization ID the token must belong to (optional; omitting accepts any valid WorkOS key)
+    /// Server's WorkOS secret key (sk_…) used to call POST /api_keys/validations
+    #[arg(long = "workos-api-key", value_name = "KEY")]
+    pub workos_api_key: Option<String>,
+
+    /// Organization ID the client token must belong to (required when WorkOS is enabled)
     #[arg(long = "workos-org-id", value_name = "ORG")]
     pub workos_org_id: Option<String>,
 
@@ -264,6 +268,12 @@ impl CommonArgs {
             config
                 .workos
                 .get_or_insert_with(resonate_auth::workos::Config::default);
+        }
+        if let Some(key) = self.workos_api_key {
+            let w = config
+                .workos
+                .get_or_insert_with(resonate_auth::workos::Config::default);
+            w.api_key = Some(key);
         }
         if let Some(oid) = self.workos_org_id {
             let w = config

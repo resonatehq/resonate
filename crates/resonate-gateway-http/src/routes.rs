@@ -276,7 +276,7 @@ async fn handle_poll(
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.strip_prefix("Bearer "));
 
-        if mode.check_token(token).await.is_err() {
+        if !mode.check_token(token).await {
             tracing::warn!(group = %group, id = %id, "Poll connection rejected: unauthorized");
             return (StatusCode::UNAUTHORIZED, "Unauthorized").into_response();
         }

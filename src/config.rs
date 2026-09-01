@@ -480,6 +480,16 @@ impl Config {
             );
         }
 
+        // WorkOS mode requires both api_key and org_id.
+        if let Some(ref w) = self.workos {
+            if w.api_key.is_none() {
+                return Err("workos.api_key is required when WorkOS auth is enabled".into());
+            }
+            if w.org_id.is_none() {
+                return Err("workos.org_id is required when WorkOS auth is enabled".into());
+            }
+        }
+
         // `task.acquire` validates `ttl >= 1`, so a non-positive lease would
         // make every acquire fail with a 400 and the worker would silently
         // never run anything. Reject it here instead.

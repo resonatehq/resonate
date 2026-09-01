@@ -76,13 +76,11 @@ impl AuthMode {
     /// authentication. Used for endpoints like `/poll` that don't carry a
     /// protocol envelope.
     ///
-    /// Returns `Ok(())` if the token is valid, `Err(())` if it is not.
-    pub async fn check_token(&self, token: Option<&str>) -> Result<(), ()> {
+    /// Returns `true` if the token is valid, `false` if it is not.
+    pub async fn check_token(&self, token: Option<&str>) -> bool {
         match self {
             AuthMode::Jwt(cfg) => auth_check_token(cfg, token),
-            AuthMode::WorkOs(client) => workos::auth_check_workos(client, token)
-                .await
-                .map_err(|_| ()),
+            AuthMode::WorkOs(client) => workos::auth_check_workos(client, token).await.is_ok(),
         }
     }
 }
@@ -213,13 +211,12 @@ pub fn load_public_key(path: &str) -> Result<VerificationKey, String> {
 /// by the configured public key.  Used for endpoints (like `/poll`) that don't
 /// carry a protocol envelope and therefore cannot do prefix-based authorization.
 ///
-/// Returns `Ok(())` if the token is valid.
-/// Returns `Err(())` if the token is missing, empty, or fails verification.
-#[allow(clippy::result_unit_err)]
-pub fn auth_check_token(auth: &AuthConfig, token: Option<&str>) -> Result<(), ()> {
+/// Returns `true` if the token is valid.
+/// Returns `false` if the token is missing, empty, or fails verification.
+pub fn auth_check_token(auth: &AuthConfig, token: Option<&str>) -> bool {
     match token {
-        Some(t) if !t.is_empty() => verify_jwt(auth, t).map(|_| ()).map_err(|_| ()),
-        _ => Err(()),
+        Some(t) if !t.is_empty() => verify_jwt(auth, t).is_ok(),
+        _ => false,
     }
 }
 
@@ -468,7 +465,8 @@ mod tests {
     /// Build a WorkOsClient pointed at a mock server.
     fn workos_client(mock_url: &str) -> workos::WorkOsClient {
         let cfg = workos::WorkOsConfig {
-            org_id: None,
+            api_key: "sk_server_secret".into(),
+            org_id: "org_abc".into(),
             base_url: mock_url.to_string(),
         };
         workos::WorkOsClient::new(cfg)
@@ -494,12 +492,17 @@ mod tests {
     #[tokio::test]
     async fn check_envelope_workos_success() {
         let mock = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/organizations"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(serde_json::json!({"data": [{"id": "org_x", "name": "test"}]})),
-            )
+        Mock::given(method("POST"))
+            .and(path("/api_keys/validations"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "api_key": {
+                    "id": "api_key_123",
+                    "owner": {
+                        "type": "organization",
+                        "id": "org_abc"
+                    }
+                }
+            })))
             .mount(&mock)
             .await;
 
@@ -512,14 +515,6 @@ mod tests {
     #[tokio::test]
     async fn check_envelope_workos_missing_token() {
         let mock = MockServer::start().await;
-        Mock::given(method("POST"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(serde_json::json!({"data": [{"id": "org_x", "name": "test"}]})),
-            )
-            .mount(&mock)
-            .await;
-
         let mode = AuthMode::WorkOs(workos_client(&mock.uri()));
         let mut req = request("promise.get");
         req.head.auth = None;
@@ -536,28 +531,34 @@ mod tests {
     #[tokio::test]
     async fn check_token_workos_success() {
         let mock = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/organizations"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(serde_json::json!({"data": [{"id": "org_x", "name": "test"}]})),
-            )
+        Mock::given(method("POST"))
+            .and(path("/api_keys/validations"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "api_key": {
+                    "id": "api_key_123",
+                    "owner": {
+                        "type": "organization",
+                        "id": "org_abc"
+                    }
+                }
+            })))
             .mount(&mock)
             .await;
 
         let mode = AuthMode::WorkOs(workos_client(&mock.uri()));
-        assert!(mode.check_token(Some("tok")).await.is_ok());
+        assert!(mode.check_token(Some("tok")).await);
     }
 
     #[tokio::test]
     async fn check_token_workos_rejection() {
         let mock = MockServer::start().await;
         Mock::given(method("POST"))
+            .and(path("/api_keys/validations"))
             .respond_with(ResponseTemplate::new(401))
             .mount(&mock)
             .await;
 
         let mode = AuthMode::WorkOs(workos_client(&mock.uri()));
-        assert!(mode.check_token(Some("tok")).await.is_err());
+        assert!(!mode.check_token(Some("tok")).await);
     }
 }
