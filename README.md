@@ -2,7 +2,7 @@
 
 ![Resonate](./assets/resonate-banner.png)
 
-# Resonate Server
+# Resonate
 
 ### Distributed async await. One binary. Absolute orchestration powerhouse.
 
@@ -13,27 +13,64 @@
 [![Discord](https://img.shields.io/badge/Discord-join-1EE3CF?style=flat-square&logo=discord&logoColor=white)](https://resonatehq.io/discord)
 [![Docs](https://img.shields.io/badge/docs-resonatehq.io-1EE3CF?style=flat-square)](https://docs.resonatehq.io/)
 
-[Quickstart](#quickstart) · [Architecture](#architecture) · [Backends](#backends) · [Workers](#workers) · [Plugins](#plugins) · [Deploy](#deploy) · [Docs](https://docs.resonatehq.io/)
+[Example](#example) · [Console](#console) · [Quickstart](#quickstart) · [Architecture](#architecture) · [Backends](#backends) · [Workers](#workers) · [Plugins](#plugins) · [Deploy](#deploy) · [Docs](https://docs.resonatehq.io/)
 
 </div>
 
 ---
 
-## What is this?
+[Resonate](https://resonatehq.io/)'s durable async await replaces queues, state machines, and schedulers to enable any developer to write reliable distributed applications faster without touching infrastructure.
 
-The Resonate Server is a single, highly efficient binary that pairs with a Resonate SDK to bring **durable execution** to your application. It is both supervisor and orchestrator for your workers, persisting execution state so long-running functions always run to completion.
+1. Write durable functions in ordinary code using any of [our language SDKs](#sdks)
+2. Run Resonate — one binary, one command — for a complete local development experience, with production parity
+3. Deploy your workers to your own infrastructure, in-process or out-of-process
+4. Point Resonate at the database you already run — SQLite, PostgreSQL, or MySQL — and keep operating the stack you have
+5. Resonate invokes your functions over HTTP or Pub/Sub and persists every step, so a crash is a resume, not a loss
 
 No DAGs. No YAML. No new language. You write a function; Resonate makes sure it finishes.
 
+---
+
+## Example
+
+A deep research agent — plan the searches, fan them out, synthesize the results:
+
 ```typescript
-function* countdown(context: Context, count: number, delay: number) {
-  for (let i = count; i > 0; i--) {
-    yield* context.run((context: Context) => console.log(`Countdown: ${i}`));
-    yield* context.sleep(delay * 1000);   // minutes, hours, or days — survives restarts
-  }
-  console.log("Done!");
+async function research(context: Context, question: string) {
+  // Plan the searches
+  const queries = await context.run(agent,
+    `Plan the searches for: ${question}`
+  );
+  // Fan out the searches
+  const results = await Promise.allSettled(
+    queries.map((q) => context.rpc(search, q))
+  );
+  // Synthesize the results
+  return await context.run(agent,
+    `Write a cited report. ${question}: ${results}`
+  );
 }
 ```
+
+That is the whole orchestration. There is no queue to drain, no state machine to advance, and no scheduler to configure — just `await`.
+
+- **`context.run`** executes a function and persists its result. On recovery the step is not run again, its result is read back — you never pay for the same tokens twice.
+- **`context.rpc`** invokes a durable function on another worker, on another machine, in another language. It returns a promise, so ordinary `Promise.allSettled` gives you fan-out with per-branch failure handling.
+- **Everything in between survives.** Kill the worker mid-flight, deploy over it, lose the machine — the function resumes from the last persisted step, minutes or days later.
+
+---
+
+## Console
+
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./assets/console-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="./assets/console-light.png">
+    <img alt="Resonate console showing durable executions" src="./assets/console-light.png">
+  </picture>
+</div>
+
+Every durable execution, live: status, function, when it was created, when it settled, and when it times out. Filter by status, function, or time window, and search by id, function, or tag.
 
 ---
 
@@ -41,7 +78,7 @@ function* countdown(context: Context, count: number, delay: number) {
 
 ![Resonate architecture](./assets/architecture.svg)
 
-One server in the middle. Your database underneath, your workers wherever they live, and a plugin for every system you need to reach.
+One binary in the middle. Your database underneath, your workers wherever they live, and a plugin for every system you need to reach.
 
 ---
 
@@ -61,7 +98,7 @@ One server in the middle. Your database underneath, your workers wherever they l
 
 ![Resonate quickstart](./assets/quickstart-banner.png)
 
-**1. Install the server & CLI**
+**1. Install Resonate**
 
 ```shell
 brew install resonatehq/tap/resonate
@@ -94,7 +131,7 @@ resonate.register(countdown);
 
 [Working example →](https://github.com/resonatehq-examples/example-quickstart-ts)
 
-**4. Start the server, then the worker**
+**4. Start Resonate, then the worker**
 
 ```shell
 resonate serve
@@ -175,7 +212,7 @@ The [catalogue](https://github.com/resonatehq/resonate-plugins/blob/main/Plugins
 
 ## Deploy
 
-For the full guide see [Set up and run a Resonate Server](https://docs.resonatehq.io/operate/run-server).
+For the full guide see [Set up and run Resonate](https://docs.resonatehq.io/operate/run-server).
 
 ### Homebrew
 
