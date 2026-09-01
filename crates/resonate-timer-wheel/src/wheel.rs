@@ -1,4 +1,11 @@
-//! The wheel itself: a bounded, deduplicating, deadline-ordered set of timeouts.
+//!     +----------------------------------------------------------
+//!     |
+//!     |   A formal methods enthusiast? Thanks for stopping by.
+//!     |   While you are here, give us a star
+//!     |
+//!     |   ⭐ https://github.com/resonatehq/resonate
+//!     |
+//!     +----------------------------------------------------------
 
 use vstd::prelude::*;
 
@@ -9,17 +16,6 @@ use crate::timeout::Timeout;
 
 verus! {
 
-// ---------------------------------------------------------------------------
-// Sorted-vector helpers, shared by the wheel and by the batch sort.
-// ---------------------------------------------------------------------------
-
-/// The index at which a timeout due at `deadline` belongs in a sorted vector:
-/// after every entry due no later than it.
-///
-/// Landing *after* the ties, rather than before, is what makes both the wheel
-/// and the batch sort stable -- an arrival that ties with an entry already
-/// present sorts behind it, so on a full wheel the newcomer is the one dropped,
-/// and a sorted batch keeps the caller's order among equal deadlines.
 fn slot_for<T>(items: &Vec<Timeout<T>>, deadline: u64) -> (r: usize)
     requires
         sorted(items@),
@@ -40,7 +36,6 @@ fn slot_for<T>(items: &Vec<Timeout<T>>, deadline: u64) -> (r: usize)
     i
 }
 
-/// Place `t` in a sorted vector, keeping it sorted.
 fn place<T>(items: &mut Vec<Timeout<T>>, t: Timeout<T>)
     requires
         sorted(old(items)@),
@@ -61,7 +56,6 @@ fn place<T>(items: &mut Vec<Timeout<T>>, t: Timeout<T>)
     }
 }
 
-/// Does `batch` name a timeout with this identity?
 fn mentioned<T, C: Comparator<T>>(cmp: &C, batch: &Vec<Timeout<T>>, v: &T) -> (r: bool)
     ensures
         r == mentions(*cmp, batch@, *v),
@@ -81,7 +75,6 @@ fn mentioned<T, C: Comparator<T>>(cmp: &C, batch: &Vec<Timeout<T>>, v: &T) -> (r
     false
 }
 
-/// **Step 1 of a merge.** Keep the entries the batch says nothing about.
 fn drop_mentioned<T, C: Comparator<T>>(
     cmp: &C,
     items: Vec<Timeout<T>>,
@@ -126,7 +119,6 @@ fn drop_mentioned<T, C: Comparator<T>>(
     out
 }
 
-/// **Step 2 of a merge.** The batch's updates: one per timeout, the last given.
 fn last_updates<T, C: Comparator<T>>(cmp: &C, batch: Vec<Timeout<T>>) -> (r: Vec<Timeout<T>>)
     ensures
         r@ == spec_updates(*cmp, batch@),
@@ -150,7 +142,6 @@ fn last_updates<T, C: Comparator<T>>(cmp: &C, batch: Vec<Timeout<T>>) -> (r: Vec
         proof {
             assert(rest@ =~= before.skip(1));
         }
-        // Keep it only if no *later* arrival names the same timeout.
         if !mentioned(cmp, &rest, &t.value) {
             let ghost o = out@;
             out.push(t);
@@ -170,13 +161,6 @@ fn last_updates<T, C: Comparator<T>>(cmp: &C, batch: Vec<Timeout<T>>) -> (r: Vec
     out
 }
 
-/// Sort a batch by deadline, nearest first.
-///
-/// Insertion sort through `place`, which means the ordering rule is written
-/// once and the sort is stable by construction. `O(m^2)` on the batch, matched
-/// to the batch sizes a wheel actually sees; the specification says nothing
-/// about the algorithm, so a merge sort could be dropped in underneath without
-/// the statement of correctness changing.
 fn sort_by_deadline<T>(batch: Vec<Timeout<T>>) -> (r: Vec<Timeout<T>>)
     ensures
         r@ == spec_sort(batch@),
@@ -212,55 +196,6 @@ fn sort_by_deadline<T>(batch: Vec<Timeout<T>>) -> (r: Vec<Timeout<T>>)
     out
 }
 
-/// A bounded set of pending [`Timeout`]s, ordered by deadline and deduplicated
-/// by a [`Comparator`].
-///
-/// The wheel holds at most `capacity` timeouts, kept sorted with the nearest
-/// deadline first, and never holds two timeouts the comparator calls the same.
-/// [`merge`](TimerWheel::merge) folds a batch of arrivals in under those rules:
-/// same identity replaces rather than duplicates, and when the union overflows
-/// capacity it is the farthest-future timeouts that fall off.
-///
-/// The three properties above are not conventions — they are
-/// [`TimerWheel::wf`], and every method that returns a wheel proves it.
-///
-/// # Cost
-///
-/// `merge` is `O((n + m)^2)` for a wheel of `n` holding a batch of `m`: each
-/// arrival scans for its identity and again for its slot. The wheel is sized
-/// for the near horizon — thousands of entries, not millions — and a flat
-/// `Vec` beats a heap or a hash index at that size on the operation that
-/// actually runs hot, which is walking the front in deadline order.
-///
-/// # Example
-///
-/// ```
-/// use resonate_timer_wheel::{IdComparator, Timeout, TimerWheel};
-///
-/// let mut w = TimerWheel::new(2, IdComparator);
-/// w.merge(vec![
-///     Timeout::new(30, 1u64),
-///     Timeout::new(10, 2u64),
-///     Timeout::new(20, 3u64),
-/// ]);
-/// // Capacity 2 keeps the two nearest deadlines; id 1 at 30 is dropped.
-/// assert_eq!(w.len(), 2);
-/// assert_eq!(w.peek().unwrap().deadline, 10);
-///
-/// // id 3's deadline moves 20 -> 5. It is replaced, not stored twice.
-/// w.merge(vec![Timeout::new(5, 3u64)]);
-/// assert_eq!(w.len(), 2);
-/// assert_eq!(w.peek().unwrap().value, 3);
-///
-/// // `next` answers "how long may I sleep?" without disturbing anything.
-/// assert_eq!(w.next(), Some(5));
-/// assert_eq!(w.next(), Some(5));
-///
-/// let due = w.pop_expired(5);
-/// assert_eq!(due.len(), 1);
-/// assert_eq!(w.len(), 1);
-/// assert_eq!(w.next(), Some(10));
-/// ```
 pub struct TimerWheel<T, C: Comparator<T>> {
     cmp: C,
     cap: usize,
@@ -276,33 +211,20 @@ impl<T, C: Comparator<T>> View for TimerWheel<T, C> {
 }
 
 impl<T, C: Comparator<T>> TimerWheel<T, C> {
-    /// The comparator this wheel was built with. Ghost accessor.
     pub closed spec fn comparator(&self) -> C {
         self.cmp
     }
 
-    /// The wheel's capacity. Ghost accessor; [`TimerWheel::capacity`] is the
-    /// executable one.
     pub closed spec fn capacity_spec(&self) -> nat {
         self.cap as nat
     }
 
-    /// **The wheel invariant**, in three conjuncts:
-    ///
-    /// - deadlines are non-decreasing, so index 0 is the next timeout to fire;
-    /// - no two entries are the same logical timeout;
-    /// - the wheel is within capacity.
-    ///
-    /// Every public method requires it and re-establishes it, so a wheel
-    /// obtained from [`TimerWheel::new`] satisfies it forever.
     pub open spec fn wf(&self) -> bool {
         &&& sorted(self@)
         &&& distinct(self.comparator(), self@)
         &&& self@.len() <= self.capacity_spec()
     }
 
-    /// An empty wheel holding at most `capacity` timeouts, identifying them
-    /// with `cmp`.
     pub fn new(capacity: usize, cmp: C) -> (r: Self)
         ensures
             r.wf(),
@@ -313,7 +235,6 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
         TimerWheel { cmp, cap: capacity, items: Vec::new() }
     }
 
-    /// How many timeouts the wheel is holding.
     pub fn len(&self) -> (r: usize)
         ensures
             r == self@.len(),
@@ -321,7 +242,6 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
         self.items.len()
     }
 
-    /// The most timeouts this wheel will ever hold.
     pub fn capacity(&self) -> (r: usize)
         ensures
             r == self.capacity_spec(),
@@ -329,7 +249,6 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
         self.cap
     }
 
-    /// Whether the wheel is holding nothing.
     pub fn is_empty(&self) -> (r: bool)
         ensures
             r == (self@.len() == 0),
@@ -337,8 +256,6 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
         self.items.is_empty()
     }
 
-    /// Whether the wheel is at capacity — the state in which a merge starts
-    /// dropping far-future arrivals.
     pub fn is_full(&self) -> (r: bool)
         requires
             self.wf(),
@@ -348,10 +265,6 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
         self.items.len() == self.cap
     }
 
-    /// The timeout due soonest, without removing it.
-    ///
-    /// [`TimerWheel::next`] returns just its deadline, which is usually what a
-    /// scheduler wants and does not borrow the wheel.
     pub fn peek(&self) -> (r: Option<&Timeout<T>>)
         ensures
             self@.len() == 0 ==> r is None,
@@ -364,29 +277,12 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
         }
     }
 
-    /// The deadline of the timeout due soonest, without removing anything.
-    ///
-    /// This is the question a scheduler asks between ticks: *how long may I
-    /// sleep?* The answer is only meaningful because the third postcondition
-    /// holds — nothing in the wheel is due before what comes back — so a caller
-    /// that waits until this deadline cannot have missed a timer. `None` means
-    /// the wheel is empty and there is nothing to wait for.
-    ///
-    /// Returning the deadline alone rather than the timeout is deliberate: the
-    /// caller does not borrow the wheel and is free to mutate it while the
-    /// answer is in hand. Use [`TimerWheel::peek`] when the payload is wanted
-    /// too, and [`TimerWheel::pop_expired`] to take the due timeouts out.
-    ///
-    /// Despite the name this does **not** advance anything, and `TimerWheel` is
-    /// not an `Iterator`. Repeated calls return the same deadline until the
-    /// wheel is changed.
     pub fn next(&self) -> (r: Option<u64>)
         requires
             self.wf(),
         ensures
             r is Some <==> self@.len() > 0,
             r matches Some(d) ==> d == self@[0].deadline,
-            // Nothing is due sooner. This is what makes it safe to sleep on.
             r matches Some(d) ==> forall|i: int|
                 0 <= i < self@.len() ==> d <= #[trigger] self@[i].deadline,
     {
@@ -397,13 +293,6 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Scans. Both are linear and both establish exactly the side condition its
-    // bridge lemma in `proof.rs` needs.
-    // -----------------------------------------------------------------------
-
-    /// The index of the entry that is the same logical timeout as `v`, or
-    /// `len()` when the wheel holds no such entry.
     fn find_same(&self, v: &T) -> (r: usize)
         ensures
             r <= self@.len(),
@@ -426,28 +315,6 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
         i
     }
 
-    // -----------------------------------------------------------------------
-    // Merge
-    // -----------------------------------------------------------------------
-
-    /// Fold a batch of timeouts into the wheel.
-    ///
-    /// Four steps, and they are the four words of [`spec_merge`]:
-    ///
-    /// 1. **drop** every entry the batch mentions;
-    /// 2. **add** the batch's updates — one per timeout, the last the caller gave;
-    /// 3. **sort** by deadline, nearest first;
-    /// 4. **cut** to capacity.
-    ///
-    /// The wheel is deliberately out of order and possibly over capacity between
-    /// steps 2 and 4. Capacity is applied once, to the finished union, which is
-    /// what makes the result a function of the batch's contents rather than of
-    /// the order it arrived in.
-    ///
-    /// The postcondition names `spec_merge` directly, so this method is *proved
-    /// equal* to those four steps. Nothing below the equality is promised: the
-    /// scans, the insertion sort and the truncation are an implementation, and
-    /// can be replaced by anything faster without the guarantee moving.
     pub fn merge(&mut self, incoming: Vec<Timeout<T>>)
         requires
             old(self).wf(),
@@ -455,25 +322,15 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
             final(self).wf(),
             final(self).comparator() == old(self).comparator(),
             final(self).capacity_spec() == old(self).capacity_spec(),
-            // The functional specification: this *is* what merge means.
             final(self)@ == spec_merge(
                 old(self).comparator(),
                 old(self)@,
                 incoming@,
                 old(self).capacity_spec(),
             ),
-            // A merge never costs the wheel a slot it was already using: an
-            // entry it loses is one the batch mentions, and every mentioned
-            // identity has an update waiting for it.
             old(self)@.len() <= final(self)@.len(),
-            // No duplicates in, no duplicates out -- whatever the batch does.
             no_duplicates(old(self).comparator(), old(self)@)
                 ==> no_duplicates(final(self).comparator(), final(self)@),
-            // An arrival REPLACES: whatever the wheel held under that identity,
-            // afterwards nothing under it survives with any other deadline. So
-            // a timeout already in the wheel either comes back with the new
-            // deadline or is pushed out -- never both, never stale. See
-            // `lemma_merge_replaces_or_evicts` for that spelled out.
             forall|j: int|
                 #![trigger incoming@[j].value]
                 0 <= j < incoming@.len() && (forall|l: int|
@@ -492,18 +349,15 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
         let ghost s0 = self.items@;
         let ghost inc0 = incoming@;
 
-        // 1. Drop every entry the batch mentions.
         let held = self.items.split_off(0);
         proof {
             assert(held@ =~= s0);
         }
         self.items = drop_mentioned(&self.cmp, held, &incoming);
 
-        // 2. Add the batch's updates.
         let mut updates = last_updates(&self.cmp, incoming);
         self.items.append(&mut updates);
 
-        // 3. Order by deadline.
         let ghost union = self.items@;
         let unsorted = self.items.split_off(0);
         proof {
@@ -511,7 +365,6 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
         }
         self.items = sort_by_deadline(unsorted);
 
-        // 4. Cut to capacity.
         let ghost ordered = self.items@;
         self.items.truncate(self.cap);
 
@@ -531,9 +384,6 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
         }
     }
 
-    /// Merge a single timeout. Same rules as [`TimerWheel::merge`]: it
-    /// replaces an entry with the same identity, and it is dropped if the
-    /// wheel is full and nothing is due later.
     pub fn insert(&mut self, t: Timeout<T>)
         requires
             old(self).wf(),
@@ -558,15 +408,6 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
         self.merge(batch);
     }
 
-    // -----------------------------------------------------------------------
-    // Firing
-    // -----------------------------------------------------------------------
-
-    /// Remove and return every timeout due at or before `now`, nearest first.
-    ///
-    /// The postcondition is an exact split: `r@ + self@` reconstructs the wheel
-    /// as it was, everything returned is due, and nothing left behind is. There
-    /// is no third bucket, so no timeout can be silently lost here.
     pub fn pop_expired(&mut self, now: u64) -> (r: Vec<Timeout<T>>)
         requires
             old(self).wf(),
@@ -577,9 +418,6 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
             r@ + final(self)@ == old(self)@,
             forall|i: int| 0 <= i < r@.len() ==> #[trigger] r@[i].deadline <= now,
             forall|i: int| 0 <= i < final(self)@.len() ==> now < #[trigger] final(self)@[i].deadline,
-            // Nothing fires early. This is the other end of `next`: a caller
-            // that slept until the deadline `next` handed back comes here and
-            // gets nothing, so waiting on that answer cannot miss a timeout.
             (old(self)@.len() > 0 && now < old(self)@[0].deadline) ==> r@.len() == 0,
     {
         let ghost c = self.cmp;
@@ -587,8 +425,6 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
 
         let k = slot_for(&self.items, now);
 
-        // `split_off` twice, rather than `mem::swap`: the tail comes off, then
-        // the head, leaving `items` empty for the tail to move back into.
         let remaining = self.items.split_off(k);
         let expired = self.items.split_off(0);
         self.items = remaining;
@@ -602,8 +438,6 @@ impl<T, C: Comparator<T>> TimerWheel<T, C> {
                 assert(self.items@[i] == s0[k + i]);
                 assert(s0[k as int].deadline <= s0[k + i].deadline);
             }
-            // Anything returned would have to start at the wheel's own front,
-            // which by hypothesis is not due yet.
             if expired@.len() > 0 {
                 assert(expired@[0] == s0[0]);
             }
