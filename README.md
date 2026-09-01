@@ -13,7 +13,7 @@
 
 ---
 
-[Resonate](https://resonatehq.io/) is an AI-native, extensible durable execution platform for agentic and classic workloads. Resonate features a dead simple programming model and a dead simple operational model: functions and promises on a single binary. Write normal-looking code and get durable, scalable, and reliable applications.
+[Resonate](https://resonatehq.io/) is an AI-native, extensible durable execution platform for agentic and classic workloads. Resonate features a dead simple programming model and a dead simple operational model: functions and promises on a single binary. Write normal code and get durable, scalable, and reliable applications.
 
 1. Write durable functions in ordinary code with any of [our language SDKs](#sdks)
 2. Run `resonate dev` while you build — one binary, in memory, nothing else to install
