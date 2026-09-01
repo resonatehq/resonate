@@ -42,6 +42,10 @@ path = "src/main.rs"
 [[test]]
 name = "differential"
 path = "diff/differential.rs"
+
+[[test]]
+name = "test_workos_startup"
+path = "test/test_workos_startup.rs"
 # It compares the engines against each other, so it needs all of them; with any
 # turned off cargo skips the target rather than failing to build it.
 required-features = ["sqlite", "postgres", "mysql"]
@@ -87,3 +91,6 @@ validator = { workspace = true }
 url = { workspace = true }
 base64 = "0.22"
 tower-http = { version = "0.6", features = ["trace", "catch-panic", "cors"] }
+
+[dev-dependencies]
+toml = "0.8"

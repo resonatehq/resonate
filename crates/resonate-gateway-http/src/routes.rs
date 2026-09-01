@@ -22,7 +22,7 @@ use axum::{
 use lazy_static::lazy_static;
 use prometheus::{register_counter_vec, register_histogram_vec, CounterVec, HistogramVec};
 
-use resonate_auth::{auth_check, auth_check_token, AuthConfig};
+use resonate_auth::AuthMode;
 use resonate_core::types::{self, RequestEnvelope, ResponseEnvelope};
 use resonate_core::{ui, ResonateServer};
 use resonate_transport_http_poll::PollRegistry;
@@ -65,7 +65,7 @@ lazy_static! {
 #[derive(Clone)]
 pub struct AppState {
     pub server: Arc<dyn ResonateServer>,
-    pub auth: Option<Arc<AuthConfig>>,
+    pub auth: Option<AuthMode>,
     pub poll_registry: Arc<PollRegistry>,
 }
 
@@ -73,7 +73,7 @@ pub struct AppState {
 #[derive(Clone)]
 pub struct ApiState {
     pub server: Arc<dyn ResonateServer>,
-    pub auth: Option<Arc<AuthConfig>>,
+    pub auth: Option<AuthMode>,
 }
 
 impl axum::extract::FromRef<AppState> for ApiState {
@@ -88,7 +88,7 @@ impl axum::extract::FromRef<AppState> for ApiState {
 // Sub-state for poll handler — authentication and the connection registry.
 #[derive(Clone)]
 pub struct PollState {
-    pub auth: Option<Arc<AuthConfig>>,
+    pub auth: Option<AuthMode>,
     pub poll_registry: Arc<PollRegistry>,
 }
 
@@ -201,22 +201,22 @@ async fn handle_api(
         "Received request"
     );
 
-    if let Some(auth) = &api_state.auth {
-        if let Err(err_response) = auth_check(auth, &req) {
-            let status = err_response.head.status.to_string();
+    if let Some(mode) = &api_state.auth {
+        if let Err(rejection) = mode.check_envelope(&req).await {
+            let status_str = rejection.head.status.to_string();
             let elapsed_ms = start.elapsed().as_millis();
             tracing::warn!(
                 kind = %kind,
                 corr_id = %corr_id,
-                status = %status,
+                status = %status_str,
                 elapsed_ms = elapsed_ms,
                 "Request rejected by auth"
             );
-            REQUEST_TOTAL.with_label_values(&[&kind, &status]).inc();
+            REQUEST_TOTAL.with_label_values(&[&kind, &status_str]).inc();
             REQUEST_DURATION
                 .with_label_values(&[&kind])
                 .observe(start.elapsed().as_secs_f64());
-            return into_response(*err_response);
+            return into_response(*rejection);
         }
     }
 
@@ -270,13 +270,13 @@ async fn handle_poll(
     Path((group, id)): Path<(String, String)>,
 ) -> Response {
     // Authenticate when auth is configured.
-    if let Some(auth) = &poll_state.auth {
+    if let Some(mode) = &poll_state.auth {
         let token = headers
             .get(axum::http::header::AUTHORIZATION)
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.strip_prefix("Bearer "));
 
-        if auth_check_token(auth, token).is_err() {
+        if mode.check_token(token).await.is_err() {
             tracing::warn!(group = %group, id = %id, "Poll connection rejected: unauthorized");
             return (StatusCode::UNAUTHORIZED, "Unauthorized").into_response();
         }

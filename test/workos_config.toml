@@ -1,0 +1,11 @@
+level = "debug"
+debug = true
+
+[storage]
+type = "sqlite"
+
+[storage.sqlite]
+path = ":memory:"
+
+[workos]
+org_id = "org_abc"

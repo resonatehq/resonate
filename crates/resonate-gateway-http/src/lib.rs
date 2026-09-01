@@ -60,6 +60,12 @@ pub struct Config {
     #[serde(default)]
     pub auth: Option<resonate_auth::Config>,
 
+    /// WorkOS authentication. Absent means WorkOS auth disabled.
+    ///
+    /// If present, `auth` must be `None` — the two modes are mutually exclusive.
+    #[serde(default)]
+    pub workos: Option<resonate_auth::workos::Config>,
+
     /// Abort the process when a handler panics, rather than answering 500.
     ///
     /// For a single-process store — SQLite — a panic mid-transaction can leave
@@ -86,6 +92,7 @@ impl Default for Config {
             url: None,
             cors_allow_origins: Vec::new(),
             auth: None,
+            workos: None,
             abort_on_panic: false,
         }
     }
@@ -94,7 +101,7 @@ impl Default for Config {
 /// A router built once the gateway's auth policy is known. See
 /// [`HttpGateway::with_routes`].
 type ExtraRoutes = Box<
-    dyn FnOnce(Option<Arc<resonate_auth::AuthConfig>>) -> axum::Router<routes::AppState> + Send,
+    dyn FnOnce(Option<resonate_auth::AuthMode>) -> axum::Router<routes::AppState> + Send,
 >;
 
 /// axum, hosting the Resonate protocol over HTTP.
@@ -161,7 +168,7 @@ impl HttpGateway {
     /// requests here has to be able to apply it.
     pub fn with_routes(
         self,
-        build: impl FnOnce(Option<Arc<resonate_auth::AuthConfig>>) -> axum::Router<routes::AppState>
+        build: impl FnOnce(Option<resonate_auth::AuthMode>) -> axum::Router<routes::AppState>
             + Send
             + 'static,
     ) -> Self {
@@ -258,9 +265,22 @@ impl ResonateGateway for HttpGateway {
             // touches the disk and it can fail, which is what `init` is for. A
             // bad key path stops the process here rather than surfacing later
             // as a request nobody can authenticate.
-            let auth = match &self.config.auth {
-                Some(cfg) => Some(Arc::new(cfg.load().map_err(Unavailable::new)?)),
-                None => {
+            let auth: Option<resonate_auth::AuthMode> = match (&self.config.auth, &self.config.workos) {
+                (Some(_), Some(_)) => {
+                    return Err(Unavailable::new(
+                        "auth and workos cannot both be configured — choose exactly one mode",
+                    ));
+                }
+                (Some(cfg), None) => {
+                    let ac = cfg.load().map_err(Unavailable::new)?;
+                    Some(resonate_auth::AuthMode::Jwt(Arc::new(ac)))
+                }
+                (None, Some(cfg)) => {
+                    let wc = cfg.load().map_err(Unavailable::new)?;
+                    let client = resonate_auth::workos::WorkOsClient::new(wc);
+                    Some(resonate_auth::AuthMode::WorkOs(client))
+                }
+                (None, None) => {
                     tracing::info!("Auth disabled — all requests accepted");
                     None
                 }

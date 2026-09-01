@@ -39,6 +39,13 @@ pub struct Config {
     #[serde(default)]
     pub auth: Option<resonate_auth::Config>,
 
+    /// WorkOS authentication configuration. Absent = WorkOS auth disabled.
+    ///
+    /// `auth` and `workos` together is a startup error: exactly one mode
+    /// must be active or neither.
+    #[serde(default)]
+    pub workos: Option<resonate_auth::workos::Config>,
+
     /// Task configuration
     #[serde(default)]
     pub tasks: TasksConfig,
@@ -402,6 +409,7 @@ impl Default for Config {
             server: ServerConfig::default(),
             storage: StorageConfig::default(),
             auth: None,
+            workos: None,
             tasks: TasksConfig::default(),
             timeouts: TimeoutsConfig::default(),
             transports: TransportsConfig::default(),
@@ -463,6 +471,13 @@ impl Config {
         }
         if self.transports.gcps.concurrency == 0 {
             return Err("transports.gcps.concurrency must be at least 1 (got 0)".to_string());
+        }
+
+        // Auth and WorkOS are mutually exclusive modes.
+        if self.auth.is_some() && self.workos.is_some() {
+            return Err(
+                "auth and workos cannot both be configured — choose exactly one mode".into(),
+            );
         }
 
         // `task.acquire` validates `ttl >= 1`, so a non-positive lease would

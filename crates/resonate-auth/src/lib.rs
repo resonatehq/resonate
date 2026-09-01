@@ -6,7 +6,10 @@
 //! [`AuthConfig`] — policy, not protocol, which is why this is its own crate
 //! rather than part of `core`.
 
+pub mod workos;
+
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
@@ -32,6 +35,59 @@ pub struct AuthConfig {
 pub struct VerificationKey {
     pub decoding_key: DecodingKey,
     pub algorithms: Vec<Algorithm>,
+}
+
+/// Which authentication mode is active.
+///
+/// Exactly one — the gateway picks at startup based on config.
+#[derive(Clone)]
+pub enum AuthMode {
+    /// Local JWT verification against a public key.
+    Jwt(Arc<AuthConfig>),
+    /// Remote token validation via the WorkOS API.
+    WorkOs(workos::WorkOsClient),
+}
+
+impl AuthMode {
+    /// Authenticate and authorize an envelope-bearing request.
+    ///
+    /// Dispatches to JWT verification or WorkOS token validation, depending
+    /// on which mode is active. The caller gets back a ready-to-render error
+    /// envelope on failure.
+    pub async fn check_envelope(
+        &self,
+        req: &RequestEnvelope,
+    ) -> Result<(), Box<ResponseEnvelope>> {
+        match self {
+            AuthMode::Jwt(cfg) => auth_check(cfg, req),
+            AuthMode::WorkOs(client) => {
+                let token = req.head.auth.as_deref();
+                match workos::auth_check_workos(client, token).await {
+                    Ok(()) => Ok(()),
+                    Err(rejection) => Err(Box::new(ResponseEnvelope::error(
+                        req.kind.clone(),
+                        req.head.corr_id.clone(),
+                        rejection.status as i32,
+                        &rejection.message,
+                    ))),
+                }
+            }
+        }
+    }
+
+    /// Verify a bearer token — no envelope, no authorization, just
+    /// authentication. Used for endpoints like `/poll` that don't carry a
+    /// protocol envelope.
+    ///
+    /// Returns `Ok(())` if the token is valid, `Err(())` if it is not.
+    pub async fn check_token(&self, token: Option<&str>) -> Result<(), ()> {
+        match self {
+            AuthMode::Jwt(cfg) => auth_check_token(cfg, token),
+            AuthMode::WorkOs(client) => {
+                workos::auth_check_workos(client, token).await.map_err(|_| ())
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -403,5 +459,105 @@ fn extract_resource_id(kind: &str, data: &Value) -> Option<String> {
         // restriction.  This ensures newly added commands are denied by default
         // until explicitly handled here.
         _ => Some(String::new()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// Build a WorkOsClient pointed at a mock server.
+    fn workos_client(mock_url: &str) -> workos::WorkOsClient {
+        let cfg = workos::WorkOsConfig {
+            org_id: None,
+            base_url: mock_url.to_string(),
+        };
+        workos::WorkOsClient::new(cfg)
+    }
+
+    fn request(kind: &str) -> RequestEnvelope {
+        RequestEnvelope {
+            kind: kind.into(),
+            head: resonate_core::types::RequestHead {
+                auth: Some("tok".into()),
+                corr_id: "42".into(),
+                version: "1".into(),
+                debug_time: None,
+            },
+            data: serde_json::json!({}),
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // AuthMode::check_envelope — WorkOS branch
+    // -------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn check_envelope_workos_success() {
+        let mock = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/organizations"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                serde_json::json!({"data": [{"id": "org_x", "name": "test"}]}),
+            ))
+            .mount(&mock)
+            .await;
+
+        let mode = AuthMode::WorkOs(workos_client(&mock.uri()));
+        let req = request("promise.get");
+        let r = mode.check_envelope(&req).await;
+        assert!(r.is_ok(), "expected Ok, got {:?}", r);
+    }
+
+    #[tokio::test]
+    async fn check_envelope_workos_missing_token() {
+        let mock = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                serde_json::json!({"data": [{"id": "org_x", "name": "test"}]}),
+            ))
+            .mount(&mock)
+            .await;
+
+        let mode = AuthMode::WorkOs(workos_client(&mock.uri()));
+        let mut req = request("promise.get");
+        req.head.auth = None;
+        let r = mode.check_envelope(&req).await;
+        assert!(r.is_err());
+        let rejection = r.unwrap_err();
+        assert_eq!(rejection.head.status, 401);
+    }
+
+    // -------------------------------------------------------------------
+    // AuthMode::check_token — WorkOS branch
+    // -------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn check_token_workos_success() {
+        let mock = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/organizations"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                serde_json::json!({"data": [{"id": "org_x", "name": "test"}]}),
+            ))
+            .mount(&mock)
+            .await;
+
+        let mode = AuthMode::WorkOs(workos_client(&mock.uri()));
+        assert!(mode.check_token(Some("tok")).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn check_token_workos_rejection() {
+        let mock = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&mock)
+            .await;
+
+        let mode = AuthMode::WorkOs(workos_client(&mock.uri()));
+        assert!(mode.check_token(Some("tok")).await.is_err());
     }
 }
