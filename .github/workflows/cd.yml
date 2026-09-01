@@ -105,13 +105,8 @@ jobs:
           echo "**GitHub Tag:** ${{ steps.version.outputs.tag_version }}" >> $GITHUB_STEP_SUMMARY
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # PHASE 2: DOCKER IMAGE PUBLISHING (DISABLED)
+  # PHASE 2: DOCKER IMAGE PUBLISHING
   # ═══════════════════════════════════════════════════════════════════════════
-  # NOTE: Publishing to DockerHub is commented out.
-  # To enable:
-  #   1. Set secrets: DOCKER_USERNAME, DOCKER_PASSWORD
-  #   2. Remove: if: false
-  #   3. Test with workflow_dispatch
 
   publish-dockerhub:
     name: Publish DockerHub Image
@@ -162,13 +157,8 @@ jobs:
           cache-to: type=gha,mode=max
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # PHASE 2.5: GITHUB CONTAINER REGISTRY PUBLISHING (DISABLED)
+  # PHASE 2.5: GITHUB CONTAINER REGISTRY PUBLISHING
   # ═══════════════════════════════════════════════════════════════════════════
-  # NOTE: Publishing to GHCR is commented out.
-  # To enable:
-  #   1. No secrets needed (uses GITHUB_TOKEN)
-  #   2. Remove: if: false
-  #   3. Test with workflow_dispatch
 
   publish-github-image:
     name: Publish GitHub Container Image
@@ -283,13 +273,8 @@ jobs:
           cache-to: type=gha,mode=max
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # PHASE 3: BINARY ARTIFACT PUBLISHING (DISABLED)
+  # PHASE 3: BINARY ARTIFACT PUBLISHING
   # ═══════════════════════════════════════════════════════════════════════════
-  # NOTE: Publishing binary artifacts is commented out.
-  # To enable:
-  #   1. No secrets needed (uses GITHUB_TOKEN)
-  #   2. Remove: if: false
-  #   3. Test with workflow_dispatch
   #
   # Builds for:
   #   - Linux x86_64 (ubuntu-latest)
@@ -388,11 +373,10 @@ jobs:
           echo "✓ Uploaded ${TARBALL} and checksum to release ${TAG}"
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # PHASE 3.5: HOMEBREW FORMULA UPDATE (DISABLED)
+  # PHASE 3.5: HOMEBREW FORMULA UPDATE
   # ═══════════════════════════════════════════════════════════════════════════
   # Updates resonatehq/homebrew-tap with new version and sha256 checksums
   # Opens a pull request for review
-  # Requires: HOMEBREW_TAP_TOKEN secret (personal access token with repo scope)
 
   update-homebrew:
     name: Update Homebrew Formula
@@ -561,13 +545,8 @@ jobs:
           echo "View: https://github.com/resonatehq/homebrew-tap/blob/main/Formula/resonate.rb" >> $GITHUB_STEP_SUMMARY
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # PHASE 4: POST-PUBLICATION VERIFICATION (DISABLED)
+  # PHASE 4: POST-PUBLICATION VERIFICATION
   # ═══════════════════════════════════════════════════════════════════════════
-  # NOTE: Artifact verification is commented out.
-  # To enable:
-  #   1. No secrets needed (uses GITHUB_TOKEN)
-  #   2. Remove: if: false
-  #   3. Ensure publish jobs are enabled (depends on them)
   #
   # Validates:
   #   - All expected artifacts exist
@@ -582,6 +561,7 @@ jobs:
         check-version,
         publish-dockerhub,
         publish-github-image,
+        publish-gcr-image,
         publish-github-artifacts,
       ]
 
