@@ -2252,11 +2252,18 @@ impl SqliteDb<'_> {
         self.armed.borrow_mut().push(Scheduled { at, timeout });
     }
 
-    /// A promise joins the eager sweep only when it is targeted — the queue is
-    /// `state = 'pending' AND target IS NOT NULL`, so an untargeted promise
-    /// times out lazily through `try_timeout` and has no deadline to announce.
-    fn arm_promise_timeout(&self, promise_id: &str, timeout_at: i64, targeted: bool) {
-        if targeted {
+    /// A promise joins the eager sweep when someone can be blocked on it — the
+    /// queue is `state = 'pending' AND external`, which is the arming rule
+    /// `04-theorems/liveness.lean` states as `otype.awaitable`. It is the same
+    /// predicate the awaitability door checks, and deliberately so: the server
+    /// owes an observation exactly where someone can await one, so this is one
+    /// rule and not two.
+    ///
+    /// An `.internal` promise is on no queue and has no deadline to announce.
+    /// Nobody may await it, so nobody is owed the observation; it times out
+    /// lazily through `try_timeout` on the first request that names it.
+    fn arm_promise_timeout(&self, promise_id: &str, timeout_at: i64, awaitable: bool) {
+        if awaitable {
             self.arm(
                 timeout_at,
                 Timeout::PromiseTimeout {
@@ -2592,8 +2599,16 @@ impl<'a> SqliteDb<'a> {
             // inserted, and `task_state IS NULL` is the guard that used to be
             // `INSERT OR IGNORE INTO tasks`: a promise carries at most one task,
             // and only the first writer gets to install it. No promise timeout
-            // is written either way — `state = 'pending' AND target IS NOT NULL`
-            // is the queue, and the INSERT above already put the row in it.
+            // is written either way — `state = 'pending' AND external` is the
+            // queue, and the INSERT above already put the row in it.
+            //
+            // The announcement stands here rather than on the targeted branch
+            // below: an untargeted external promise never reaches that branch
+            // and is on the queue all the same. A row already past its
+            // deadline is settled, so it joins no queue and announces nothing.
+            if !already_timedout {
+                self.arm_promise_timeout(id, timeout_at, crate::awaitable_tags_json(tags));
+            }
             if already_timedout {
                 // Already timed out — create fulfilled task if resonate:target
                 if address.is_some() {
@@ -2604,7 +2619,6 @@ impl<'a> SqliteDb<'a> {
                     )?;
                 }
             } else if let Some(addr) = address {
-                self.arm_promise_timeout(id, timeout_at, true);
                 // TaskInfraCreated
                 let created = self.conn.execute(
                     "UPDATE promises SET task_state = 'pending', task_version = 0, retry_timeout_at = ?2
@@ -2844,7 +2858,7 @@ impl<'a> SqliteDb<'a> {
                     self.arm_promise_timeout(
                         promise_id,
                         timeout_at,
-                        promise.tags.contains_key("resonate:target"),
+                        resonate_core::types::is_external(&promise.tags),
                     );
                     self.arm_lease(promise_id, pid, created_at + ttl);
                 }
@@ -3404,7 +3418,7 @@ impl<'a> SqliteDb<'a> {
         let mut stmt = self.conn.prepare(
             "SELECT deadline, kind, id, pid FROM (
                  SELECT timeout_at AS deadline, 'promise' AS kind, id AS id, NULL AS pid
-                   FROM promises WHERE state = 'pending' AND target IS NOT NULL
+                   FROM promises WHERE state = 'pending' AND external
                  UNION ALL
                  SELECT retry_timeout_at, 'retry', id, NULL
                    FROM promises WHERE task_state = 'pending' AND retry_timeout_at IS NOT NULL
@@ -3515,7 +3529,14 @@ impl<'a> SqliteDb<'a> {
 
         if promise_inserted {
             // Step 6 is gone with `promise_timeouts`; the INSERT above already
-            // put a pending, targeted promise on the queue.
+            // put a pending, awaitable promise on the queue.
+            if !already_timedout {
+                self.arm_promise_timeout(
+                    &promise_id,
+                    promise_timeout_at,
+                    resonate_core::types::is_external(promise_tags),
+                );
+            }
             if already_timedout {
                 // Promise is immediately settled — create fulfilled task if resonate:target is set
                 if address.is_some() {
@@ -3527,7 +3548,6 @@ impl<'a> SqliteDb<'a> {
                 }
             } else if let Some(addr) = &address {
                 // Step 7: Create task infrastructure if resonate:target is set
-                self.arm_promise_timeout(&promise_id, promise_timeout_at, true);
                 let created = self.conn.execute(
                     "UPDATE promises SET task_state = 'pending', task_version = 0, retry_timeout_at = ?2
                      WHERE id = ?1 AND task_state IS NULL",
@@ -3597,16 +3617,17 @@ impl<'a> SqliteDb<'a> {
 
         // Statement 1: Process expired promise timeouts.
         //
-        // `state = 'pending' AND target IS NOT NULL` is the whole of what
-        // `promise_timeouts` held: rows entered on create and left on settle,
-        // and only a targeted promise was ever swept eagerly. Untargeted ones
-        // still time out lazily, through `try_timeout`.
+        // `state = 'pending' AND external` is the whole of what
+        // `promise_timeouts` held: rows entered on create and left on settle.
+        // `external` is `otype.awaitable` as a stored column — every promise
+        // someone can be blocked on. Internal ones are on no queue and still
+        // time out lazily, through `try_timeout`.
         let expired_ids: Vec<String> = match selected("promise") {
             None => Vec::new(),
             Some(id) => {
                 let mut stmt = self.conn.prepare(
                     "SELECT id FROM promises
-                     WHERE state = 'pending' AND target IS NOT NULL AND timeout_at <= ?1
+                     WHERE state = 'pending' AND external AND timeout_at <= ?1
                        AND (?2 IS NULL OR id = ?2)
                      ORDER BY id",
                 )?;
@@ -3728,7 +3749,7 @@ impl<'a> SqliteDb<'a> {
         // predicates are the membership rules the deleted tables carried.
         let mut stmt = conn.prepare(
             "SELECT id, timeout_at FROM promises
-             WHERE state = 'pending' AND target IS NOT NULL ORDER BY id",
+             WHERE state = 'pending' AND external ORDER BY id",
         )?;
         let promise_timeouts: Vec<SnapshotPromiseTimeout> = {
             let mut rows = stmt.query([])?;
@@ -3916,12 +3937,12 @@ fn row_to_schedule(row: &rusqlite::Row) -> rusqlite::Result<ScheduleRecord> {
 //                     other — which is why fulfilling a task, dropping its
 //                     timeout and clearing its lease are one UPDATE here.
 //
-//   promise_timeouts  Gone. The queue is `state = 'pending' AND target IS NOT
-//                     NULL`, which is what rows entering on create and leaving
-//                     on settle amounted to; idx_promises_timeout_at is the
-//                     index the table carried. Untargeted promises were never
-//                     swept eagerly and still are not — they time out lazily,
-//                     through try_timeout.
+//   promise_timeouts  Gone. The queue is `state = 'pending' AND external`,
+//                     which is what rows entering on create and leaving on
+//                     settle amounted to; idx_promises_timeout_at is the
+//                     index the table carried. Internal promises are on no
+//                     queue and never were — they time out lazily, through
+//                     try_timeout.
 //
 //   schedule_timeouts Gone: `next_run_at` already is the queue, and
 //                     process_schedule_timeout's idempotency guard reads the

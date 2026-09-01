@@ -1827,28 +1827,43 @@ async fn differential_sweep_modes() {
     print_timing_summary(&mut timings, &backends);
 }
 
-/// The divergence, in nine steps, with nothing left to chance.
+// ---------------------------------------------------------------------------
+// The arming rule, on every backend
+// ---------------------------------------------------------------------------
+
+/// A promise anyone can block on must be armed — on all four.
 ///
-/// `differential_sweep_modes` measures how often the two rules disagree over a
-/// random walk. This says exactly what the disagreement IS, on the one shape
-/// that matters: a task suspended on an `resonate:external` promise that
-/// carries no `resonate:target`, with a listener on it too.
+/// `04-theorems/liveness.lean` keys `enabledInternal` for a promise timeout on
+/// `otype.awaitable`, which is [`resonate_core::types::is_external`]: a
+/// target, `resonate:scope = global`, `resonate:external = true`, or
+/// `resonate:timer = true`. Not "has a task". The two are not the same set,
+/// and the difference is exactly the shape below — a task suspended on an
+/// external, untargeted promise, with a listener on it too.
 ///
-/// That promise is `otype.awaitable` and not `okind == Task`, which is the gap
-/// between the specification's arming rule and the shipped queue. Nothing else
-/// in the protocol distinguishes the two.
+/// Every engine here once armed `resonate:target` instead, the oracle
+/// included, so the differential could not see it: four implementations
+/// agreeing on a rule narrower than the specification's look identical to each
+/// other. That is what this test is for, and why it asserts against the
+/// specification rather than across backends.
+///
+/// Under a materialising read discipline the narrow rule is merely late — the
+/// next request to name the promise does the same work. Under the projected
+/// discipline nothing touches it at all: `EventuallyEveryExternalPromiseSettles`
+/// needs fairness on this step, and a step that is never armed is never fired.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_suspended_task_waits_on_a_reader_under_the_narrow_queue() {
-    let backends: Vec<(String, Backend)> = vec![
+async fn an_awaitable_promise_is_armed_even_with_no_task() {
+    let _db_guard = db_lock().lock().unwrap_or_else(|e| e.into_inner());
+
+    let mut backends: Vec<(String, Backend)> = vec![
         (
-            "targeted".into(),
+            "sqlite".into(),
             Arc::new(
                 SqliteEngine::open(":memory:", TASK_RETRY_TIMEOUT_MS, PRELOAD_LIMIT, true, true)
                     .expect("sqlite"),
             ) as Backend,
         ),
         (
-            "awaitable".into(),
+            "sqlite-eager".into(),
             Arc::new(
                 SqliteEagerEngine::open(
                     ":memory:",
@@ -1860,19 +1875,54 @@ async fn a_suspended_task_waits_on_a_reader_under_the_narrow_queue() {
                 .expect("sqlite eager"),
             ) as Backend,
         ),
+        (
+            "oracle".into(),
+            Arc::new(SharedOracle::with_preload_limit(PRELOAD_LIMIT)) as Backend,
+        ),
     ];
+    if let Ok(url) = std::env::var("TEST_POSTGRES_URL") {
+        let pg = PostgresEngine::connect(&url, 5, TASK_RETRY_TIMEOUT_MS, PRELOAD_LIMIT, true)
+            .await
+            .expect("postgres connect");
+        pg.init(true).await.expect("postgres schema init");
+        backends.push(("postgres".into(), Arc::new(pg) as Backend));
+    }
+    if let Ok(url) = std::env::var("TEST_MYSQL_URL") {
+        let my = MysqlEngine::connect(&url, 5, TASK_RETRY_TIMEOUT_MS, PRELOAD_LIMIT, true)
+            .await
+            .expect("mysql connect");
+        my.init(true).await.expect("mysql schema init");
+        backends.push(("mysql".into(), Arc::new(my) as Backend));
+    }
+    eprintln!(
+        "[arm] backends: {}",
+        backends
+            .iter()
+            .map(|(n, _)| n.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
 
     let t = T0;
     let deadline = t + 1_000;
+    reset_all(&backends, t).await;
 
-    // `o:a` — awaitable, untargeted. On the specification's queue, on neither
-    // engine's `tasks`, and on only one engine's sweep.
+    // `o:a` — awaitable, and carrying no target, so it has no task. This is
+    // the promise the narrow rule missed.
     let create_a = req(
         "promise.create",
         json!({ "id": "o:a", "timeoutAt": deadline, "param": {},
                 "tags": { "resonate:external": "true" } }),
     );
-    // `o:x` — a task, so targeted, so on both queues.
+    // `o:i` — internal. On no queue under either rule: nobody may await it, so
+    // nobody is owed the observation. Here so that the fix is the awaitable
+    // set and not simply "arm everything".
+    let create_i = req(
+        "promise.create",
+        json!({ "id": "o:i", "timeoutAt": deadline, "param": {}, "tags": {} }),
+    );
+    // `o:x` — a task. `task.create` hands it back already acquired at
+    // version 1, so there is no acquire step.
     let create_x = req(
         "task.create",
         json!({ "pid": PID, "ttl": TTL, "action": {
@@ -1880,8 +1930,6 @@ async fn a_suspended_task_waits_on_a_reader_under_the_narrow_queue() {
             "data": { "id": "o:x", "timeoutAt": t + 900_000, "param": {},
                       "tags": { "resonate:target": WORKER_URL } } } }),
     );
-    // `task.create` hands the task back already acquired at version 1, so
-    // there is no acquire step: the worker that created it holds it.
     let suspend = req(
         "task.suspend",
         json!({ "id": "o:x", "version": 1, "actions": [{
@@ -1893,162 +1941,120 @@ async fn a_suspended_task_waits_on_a_reader_under_the_narrow_queue() {
         json!({ "awaited": "o:a", "address": WORKER_URL }),
     );
 
-    for envelope in [&create_a, &create_x, &suspend, &listen] {
+    for envelope in [&create_a, &create_i, &create_x, &suspend, &listen] {
         for (name, b) in &backends {
             let resp = send(b, envelope, t).await;
             assert_eq!(resp.head.status, 200, "{name}: {} failed", envelope.kind);
         }
     }
 
-    // Both hold the same suspended task and the same ledger. Everything but
-    // the queue itself: `promiseTimeouts` is the queue, and the two engines
-    // disagree about it by construction — that is the mode, not a divergence.
-    let (before, _) = snap_all(&backends, t).await;
-    assert_no_divergence(
-        &before,
-        &[
-            "promises",
-            "tasks",
-            "callbacks",
-            "listeners",
-            "taskTimeouts",
-        ],
-        "before the deadline",
-    );
+    // The queue, as each engine reports it. This is the regression: `o:a` was
+    // absent from all four.
+    for (name, b) in &backends {
+        let armed: Vec<String> = b
+            .upcoming(16)
+            .await
+            .expect("upcoming")
+            .iter()
+            .map(|s| format!("{}:{}", s.timeout.kind(), s.timeout.id()))
+            .collect();
+        assert!(
+            armed.contains(&"promise:o:a".to_string()),
+            "{name}: an awaitable promise with no task must be armed, got {armed:?}"
+        );
+        assert!(
+            !armed.contains(&"promise:o:i".to_string()),
+            "{name}: an internal promise must not be armed, got {armed:?}"
+        );
+    }
 
-    // The queue, though, already differs — and it is what a timer is told to
-    // wake for.
-    let ups: Vec<Vec<String>> = {
-        let mut v = Vec::new();
-        for (_, b) in &backends {
-            v.push(
-                b.upcoming(16)
-                    .await
-                    .expect("upcoming")
-                    .iter()
-                    .map(|s| format!("{}:{}", s.timeout.kind(), s.timeout.id()))
-                    .collect(),
-            );
-        }
-        v
-    };
-    assert!(
-        !ups[0].contains(&"promise:o:a".to_string()),
-        "targeted should not arm an untargeted promise, got {:?}",
-        ups[0]
-    );
-    assert!(
-        ups[1].contains(&"promise:o:a".to_string()),
-        "awaitable must arm every promise anyone can block on, got {:?}",
-        ups[1]
-    );
-
-    // Past the deadline, fire the timeout by name — the precise form, what a
-    // timer does. Same input, same instant, both engines.
+    // Past the deadline, fire it by name — the precise form, what a timer
+    // does with what `upcoming` told it.
     let after = deadline + 1;
     let timeout = Timeout::PromiseTimeout {
         promise_id: "o:a".to_string(),
     };
-    let mut emitted: Vec<Vec<String>> = Vec::new();
-    for (_, b) in &backends {
+    for (name, b) in &backends {
         let out = b.process(Input::Internal(timeout.clone()), after).await;
-        emitted.push(
-            out.messages
-                .iter()
-                .map(|m| {
-                    m.to_json()
-                        .get("kind")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("?")
-                        .to_string()
-                })
-                .collect(),
+        if !b.returns_messages() {
+            continue;
+        }
+        let mut kinds: Vec<String> = out
+            .messages
+            .iter()
+            .map(|m| match m {
+                Outgoing::Execute { .. } => "execute".to_string(),
+                Outgoing::Unblock { .. } => "unblock".to_string(),
+            })
+            .collect();
+        kinds.sort();
+        // Two: the listener learns the promise settled, and the task it was
+        // blocking goes back out to its worker.
+        assert_eq!(
+            kinds,
+            vec!["execute", "unblock"],
+            "{name}: firing an awaitable promise's deadline must discharge what waited on it"
         );
     }
-    // A whole sweep, too, in case the narrow engine finds it there.
-    for (_, b) in &backends {
-        let _ = b.tick(after).await.expect("tick");
+
+    // And what it left behind, which is the point of arming it at all.
+    let (snaps, _) = snap_all(&backends, after).await;
+    for (name, snap) in &snaps {
+        let promise = |id: &str| {
+            snap.get("promises")
+                .and_then(|v| v.as_array())
+                .and_then(|a| {
+                    a.iter()
+                        .find(|p| p.get("id").and_then(|v| v.as_str()) == Some(id))
+                })
+                .unwrap_or_else(|| panic!("{name}: promise {id} missing"))
+        };
+        assert_eq!(
+            promise("o:a").get("state").unwrap(),
+            "rejected_timedout",
+            "{name}: the swept promise must be settled in store"
+        );
+        assert_eq!(
+            promise("o:i").get("state").unwrap(),
+            "pending",
+            "{name}: an internal promise is not swept — it times out on first touch"
+        );
+        assert_eq!(
+            snap.get("callbacks").unwrap().as_array().unwrap().len(),
+            0,
+            "{name}: the callback ledger must be discharged"
+        );
+        assert_eq!(
+            snap.get("listeners").unwrap().as_array().unwrap().len(),
+            0,
+            "{name}: the listener must be discharged"
+        );
+        let task = &snap.get("tasks").unwrap().as_array().unwrap()[0];
+        assert_eq!(
+            task.get("state").unwrap(),
+            "pending",
+            "{name}: task resumed"
+        );
+        assert_eq!(task.get("resumes").unwrap(), 1, "{name}: task told why");
     }
 
-    let (fired, _) = snap_all(&backends, after).await;
-    let task_state = |snap: &Value| {
-        snap.pointer("/tasks/0/state")
-            .and_then(|v| v.as_str())
-            .unwrap_or("?")
-            .to_string()
-    };
-
-    assert!(
-        emitted[0].is_empty(),
-        "targeted should have nothing to fire, got {:?}",
-        emitted[0]
-    );
-    assert_eq!(task_state(&fired[0].1), "suspended");
-    assert_eq!(
-        fired[0].1.pointer("/promises/0/state").unwrap(),
-        "pending",
-        "targeted leaves the promise pending in store past its deadline"
-    );
-    assert_eq!(
-        fired[0]
-            .1
-            .pointer("/callbacks")
-            .unwrap()
-            .as_array()
-            .unwrap()
-            .len(),
-        1,
-        "targeted still owes the resume"
-    );
-
-    // One firing, two messages: the listener learns the promise settled, and
-    // the task it was blocking goes back out to its worker.
-    let mut kinds = emitted[1].clone();
-    kinds.sort();
-    assert_eq!(kinds, vec!["execute".to_string(), "unblock".to_string()]);
-    assert_eq!(task_state(&fired[1].1), "pending");
-    assert_eq!(
-        fired[1].1.pointer("/promises/0/state").unwrap(),
-        "rejected_timedout"
-    );
-    assert!(fired[1]
-        .1
-        .pointer("/callbacks")
-        .unwrap()
-        .as_array()
-        .unwrap()
-        .is_empty());
-
-    // The narrow engine is not wrong, only late: it owes the work to whoever
-    // reads next. One read, and the two agree on everything the protocol says
-    // is state — the settlement is stamped at `timeout_at`, not at the instant
-    // it was noticed, so even `settledAt` matches.
-    let read_at = after + 5_000;
-    quiesce(&backends, &["o:a".to_string(), "o:x".to_string()], read_at).await;
-    let (settled, _) = snap_all(&backends, read_at).await;
-    assert_eq!(
-        settled[0].1.get("promises"),
-        settled[1].1.get("promises"),
-        "a read must bring the narrow engine to where the wide one already was"
-    );
-    assert_eq!(task_state(&settled[0].1), "pending");
-    assert_eq!(task_state(&settled[1].1), "pending");
-
-    // What does NOT converge, and cannot: a settlement is stamped at
-    // `timeout_at`, but the RESUME it triggers is stamped at the instant it
-    // was discharged. The wide queue discharged at the deadline; the narrow
-    // one discharged when a reader turned up five seconds later, and the
-    // redispatch clock it armed is five seconds later to match. Nothing reads
-    // that back to a common value — it is the latency the eager sweep exists
-    // to remove, made durable.
-    let retry = |snap: &Value| {
-        snap.pointer("/taskTimeouts/0/timeout")
-            .and_then(|v| v.as_i64())
-            .expect("a resumed task is on the retry queue")
-    };
-    assert_eq!(
-        retry(&settled[0].1) - retry(&settled[1].1),
-        read_at - after,
-        "the narrow engine's redispatch clock lags by exactly the read delay"
-    );
+    // The internal promise is not stranded, only unswept: a read settles it,
+    // which is the same transition off a request instead of off the sweep.
+    quiesce(&backends, &["o:i".to_string()], after).await;
+    let (after_read, _) = snap_all(&backends, after).await;
+    for (name, snap) in &after_read {
+        let p_i = snap
+            .get("promises")
+            .and_then(|v| v.as_array())
+            .and_then(|a| {
+                a.iter()
+                    .find(|p| p.get("id").and_then(|v| v.as_str()) == Some("o:i"))
+            })
+            .unwrap();
+        assert_eq!(
+            p_i.get("state").unwrap(),
+            "rejected_timedout",
+            "{name}: an internal promise still settles on the first read past its deadline"
+        );
+    }
 }

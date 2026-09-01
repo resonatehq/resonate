@@ -35,6 +35,21 @@ pub mod oracle;
 
 use resonate_core::types::{PromiseRecord, TaskState};
 
+/// [`resonate_core::types::is_external`], where the caller holds the tags as
+/// the JSON it is about to insert rather than as a map.
+///
+/// Here rather than three times because it is the arming rule, and the arming
+/// rule must be one rule: `04-theorems/liveness.lean` keys `enabledInternal`
+/// for a promise timeout on `otype.awaitable`, the same predicate the
+/// awaitability door checks. The server owes an observation exactly where
+/// someone can await one.
+///
+/// Malformed JSON answers `false` — the INSERT beside every caller would have
+/// failed on it the same way.
+pub fn awaitable_tags_json(tags: &str) -> bool {
+    resonate_core::types::is_external(&serde_json::from_str(tags).unwrap_or_default())
+}
+
 pub type StorageResult<T> = Result<T, StorageError>;
 
 #[derive(Debug)]

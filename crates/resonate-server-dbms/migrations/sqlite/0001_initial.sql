@@ -31,6 +31,15 @@ CREATE TABLE IF NOT EXISTS promises (
   parent_id TEXT GENERATED ALWAYS AS (json_extract(tags, '$.resonate:parent')) STORED,
   branch_id TEXT GENERATED ALWAYS AS (json_extract(tags, '$.resonate:branch')) STORED,
   is_timer BOOLEAN NOT NULL GENERATED ALWAYS AS (COALESCE(json_extract(tags, '$.resonate:timer'), '') = 'true') STORED,
+  -- `resonate_core::types::otype`, in SQL: who may be blocked on this. Four
+  -- alternatives, not a hierarchy. Postgres has carried this column all along;
+  -- it is here now because the promise-timeout queue is keyed on it, and a
+  -- queue spelled out three times drifts.
+  external BOOLEAN NOT NULL GENERATED ALWAYS AS (
+                  COALESCE(json_extract(tags, '$.resonate:scope'), '')    = 'global'
+                  OR COALESCE(json_extract(tags, '$.resonate:external'), '') = 'true'
+                  OR json_extract(tags, '$.resonate:target') IS NOT NULL
+                  OR COALESCE(json_extract(tags, '$.resonate:timer'), '') = 'true') STORED,
   timeout_at BIGINT NOT NULL,
   created_at BIGINT NOT NULL,
   settled_at BIGINT,
@@ -48,7 +57,7 @@ CREATE TABLE IF NOT EXISTS promises (
   ttl        BIGINT,
   pid        TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_promises_timeout_at ON promises (timeout_at) WHERE state = 'pending';
+CREATE INDEX IF NOT EXISTS idx_promises_timeout_at ON promises (timeout_at) WHERE state = 'pending' AND external;
 CREATE INDEX IF NOT EXISTS idx_promises_target ON promises (target) WHERE target IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_promises_branch_id ON promises (branch_id) WHERE branch_id IS NOT NULL;
 

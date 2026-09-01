@@ -29,6 +29,15 @@ CREATE TABLE IF NOT EXISTS promises (
   parent_id VARCHAR(255) GENERATED ALWAYS AS (tags->>'$."resonate:parent"') STORED,
   branch_id VARCHAR(255) GENERATED ALWAYS AS (tags->>'$."resonate:branch"') STORED,
   is_timer BOOLEAN GENERATED ALWAYS AS (COALESCE(tags->>'$."resonate:timer"', '') = 'true') STORED NOT NULL,
+  -- `resonate_core::types::otype`, in SQL: who may be blocked on this. Four
+  -- alternatives, not a hierarchy. Postgres has carried this column all along;
+  -- it is here now because the promise-timeout queue is keyed on it, and a
+  -- queue spelled out three times drifts.
+  external BOOLEAN GENERATED ALWAYS AS (
+                  COALESCE(tags->>'$."resonate:scope"', '')    = 'global'
+                  OR COALESCE(tags->>'$."resonate:external"', '') = 'true'
+                  OR tags->>'$."resonate:target"' IS NOT NULL
+                  OR COALESCE(tags->>'$."resonate:timer"', '') = 'true') STORED NOT NULL,
   timeout_at BIGINT NOT NULL,
   created_at BIGINT NOT NULL,
   settled_at BIGINT,
@@ -46,7 +55,7 @@ CREATE TABLE IF NOT EXISTS promises (
   pid VARCHAR(255) NULL,
 
   PRIMARY KEY (id),
-  INDEX idx_promises_timeout_at (timeout_at),
+  INDEX idx_promises_timeout_at (external, state, timeout_at),
   INDEX idx_promises_target (target),
   INDEX idx_promises_branch_id (branch_id),
   -- `promise_timeouts` is gone: a pending, targeted promise past its

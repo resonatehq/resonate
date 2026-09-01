@@ -129,11 +129,13 @@ CREATE TABLE IF NOT EXISTS promises (
 );
 
 -- The promise timeout sweep queue is NOT a column: promise_timeouts membership
--- is exactly (state = 'pending' AND target IS NOT NULL), given
--- `consistent_task_iff_targeted_promise`. A targetless promise has no task and
--- is never swept eagerly; it times out lazily on first touch (try_timeout).
+-- is exactly (state = 'pending' AND external) — the arming rule
+-- `04-theorems/liveness.lean` states as `otype.awaitable`, and the same
+-- predicate the awaitability door checks, because they are one rule. An
+-- `.internal` promise is on no queue: nobody may await it, so nobody is owed
+-- the observation, and it times out lazily on first touch (try_timeout).
 CREATE INDEX IF NOT EXISTS idx_promises_timeout_at
-  ON promises (timeout_at) WHERE state = 'pending';
+  ON promises (timeout_at) WHERE state = 'pending' AND external;
 
 CREATE INDEX IF NOT EXISTS idx_promises_origin_id
   ON promises (origin_id);

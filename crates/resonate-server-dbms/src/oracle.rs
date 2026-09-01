@@ -212,9 +212,11 @@ impl Oracle {
         let mut out: Vec<Scheduled> = Vec::new();
 
         for pt in &self.p_timeouts {
-            if self.promises.get(&pt.id).is_some_and(|p| {
-                p.state == PromiseState::Pending && p.tags.contains_key("resonate:target")
-            }) {
+            if self
+                .promises
+                .get(&pt.id)
+                .is_some_and(|p| p.state == PromiseState::Pending && Self::armed_promise(&p.tags))
+            {
                 out.push(Scheduled {
                     at: pt.timeout,
                     timeout: Timeout::PromiseTimeout {
@@ -417,7 +419,7 @@ impl Oracle {
                 );
             }
         } else {
-            if addr.is_some() {
+            if Self::armed_promise(&r.tags) {
                 self.set_p_timeout(&r.id, r.timeout_at);
             }
             if let Some(ref addr) = addr {
@@ -920,7 +922,12 @@ impl Oracle {
             },
         );
         if !already_timedout {
-            self.set_p_timeout(&promise_id, action.timeout_at);
+            // Gated like every other arming site, not left unconditional: a
+            // `task.create` promise is targeted in practice and so awaitable
+            // either way, but the queue's rule is the queue's rule.
+            if Self::armed_promise(&action.tags) {
+                self.set_p_timeout(&promise_id, action.timeout_at);
+            }
             self.set_t_timeout(&promise_id, TTimeoutKind::Lease, now + r.ttl);
             // task.create returns an already-acquired task to the caller (who IS the
             // worker), so no execute notification is needed. SQLite likewise does not
@@ -1337,7 +1344,7 @@ impl Oracle {
                             );
                         }
                     } else {
-                        if addr.is_some() {
+                        if Self::armed_promise(&create_data.tags) {
                             self.set_p_timeout(&create_data.id, create_data.timeout_at);
                         }
                         if let Some(ref a) = addr {
@@ -2129,7 +2136,7 @@ impl Oracle {
                             );
                         }
                     } else {
-                        if addr.is_some() {
+                        if Self::armed_promise(&tags) {
                             self.set_p_timeout(&promise_id, timeout_at);
                         }
                         if let Some(ref a) = addr {
@@ -2421,6 +2428,16 @@ impl Oracle {
     }
 
     // ─── Timeout list helpers ──────────────────────────────────────────────────
+
+    /// Does this promise join the eager sweep?
+    ///
+    /// `otype.awaitable` — the arming rule `04-theorems/liveness.lean` states,
+    /// and the same predicate the awaitability door checks, because the server
+    /// owes an observation exactly where someone can await one. Not "has a
+    /// task": an untargeted external promise has no task and is on the queue.
+    fn armed_promise(tags: &std::collections::HashMap<String, String>) -> bool {
+        resonate_core::types::is_external(tags)
+    }
 
     fn set_p_timeout(&mut self, id: &str, timeout: i64) {
         self.armed.push(Scheduled {

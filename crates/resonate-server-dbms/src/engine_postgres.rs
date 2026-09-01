@@ -2345,8 +2345,12 @@ impl<'a> PostgresDb<'a> {
         self.armed.borrow_mut().push(Scheduled { at, timeout });
     }
 
-    fn arm_promise_timeout(&self, promise_id: &str, timeout_at: i64, targeted: bool) {
-        if targeted {
+    /// A promise joins the eager sweep when someone can be blocked on it — the
+    /// queue is `state = 'pending' AND external`, the arming rule
+    /// `04-theorems/liveness.lean` states as `otype.awaitable`, and the same
+    /// predicate `task.suspend`'s door checks. One rule, not two.
+    fn arm_promise_timeout(&self, promise_id: &str, timeout_at: i64, awaitable: bool) {
+        if awaitable {
             self.arm(
                 timeout_at,
                 Timeout::PromiseTimeout {
@@ -2887,7 +2891,7 @@ impl PostgresDb<'_> {
         self.absorb_and_arm_retries(&rows[0], created_at + trt);
         let was_created: bool = rows[0].get("was_created");
         if was_created && !already_timedout {
-            self.arm_promise_timeout(id, timeout_at, address.is_some());
+            self.arm_promise_timeout(id, timeout_at, crate::awaitable_tags_json(tags));
         }
         Ok(PromiseCreateResult {
             was_created,
@@ -3200,7 +3204,7 @@ impl PostgresDb<'_> {
                 self.arm_promise_timeout(
                     promise_id,
                     timeout_at,
-                    promise.tags.contains_key("resonate:target"),
+                    resonate_core::types::is_external(&promise.tags),
                 );
                 self.arm_lease(promise_id, pid, created_at + ttl);
             }
@@ -3333,6 +3337,12 @@ impl PostgresDb<'_> {
             SELECT
               EXISTS (SELECT 1 FROM fence_check) AS task_exists,
               (SELECT ok FROM fence_ok) AS fence_ok,
+              -- The promise this statement armed, if it armed one: newly
+              -- inserted, still pending, and awaitable. Read off the row
+              -- rather than inferred from the retries, because a retry is
+              -- armed only for a task and the queue is not keyed on tasks.
+              (SELECT id FROM inserted_or_skipped_promise
+                 WHERE state = 'pending' AND external) AS armed_promise_id,
               {cols}, {messages}
             FROM (SELECT 1) AS dummy
             LEFT JOIN result r ON true
@@ -3347,13 +3357,14 @@ impl PostgresDb<'_> {
             return Err(StorageError::Serialization);
         }
         let row = &rows[0];
-        let armed = self.absorb_and_arm_retries(row, created_at + trt);
+        self.absorb_and_arm_retries(row, created_at + trt);
         let promise_id_val: Option<String> = row.get("id");
-        // A promise joins the eager sweep under exactly the condition its task
-        // gets a retry deadline: newly created, targeted, not already timed
-        // out. So the retries this statement armed name the promises too, and
-        // there is no separate `was_created` to read.
-        for id in &armed {
+        // A promise joins the eager sweep when someone can be blocked on it,
+        // which is not the condition its task gets a retry deadline under —
+        // an untargeted external promise has no task and is on the queue all
+        // the same. So the statement says which promise it armed.
+        let armed_promise: Option<String> = row.get("armed_promise_id");
+        if let Some(id) = &armed_promise {
             self.arm_promise_timeout(id, timeout_at, true);
         }
         Ok(TaskFenceResult {
@@ -3925,7 +3936,7 @@ impl PostgresDb<'_> {
             sqlx::query(
                 "SELECT deadline, kind, id, pid FROM (
                      SELECT timeout_at AS deadline, 'promise' AS kind, id AS id, NULL::text AS pid
-                       FROM promises WHERE state = 'pending' AND target IS NOT NULL
+                       FROM promises WHERE state = 'pending' AND external
                      UNION ALL
                      SELECT retry_timeout_at, 'retry', id, NULL
                        FROM promises WHERE task_state = 'pending' AND retry_timeout_at IS NOT NULL
@@ -4026,6 +4037,10 @@ impl PostgresDb<'_> {
             )
             SELECT id, cron, promise_id, promise_timeout, NULLIF(promise_param_headers, '{{}}'::jsonb)::text AS promise_param_headers,
                    promise_param_data, promise_tags::text, created_at, next_run_at, last_run_at,
+                   -- As in task_fence_create: the promise this firing armed,
+                   -- which is not the promise it gave a task to.
+                   (SELECT id FROM inserted_or_skipped_promise
+                      WHERE state = 'pending' AND external) AS armed_promise_id,
                    {messages}
             FROM updated_schedule
         ", messages = emitted_json(&["emit_new"])))
@@ -4035,12 +4050,14 @@ impl PostgresDb<'_> {
         if rows.is_empty() {
             return Ok(None);
         }
-        let armed = self.absorb_and_arm_retries(&rows[0], time + trt);
+        self.absorb_and_arm_retries(&rows[0], time + trt);
         // The schedule advanced, so its own deadline moved. The promise this
-        // firing created has one too, if it is still pending and targeted —
-        // which is exactly when a retry deadline was armed for it.
+        // firing created has one too, if it is still pending and awaitable —
+        // which the statement reports, because it is not the same condition a
+        // retry deadline was armed under.
         let schedule = row_to_schedule(&rows[0]);
-        for id in &armed {
+        let armed_promise: Option<String> = rows[0].get("armed_promise_id");
+        if let Some(id) = &armed_promise {
             self.arm_promise_timeout(id, fired_at + schedule.promise_timeout, true);
         }
         self.arm(
@@ -4090,12 +4107,12 @@ impl PostgresDb<'_> {
 
         // Statement 1: expired promises.
         //
-        // `state = 'pending' AND target IS NOT NULL` is the whole of what
+        // `state = 'pending' AND external` is the whole of what
         // promise_timeouts held: rows enter on create and leave on settle, and
         // only targeted promises are ever swept eagerly.
         if let Some(id) = selected("promise") {
             let sql = expire_batch_sql(
-                "state = 'pending' AND target IS NOT NULL AND timeout_at <= $1
+                "state = 'pending' AND external AND timeout_at <= $1
                  AND ($2::text IS NULL OR id = $2)",
                 "$1",
                 trt,
@@ -4196,7 +4213,7 @@ impl PostgresDb<'_> {
         let pt_rows = rt_block_on(
             sqlx::query(
                 "SELECT id, timeout_at FROM promises
-                 WHERE state = 'pending' AND target IS NOT NULL ORDER BY id",
+                 WHERE state = 'pending' AND external ORDER BY id",
             )
             .fetch_all(self.tx().as_mut()),
         )?;
