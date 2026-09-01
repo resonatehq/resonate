@@ -34,7 +34,15 @@ pub const ENABLED: &str = "enabled";
 /// Builds the layered configuration: defaults, then a file, then the
 /// environment, then explicit overrides. Each layer wins over the last.
 pub struct Loader {
-    figment: Figment,
+    /// What plugins and the server declare when nobody has said anything.
+    defaults: Figment,
+    /// What someone actually wrote: a file, the environment, a `--set`.
+    ///
+    /// Kept apart from the defaults rather than collapsed into one figment,
+    /// because "was this set, or is it just the default?" is a question two of
+    /// the things below have to ask, and metadata cannot answer it reliably.
+    explicit: Figment,
+    aliases: Vec<(String, String)>,
 }
 
 impl Loader {
@@ -44,39 +52,42 @@ impl Loader {
     /// plugin by hand. Now it is assembled, so a plugin the binary does not
     /// carry contributes nothing and cannot be configured by accident.
     pub fn new(registry: &Registry) -> Self {
-        let mut figment = Figment::new();
-        for (port, id, defaults, default_enabled) in registry.default_layers() {
+        let mut defaults = Figment::new();
+        for (port, id, plugin_defaults, default_enabled) in registry.default_layers() {
             let key = format!("{}.{}", port.section(), id);
-            figment = figment.merge(Serialized::default(&key, defaults));
+            defaults = defaults.merge(Serialized::default(&key, plugin_defaults));
             if !port.is_singleton() {
-                figment = figment.merge(Serialized::default(
+                defaults = defaults.merge(Serialized::default(
                     &format!("{key}.{ENABLED}"),
                     default_enabled,
                 ));
             }
         }
-        Self { figment }
+        Self {
+            defaults,
+            explicit: Figment::new(),
+            aliases: Vec::new(),
+        }
     }
 
     /// Merge the server's own defaults — everything that is not a plugin.
     pub fn defaults<T: serde::Serialize>(mut self, core: T) -> Self {
-        // Merged *under* the plugin layer above rather than over it: a plugin
-        // owns its own section, and the server's defaults must not reach into
-        // it.
-        self.figment = Figment::from(Serialized::defaults(core)).merge(self.figment);
+        // Under the plugin layer, not over it: a plugin owns its own section
+        // and the server's defaults must not reach into it.
+        self.defaults = Figment::from(Serialized::defaults(core)).merge(self.defaults);
         self
     }
 
     /// An optional TOML file. Missing is not an error — a server with no
     /// config file runs on defaults and the environment.
     pub fn file(mut self, path: impl AsRef<std::path::Path>) -> Self {
-        self.figment = self.figment.merge(Toml::file(path.as_ref()));
+        self.explicit = self.explicit.merge(Toml::file(path.as_ref()));
         self
     }
 
     /// `PREFIX_SECTION__ID__FIELD`, double underscore for nesting.
     pub fn env(mut self, prefix: &str) -> Self {
-        self.figment = self.figment.merge(FigEnv::prefixed(prefix).split("__"));
+        self.explicit = self.explicit.merge(FigEnv::prefixed(prefix).split("__"));
         self
     }
 
@@ -91,23 +102,55 @@ impl Loader {
         // one line of TOML expresses the whole assignment — including a list or
         // a table, which a string-valued override could not carry.
         let assignment = format!("{key} = {value}");
-        self.figment = match Toml::string(&assignment).data() {
-            Ok(_) => self.figment.merge(Toml::string(&assignment)),
+        self.explicit = match Toml::string(&assignment).data() {
+            Ok(_) => self.explicit.merge(Toml::string(&assignment)),
             // Unquoted, so it was meant as a string: `--set level=debug`.
             Err(_) => {
                 let quoted = format!("{key} = {}", toml_quote(value));
                 Toml::string(&quoted)
                     .data()
                     .map_err(|e| ConfigError::from_source(key, e.to_string(), "--set"))?;
-                self.figment.merge(Toml::string(&quoted))
+                self.explicit.merge(Toml::string(&quoted))
             }
         };
         Ok(self)
     }
 
+    /// Accept a key this server used to read, at the key it reads now.
+    ///
+    /// Deriving a plugin's config key from its port and id is what stops the
+    /// file, the environment variable and the `--set` path drifting apart —
+    /// but a server already deployed has the old key in its files. The alias
+    /// fills in only when nothing was written at the new key, so a config that
+    /// names both is not ambiguous: the current name wins.
+    pub fn alias(mut self, old: &str, new: &str) -> Self {
+        self.aliases.push((old.to_string(), new.to_string()));
+        self
+    }
+
     pub fn load(self) -> Loaded {
+        let Self {
+            defaults,
+            explicit,
+            aliases,
+        } = self;
+
+        let mut carried = Figment::new();
+        let mut deprecated = Vec::new();
+        for (old, new) in &aliases {
+            let Ok(value) = explicit.find_value(old) else {
+                continue;
+            };
+            if explicit.find_value(new).is_ok() {
+                continue;
+            }
+            carried = carried.merge(Serialized::default(new, value));
+            deprecated.push((old.clone(), new.clone()));
+        }
+
         Loaded {
-            figment: self.figment,
+            figment: defaults.merge(carried).merge(explicit),
+            deprecated,
         }
     }
 }
@@ -115,9 +158,17 @@ impl Loader {
 /// Configuration, merged and ready to be handed out one plugin at a time.
 pub struct Loaded {
     figment: Figment,
+    deprecated: Vec<(String, String)>,
 }
 
 impl Loaded {
+    /// Deprecated keys this configuration actually used, and what replaced
+    /// them. Worth one warning at startup each: silence is how a key nobody
+    /// reads any more goes on looking like it works.
+    pub fn deprecated_keys(&self) -> &[(String, String)] {
+        &self.deprecated
+    }
+
     /// This plugin's slice of the configuration.
     pub fn settings(&self, port: Port, id: &str) -> Settings<'_> {
         Settings {

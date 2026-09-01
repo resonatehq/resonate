@@ -304,3 +304,56 @@ impl ResonateServer for Dead {
         unreachable!("never constructed")
     }
 }
+
+// ─── Migrating a key ─────────────────────────────────────────────────────────
+
+#[test]
+fn a_retired_key_still_works_and_says_so() {
+    let registry = Registry::new().worker(&KAFKA);
+    let loaded = loader(&registry)
+        .alias("messages.kafka", "transports.kafka")
+        .set("messages.kafka.concurrency", "4")
+        .unwrap()
+        .load();
+
+    let config: KafkaConfig = loaded.settings(Port::Worker, "kafka").extract().unwrap();
+    assert_eq!(config.concurrency, 4, "a deployed config keeps working");
+    assert_eq!(
+        loaded.deprecated_keys(),
+        &[("messages.kafka".to_string(), "transports.kafka".to_string())],
+        "and is named once at startup rather than silently honoured forever"
+    );
+}
+
+#[test]
+fn the_current_key_wins_when_a_config_names_both() {
+    let registry = Registry::new().worker(&KAFKA);
+    let loaded = loader(&registry)
+        .alias("messages.kafka", "transports.kafka")
+        .set("messages.kafka.concurrency", "4")
+        .unwrap()
+        .set("transports.kafka.concurrency", "9")
+        .unwrap()
+        .load();
+
+    let config: KafkaConfig = loaded.settings(Port::Worker, "kafka").extract().unwrap();
+    assert_eq!(config.concurrency, 9);
+    assert!(
+        loaded.deprecated_keys().is_empty(),
+        "nothing was carried, so there is nothing to warn about"
+    );
+}
+
+#[test]
+fn an_alias_does_not_outrank_a_plugins_own_default() {
+    // The failure this guards: a legacy key that is merely *absent* must not
+    // shadow the defaults layer, and a default at the new key must not shadow
+    // a value someone actually wrote at the old one.
+    let registry = Registry::new().worker(&KAFKA);
+    let loaded = loader(&registry)
+        .alias("messages.kafka", "transports.kafka")
+        .load();
+    let config: KafkaConfig = loaded.settings(Port::Worker, "kafka").extract().unwrap();
+    assert_eq!(config.concurrency, default_concurrency());
+    assert!(loaded.deprecated_keys().is_empty());
+}
