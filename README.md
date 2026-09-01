@@ -7,7 +7,7 @@
 [![Discord](https://img.shields.io/badge/Discord-join-1EE3CF?style=flat-square&logo=discord&logoColor=white)](https://resonatehq.io/discord)
 [![Docs](https://img.shields.io/badge/docs-resonatehq.io-1EE3CF?style=flat-square)](https://docs.resonatehq.io/)
 
-[Example](#example) · [Console](#console) · [Quickstart](#quickstart) · [Architecture](#architecture) · [Backends](#backends) · [Workers](#workers) · [Plugins](#plugins) · [Deploy](#deploy) · [Docs](https://docs.resonatehq.io/)
+[Example](#example) · [Install](#install-and-run) · [Console](#console) · [Architecture](#architecture) · [Backends](#backends) · [Workers](#workers) · [Plugins](#plugins) · [Deploy](#deploy) · [Docs](https://docs.resonatehq.io/)
 
 </div>
 
@@ -15,19 +15,11 @@
 
 [Resonate](https://resonatehq.io/) is an AI-native, extensible durable execution platform for agentic and classic workloads. Resonate features a dead simple programming model and a dead simple operational model: functions and promises on a single binary. Write normal code and get durable, scalable, and reliable applications.
 
-1. Write durable functions in ordinary code with any of [our language SDKs](#sdks)
-2. Run `resonate dev` while you build — one binary, in memory, nothing else to install
-3. Deploy your workers wherever your code already runs, in-process or out-of-process
-4. Point Resonate at the database you already operate — SQLite, PostgreSQL, or MySQL
-5. Resonate invokes your functions over HTTP or Pub/Sub, persisting every step along the way
-
-No DAGs. No YAML. No new language. You write a function; Resonate makes sure it finishes.
-
 ---
 
 ## Example
 
-A deep research agent — plan the searches, fan them out, synthesize the results:
+A deep research agent: plan the searches, fan them out, synthesize the results.
 
 ```typescript
 async function research(context: Context, question: string) {
@@ -40,17 +32,98 @@ async function research(context: Context, question: string) {
     queries.map((q) => context.rpc(search, q))
   );
   // Synthesize the results
+  const cited = results.filter((r) => r.status === "fulfilled").map((r) => r.value);
   return await context.run(agent,
-    `Write a cited report. ${question}: ${results}`
+    `Write a cited report. ${question}: ${cited}`
   );
 }
 ```
 
-That is the whole orchestration. There is no queue to drain, no state machine to advance, and no scheduler to configure — just `await`.
+That is the whole orchestration — no queue to drain, no state machine to
+advance, no scheduler to configure.
 
-- **`context.run`** executes a function and persists its result. On recovery the step is not run again, its result is read back — you never pay for the same tokens twice.
-- **`context.rpc`** invokes a durable function on another worker, on another machine, in another language. It returns a promise, so ordinary `Promise.allSettled` gives you fan-out with per-branch failure handling.
-- **Everything in between survives.** Kill the worker mid-flight, deploy over it, lose the machine — the function resumes from the last persisted step, minutes or days later.
+- **`context.run`** calls a function and persists its result. On recovery the
+  call is not made again, its result is read back — you never pay for the same
+  tokens twice.
+- **`context.rpc`** calls a function on another worker, on another machine, in
+  another language. It returns a promise, so `Promise.allSettled` gives you
+  fan-out with per-branch failure handling — the same code you would write
+  in-process.
+- **Everything in between survives.** Kill the worker mid-flight and the
+  execution is still there, waiting for the next one to pick it up.
+
+---
+
+## Install and run
+
+**1. Install Resonate**
+
+```shell
+brew install resonatehq/tap/resonate
+```
+
+Or, with Node on the machine, skip the install: every `resonate` command below
+also runs as `npx resonate-cli@latest`.
+
+**2. Install an SDK**
+
+```shell
+npm install @resonatehq/sdk
+```
+
+**3. Write the worker** — `research.ts`
+
+`agent` and `search` are your code: a model call and a search API. Resonate does
+not care what is inside them, only that their results are worth keeping.
+
+```typescript
+import { type Context, type Info, Resonate } from "@resonatehq/sdk/async";
+
+async function agent(info: Info, prompt: string) {
+  // your model call
+}
+
+async function search(info: Info, query: string) {
+  // your search API
+}
+
+async function research(context: Context, question: string) {
+  // as above
+}
+
+const resonate = new Resonate({ url: "http://localhost:8001" });
+resonate.register("research", research);
+resonate.register("search", search);
+resonate.register("agent", agent);
+```
+
+**4. Start Resonate, then the worker**
+
+```shell
+resonate dev
+npx tsx research.ts
+```
+
+`resonate dev` keeps state in memory, for development. `resonate serve` keeps it
+in a database — see [Backends](#backends).
+
+**5. Activate the function**
+
+```shell
+resonate invoke research.1 --func research --arg "What is durable execution?"
+```
+
+```
+[agent]  Plan the searches for: What is durable execution?
+[search] durable execution
+[search] workflow recovery
+[search] sagas
+[agent]  Write a cited report. What is durable execution? ...
+```
+
+Kill the worker while the searches are in flight and start it again. The
+execution waits in the meantime, then resumes: the searches that never finished
+run again, and the plan — already persisted — does not.
 
 ---
 
@@ -74,6 +147,22 @@ Every durable execution, live: status, function, when it was created, when it se
 
 One binary in the middle. Your database underneath, your workers wherever they live, and a plugin for every system you need to reach.
 
+### Build only what you need
+
+The storage engines are cargo features. The default build carries all three;
+name one and the build carries one. At least one is required — a build with
+none fails at compile time rather than at startup.
+
+```shell
+cargo build --release --no-default-features --features sqlite
+```
+
+| Feature | Engine |
+|---|---|
+| `sqlite` | SQLite — what `resonate serve` defaults to, and what `resonate dev` runs in memory |
+| `postgres` | PostgreSQL |
+| `mysql` | MySQL |
+
 ---
 
 ## Why Resonate
@@ -85,72 +174,6 @@ One binary in the middle. Your database underneath, your workers wherever they l
 | **Differentially tested** | Every storage engine is compared step-for-step against an executable oracle on randomized traffic, across SQLite, PostgreSQL, and MySQL, with a snapshot diff after every request. |
 | **One binary** | `brew install`, `resonate serve`, done. No control plane to operate, no cluster to bootstrap. |
 | **Boring where it counts** | Your existing database is the state store. Your existing observability stack gets Prometheus metrics and OpenTelemetry traces. |
-
----
-
-## Quickstart
-
-![Resonate quickstart](./assets/quickstart-banner.png)
-
-**1. Install Resonate**
-
-```shell
-brew install resonatehq/tap/resonate
-```
-
-Or, with Node already on the machine, skip the install: every `resonate` command
-below also runs as `npx resonate-cli@latest`.
-
-**2. Install an SDK**
-
-```shell
-npm install @resonatehq/sdk
-```
-
-**3. Write a durable function** — `countdown.ts`
-
-```typescript
-import { Resonate, type Context } from "@resonatehq/sdk";
-
-function* countdown(context: Context, count: number, delay: number) {
-  for (let i = count; i > 0; i--) {
-    // Run a function, persist its result
-    yield* context.run((context: Context) => console.log(`Countdown: ${i}`));
-    // Sleep
-    yield* context.sleep(delay * 1000);
-  }
-  console.log("Done!");
-}
-
-const resonate = new Resonate({ url: "http://localhost:8001" });
-resonate.register(countdown);
-```
-
-[Working example →](https://github.com/resonatehq-examples/example-quickstart-ts)
-
-**4. Start Resonate, then the worker**
-
-```shell
-resonate serve
-npx ts-node countdown.ts
-```
-
-**5. Activate the function**
-
-```shell
-resonate invoke countdown.1 --func countdown --arg 5 --arg 60
-```
-
-```
-Countdown: 5
-Countdown: 4
-Countdown: 3
-Countdown: 2
-Countdown: 1
-Done!
-```
-
-Kill the worker halfway through. Start it again. The countdown picks up where it left off.
 
 ---
 
@@ -220,6 +243,18 @@ resonate serve
 
 Every release and its artifacts are on the [releases page](https://github.com/resonatehq/resonate/releases).
 
+On start you will see:
+
+```shell
+INFO resonate: Resonate Server starting port=8001
+INFO resonate: Using SQLite backend path=resonate.db
+INFO resonate: SQLite initialized
+INFO resonate: Metrics server listening port=9090
+INFO resonate: Server listening bind=0.0.0.0 port=8001
+```
+
+HTTP on `8001`, metrics on `9090`. These are the defaults every SDK assumes, and both are configurable.
+
 ### npm
 
 ```shell
@@ -234,18 +269,6 @@ JavaScript project that wants Resonate on hand:
 ```shell
 npm install --save-dev resonate-cli
 ```
-
-On start you will see:
-
-```shell
-INFO resonate: Resonate Server starting port=8001
-INFO resonate: Using SQLite backend path=resonate.db
-INFO resonate: SQLite initialized
-INFO resonate: Metrics server listening port=9090
-INFO resonate: Server listening bind=0.0.0.0 port=8001
-```
-
-HTTP on `8001`, metrics on `9090`. These are the defaults every SDK assumes, and both are configurable.
 
 ### Docker
 
