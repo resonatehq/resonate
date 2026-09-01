@@ -62,7 +62,7 @@ settled promise (`done`):
 | field | type | meaning |
 |---|---|---|
 | `v` | int | Format version, currently `1`. A document with a higher `v` is refused rather than misread. |
-| `clk` | int | The origin's high-water `now`, ms. Never decreases, so the origin's view of time is monotone even if a caller's clock regresses. |
+| `clk` | int | The latest `now` observed for the origin, ms. It never decreases and is diagnostic metadata. |
 | `g` | int | Generation — bumped by the shell once per committed write. Diagnostic only. |
 | `og` | string | 16 lowercase hex chars of 64-bit FNV-1a over the origin string. A document whose `og` does not hash the origin it was read under is refused (`OriginMismatch`). |
 | `ta` | int | Deadline of the timer object currently armed for this origin — the minimum of every `pt`/`kt` deadline. Omitted when nothing is armed. |
@@ -156,7 +156,7 @@ The decoded form of a document is `OriginDoc`
 pub struct OriginDoc {
     pub promises: BTreeMap<String, PromiseDoc>,  // by FULL promise id
     pub tasks:    BTreeMap<String, TaskDoc>,     // by full promise id — a task's id IS its promise's id
-    pub clock:    i64,          // high-water `now`; never decreases
+    pub clock:    i64,          // latest observed `now`; never decreases
     pub gen:      u64,          // bumped by the shell per committed write; diagnostic
     pub timer_at: Option<i64>,  // deadline of the timer object armed for this origin
 }

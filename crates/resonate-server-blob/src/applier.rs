@@ -612,13 +612,14 @@ fn decide(loaded: &OriginDoc, batch: &[Work], shared: &Arc<Shared>) -> Decision 
     let mut doc = loaded.clone();
     let mut replies = Vec::with_capacity(batch.len());
     let mut sends = Vec::new();
-    // An origin's view of time never goes backwards, whatever a caller's clock
-    // says.
+    // Preserve each request's time: concurrent requests may reach this actor
+    // out of timestamp order. Track the latest observed time separately for
+    // the document's diagnostic metadata.
     let mut clock = doc.clock;
 
     for work in batch {
-        let now = work.now().max(clock);
-        clock = now;
+        let now = work.now();
+        clock = clock.max(now);
         let fx = match work {
             Work::Request { req, .. } => {
                 let (fx, reply) = handle(&doc, req, now, &shared.cfg.kernel);
@@ -1408,7 +1409,7 @@ mod tests {
     // --- clock ------------------------------------------------------------
 
     #[tokio::test]
-    async fn an_origins_clock_never_goes_backwards() {
+    async fn an_origins_clock_records_latest_time() {
         let store = shared_store();
         let p = pool_with(Arc::clone(&store), Arc::new(MemDocCache::new(4)));
         p.submit(
@@ -1418,15 +1419,17 @@ mod tests {
         )
         .await
         .unwrap();
-        // A caller with a regressed clock must not un-expire anything.
+        // A concurrent caller's timestamp belongs to that operation; it must
+        // not be replaced with the document's latest recorded time.
         let reply = p
             .submit(ORIGIN, create("diff:b", 500_000, json!({})), 1)
             .await
             .unwrap();
-        assert_eq!(
-            reply.data["promise"]["createdAt"], 10_000,
-            "the origin's high-water clock won"
-        );
+        assert_eq!(reply.data["promise"]["createdAt"], 1);
+
+        let stored = store.get(&keys().doc_key(ORIGIN)).await.unwrap().unwrap();
+        let doc = codec::decode(&stored.0, ORIGIN).unwrap();
+        assert_eq!(doc.clock, 10_000);
     }
 
     #[tokio::test]

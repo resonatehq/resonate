@@ -53,8 +53,7 @@ pub struct OriginDoc {
     pub promises: BTreeMap<String, PromiseDoc>,
     /// Tasks by full promise id — a task's id *is* its promise's id.
     pub tasks: BTreeMap<String, TaskDoc>,
-    /// High-water `now` for this origin. Never decreases, so an origin's view
-    /// of time is monotone even if a caller's clock regresses.
+    /// Latest `now` observed for this origin, retained as diagnostic metadata.
     pub clock: i64,
     /// Bumped by the shell once per committed write. Diagnostic only.
     pub gen: u64,
