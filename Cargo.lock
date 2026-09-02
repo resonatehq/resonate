@@ -2701,10 +2701,10 @@ dependencies = [
  "resonate-server-sqlite",
  "resonate-sql",
  "resonate-timer-wheel",
- "resonate-transport-gcps",
- "resonate-transport-http-poll",
- "resonate-transport-http-push",
  "resonate-worker-bash",
+ "resonate-worker-gcps",
+ "resonate-worker-http-poll",
+ "resonate-worker-http-push",
  "serde",
  "serde_json",
  "tokio",
@@ -2753,7 +2753,7 @@ dependencies = [
  "prometheus",
  "resonate-auth",
  "resonate-core",
- "resonate-transport-http-poll",
+ "resonate-worker-http-poll",
  "serde",
  "serde_json",
  "tokio",
@@ -2772,7 +2772,7 @@ dependencies = [
  "resonate-core",
  "resonate-gateway-http",
  "resonate-server-oracle",
- "resonate-transport-http-poll",
+ "resonate-worker-http-poll",
  "rust-embed",
  "serde",
  "serde_json",
@@ -2881,49 +2881,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "resonate-transport-gcps"
-version = "0.9.8"
-dependencies = [
- "async-trait",
- "google-cloud-pubsub",
- "resonate-core",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "resonate-transport-http-poll"
-version = "0.9.8"
-dependencies = [
- "async-trait",
- "fastrand",
- "resonate-plugin",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "resonate-transport-http-push"
-version = "0.9.8"
-dependencies = [
- "async-trait",
- "axum",
- "google-cloud-auth",
- "reqwest 0.12.28",
- "resonate-plugin",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "resonate-worker-bash"
 version = "0.9.8"
 dependencies = [
@@ -2937,6 +2894,49 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "resonate-worker-gcps"
+version = "0.9.8"
+dependencies = [
+ "async-trait",
+ "google-cloud-pubsub",
+ "resonate-core",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "resonate-worker-http-poll"
+version = "0.9.8"
+dependencies = [
+ "async-trait",
+ "fastrand",
+ "resonate-plugin",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "resonate-worker-http-push"
+version = "0.9.8"
+dependencies = [
+ "async-trait",
+ "axum",
+ "google-cloud-auth",
+ "reqwest 0.12.28",
+ "resonate-plugin",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

@@ -22,7 +22,7 @@ use axum::response::IntoResponse;
 use axum::Json;
 use resonate_core::types::ResponseEnvelope;
 use resonate_core::{ResonateGateway, ResonateServer, Unavailable};
-use resonate_transport_http_poll::PollRegistry;
+use resonate_worker_http_poll::PollRegistry;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
