@@ -146,7 +146,10 @@ pub struct CommonArgs {
     pub transports_http_poll_buffer_size: Option<usize>,
 
     /// SSE keepalive interval in seconds (0 = disabled) [default: 30]
-    #[arg(long = "transports-http-poll-keepalive-interval-secs", value_name = "SECS")]
+    #[arg(
+        long = "transports-http-poll-keepalive-interval-secs",
+        value_name = "SECS"
+    )]
     pub transports_http_poll_keepalive_interval_secs: Option<u64>,
 
     // --- HTTP Push Auth ---
