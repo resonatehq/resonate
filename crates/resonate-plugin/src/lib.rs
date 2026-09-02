@@ -29,8 +29,8 @@
 //!         if config.brokers.is_empty() {
 //!             return Err(settings.reject("brokers", "at least one broker is required"));
 //!         }
-//!         Ok(Some(Box::new(move |server| {
-//!             Arc::new(KafkaTransport::new(server, config)) as Arc<dyn ResonateWorker>
+//!         Ok(Some(Box::new(move |deps: WorkerDependencies| {
+//!             Arc::new(KafkaTransport::new(deps.server, config)) as Arc<dyn ResonateWorker>
 //!         })))
 //!     },
 //! );
@@ -56,7 +56,7 @@
 //! // 2. The server, handed that router.
 //! let connect = (chosen.configure)(&config.server(chosen.id))?;
 //! let build = connect().await?;
-//! let server = build(&ServerCtx::new(Arc::clone(&router) as _, debug));
+//! let server = build(ServerDependencies::new(Arc::clone(&router) as _, debug));
 //!
 //! // 3. The workers, each downgrading the server that now exists.
 //! let mut workers = HashMap::new();
@@ -64,7 +64,7 @@
 //!     let Some(build) = (plugin.configure)(&config.worker(plugin.id))? else {
 //!         continue; // turned itself off
 //!     };
-//!     let worker = build(Arc::downgrade(&server));
+//!     let worker = build(WorkerDependencies::new(Arc::downgrade(&server)));
 //!     for scheme in plugin.schemes {
 //!         workers.insert(scheme.to_string(), Arc::clone(&worker));
 //!     }
@@ -114,8 +114,8 @@ pub mod registry;
 pub use config::{Configuration, Loader, Settings};
 pub use error::{ConfigError, RegistryError, StartupError};
 pub use plugin::{
-    GatewayFactory, GatewayPlugin, ServerConnect, ServerCtx, ServerFactory, ServerPlugin,
-    WorkerFactory, WorkerPlugin,
+    GatewayDependencies, GatewayFactory, GatewayPlugin, ServerConnect, ServerDependencies,
+    ServerFactory, ServerPlugin, WorkerDependencies, WorkerFactory, WorkerPlugin,
 };
 pub use registry::Registry;
 

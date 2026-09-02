@@ -17,19 +17,34 @@ use crate::error::{ConfigError, StartupError};
 
 // ─── Worker ──────────────────────────────────────────────────────────────────
 
-/// Build the worker, given the server it reports back to.
+/// What the composition root gives a worker: everything it needs and cannot
+/// read out of its own settings.
 ///
-/// Sync and infallible: everything that can fail belongs in `configure`, and
-/// everything that starts background work belongs in the worker's own `init`.
-/// The handle is the only thing a worker cannot get from its own settings —
-/// everything else it needs it declares, with its own defaults.
+/// Which is one thing. Anything else a worker needs, it declares in its own
+/// section with its own default.
 ///
 /// [`Weak`] deliberately: a router holds its workers and a server holds its
 /// router, so a strong handle back would close a reference cycle and nothing in
 /// it would ever be dropped. Upgrade per message; a failed upgrade means the
 /// server is gone and there is no work worth doing.
-pub type WorkerFactory =
-    Box<dyn FnOnce(Weak<dyn ResonateServer>) -> Arc<dyn ResonateWorker> + Send>;
+#[non_exhaustive]
+pub struct WorkerDependencies {
+    pub server: Weak<dyn ResonateServer>,
+}
+
+impl WorkerDependencies {
+    pub fn new(server: Weak<dyn ResonateServer>) -> Self {
+        Self { server }
+    }
+}
+
+/// Build the worker. Sync and infallible: everything that can fail belongs in
+/// `configure`, and everything that starts background work belongs in the
+/// worker's own `init`.
+///
+/// By value, so the handle can be moved into the worker rather than cloned out
+/// of a borrow.
+pub type WorkerFactory = Box<dyn FnOnce(WorkerDependencies) -> Arc<dyn ResonateWorker> + Send>;
 
 /// A plugin that consumes what a server emits.
 pub struct WorkerPlugin {
@@ -69,8 +84,8 @@ impl WorkerPlugin {
 
 // ─── Server ──────────────────────────────────────────────────────────────────
 
-/// What a server is handed: the two things it cannot read out of its own
-/// settings.
+/// What the composition root gives a server: the two things it needs and cannot
+/// read out of its own settings.
 ///
 /// The router exists before the server and is still empty — its workers are
 /// installed once the server they hold a handle to exists. A server that needs a
@@ -81,21 +96,21 @@ impl WorkerPlugin {
 /// only kind with nowhere else to receive it: a worker and a gateway are handed
 /// it by their own `init`.
 #[non_exhaustive]
-pub struct ServerCtx {
+pub struct ServerDependencies {
     pub router: Arc<dyn ResonateRouter>,
     /// The clock belongs to the caller, so nothing may start work that runs on
     /// wall time.
     pub debug: bool,
 }
 
-impl ServerCtx {
+impl ServerDependencies {
     pub fn new(router: Arc<dyn ResonateRouter>, debug: bool) -> Self {
         Self { router, debug }
     }
 }
 
 /// Build the server, once the router and its workers exist.
-pub type ServerFactory = Box<dyn FnOnce(&ServerCtx) -> Arc<dyn ResonateServer> + Send>;
+pub type ServerFactory = Box<dyn FnOnce(ServerDependencies) -> Arc<dyn ResonateServer> + Send>;
 
 /// Acquire what the server needs — a connection pool, a schema, a session.
 /// Async and fallible, and run before anything else, so a database that will not
@@ -140,14 +155,24 @@ impl ServerPlugin {
 
 // ─── Gateway ─────────────────────────────────────────────────────────────────
 
-/// Build the gateway, given the server it puts requests to.
+/// What the composition root gives a gateway.
 ///
 /// Strong, unlike a worker: a gateway is not in the reference cycle, and it
 /// keeps its server alive for exactly as long as it can still accept a request.
-/// Binding a port belongs in its `init`, not here — a gateway is the last thing
-/// to start.
-pub type GatewayFactory =
-    Box<dyn FnOnce(Arc<dyn ResonateServer>) -> Arc<dyn ResonateGateway> + Send>;
+#[non_exhaustive]
+pub struct GatewayDependencies {
+    pub server: Arc<dyn ResonateServer>,
+}
+
+impl GatewayDependencies {
+    pub fn new(server: Arc<dyn ResonateServer>) -> Self {
+        Self { server }
+    }
+}
+
+/// Build the gateway. Binding a port belongs in its `init`, not here — a gateway
+/// is the last thing to start.
+pub type GatewayFactory = Box<dyn FnOnce(GatewayDependencies) -> Arc<dyn ResonateGateway> + Send>;
 
 /// A plugin that accepts requests from outside and puts them to the server.
 pub struct GatewayPlugin {

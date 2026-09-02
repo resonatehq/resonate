@@ -5,7 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use resonate_plugin::{
     ConfigError, GatewayPlugin, Loader, Registry, RegistryError, ResonateServer, ResonateWorker,
-    ServerPlugin, Settings, StartupError, WorkerFactory, WorkerPlugin,
+    ServerPlugin, Settings, StartupError, WorkerDependencies, WorkerFactory, WorkerPlugin,
 };
 use serde::{Deserialize, Serialize};
 
@@ -66,7 +66,7 @@ fn kafka_configure(settings: &Settings<'_>) -> Result<Option<WorkerFactory>, Con
         // the one place that knows.
         return Err(settings.reject("concurrency", "must be at least 1 (got 0)"));
     }
-    Ok(Some(Box::new(move |_server| {
+    Ok(Some(Box::new(move |_deps: WorkerDependencies| {
         Arc::new(KafkaWorker { config }) as Arc<dyn ResonateWorker>
     })))
 }
@@ -293,8 +293,9 @@ fn the_typed_config_never_leaves_the_plugins_crate() {
         .load();
 
     let factory = (KAFKA.configure)(&loaded.worker("kafka")).unwrap().unwrap();
-    let worker: Arc<dyn ResonateWorker> =
-        factory(std::sync::Weak::<Dead>::new() as std::sync::Weak<dyn ResonateServer>);
+    let worker: Arc<dyn ResonateWorker> = factory(WorkerDependencies::new(
+        std::sync::Weak::<Dead>::new() as std::sync::Weak<dyn ResonateServer>,
+    ));
     // Nothing about KafkaConfig is reachable from here, which is the point.
     let _ = worker;
 }
