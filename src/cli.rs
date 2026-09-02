@@ -283,15 +283,15 @@ impl CommonArgs {
 
         if let Some(mode_str) = self.transports_http_push_auth_mode {
             let mode = match mode_str.as_str() {
-                "bearer" => resonate_worker_http_push::AuthMode::Bearer,
-                "gcp" => resonate_worker_http_push::AuthMode::Gcp,
-                _ => resonate_worker_http_push::AuthMode::None,
+                "bearer" => resonate_transport_http_push::AuthMode::Bearer,
+                "gcp" => resonate_transport_http_push::AuthMode::Gcp,
+                _ => resonate_transport_http_push::AuthMode::None,
             };
             let auth = config
                 .transports
                 .http_push
                 .auth
-                .get_or_insert_with(resonate_worker_http_push::AuthConfig::default);
+                .get_or_insert_with(resonate_transport_http_push::AuthConfig::default);
             auth.mode = mode;
             if let Some(v) = self.transports_http_push_auth_token {
                 auth.token = Some(v);

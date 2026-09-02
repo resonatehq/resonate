@@ -352,15 +352,15 @@ impl Default for TimeoutsConfig {
 pub struct TransportsConfig {
     /// HTTP push transport configuration
     #[serde(default)]
-    pub http_push: resonate_worker_http_push::Config,
+    pub http_push: resonate_transport_http_push::Config,
 
     /// HTTP poll (SSE) transport configuration
     #[serde(default)]
-    pub http_poll: resonate_worker_http_poll::Config,
+    pub http_poll: resonate_transport_http_poll::Config,
 
     /// Google Cloud Pub/Sub transport configuration
     #[serde(default)]
-    pub gcps: resonate_worker_gcps::Config,
+    pub gcps: resonate_transport_gcps::Config,
 
     /// Bash execution transport configuration
     #[serde(default)]

@@ -12,7 +12,7 @@ path = "src/lib.rs"
 [dependencies]
 resonate-auth = { path = "../resonate-auth" }
 resonate-core = { path = "../resonate-core" }
-resonate-worker-http-poll = { path = "../resonate-worker-http-poll" }
+resonate-transport-http-poll = { path = "../resonate-transport-http-poll" }
 async-trait = { workspace = true }
 serde = { workspace = true }
 axum = { version = "0.7", features = ["json"] }

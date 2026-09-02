@@ -1,9 +1,9 @@
 [package]
-name = "resonate-worker-http-poll"
+name = "resonate-transport-http-poll"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Resonate worker: deliver messages to a worker that holds an open SSE connection, for workers that cannot be dialled."
+description = "Resonate transport: deliver messages to a worker that holds an open SSE connection, for workers that cannot be dialled."
 
 [dependencies]
 resonate-plugin = { path = "../resonate-plugin" }

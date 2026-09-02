@@ -1,9 +1,9 @@
 [package]
-name = "resonate-worker-http-push"
+name = "resonate-transport-http-push"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Resonate worker: deliver messages to a worker over HTTP(S), with optional outbound auth."
+description = "Resonate transport: deliver messages to a worker over HTTP(S), with optional outbound auth."
 
 [dependencies]
 resonate-plugin = { path = "../resonate-plugin" }

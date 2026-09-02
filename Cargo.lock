@@ -2701,10 +2701,10 @@ dependencies = [
  "resonate-server-sqlite",
  "resonate-sql",
  "resonate-timer-wheel",
+ "resonate-transport-gcps",
+ "resonate-transport-http-poll",
+ "resonate-transport-http-push",
  "resonate-worker-bash",
- "resonate-worker-gcps",
- "resonate-worker-http-poll",
- "resonate-worker-http-push",
  "serde",
  "serde_json",
  "tokio",
@@ -2753,7 +2753,7 @@ dependencies = [
  "prometheus",
  "resonate-auth",
  "resonate-core",
- "resonate-worker-http-poll",
+ "resonate-transport-http-poll",
  "serde",
  "serde_json",
  "tokio",
@@ -2772,7 +2772,7 @@ dependencies = [
  "resonate-core",
  "resonate-gateway-http",
  "resonate-server-oracle",
- "resonate-worker-http-poll",
+ "resonate-transport-http-poll",
  "rust-embed",
  "serde",
  "serde_json",
@@ -2881,23 +2881,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "resonate-worker-bash"
-version = "0.9.8"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "fastrand",
- "reqwest 0.12.28",
- "resonate-core",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "resonate-worker-gcps"
+name = "resonate-transport-gcps"
 version = "0.9.8"
 dependencies = [
  "async-trait",
@@ -2911,7 +2895,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "resonate-worker-http-poll"
+name = "resonate-transport-http-poll"
 version = "0.9.8"
 dependencies = [
  "async-trait",
@@ -2925,7 +2909,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "resonate-worker-http-push"
+name = "resonate-transport-http-push"
 version = "0.9.8"
 dependencies = [
  "async-trait",
@@ -2937,6 +2921,22 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "resonate-worker-bash"
+version = "0.9.8"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "fastrand",
+ "reqwest 0.12.28",
+ "resonate-core",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "url",
 ]
 
 [[package]]

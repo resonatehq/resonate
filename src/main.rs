@@ -32,7 +32,7 @@ use resonate_server_postgres::PostgresEngine;
 #[cfg(feature = "sqlite")]
 use resonate_server_sqlite::SqliteEngine;
 use resonate_sql::engine::Engine;
-use resonate_worker_http_poll::PollRegistry;
+use resonate_transport_http_poll::PollRegistry;
 use server::Server;
 use std::collections::HashMap;
 
@@ -292,11 +292,11 @@ async fn run_server(config: Config) -> Result<(), String> {
 
         if config.transports.http_push.enabled {
             let worker: Arc<dyn ResonateWorker> =
-                Arc::new(resonate_worker_http_push::HttpPushTransport::new(
+                Arc::new(resonate_transport_http_push::HttpPushTransport::new(
                     server_handle.clone(),
                     config.transports.http_push.clone(),
                 ));
-            for scheme in resonate_worker_http_push::SCHEMES {
+            for scheme in resonate_transport_http_push::SCHEMES {
                 workers.insert((*scheme).to_string(), Arc::clone(&worker));
             }
         } else {
@@ -305,7 +305,7 @@ async fn run_server(config: Config) -> Result<(), String> {
 
         if config.transports.http_poll.enabled {
             workers.insert(
-                resonate_worker_http_poll::SCHEME.to_string(),
+                resonate_transport_http_poll::SCHEME.to_string(),
                 poll_registry.clone(),
             );
         } else {
@@ -314,8 +314,8 @@ async fn run_server(config: Config) -> Result<(), String> {
 
         if config.transports.gcps.enabled {
             workers.insert(
-                resonate_worker_gcps::SCHEME.to_string(),
-                Arc::new(resonate_worker_gcps::GcpsPubSubTransport::new(
+                resonate_transport_gcps::SCHEME.to_string(),
+                Arc::new(resonate_transport_gcps::GcpsPubSubTransport::new(
                     server_handle.clone(),
                     config.transports.gcps.clone(),
                 )),

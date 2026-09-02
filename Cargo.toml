@@ -11,9 +11,9 @@ members = [
     "crates/resonate-server-mysql",
     "crates/resonate-server-oracle",
     "crates/resonate-timer-wheel",
-    "crates/resonate-worker-gcps",
-    "crates/resonate-worker-http-poll",
-    "crates/resonate-worker-http-push",
+    "crates/resonate-transport-gcps",
+    "crates/resonate-transport-http-poll",
+    "crates/resonate-transport-http-push",
     "crates/resonate-worker-bash",
 ]
 
@@ -75,9 +75,9 @@ resonate-server-postgres = { path = "crates/resonate-server-postgres", optional 
 resonate-server-mysql = { path = "crates/resonate-server-mysql", optional = true }
 resonate-server-oracle = { path = "crates/resonate-server-oracle" }
 resonate-timer-wheel = { path = "crates/resonate-timer-wheel" }
-resonate-worker-gcps = { path = "crates/resonate-worker-gcps" }
-resonate-worker-http-poll = { path = "crates/resonate-worker-http-poll" }
-resonate-worker-http-push = { path = "crates/resonate-worker-http-push" }
+resonate-transport-gcps = { path = "crates/resonate-transport-gcps" }
+resonate-transport-http-poll = { path = "crates/resonate-transport-http-poll" }
+resonate-transport-http-push = { path = "crates/resonate-transport-http-push" }
 resonate-worker-bash = { path = "crates/resonate-worker-bash" }
 jsonwebtoken = "9"
 tokio = { version = "1", features = ["full"] }

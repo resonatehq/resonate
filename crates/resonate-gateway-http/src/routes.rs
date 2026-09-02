@@ -25,7 +25,7 @@ use prometheus::{register_counter_vec, register_histogram_vec, CounterVec, Histo
 use resonate_auth::{auth_check, auth_check_token, AuthConfig};
 use resonate_core::types::{self, RequestEnvelope, ResponseEnvelope};
 use resonate_core::{ui, ResonateServer};
-use resonate_worker_http_poll::PollRegistry;
+use resonate_transport_http_poll::PollRegistry;
 
 lazy_static! {
     /// Requests by kind and status. Registered into prometheus' default

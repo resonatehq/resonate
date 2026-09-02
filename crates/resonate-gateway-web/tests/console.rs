@@ -265,9 +265,9 @@ fn merged() -> Router {
     let oracle = Arc::new(SharedOracle::with_preload_limit(10));
     let server: Arc<dyn ResonateServer> = oracle.clone();
     let weak: std::sync::Weak<dyn ResonateServer> = Arc::downgrade(&oracle) as _;
-    let poll_registry = Arc::new(resonate_worker_http_poll::PollRegistry::new(
+    let poll_registry = Arc::new(resonate_transport_http_poll::PollRegistry::new(
         weak,
-        resonate_worker_http_poll::Config {
+        resonate_transport_http_poll::Config {
             enabled: true,
             max_connections: 4,
             buffer_size: 4,

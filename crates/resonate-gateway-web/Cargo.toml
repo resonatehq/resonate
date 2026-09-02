@@ -26,7 +26,7 @@ rust-embed = { version = "8", features = ["debug-embed"] }
 # the binary does. The dependency runs one way only: the gateway knows nothing
 # about a console.
 resonate-gateway-http = { path = "../resonate-gateway-http" }
-resonate-worker-http-poll = { path = "../resonate-worker-http-poll" }
+resonate-transport-http-poll = { path = "../resonate-transport-http-poll" }
 resonate-server-oracle = { path = "../resonate-server-oracle" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tower = { version = "0.5", features = ["util"] }
