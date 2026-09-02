@@ -12,11 +12,15 @@ use resonate_core::{scheme_of, Cause, ResonateRouter, ResonateWorker, Unavailabl
 
 /// Routes a message to the worker registered for its address scheme.
 ///
+/// The [`ResonateRouter`] this binary uses, and the only one there is. Not a
+/// plugin: there is one of it, it is a dozen lines, and nothing about it varies
+/// per deployment.
+///
 /// The router's knowledge of an address stops at the scheme: it reads the
 /// scheme, looks up a worker, and hands over the untouched address string.
 /// Registering a new scheme is therefore the whole cost of adding a worker —
 /// nothing here, and nothing in `core`, has to change.
-pub struct TransportDispatcher {
+pub struct Router {
     /// Written once, at startup, and read on every message after.
     ///
     /// The router is the only participant that starts incomplete, and that is
@@ -28,13 +32,13 @@ pub struct TransportDispatcher {
     workers: OnceLock<HashMap<String, Arc<dyn ResonateWorker>>>,
 }
 
-impl Default for TransportDispatcher {
+impl Default for Router {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl TransportDispatcher {
+impl Router {
     /// A router with nothing to route to yet. Built first, so the server has
     /// something to be handed.
     pub fn new() -> Self {
@@ -63,7 +67,7 @@ impl TransportDispatcher {
     }
 }
 
-impl TransportDispatcher {
+impl Router {
     async fn route_inner(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
         let scheme = scheme_of(address)
             .ok_or_else(|| Unavailable::unroutable(format!("address is not a URI: {address}")))?;
@@ -75,7 +79,7 @@ impl TransportDispatcher {
 }
 
 #[async_trait]
-impl ResonateRouter for TransportDispatcher {
+impl ResonateRouter for Router {
     /// Start every worker, and hand each the debug flag.
     ///
     /// Driven from here rather than from the composition root because this is
@@ -86,7 +90,7 @@ impl ResonateRouter for TransportDispatcher {
     async fn init(&self, debug: bool) -> Result<(), Unavailable> {
         for (scheme, worker) in self.workers().into_iter().flatten() {
             worker.init(debug).await.map_err(|e| {
-                Unavailable::new(format!("transport '{scheme}' failed to start: {e}"))
+                Unavailable::new(format!("worker for '{scheme}' failed to start: {e}"))
             })?;
         }
         Ok(())
@@ -100,7 +104,7 @@ impl ResonateRouter for TransportDispatcher {
     async fn stop(&self) -> Result<(), Unavailable> {
         for (scheme, worker) in self.workers().into_iter().flatten() {
             if let Err(e) = worker.stop().await {
-                tracing::warn!(scheme = %scheme, error = %e, "transport did not stop cleanly");
+                tracing::warn!(scheme = %scheme, error = %e, "worker did not stop cleanly");
             }
         }
         Ok(())
@@ -196,16 +200,16 @@ mod tests {
         })
     }
 
-    fn router_with(scheme: &str, stub: Arc<RecordingWorker>) -> TransportDispatcher {
+    fn router_with(scheme: &str, stub: Arc<RecordingWorker>) -> Router {
         let mut workers: HashMap<String, Arc<dyn ResonateWorker>> = HashMap::new();
         workers.insert(scheme.to_string(), stub);
-        let router = TransportDispatcher::new();
+        let router = Router::new();
         router.install(workers).unwrap();
         router
     }
 
-    fn empty_router() -> TransportDispatcher {
-        let router = TransportDispatcher::new();
+    fn empty_router() -> Router {
+        let router = Router::new();
         router.install(HashMap::new()).unwrap();
         router
     }
@@ -278,7 +282,7 @@ mod tests {
         }
         let mut workers: HashMap<String, Arc<dyn ResonateWorker>> = HashMap::new();
         workers.insert("poll".to_string(), Arc::new(FailingWorker));
-        let router = TransportDispatcher::new();
+        let router = Router::new();
         router.install(workers).unwrap();
         let err = router
             .route("poll://any@g", &execute_msg())
@@ -318,7 +322,7 @@ mod tests {
         // The window between the router being built and its workers arriving.
         // Nothing routes then — no gateway is listening — but it must report
         // rather than panic if anything does.
-        let err = TransportDispatcher::new()
+        let err = Router::new()
             .route("http://example.com/", &execute_msg())
             .await
             .expect_err("no workers yet");
@@ -327,7 +331,7 @@ mod tests {
 
     #[tokio::test]
     async fn workers_are_installed_once() {
-        let router = TransportDispatcher::new();
+        let router = Router::new();
         router.install(HashMap::new()).unwrap();
         router
             .install(HashMap::new())

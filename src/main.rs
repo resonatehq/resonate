@@ -4,8 +4,8 @@ mod deadlines;
 mod mcp;
 mod metrics;
 mod processing;
+mod router;
 mod server;
-mod transport;
 
 use std::sync::Arc;
 
@@ -335,7 +335,7 @@ async fn run_server(config: Config) -> Result<(), String> {
 
         transports = Some(Transports { poll_registry });
 
-        let dispatcher = transport::TransportDispatcher::new();
+        let dispatcher = router::Router::new();
         dispatcher
             .install(workers)
             .expect("the router is built here and nowhere else");
