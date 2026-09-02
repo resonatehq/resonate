@@ -79,14 +79,22 @@
 //! // 5. The gateways, holding the server strongly. Nothing is bound yet.
 //! let gateways = /* (plugin.configure)(&config.gateway(plugin.id), deps)? */;
 //!
-//! // 6. Start. The server first, because a worker that upgrades its handle
-//! //    must find something that can answer. The gateways last, because
-//! //    accepting a request the rest of the process cannot serve is worse than
-//! //    not accepting it.
+//! // 6. Start, in the order things were built.
+//! router.init(debug).await?;
 //! server.init(debug).await?;
-//! router.init(debug).await?;   // each worker's init
-//! for gateway in &gateways { gateway.init(debug).await?; }
+//! for worker in workers.values() { worker.init(debug).await?; }
+//! for gateway in &gateways       { gateway.init(debug).await?; }
 //! ```
+//!
+//! Init order is construction order — one rule, no special case to remember —
+//! and it is also the order that works: a worker that upgrades its handle finds
+//! a server that can already answer, and a gateway binds only once everything
+//! behind it can serve what it accepts. Accepting a request the rest of the
+//! process cannot serve is worse than not accepting it, so the gateways are
+//! last.
+//!
+//! Each thing is started by whoever built it, which is this loop. A router does
+//! not drive its workers' lifecycle just because it holds them.
 //!
 //! Step 4 is what closes the cycle — server holds router, router holds workers,
 //! workers hold server — and the router is the only participant that starts
@@ -98,9 +106,12 @@
 //! would ever be dropped. Upgrade per message: a failed upgrade means the server
 //! is gone and there is no work worth doing.
 //!
-//! Shutdown runs backwards, with one exception: the gateways stop first, then
-//! the workers, then the server — but a gateway's drain can be waiting on a
-//! stream only a worker can release, so in practice the gateway is stopped last.
+//! Shutdown is not the mirror image, and the exception is load-bearing: a
+//! gateway's graceful drain can be waiting on a long-lived response that only a
+//! worker's `stop` releases, so stopping the gateway first would deadlock. The
+//! workers stop, then the server, then the router, and the gateway last — which
+//! also means a client gets a 503 rather than a closed socket while in-flight
+//! work drains.
 //!
 //! # Assembling a binary
 //!
