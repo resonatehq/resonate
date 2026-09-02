@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use resonate_core::types::{
     PromiseState, RequestEnvelope, RequestHead, ResponseEnvelope, SUPPORTED_VERSIONS,
 };
-use resonate_server_oracle::SharedOracle;
+use resonate_oracle::SharedOracle;
 use resonate_sql::engine::{Engine, Input};
 use serde_json::{json, Value};
 

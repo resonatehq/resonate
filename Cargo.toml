@@ -9,7 +9,7 @@ members = [
     "crates/resonate-server-sqlite",
     "crates/resonate-server-postgres",
     "crates/resonate-server-mysql",
-    "crates/resonate-server-oracle",
+    "crates/resonate-oracle",
     "crates/resonate-timer-wheel",
     "crates/resonate-transport-gcps",
     "crates/resonate-transport-http-poll",
@@ -73,7 +73,7 @@ resonate-sql = { path = "crates/resonate-sql" }
 resonate-server-sqlite = { path = "crates/resonate-server-sqlite", optional = true }
 resonate-server-postgres = { path = "crates/resonate-server-postgres", optional = true }
 resonate-server-mysql = { path = "crates/resonate-server-mysql", optional = true }
-resonate-server-oracle = { path = "crates/resonate-server-oracle" }
+resonate-oracle = { path = "crates/resonate-oracle" }
 resonate-timer-wheel = { path = "crates/resonate-timer-wheel" }
 resonate-transport-gcps = { path = "crates/resonate-transport-gcps" }
 resonate-transport-http-poll = { path = "crates/resonate-transport-http-poll" }

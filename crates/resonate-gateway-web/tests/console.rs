@@ -12,7 +12,7 @@ use axum::Router;
 use http_body_util::BodyExt;
 use resonate_core::ResonateServer;
 use resonate_gateway_web::{ConsoleState, MOUNT, RPC_PATH};
-use resonate_server_oracle::SharedOracle;
+use resonate_oracle::SharedOracle;
 use serde_json::{json, Value};
 use tower::ServiceExt;
 

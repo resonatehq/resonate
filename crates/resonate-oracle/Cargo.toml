@@ -1,9 +1,14 @@
 [package]
-name = "resonate-server-oracle"
+name = "resonate-oracle"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Resonate server: the reference model, in memory. What the differential compares every other server against."
+description = "Resonate's reference model, in memory: what the differential compares every server against."
+
+# Not resonate-server-*. That prefix means a server plugin you register and
+# run, and next to resonate-server-postgres and -mysql it would read as an
+# Oracle Database backend, which is the opposite of what this is. It satisfies
+# ResonateServer so the comparison can run through the port, and that is all.
 
 [dependencies]
 resonate-sql = { path = "../resonate-sql" }

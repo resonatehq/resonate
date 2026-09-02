@@ -2695,8 +2695,8 @@ dependencies = [
  "resonate-core",
  "resonate-gateway-http",
  "resonate-gateway-web",
+ "resonate-oracle",
  "resonate-server-mysql",
- "resonate-server-oracle",
  "resonate-server-postgres",
  "resonate-server-sqlite",
  "resonate-sql",
@@ -2771,7 +2771,7 @@ dependencies = [
  "resonate-auth",
  "resonate-core",
  "resonate-gateway-http",
- "resonate-server-oracle",
+ "resonate-oracle",
  "resonate-transport-http-poll",
  "rust-embed",
  "serde",
@@ -2779,6 +2779,21 @@ dependencies = [
  "tokio",
  "tower",
  "tracing",
+]
+
+[[package]]
+name = "resonate-oracle"
+version = "0.9.8"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "resonate-core",
+ "resonate-sql",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "validator",
 ]
 
 [[package]]
@@ -2803,21 +2818,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sqlx",
- "tokio",
- "tracing",
- "validator",
-]
-
-[[package]]
-name = "resonate-server-oracle"
-version = "0.9.8"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "resonate-core",
- "resonate-sql",
- "serde",
- "serde_json",
  "tokio",
  "tracing",
  "validator",

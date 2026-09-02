@@ -37,8 +37,8 @@ use resonate_core::types::{RequestEnvelope, RequestHead, ResponseEnvelope, SUPPO
 
 use resonate_sql::engine::{Engine, Input, Outgoing, Scheduled, Timeout};
 
+use resonate_oracle::{Oracle, SharedOracle};
 use resonate_server_mysql::MysqlEngine;
-use resonate_server_oracle::{Oracle, SharedOracle};
 use resonate_server_postgres::PostgresEngine;
 use resonate_server_sqlite::SqliteEngine;
 use serde_json::{json, Value};

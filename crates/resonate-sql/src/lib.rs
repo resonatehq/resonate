@@ -6,7 +6,7 @@
 //! There is no shared engine over a storage trait — lifting the state machine
 //! into shared Rust would cost Postgres its single-round-trip CTE, which is the
 //! property that makes it fast. What keeps them honest is the differential, run
-//! in lock step against `resonate-server-oracle`.
+//! in lock step against `resonate-oracle`.
 //!
 //! So what is here is what all three genuinely share and nothing more: the
 //! [`engine::Engine`] contract they implement, the error they report, the
