@@ -78,7 +78,7 @@ struct KafkaWorker {
 
 #[async_trait]
 impl ResonateWorker for KafkaWorker {
-    async fn send(
+    async fn process(
         &self,
         _address: &str,
         _msg: &resonate_core::types::Message,

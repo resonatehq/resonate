@@ -261,7 +261,7 @@ impl ResonateWorker for GcpsPubSubTransport {
         Ok(())
     }
 
-    async fn send(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
+    async fn process(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
         let addr = GcpsAddress::parse(address)?;
         let payload = serde_json::to_value(msg)
             .map_err(|e| Unavailable::new(format!("cannot serialize message: {e}")))?;

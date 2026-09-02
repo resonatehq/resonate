@@ -358,7 +358,7 @@ impl ResonateWorker for HttpPushTransport {
 
     /// The address is the URL verbatim; the router has already guaranteed the
     /// scheme is `http` or `https`.
-    async fn send(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
+    async fn process(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
         let payload = serde_json::to_value(msg)
             .map_err(|e| Unavailable::new(format!("cannot serialize message: {e}")))?;
         HttpPushTransport::send(

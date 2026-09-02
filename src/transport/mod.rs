@@ -33,7 +33,7 @@ impl TransportDispatcher {
         let worker = self.workers.get(&scheme).ok_or_else(|| {
             Unavailable::unroutable(format!("no worker registered for scheme '{scheme}'"))
         })?;
-        worker.send(address, msg).await
+        worker.process(address, msg).await
     }
 }
 
@@ -127,7 +127,7 @@ pub mod stubs {
 
     #[async_trait]
     impl ResonateWorker for RecordingWorker {
-        async fn send(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
+        async fn process(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
             let value = serde_json::to_value(msg).expect("message serializes");
             self.calls
                 .lock()
@@ -231,7 +231,7 @@ mod tests {
         struct FailingWorker;
         #[async_trait]
         impl ResonateWorker for FailingWorker {
-            async fn send(&self, _a: &str, _m: &Message) -> Result<(), Unavailable> {
+            async fn process(&self, _a: &str, _m: &Message) -> Result<(), Unavailable> {
                 Err(Unavailable::new("worker said no"))
             }
         }

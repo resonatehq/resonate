@@ -274,7 +274,7 @@ impl ResonateWorker for PollRegistry {
         Ok(())
     }
 
-    async fn send(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
+    async fn process(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
         let addr = PollAddress::parse(address)?;
         // Serialize via `Value` rather than straight from the struct. serde_json
         // has no `preserve_order`, so a `Value` map is a BTreeMap and emits keys

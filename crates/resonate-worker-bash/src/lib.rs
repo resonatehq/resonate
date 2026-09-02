@@ -242,7 +242,7 @@ impl ResonateWorker for BashExecTransport {
         Ok(())
     }
 
-    async fn send(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
+    async fn process(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
         BashExecTransport::send(self, address, msg).await
     }
 }
