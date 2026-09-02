@@ -756,7 +756,8 @@ mod tests {
 
     fn no_server() -> resonate_plugin::WorkerDependencies {
         resonate_plugin::WorkerDependencies::new(
-            std::sync::Weak::<NoopServer>::new() as std::sync::Weak<dyn ResonateServer>
+            std::sync::Weak::<NoopServer>::new() as std::sync::Weak<dyn ResonateServer>,
+            resonate_plugin::Routes::new(),
         )
     }
 

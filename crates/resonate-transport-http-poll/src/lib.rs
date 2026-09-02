@@ -41,8 +41,24 @@ fn configure(
     if config.max_connections == 0 {
         return Err(settings.reject("max_connections", "must be at least 1 (got 0)"));
     }
-    Ok(Some(PollRegistry::new(deps.server, config)))
+    let registry = PollRegistry::new(deps.server, config);
+
+    // The inbound half. A worker that cannot be dialled dials in, so this
+    // transport needs an HTTP endpoint — but it does not need a *listener*.
+    // The gateway has one, and one port is what makes the endpoint reachable
+    // wherever the protocol is.
+    let handler = Arc::clone(&registry);
+    deps.routes.add(PLUGIN.id(), move |auth| {
+        Router::new()
+            .route(POLL_PATH, get(handle))
+            .with_state((handler, auth))
+    });
+
+    Ok(Some(registry))
 }
+
+/// Where workers connect. On the gateway's listener, alongside the protocol.
+pub const POLL_PATH: &str = "/poll/:group/:id";
 
 /// Everything under `[workers.transport_http_poll]`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -58,26 +74,9 @@ pub struct Config {
     /// Per-connection message buffer [default: 100]
     #[serde(default = "default_buffer_size")]
     pub buffer_size: usize,
-
-    /// Where to listen for workers [default: 0.0.0.0:8002].
-    ///
-    /// This transport has an inbound half — a worker that cannot be dialled
-    /// dials in — so it binds its own socket rather than asking a gateway to
-    /// host a route for it. One plugin, one listener, and no plugin reaching
-    /// into another.
-    #[serde(default = "default_bind")]
-    pub bind: String,
-
-    /// Who may connect. Absent means anyone.
-    ///
-    /// Its own, because it enforces it: the policy a gateway applies to the
-    /// worker endpoint is that gateway's, and this is a different door.
-    #[serde(default)]
-    pub auth: Option<resonate_auth::Config>,
-}
-
-fn default_bind() -> String {
-    "0.0.0.0:8002".to_string()
+    // No `bind` and no `auth`. This transport serves a route, not a socket:
+    // the gateway that owns the listener owns the address it is reachable at
+    // and the policy that admits a connection to it. One door, one lock.
 }
 
 fn default_enabled() -> bool {
@@ -96,8 +95,6 @@ impl Default for Config {
             enabled: default_enabled(),
             max_connections: default_max_connections(),
             buffer_size: default_buffer_size(),
-            bind: default_bind(),
-            auth: None,
         }
     }
 }
@@ -155,20 +152,7 @@ pub struct PollConnection {
 }
 
 /// Manages all active poll connections, grouped by group name.
-/// The listener, once `init` has bound it, and the switch that ends it.
-struct Serving {
-    task: tokio::task::JoinHandle<()>,
-    shutdown: tokio::sync::oneshot::Sender<()>,
-}
-
 pub struct PollRegistry {
-    config: Config,
-    serving: std::sync::Mutex<Option<Serving>>,
-    /// Where `init` actually bound. Worth keeping because `bind` may name port
-    /// 0, and then the configured address is not the one anything can reach.
-    bound: std::sync::Mutex<Option<std::net::SocketAddr>>,
-    /// A handle to itself, for the listener it serves from.
-    this: Weak<PollRegistry>,
     /// group -> [connection]
     connections: Mutex<HashMap<String, Vec<Arc<PollConnection>>>>,
     /// Monotonically increasing counter for unique connection IDs.
@@ -185,25 +169,15 @@ pub struct PollRegistry {
 }
 
 impl PollRegistry {
-    /// `Arc`, because the listener it starts in `init` serves from a handle to
-    /// itself. That cycle is this crate's own business.
+    /// `Arc`, because the route registered for it holds one.
     pub fn new(server: Weak<dyn ResonateServer>, config: Config) -> Arc<Self> {
-        Arc::new_cyclic(|this| Self {
-            this: this.clone(),
+        Arc::new(Self {
             connections: Mutex::new(HashMap::new()),
             next_conn_id: AtomicU64::new(1),
             max_connections: config.max_connections,
             buffer_size: config.buffer_size,
-            config,
-            serving: std::sync::Mutex::new(None),
-            bound: std::sync::Mutex::new(None),
             server,
         })
-    }
-
-    /// Where the listener is, once `init` has bound it.
-    pub fn local_addr(&self) -> Option<std::net::SocketAddr> {
-        *self.bound.lock().expect("poll bound mutex")
     }
 
     /// How many connections are open, across every group.
@@ -341,70 +315,27 @@ impl PollRegistry {
 
 #[async_trait::async_trait]
 impl ResonateWorker for PollRegistry {
-    /// Bind and serve the endpoint workers dial.
-    ///
-    /// The connections it accepts are what `process` later writes into, so
-    /// nothing can be delivered before this. A port already taken is a startup
-    /// failure, which is the whole reason binding belongs here.
-    async fn init(&self, _debug: bool) -> Result<(), Unavailable> {
-        let auth = match &self.config.auth {
-            Some(cfg) => Some(Arc::new(
-                cfg.load()
-                    .map_err(|e| Unavailable::new(format!("poll auth: {e}")))?,
-            )),
-            None => None,
-        };
-        let listener = tokio::net::TcpListener::bind(&self.config.bind)
-            .await
-            .map_err(|e| Unavailable::new(format!("poll cannot bind {}: {e}", self.config.bind)))?;
-        if let Ok(addr) = listener.local_addr() {
-            *self.bound.lock().expect("poll bound mutex") = Some(addr);
-        }
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        let this = self
-            .this
-            .upgrade()
-            .ok_or_else(|| Unavailable::new("poll transport was dropped during startup"))?;
-        let task = tokio::spawn(serve(this, auth, listener, rx));
-        *self.serving.lock().expect("poll serving mutex") = Some(Serving { task, shutdown: tx });
-        tracing::info!(bind = %self.config.bind, "Poll listener started");
-        Ok(())
-    }
+    // No `init`. There is nothing to open: the route was registered during
+    // `configure` and the gateway binds the socket it lives on.
 
-    /// Drop every connection, then close the listener — in that order.
+    /// Drop every connection, which is what ends the SSE streams.
     ///
     /// Each registered connection owns the sending half of its stream's
     /// channel. Clearing the map drops them all, the handler's `recv` returns
-    /// `None`, and the stream finishes on its own — so the transport tears down
-    /// its own connections and nothing outside it needs a say.
+    /// `None`, and the stream finishes on its own — so this transport tears
+    /// down its own connections and nothing outside it needs a say.
     ///
-    /// The order is not a preference. Doing it the other way round deadlocks,
-    /// and `a_connected_worker_does_not_wedge_stop` is what says so.
+    /// That is also what lets the gateway stop *after* the workers: axum's
+    /// graceful shutdown waits for every in-flight response, and an SSE
+    /// response is in flight until its stream ends. By the time the gateway
+    /// drains, there are none left for it to wait on.
+    /// `a_drained_registry_ends_its_streams` says so.
     async fn stop(&self) -> Result<(), Unavailable> {
-        // The connections first, and the order is the whole of it. axum's
-        // graceful shutdown stops accepting and then waits for every in-flight
-        // response; an SSE response is in flight until its stream ends, and
-        // these streams end when their sender drops, and this registry is the
-        // only thing holding one. Awaiting the listener before clearing the map
-        // would be waiting on a stream only the line below can finish.
-        let n = {
-            let mut conns = self.connections.lock().await;
-            let n: usize = conns.values().map(|v| v.len()).sum();
-            conns.clear();
-            n
-        };
+        let mut conns = self.connections.lock().await;
+        let n: usize = conns.values().map(|v| v.len()).sum();
+        conns.clear();
         if n > 0 {
             tracing::info!(connections = n, "Poll connections closed");
-        }
-
-        // Then the listener, whose drain is now finite.
-        //
-        // Taken out of the guard before the await: a std MutexGuard is not
-        // Send, and holding one across one would make this future un-spawnable.
-        let serving = self.serving.lock().expect("poll serving mutex").take();
-        if let Some(serving) = serving {
-            let _ = serving.shutdown.send(());
-            let _ = serving.task.await;
         }
         Ok(())
     }
@@ -441,23 +372,9 @@ use axum::routing::get;
 use axum::Router;
 
 /// Serve `GET /poll/{group}/{id}` until `stop`.
-async fn serve(
-    registry: Arc<PollRegistry>,
-    auth: Option<Arc<resonate_auth::AuthConfig>>,
-    listener: tokio::net::TcpListener,
-    shutdown: tokio::sync::oneshot::Receiver<()>,
-) {
-    let app = Router::new()
-        .route("/poll/:group/:id", get(handle))
-        .with_state((registry, auth));
-    let served = axum::serve(listener, app).with_graceful_shutdown(async move {
-        let _ = shutdown.await;
-    });
-    if let Err(e) = served.await {
-        tracing::error!(error = %e, "Poll listener stopped");
-    }
-}
-
+/// What the handler needs: the registry to register into, and the gateway's
+/// auth policy — handed over when it built these routes, so this endpoint
+/// admits exactly whom the protocol endpoint admits.
 type PollState = (Arc<PollRegistry>, Option<Arc<resonate_auth::AuthConfig>>);
 
 async fn handle(
@@ -539,7 +456,8 @@ mod tests {
 
     fn no_server() -> resonate_plugin::WorkerDependencies {
         resonate_plugin::WorkerDependencies::new(
-            std::sync::Weak::<NoopServer>::new() as std::sync::Weak<dyn ResonateServer>
+            std::sync::Weak::<NoopServer>::new() as std::sync::Weak<dyn ResonateServer>,
+            resonate_plugin::Routes::new(),
         )
     }
 
@@ -584,55 +502,64 @@ mod tests {
         assert_eq!(err.key, "workers.transport_http_poll.buffer_size");
     }
 
-    /// The bug this pins: `stop` used to await the listener before clearing the
-    /// map, and axum's graceful shutdown waits for every in-flight response. An
-    /// SSE response is in flight until its stream ends, and the stream ends
-    /// when this registry drops its sender — so the await was waiting on
-    /// something only the line after it could cause.
+    /// Registering a route is what this transport does instead of binding.
     ///
-    /// A real connection over a real socket, because that is the only way the
-    /// listener has a connection task to wait on.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn a_connected_worker_does_not_wedge_stop() {
+    /// The gateway serves it, so `configure` has to have put it there before
+    /// any gateway's `init` runs — which is why registration is here and not in
+    /// an `init` of its own.
+    #[test]
+    fn it_registers_a_route_rather_than_taking_a_port() {
+        let config = settings(&[]);
+        let routes = resonate_plugin::Routes::new();
+        let deps = resonate_plugin::WorkerDependencies::new(
+            std::sync::Weak::<NoopServer>::new() as std::sync::Weak<dyn ResonateServer>,
+            Arc::clone(&routes),
+        );
+        (PLUGIN.configure)(&config.worker(&PLUGIN.id()), deps).unwrap();
+
+        let registered = routes.take();
+        assert_eq!(registered.len(), 1);
+        assert_eq!(registered[0].0, "transport_http_poll");
+    }
+
+    /// A transport that is off registers nothing — no dangling endpoint on the
+    /// gateway for a scheme nothing routes to.
+    #[test]
+    fn turning_it_off_takes_the_route_with_it() {
+        let config = settings(&[("workers.transport_http_poll.enabled", "false")]);
+        let routes = resonate_plugin::Routes::new();
+        let deps = resonate_plugin::WorkerDependencies::new(
+            std::sync::Weak::<NoopServer>::new() as std::sync::Weak<dyn ResonateServer>,
+            Arc::clone(&routes),
+        );
+        assert!((PLUGIN.configure)(&config.worker(&PLUGIN.id()), deps)
+            .unwrap()
+            .is_none());
+        assert!(routes.is_empty());
+    }
+
+    /// `stop` ends every stream, which is what lets the gateway drain after it.
+    ///
+    /// axum's graceful shutdown waits for in-flight responses, and an SSE
+    /// response is in flight until its stream ends — and these streams end when
+    /// this registry drops its senders. If `stop` left one alive, the gateway
+    /// would wait on it until the shutdown timeout.
+    #[tokio::test]
+    async fn a_drained_registry_ends_its_streams() {
         let poll = PollRegistry::new(
             std::sync::Weak::<NoopServer>::new() as Weak<dyn ResonateServer>,
-            Config {
-                bind: "127.0.0.1:0".to_string(),
-                ..Config::default()
-            },
+            Config::default(),
         );
-        poll.init(false).await.expect("binds an ephemeral port");
-        let addr = poll.local_addr().expect("bound in init");
+        let (_conn_id, mut rx) = poll.register("default", "w1").await.expect("capacity");
+        assert_eq!(poll.connection_count().await, 1);
 
-        // Hold an SSE connection open, the way a worker does. The socket stays
-        // in scope: dropping it would end the stream for the wrong reason.
-        let mut worker = tokio::net::TcpStream::connect(addr).await.expect("connect");
-        tokio::io::AsyncWriteExt::write_all(
-            &mut worker,
-            b"GET /poll/default/w1 HTTP/1.1\r\nHost: x\r\n\r\n",
-        )
-        .await
-        .expect("request");
+        poll.stop().await.expect("stops");
 
-        // Wait for the registry to take it, so the test is not racing the
-        // handler into asserting on an empty map.
-        for _ in 0..300 {
-            if poll.connection_count().await > 0 {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-        assert_eq!(
-            poll.connection_count().await,
-            1,
-            "the connection registered"
-        );
-
-        tokio::time::timeout(std::time::Duration::from_secs(5), poll.stop())
-            .await
-            .expect("stop must not wait on a stream only it can end")
-            .expect("stops cleanly");
         assert_eq!(poll.connection_count().await, 0);
+        assert!(
+            rx.recv().await.is_none(),
+            "the stream must see its channel close, or the gateway waits on it"
+        );
     }
 
     #[test]

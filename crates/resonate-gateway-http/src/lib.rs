@@ -45,7 +45,11 @@ fn configure(
     if !config.enabled {
         return Ok(None);
     }
-    Ok(Some(Arc::new(HttpGateway::new(deps.server, config))))
+    Ok(Some(Arc::new(HttpGateway::new(
+        deps.server,
+        deps.routes,
+        config,
+    ))))
 }
 
 /// Where to listen, and how to behave once we do.
@@ -121,24 +125,52 @@ pub struct HttpGateway {
     /// handed to the routes when `init` builds them. Strong, unlike a worker's
     /// handle: nothing points back at a gateway, so there is no cycle to break.
     server: Arc<dyn ResonateServer>,
+    /// What every other plugin asked to have served here.
+    ///
+    /// This gateway owns the only listener, so it owns everyone's HTTP: the
+    /// poll transport's SSE endpoint, the console, and whatever a worker
+    /// registers for a callback. They are merged in `init` — see there for why
+    /// it cannot be earlier.
+    routes: Arc<resonate_plugin::Routes>,
     serving: std::sync::Mutex<Option<Serving>>,
 }
 
 impl HttpGateway {
     /// Build the gateway. Nothing is bound and nothing runs until `init`.
-    pub fn new(server: Arc<dyn ResonateServer>, config: Config) -> Self {
+    pub fn new(
+        server: Arc<dyn ResonateServer>,
+        routes: Arc<resonate_plugin::Routes>,
+        config: Config,
+    ) -> Self {
         Self {
             config,
             server,
+            routes,
             serving: std::sync::Mutex::new(None),
         }
     }
 }
 
 /// Routes, state and layers, in the order a request meets them.
-fn build_app(state: routes::AppState, config: &Config) -> axum::Router {
+///
+/// `extra` is what every other plugin registered. Merged before the layers, so
+/// a registered route gets the same panic guard, the same tracing and the same
+/// CORS as the protocol's own — a route served here is served on the same terms
+/// as everything else, not through a hole beside them.
+fn build_app(
+    state: routes::AppState,
+    config: &Config,
+    extra: Vec<(String, axum::Router)>,
+) -> axum::Router {
     let abort_on_panic = config.abort_on_panic;
-    let mut app = routes::api_routes()
+    let mut merged = routes::api_routes().with_state(state);
+    for (plugin, router) in extra {
+        tracing::info!(plugin = %plugin, "Serving routes for plugin");
+        // Panics on a path collision, naming neither side — which is why the
+        // line above names the plugin whose routes are going in.
+        merged = merged.merge(router);
+    }
+    let mut app = merged
         .layer(tower_http::catch_panic::CatchPanicLayer::custom(
             move |err: Box<dyn std::any::Any + Send + 'static>| {
                 let message = if let Some(s) = err.downcast_ref::<&str>() {
@@ -168,8 +200,7 @@ fn build_app(state: routes::AppState, config: &Config) -> axum::Router {
                 .on_failure(
                     tower_http::trace::DefaultOnFailure::new().level(tracing::Level::ERROR),
                 ),
-        )
-        .with_state(state);
+        );
     if let Some(layer) = cors_layer(&config.cors_allow_origins) {
         app = app.layer(layer);
     }
@@ -216,12 +247,28 @@ impl ResonateGateway for HttpGateway {
                 None
             }
         };
+        // Every other plugin's routes, built now that the auth policy exists.
+        // This is why registration is a builder and not a router: a route that
+        // must authenticate the same way as the protocol cannot be built before
+        // the key has been read, and reading it is what `init` is for.
+        //
+        // It is also why this happens here rather than in `configure`: by the
+        // time any gateway starts, every plugin has been configured, so nothing
+        // can register after this drains the list.
+        let extra: Vec<(String, axum::Router)> = self
+            .routes
+            .take()
+            .into_iter()
+            .map(|(plugin, build)| (plugin, build(auth.clone())))
+            .collect();
+
         let app = build_app(
             routes::AppState {
                 server: Arc::clone(&self.server),
                 auth,
             },
             &self.config,
+            extra,
         );
 
         let listener = tokio::net::TcpListener::bind(&self.config.bind)

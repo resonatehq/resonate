@@ -90,30 +90,9 @@ pub struct Config {
     #[serde(default = "yes")]
     pub enabled: bool,
 
-    /// Where to listen [default: 0.0.0.0:8003].
-    ///
-    /// Its own port, because a plugin owns what it owns. It used to be merged
-    /// into the HTTP gateway's router, which meant the composition root had to
-    /// know that the console was routes rather than a gateway, and had to hand
-    /// one plugin's routes to another.
-    #[serde(default = "default_bind")]
-    pub bind: String,
-
-    /// Who may reach it. Its own, because it enforces it.
-    #[serde(default)]
-    pub auth: Option<resonate_auth::Config>,
-
-    /// Abort the process when a handler panics, rather than answering 500.
-    ///
-    /// The same setting the HTTP gateway carries, and for the same reason: this
-    /// edge writes. `promise.settle` (cancel) and `promise.create` (invoke)
-    /// arrive here as the protocol's own requests, so for a single-process
-    /// store a panic mid-transaction can leave in-memory state the next request
-    /// would read. A guarantee with one write path inside it and one outside is
-    /// not a guarantee.
-    #[serde(default)]
-    pub abort_on_panic: bool,
-
+    // No `bind`, no `auth` and no `abort_on_panic`. The console serves routes,
+    // not a socket: the gateway that owns the listener owns the address, the
+    // policy that admits a request, and the panic guard over the handlers.
     /// Answer `GET /` with a redirect to the console.
     ///
     /// The API's root is `POST /`, so a `GET` there is a person with a
@@ -127,17 +106,10 @@ fn yes() -> bool {
     true
 }
 
-fn default_bind() -> String {
-    "0.0.0.0:8003".to_string()
-}
-
 impl Default for Config {
     fn default() -> Self {
         Self {
             enabled: true,
-            bind: default_bind(),
-            auth: None,
-            abort_on_panic: false,
             redirect_root: true,
         }
     }
@@ -151,37 +123,7 @@ pub struct ConsoleState {
     pub auth: Option<Arc<AuthConfig>>,
 }
 
-/// Turn a panic in a handler into a 500, or into an abort.
-///
-/// The same layer the HTTP gateway applies, because this edge carries the same
-/// writes — see [`Config::abort_on_panic`]. Written inline rather than returned
-/// from a helper: `CatchPanicLayer::custom` is generic over the responder, and
-/// an `impl Trait` return loses the bounds `Router::layer` needs.
-macro_rules! panic_guard {
-    ($abort:expr) => {{
-        let abort = $abort;
-        tower_http::catch_panic::CatchPanicLayer::custom(
-            move |err: Box<dyn std::any::Any + Send + 'static>| {
-                let message = if let Some(s) = err.downcast_ref::<&str>() {
-                    s.to_string()
-                } else if let Some(s) = err.downcast_ref::<String>() {
-                    s.clone()
-                } else {
-                    "internal server error".to_string()
-                };
-                tracing::error!(message = %message, "panic in a console handler");
-                if abort {
-                    std::process::abort();
-                }
-                let body =
-                    ResponseEnvelope::error("unknown".to_string(), "0".to_string(), 500, &message);
-                (StatusCode::INTERNAL_SERVER_ERROR, Json(body)).into_response()
-            },
-        )
-    }};
-}
-
-/// The console's routes, with its state and its panic guard already applied.
+/// The console's routes, with its state already applied.
 ///
 /// Its one caller in production is this crate's own [`ResonateGateway::init`];
 /// the tests are the others. It stays generic in the host router's state, and
@@ -207,11 +149,7 @@ where
         router = router.route("/", get(handle_root));
     }
     tracing::info!(mount = MOUNT, "Web console enabled");
-    Some(
-        router
-            .layer(panic_guard!(config.abort_on_panic))
-            .with_state(state),
-    )
+    Some(router.with_state(state))
 }
 
 /// A browser at the API's root wants the console.
@@ -356,90 +294,52 @@ pub fn ui_kinds() -> &'static [&'static str] {
     ui::KINDS
 }
 
-// ─── The gateway ─────────────────────────────────────────────────────────────
+// ─── The plugin ───────────────────────────────────────────────────────────────
 
-/// This console, as a plugin. Its own listener, its own port, its own policy.
+/// The console, as a plugin.
+///
+/// A [`GatewayPlugin`](resonate_plugin::GatewayPlugin) because it is an edge —
+/// requests arrive from outside — but not one that listens. It registers its
+/// routes and the HTTP gateway serves them, so the console is on the same port
+/// and the same origin as the protocol it reads. One port, one process, one
+/// origin: no CORS to configure, no second address to publish, and a browser
+/// that reaches the server reaches the console.
 pub static PLUGIN: resonate_plugin::GatewayPlugin =
     resonate_plugin::GatewayPlugin::new(env!("CARGO_PKG_NAME"), configure);
 
-/// Read `[gateways.gateway_web]`, and build it unless it is off.
+/// Read `[gateways.gateway_web]`, and register the console unless it is off.
 fn configure(
     settings: &resonate_plugin::Settings<'_>,
     deps: resonate_plugin::GatewayDependencies,
 ) -> Result<Option<Arc<dyn resonate_plugin::ResonateGateway>>, resonate_plugin::ConfigError> {
     let config: Config = settings.extract()?;
     if !config.enabled {
+        tracing::info!("Web console disabled");
         return Ok(None);
     }
-    Ok(Some(Arc::new(Console {
-        config,
-        server: deps.server,
-        serving: std::sync::Mutex::new(None),
-    })))
+
+    let server = Arc::clone(&deps.server);
+    deps.routes.add(PLUGIN.id(), move |auth| {
+        // `expect`: `enabled` was checked three lines up, and nothing can have
+        // changed it — the config is owned by this closure.
+        routes(&config, ConsoleState { server, auth }).expect("the console is enabled")
+    });
+
+    // `Some`, though there is nothing to start. The composition root reads
+    // `None` as "this plugin turned itself off" and says so in the log, which
+    // would be a lie about a console that is serving. What comes back is the
+    // console as a thing that exists, with the trait's own do-nothing `init`
+    // and `stop`: it has no socket and no task, so there is nothing to drive.
+    Ok(Some(Arc::new(Console)))
 }
 
-struct Serving {
-    task: tokio::task::JoinHandle<()>,
-    shutdown: tokio::sync::oneshot::Sender<()>,
-}
+/// The console, as something the composition root can hold.
+///
+/// No `init` and no `stop` — the defaults do nothing, which is the whole
+/// truth about a plugin whose routes are served by another plugin's listener.
+struct Console;
 
-/// The console, serving itself.
-struct Console {
-    config: Config,
-    server: Arc<dyn ResonateServer>,
-    serving: std::sync::Mutex<Option<Serving>>,
-}
-
-#[async_trait::async_trait]
-impl resonate_plugin::ResonateGateway for Console {
-    async fn init(&self, _debug: bool) -> Result<(), resonate_plugin::Unavailable> {
-        let auth = match &self.config.auth {
-            Some(cfg) => Some(Arc::new(cfg.load().map_err(|e| {
-                resonate_plugin::Unavailable::new(format!("console auth: {e}"))
-            })?)),
-            None => None,
-        };
-        let app: Router<()> = routes(
-            &self.config,
-            ConsoleState {
-                server: Arc::clone(&self.server),
-                auth,
-            },
-        )
-        .expect("enabled was checked in configure");
-
-        let listener = tokio::net::TcpListener::bind(&self.config.bind)
-            .await
-            .map_err(|e| {
-                resonate_plugin::Unavailable::new(format!(
-                    "console cannot bind {}: {e}",
-                    self.config.bind
-                ))
-            })?;
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        let task = tokio::spawn(async move {
-            let served = axum::serve(listener, app).with_graceful_shutdown(async move {
-                let _ = rx.await;
-            });
-            if let Err(e) = served.await {
-                tracing::error!(error = %e, "Console listener stopped");
-            }
-        });
-        *self.serving.lock().expect("console serving mutex") = Some(Serving { task, shutdown: tx });
-        tracing::info!(bind = %self.config.bind, mount = MOUNT, "Console listening");
-        Ok(())
-    }
-
-    async fn stop(&self) -> Result<(), resonate_plugin::Unavailable> {
-        // Out of the guard before the await: a std MutexGuard is not Send.
-        let serving = self.serving.lock().expect("console serving mutex").take();
-        if let Some(serving) = serving {
-            let _ = serving.shutdown.send(());
-            let _ = serving.task.await;
-        }
-        Ok(())
-    }
-}
+impl resonate_plugin::ResonateGateway for Console {}
 
 #[cfg(test)]
 mod tests {

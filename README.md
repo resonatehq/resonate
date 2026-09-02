@@ -100,7 +100,7 @@ Done!
 ### 8. Watch it in the console
 
 The server serves a web console on its own port. Open it at
-[http://localhost:8003/console/](http://localhost:8003/console/) — `http://localhost:8003/`
+[http://localhost:8001/console/](http://localhost:8001/console/) — `http://localhost:8001/`
 redirects there — and `countdown.1` is on the list.
 
 The console is three screens: **Durable Executions** (every root promise,
@@ -150,16 +150,17 @@ You will see log output like the following:
 2026-04-02T05:05:32.481540Z  INFO resonate_base: Gateway plugin registered gateway=gateway_http
 2026-04-02T05:05:32.481712Z  INFO resonate_base: Gateway plugin registered gateway=gateway_web
 2026-04-02T05:05:32.481884Z  INFO resonate_base: Gateway plugin registered gateway=gateway_metrics
-2026-04-02T05:05:32.490331Z  INFO resonate_transport_http_poll: Poll listener started bind=0.0.0.0:8002
 2026-04-02T05:05:32.492689Z  INFO resonate_sql::server: Timer and sweep started sweep_interval_ms=60000
+2026-04-02T05:05:32.492715Z  INFO resonate_gateway_http: Serving routes for plugin plugin=transport_http_poll
+2026-04-02T05:05:32.492815Z  INFO resonate_gateway_http: Serving routes for plugin plugin=gateway_web
 2026-04-02T05:05:32.492915Z  INFO resonate_gateway_http: Server listening bind=0.0.0.0:8001
-2026-04-02T05:05:32.493204Z  INFO resonate_gateway_web: Console listening bind=0.0.0.0:8003 mount=/console
 2026-04-02T05:05:32.493388Z  INFO resonate_gateway_metrics: Metrics listening bind=0.0.0.0:9090
 ```
 
-Each of those is a plugin, and each owns its own listener: the protocol on
-8001, the poll (SSE) transport on 8002, the console on 8003, and Prometheus on
-9090.
+Each of those is a plugin. There are two listeners, not five: the HTTP gateway
+serves the protocol on 8001 and every route another plugin registered — the
+poll (SSE) endpoint, the console — so one port is one origin, and Prometheus is
+on 9090 because that is the one an operator exposes differently.
 
 These are the default ports and can be changed via configuration.
 The SDKs are all configured to use these defaults unless otherwise specified.

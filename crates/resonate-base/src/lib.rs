@@ -31,7 +31,7 @@ use std::sync::Arc;
 
 use resonate_core::{ResonateGateway, ResonateRouter, ResonateServer, ResonateWorker};
 use resonate_plugin::{
-    Configuration, GatewayDependencies, Loader, ServerDependencies, WorkerDependencies,
+    Configuration, GatewayDependencies, Loader, Routes, ServerDependencies, WorkerDependencies,
 };
 use serde::{Deserialize, Serialize};
 
@@ -232,8 +232,11 @@ pub fn build(
     config: &Configuration,
     options: &Options,
 ) -> Result<Running, String> {
-    // 1. The router, empty.
+    // 1. The router, empty — and the routes, which start empty too. Every
+    //    plugin that serves HTTP puts its routes here rather than binding a
+    //    socket, and the gateway that has a listener merges them.
     let router = Arc::new(Router::new());
+    let routes = Routes::new();
 
     // 2. The server this binary was pointed at. Nothing is connected yet —
     //    opening the database is `init`'s, like every other port's resource.
@@ -259,15 +262,15 @@ pub fn build(
     // 3. The workers, each downgrading the server that now exists.
     //
     //    Two collections, because they answer different questions: `workers` is
-    //    what was built, one entry per plugin, and `routes` is how to reach it.
-    //    A worker claiming two schemes is in `routes` twice — which is right,
-    //    two schemes reach it — and would be started twice if its lifecycle
-    //    were driven from there. `a_worker_with_two_schemes_starts_once` says
-    //    so.
+    //    what was built, one entry per plugin, and `by_scheme` is how to reach
+    //    it. A worker claiming two schemes is in `by_scheme` twice — which is
+    //    right, two schemes reach it — and would be started twice if its
+    //    lifecycle were driven from there.
+    //    `a_worker_with_two_schemes_starts_once` says so.
     let mut workers: Vec<(String, Arc<dyn ResonateWorker>)> = Vec::new();
-    let mut routes: HashMap<String, Arc<dyn ResonateWorker>> = HashMap::new();
+    let mut by_scheme: HashMap<String, Arc<dyn ResonateWorker>> = HashMap::new();
     for plugin in registry.workers() {
-        let deps = WorkerDependencies::new(Arc::downgrade(&server));
+        let deps = WorkerDependencies::new(Arc::downgrade(&server), Arc::clone(&routes));
         let Some(worker) =
             (plugin.configure)(&config.worker(&plugin.id()), deps).map_err(|e| e.to_string())?
         else {
@@ -275,7 +278,7 @@ pub fn build(
             continue;
         };
         for scheme in plugin.schemes {
-            routes.insert((*scheme).to_string(), Arc::clone(&worker));
+            by_scheme.insert((*scheme).to_string(), Arc::clone(&worker));
         }
         tracing::info!(worker = %plugin.id(), schemes = ?plugin.schemes, "Worker plugin registered");
         workers.push((plugin.id(), worker));
@@ -283,13 +286,13 @@ pub fn build(
 
     // 4. Install them. The router is complete from here and never changes again.
     router
-        .install(routes)
+        .install(by_scheme)
         .map_err(|e| format!("the router is built here and nowhere else: {e}"))?;
 
     // 5. The gateways, holding the server strongly. Nothing is bound yet.
     let mut gateways: Vec<(String, Arc<dyn ResonateGateway>)> = Vec::new();
     for plugin in registry.gateways() {
-        let deps = GatewayDependencies::new(Arc::clone(&server));
+        let deps = GatewayDependencies::new(Arc::clone(&server), Arc::clone(&routes));
         let Some(gateway) =
             (plugin.configure)(&config.gateway(&plugin.id()), deps).map_err(|e| e.to_string())?
         else {

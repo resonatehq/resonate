@@ -138,10 +138,6 @@ pub struct CommonArgs {
     #[arg(long = "transports-http-poll-enabled", value_name = "BOOL")]
     pub transports_http_poll_enabled: Option<bool>,
 
-    /// Address the poll (SSE) transport listens on [default: 0.0.0.0:8002]
-    #[arg(long = "transports-http-poll-bind", value_name = "ADDR")]
-    pub transports_http_poll_bind: Option<String>,
-
     /// Max concurrent poll (SSE) connections [default: 1000]
     #[arg(long = "transports-http-poll-max-connections", value_name = "N")]
     pub transports_http_poll_max_connections: Option<usize>,
@@ -193,10 +189,6 @@ pub struct CommonArgs {
     /// Enable/disable the web console [default: true]
     #[arg(long = "console-enabled", value_name = "BOOL")]
     pub console_enabled: Option<bool>,
-
-    /// Address the web console listens on [default: 0.0.0.0:8003]
-    #[arg(long = "console-bind", value_name = "ADDR")]
-    pub console_bind: Option<String>,
 
     // --- Observability ---
     /// Address the Prometheus endpoint listens on [default: 0.0.0.0:9090]
@@ -256,14 +248,6 @@ fn toml_string(value: &str) -> String {
         .replace('\t', "\\t");
     format!("\"{escaped}\"")
 }
-
-/// The auth policy is enforced by each edge that admits a request, so a flag
-/// that turns auth on has to reach all of them.
-const AUTHENTICATED: &[&str] = &[
-    "gateways.gateway_http",
-    "gateways.gateway_web",
-    "workers.transport_http_poll",
-];
 
 impl CommonArgs {
     /// Turn the flags into configuration overrides.
@@ -358,10 +342,6 @@ impl CommonArgs {
             "workers.transport_http_poll.enabled",
             self.transports_http_poll_enabled,
         );
-        o.maybe_str(
-            "workers.transport_http_poll.bind",
-            self.transports_http_poll_bind,
-        );
         o.maybe(
             "workers.transport_http_poll.max_connections",
             self.transports_http_poll_max_connections,
@@ -425,7 +405,6 @@ impl CommonArgs {
             );
         }
         o.maybe("gateways.gateway_web.enabled", self.console_enabled);
-        o.maybe_str("gateways.gateway_web.bind", self.console_bind);
         o.maybe(
             "gateways.gateway_metrics.enabled",
             self.observability_metrics_enabled,
@@ -435,21 +414,21 @@ impl CommonArgs {
             self.observability_metrics_bind,
         );
 
-        // Auth is one policy, applied by every edge that admits a request.
+        // One policy, on the one edge that admits a request. The console and
+        // the poll transport are routes on this gateway's listener, so they are
+        // behind this key rather than each carrying one of their own.
         //
         // `--auth-iss` and `--auth-aud` narrow a policy rather than turning one
         // on, so they only mean anything alongside a key — but they are written
         // whether or not this invocation supplied one, because the key may have
         // come from the file or the environment. Writing only the claims used
         // to drop them silently in exactly that case.
-        for edge in AUTHENTICATED {
-            o.maybe_str(
-                &format!("{edge}.auth.publickey"),
-                self.auth_publickey.clone(),
-            );
-            o.maybe_str(&format!("{edge}.auth.iss"), self.auth_iss.clone());
-            o.maybe_str(&format!("{edge}.auth.aud"), self.auth_aud.clone());
-        }
+        o.maybe_str(
+            "gateways.gateway_http.auth.publickey",
+            self.auth_publickey.clone(),
+        );
+        o.maybe_str("gateways.gateway_http.auth.iss", self.auth_iss.clone());
+        o.maybe_str("gateways.gateway_http.auth.aud", self.auth_aud.clone());
 
         // Whatever the named flags do not cover.
         for assignment in self.set {

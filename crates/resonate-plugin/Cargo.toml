@@ -7,6 +7,9 @@ description = "The Resonate plugin surface: what a plugin announces, how it is c
 
 [dependencies]
 resonate-core = { path = "../resonate-core" }
+# In the ABI because a registered route is handed the gateway's loaded auth
+# policy — one policy at one edge, rather than a setting per plugin.
+resonate-auth = { path = "../resonate-auth" }
 serde = { workspace = true }
 # Re-exported: a plugin that listens builds its own router, and two
 # semver-major axums in the graph would make those routers different types.

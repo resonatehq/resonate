@@ -24,6 +24,7 @@ use resonate_core::{ResonateGateway, ResonateRouter, ResonateServer, ResonateWor
 
 use crate::config::Settings;
 use crate::error::ConfigError;
+use crate::routes::Routes;
 
 /// A plugin's identity, from its crate name: `resonate-transport-http-poll`
 /// becomes `transport_http_poll`.
@@ -122,11 +123,15 @@ impl ServerPlugin {
 #[non_exhaustive]
 pub struct WorkerDependencies {
     pub server: Weak<dyn ResonateServer>,
+    /// Where to put an HTTP route this worker needs served — a callback
+    /// endpoint, a long-poll connection, anything a peer dials rather than
+    /// receives. See [`Routes`]: a worker never binds a socket of its own.
+    pub routes: Arc<Routes>,
 }
 
 impl WorkerDependencies {
-    pub fn new(server: Weak<dyn ResonateServer>) -> Self {
-        Self { server }
+    pub fn new(server: Weak<dyn ResonateServer>, routes: Arc<Routes>) -> Self {
+        Self { server, routes }
     }
 }
 
@@ -192,11 +197,15 @@ impl WorkerPlugin {
 #[non_exhaustive]
 pub struct GatewayDependencies {
     pub server: Arc<dyn ResonateServer>,
+    /// The routes every plugin registered. A gateway that serves HTTP takes
+    /// them in its `init` and merges them into its own router; one that does
+    /// not — the metrics endpoint — leaves them alone.
+    pub routes: Arc<Routes>,
 }
 
 impl GatewayDependencies {
-    pub fn new(server: Arc<dyn ResonateServer>) -> Self {
-        Self { server }
+    pub fn new(server: Arc<dyn ResonateServer>, routes: Arc<Routes>) -> Self {
+        Self { server, routes }
     }
 }
 

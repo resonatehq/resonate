@@ -129,8 +129,6 @@ services:
       - RESONATE_LEVEL=error
       - RESONATE_DEBUG=true
       - RESONATE_GATEWAYS__GATEWAY_HTTP__AUTH__PUBLICKEY=/etc/resonate/auth/public.pem
-      - RESONATE_GATEWAYS__GATEWAY_WEB__AUTH__PUBLICKEY=/etc/resonate/auth/public.pem
-      - RESONATE_WORKERS__TRANSPORT_HTTP_POLL__AUTH__PUBLICKEY=/etc/resonate/auth/public.pem
     volumes:
       - ../config/auth/dev/public.pem:/etc/resonate/auth/public.pem:ro
     healthcheck:
@@ -159,8 +157,6 @@ services:
       - RESONATE_SERVERS__SERVER_MYSQL__POOL_SIZE=20
       - RESONATE_DEBUG=true
       - RESONATE_GATEWAYS__GATEWAY_HTTP__AUTH__PUBLICKEY=/etc/resonate/auth/public.pem
-      - RESONATE_GATEWAYS__GATEWAY_WEB__AUTH__PUBLICKEY=/etc/resonate/auth/public.pem
-      - RESONATE_WORKERS__TRANSPORT_HTTP_POLL__AUTH__PUBLICKEY=/etc/resonate/auth/public.pem
     volumes:
       - ../config/auth/dev/public.pem:/etc/resonate/auth/public.pem:ro
     healthcheck:
@@ -192,8 +188,6 @@ services:
       - RESONATE_SERVERS__SERVER_POSTGRES__POOL_SIZE=20
       - RESONATE_DEBUG=true
       - RESONATE_GATEWAYS__GATEWAY_HTTP__AUTH__PUBLICKEY=/etc/resonate/auth/public.pem
-      - RESONATE_GATEWAYS__GATEWAY_WEB__AUTH__PUBLICKEY=/etc/resonate/auth/public.pem
-      - RESONATE_WORKERS__TRANSPORT_HTTP_POLL__AUTH__PUBLICKEY=/etc/resonate/auth/public.pem
     volumes:
       - ../config/auth/dev/public.pem:/etc/resonate/auth/public.pem:ro
     healthcheck:

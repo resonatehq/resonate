@@ -2925,6 +2925,7 @@ dependencies = [
  "axum",
  "figment",
  "prometheus",
+ "resonate-auth",
  "resonate-core",
  "serde",
  "tokio",

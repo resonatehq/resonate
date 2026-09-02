@@ -111,7 +111,10 @@ fn kafka_configure(
 /// The dangling handle a worker is given in these tests. A real one is a
 /// `Weak` to the server built at step 2.
 fn no_server() -> WorkerDependencies {
-    WorkerDependencies::new(std::sync::Weak::<Dead>::new() as std::sync::Weak<dyn ResonateServer>)
+    WorkerDependencies::new(
+        std::sync::Weak::<Dead>::new() as std::sync::Weak<dyn ResonateServer>,
+        resonate_plugin::Routes::new(),
+    )
 }
 
 static KAFKA: WorkerPlugin =

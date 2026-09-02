@@ -139,6 +139,7 @@ pub mod config;
 pub mod error;
 pub mod plugin;
 pub mod registry;
+pub mod routes;
 
 pub use registry::Registry;
 
@@ -156,6 +157,7 @@ pub use plugin::{
 
 pub use config::{Configuration, Loader, Settings};
 pub use error::{ConfigError, RegistryError};
+pub use routes::{RouteBuilder, Routes};
 
 // The port traits a plugin implements, re-exported so a plugin crate names one
 // dependency rather than two.
