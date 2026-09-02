@@ -47,7 +47,7 @@ fn default_buffer_size() -> usize {
     100
 }
 fn default_keepalive_interval_secs() -> u64 {
-    30
+    0
 }
 
 impl Default for Config {
@@ -310,8 +310,8 @@ mod tests {
     use super::Config;
 
     #[test]
-    fn keepalive_default_is_30_seconds() {
-        assert_eq!(Config::default().keepalive_interval_secs, 30);
+    fn keepalive_default_is_zero_seconds() {
+        assert_eq!(Config::default().keepalive_interval_secs, 0);
     }
 
     #[test]
@@ -321,14 +321,5 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(config.keepalive_interval_secs, 42);
-    }
-
-    #[test]
-    fn keepalive_zero_is_allowed() {
-        let config = Config {
-            keepalive_interval_secs: 0,
-            ..Default::default()
-        };
-        assert_eq!(config.keepalive_interval_secs, 0);
     }
 }
