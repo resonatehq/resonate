@@ -1,12 +1,27 @@
+//! The router: one worker per address scheme, and the counter that sees every
+//! message.
+
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
-
-use crate::metrics;
+use lazy_static::lazy_static;
+use resonate_plugin::prometheus::{register_counter_vec, CounterVec};
 
 use resonate_core::types::Message;
 use resonate_core::{scheme_of, Cause, ResonateRouter, ResonateWorker, Unavailable};
+
+lazy_static! {
+    /// Hand-offs to a worker, by outcome. Declared here because this is the one
+    /// place that sees every message — and "never reached a worker" is an
+    /// outcome only visible from here.
+    pub static ref DELIVERIES_TOTAL: CounterVec = register_counter_vec!(
+        "resonate_deliveries_total",
+        "Total number of message deliveries by status",
+        &["status"]
+    )
+    .unwrap();
+}
 
 // ---- Router ----
 
@@ -121,7 +136,7 @@ impl ResonateRouter for Router {
         // asynchronously past it, so `success` here means accepted for
         // delivery.
         let outcome = self.route_inner(address, msg).await;
-        metrics::DELIVERIES_TOTAL
+        DELIVERIES_TOTAL
             .with_label_values(&[match &outcome {
                 Ok(()) => "success",
                 Err(e) if e.cause == Cause::Unroutable => "dropped",

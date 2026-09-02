@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/resonate-auth",
+    "crates/resonate-base",
     "crates/resonate-core",
     "crates/resonate-gateway-http",
     "crates/resonate-gateway-metrics",
@@ -38,10 +39,6 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-[lib]
-name = "resonate"
-path = "src/lib.rs"
-
 [[bin]]
 name = "resonate"
 path = "src/main.rs"
@@ -68,42 +65,36 @@ concurrency-stress = [
 ]
 
 [dependencies]
-resonate-auth = { path = "crates/resonate-auth" }
-resonate-core = { path = "crates/resonate-core" }
-resonate-gateway-http = { path = "crates/resonate-gateway-http" }
-resonate-gateway-metrics = { path = "crates/resonate-gateway-metrics" }
-resonate-gateway-web = { path = "crates/resonate-gateway-web" }
+# The composition root, and the plugins this build carries. Everything that
+# makes this *this* server is the registry in `main.rs`.
+resonate-base = { path = "crates/resonate-base" }
 resonate-plugin = { path = "crates/resonate-plugin" }
-resonate-sql = { path = "crates/resonate-sql" }
 resonate-server-sqlite = { path = "crates/resonate-server-sqlite", optional = true }
 resonate-server-postgres = { path = "crates/resonate-server-postgres", optional = true }
 resonate-server-mysql = { path = "crates/resonate-server-mysql", optional = true }
 resonate-server-scylladb = { path = "crates/resonate-server-scylladb", optional = true }
-resonate-oracle = { path = "crates/resonate-oracle" }
-resonate-timer-wheel = { path = "crates/resonate-timer-wheel" }
-resonate-transport-gcps = { path = "crates/resonate-transport-gcps" }
-resonate-transport-http-poll = { path = "crates/resonate-transport-http-poll" }
 resonate-transport-http-push = { path = "crates/resonate-transport-http-push" }
+resonate-transport-http-poll = { path = "crates/resonate-transport-http-poll" }
+resonate-transport-gcps = { path = "crates/resonate-transport-gcps" }
 resonate-worker-bash = { path = "crates/resonate-worker-bash" }
-jsonwebtoken = "9"
+resonate-gateway-http = { path = "crates/resonate-gateway-http" }
+resonate-gateway-web = { path = "crates/resonate-gateway-web" }
+resonate-gateway-metrics = { path = "crates/resonate-gateway-metrics" }
+
+# The CLI client — `resonate promises`, `resonate invoke`, the MCP server —
+# which talks to a server over HTTP and shares no code with one.
 tokio = { version = "1", features = ["full"] }
-axum = { version = "0.7", features = ["json"] }
-serde = { workspace = true }
 serde_json = { workspace = true }
 clap = { version = "4", features = ["derive", "env"] }
-figment = { version = "0.10", features = ["toml", "env"] }
-tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 reqwest = { version = "0.12", features = ["json"] }
-cron = "0.12"
-chrono = "0.4"
-async-stream = "0.3"
-prometheus = "0.13"
-lazy_static = "1"
-fastrand = "2"
-tracing-appender = "0.2"
-async-trait = { workspace = true }
-validator = { workspace = true }
-url = { workspace = true }
+tracing = "0.1"
 base64 = "0.22"
-tower-http = { version = "0.6", features = ["trace", "catch-panic", "cors"] }
+
+[dev-dependencies]
+# `tests/ui.rs` drives the console's read model against every engine that is
+# compiled in, so it reaches past the plugins to what they are built on.
+resonate-core = { path = "crates/resonate-core" }
+resonate-sql = { path = "crates/resonate-sql" }
+resonate-oracle = { path = "crates/resonate-oracle" }
+fastrand = "2"

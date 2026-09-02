@@ -305,51 +305,6 @@ pub fn ui_kinds() -> &'static [&'static str] {
     ui::KINDS
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The build output has to actually be in the binary. A console that
-    /// compiles and serves a 404 is the failure this catches.
-    #[test]
-    fn the_built_console_is_embedded() {
-        let index = Assets::get("index.html").expect("index.html is embedded");
-        let html = std::str::from_utf8(&index.data).expect("utf-8");
-        assert!(
-            html.contains("<title>Resonate Console</title>"),
-            "{html:.400}"
-        );
-        // SvelteKit's base path is baked in at build time; if it drifts from
-        // MOUNT every asset link 404s.
-        assert!(
-            html.contains("/console/app/immutable/"),
-            "assets are mounted at {MOUNT}"
-        );
-
-        assert!(
-            Assets::get("fonts/inter-latin.woff2").is_some(),
-            "Inter is self-hosted so the console works air-gapped"
-        );
-        assert!(Assets::get("favicon.svg").is_some());
-        assert!(
-            Assets::iter().any(|p| p.starts_with("app/immutable/") && p.ends_with(".js")),
-            "the app's own scripts are embedded"
-        );
-    }
-
-    #[test]
-    fn assets_are_served_with_the_type_and_cache_a_browser_needs() {
-        assert_eq!(content_type("index.html"), "text/html; charset=utf-8");
-        assert_eq!(
-            content_type("app/immutable/nodes/0.abc.js"),
-            "text/javascript; charset=utf-8"
-        );
-        assert_eq!(content_type("fonts/inter-latin.woff2"), "font/woff2");
-        assert_eq!(content_type("favicon.svg"), "image/svg+xml");
-        assert_eq!(content_type("noextension"), "application/octet-stream");
-    }
-}
-
 // ─── The gateway ─────────────────────────────────────────────────────────────
 
 /// This console, as a plugin. Its own listener, its own port, its own policy.
@@ -432,5 +387,50 @@ impl resonate_plugin::ResonateGateway for Console {
             let _ = serving.task.await;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The build output has to actually be in the binary. A console that
+    /// compiles and serves a 404 is the failure this catches.
+    #[test]
+    fn the_built_console_is_embedded() {
+        let index = Assets::get("index.html").expect("index.html is embedded");
+        let html = std::str::from_utf8(&index.data).expect("utf-8");
+        assert!(
+            html.contains("<title>Resonate Console</title>"),
+            "{html:.400}"
+        );
+        // SvelteKit's base path is baked in at build time; if it drifts from
+        // MOUNT every asset link 404s.
+        assert!(
+            html.contains("/console/app/immutable/"),
+            "assets are mounted at {MOUNT}"
+        );
+
+        assert!(
+            Assets::get("fonts/inter-latin.woff2").is_some(),
+            "Inter is self-hosted so the console works air-gapped"
+        );
+        assert!(Assets::get("favicon.svg").is_some());
+        assert!(
+            Assets::iter().any(|p| p.starts_with("app/immutable/") && p.ends_with(".js")),
+            "the app's own scripts are embedded"
+        );
+    }
+
+    #[test]
+    fn assets_are_served_with_the_type_and_cache_a_browser_needs() {
+        assert_eq!(content_type("index.html"), "text/html; charset=utf-8");
+        assert_eq!(
+            content_type("app/immutable/nodes/0.abc.js"),
+            "text/javascript; charset=utf-8"
+        );
+        assert_eq!(content_type("fonts/inter-latin.woff2"), "font/woff2");
+        assert_eq!(content_type("favicon.svg"), "image/svg+xml");
+        assert_eq!(content_type("noextension"), "application/octet-stream");
     }
 }

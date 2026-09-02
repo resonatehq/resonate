@@ -540,15 +540,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "crossbeam-channel"
-version = "0.5.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82b8f8f868b36967f9606790d1903570de9ceaf870a7bf9fbbd3016d636a2cb2"
-dependencies = [
- "crossbeam-utils",
-]
-
-[[package]]
 name = "crossbeam-queue"
 version = "0.3.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2781,20 +2772,11 @@ dependencies = [
 name = "resonate"
 version = "0.9.8"
 dependencies = [
- "async-stream",
- "async-trait",
- "axum",
  "base64 0.22.1",
- "chrono",
  "clap",
- "cron",
  "fastrand",
- "figment",
- "jsonwebtoken 9.3.1",
- "lazy_static",
- "prometheus",
  "reqwest 0.12.28",
- "resonate-auth",
+ "resonate-base",
  "resonate-core",
  "resonate-gateway-http",
  "resonate-gateway-metrics",
@@ -2806,20 +2788,14 @@ dependencies = [
  "resonate-server-scylladb",
  "resonate-server-sqlite",
  "resonate-sql",
- "resonate-timer-wheel",
  "resonate-transport-gcps",
  "resonate-transport-http-poll",
  "resonate-transport-http-push",
  "resonate-worker-bash",
- "serde",
  "serde_json",
  "tokio",
- "tower-http",
  "tracing",
- "tracing-appender",
  "tracing-subscriber",
- "url",
- "validator",
 ]
 
 [[package]]
@@ -2831,6 +2807,21 @@ dependencies = [
  "serde",
  "serde_json",
  "tracing",
+]
+
+[[package]]
+name = "resonate-base"
+version = "0.9.8"
+dependencies = [
+ "async-trait",
+ "lazy_static",
+ "resonate-core",
+ "resonate-plugin",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -4369,18 +4360,6 @@ dependencies = [
  "pin-project-lite",
  "tracing-attributes",
  "tracing-core",
-]
-
-[[package]]
-name = "tracing-appender"
-version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "786d480bce6247ab75f005b14ae1624ad978d3029d9113f0a22fa1ac773faeaf"
-dependencies = [
- "crossbeam-channel",
- "thiserror 2.0.18",
- "time",
- "tracing-subscriber",
 ]
 
 [[package]]

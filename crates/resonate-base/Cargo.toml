@@ -1,0 +1,24 @@
+[package]
+name = "resonate-base"
+description = "The composition root: build a Resonate server from a registry of plugins, start it, and stop it."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "resonate_base"
+path = "src/lib.rs"
+
+[dependencies]
+resonate-core = { path = "../resonate-core" }
+resonate-plugin = { path = "../resonate-plugin" }
+async-trait = { workspace = true }
+lazy_static = "1"
+serde = { workspace = true }
+tokio = { version = "1", features = ["rt", "macros", "signal", "sync", "time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

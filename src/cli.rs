@@ -8,11 +8,29 @@ use serde_json::{json, Value};
 
 /// Common CLI flags shared between `serve` and `dev`.
 ///
-/// All fields are `Option<T>` (or plain `bool` for flags) so that only
-/// explicitly-provided values override the loaded configuration. Precedence:
-/// defaults < resonate.toml < env vars < these flags.
+/// Every one of these is an override on a configuration key, and that is all
+/// they are: `--server-port 3000` is `gateways.gateway_http.port = 3000`, and
+/// `--set gateways.gateway_http.port=3000` says the same thing. Precedence:
+/// defaults < the file < the environment < these.
+///
+/// `--set` is the general case, and the reason there is no flag per plugin
+/// field: a binary carrying a plugin this repository has never heard of
+/// configures it the same way as one that ships here. The named flags below are
+/// the handful worth typing.
 #[derive(Args, Default)]
 pub struct CommonArgs {
+    // --- Where the configuration comes from ---
+    /// Configuration file [default: resonate.toml]
+    #[arg(long = "config", value_name = "PATH")]
+    pub config: Option<String>,
+
+    /// Override any configuration key (repeatable): --set workers.worker_kafka.brokers='["a:9092"]'
+    ///
+    /// The value is read as TOML, so numbers, booleans and lists arrive as
+    /// themselves; anything else is a string.
+    #[arg(long = "set", value_name = "KEY=VALUE")]
+    pub set: Vec<String>,
+
     // --- Top-level ---
     /// Log level: debug, info, warn, error [default: info]
     #[arg(long)]
@@ -49,7 +67,7 @@ pub struct CommonArgs {
     pub cors_allow_origins: Vec<String>,
 
     // --- Storage ---
-    /// Storage backend: sqlite or postgres [default: sqlite]
+    /// Storage backend: sqlite, postgres, mysql or scylladb [default: sqlite]
     #[arg(long = "storage-type")]
     pub storage_type: Option<String>,
 
@@ -91,13 +109,6 @@ pub struct CommonArgs {
     #[arg(long = "tasks-retry-timeout", value_name = "MS")]
     pub tasks_retry_timeout: Option<i64>,
 
-    // --- Timeouts ---
-    /// Background timeout scan interval (ms) [default: 1000]
-    #[arg(long = "timeouts-poll-interval", value_name = "MS")]
-    pub timeouts_poll_interval: Option<u64>,
-
-    // --- Messages ---
-
     // --- HTTP Push ---
     /// Enable/disable HTTP push transport [default: true]
     #[arg(long = "transports-http-push-enabled", value_name = "BOOL")]
@@ -119,6 +130,10 @@ pub struct CommonArgs {
     /// Enable/disable HTTP poll (SSE) transport [default: true]
     #[arg(long = "transports-http-poll-enabled", value_name = "BOOL")]
     pub transports_http_poll_enabled: Option<bool>,
+
+    /// Address the poll (SSE) transport listens on [default: 0.0.0.0:8002]
+    #[arg(long = "transports-http-poll-bind", value_name = "ADDR")]
+    pub transports_http_poll_bind: Option<String>,
 
     /// Max concurrent poll (SSE) connections [default: 1000]
     #[arg(long = "transports-http-poll-max-connections", value_name = "N")]
@@ -167,168 +182,229 @@ pub struct CommonArgs {
     #[arg(long = "transports-bash-exec-enabled", value_name = "BOOL")]
     pub transports_bash_exec_enabled: Option<bool>,
 
-    // --- Observability ---
-    /// Prometheus metrics port (0 = disabled) [default: 9090]
-    #[arg(long = "observability-metrics-port", value_name = "PORT")]
-    pub observability_metrics_port: Option<u16>,
+    // --- Console ---
+    /// Enable/disable the web console [default: true]
+    #[arg(long = "console-enabled", value_name = "BOOL")]
+    pub console_enabled: Option<bool>,
 
-    /// OpenTelemetry OTLP endpoint [default: localhost:4317]
-    #[arg(long = "observability-otlp-endpoint", value_name = "ENDPOINT")]
-    pub observability_otlp_endpoint: Option<String>,
+    /// Address the web console listens on [default: 0.0.0.0:8003]
+    #[arg(long = "console-bind", value_name = "ADDR")]
+    pub console_bind: Option<String>,
+
+    // --- Observability ---
+    /// Address the Prometheus endpoint listens on [default: 0.0.0.0:9090]
+    #[arg(long = "observability-metrics-bind", value_name = "ADDR")]
+    pub observability_metrics_bind: Option<String>,
+
+    /// Enable/disable the Prometheus endpoint [default: true]
+    #[arg(long = "observability-metrics-enabled", value_name = "BOOL")]
+    pub observability_metrics_enabled: Option<bool>,
 }
 
+/// Collects `key = value` overrides, so each flag below is one line.
+#[derive(Default)]
+struct Overrides(Vec<(String, String)>);
+
+impl Overrides {
+    /// Set `key` when the flag was given, and do nothing when it was not.
+    ///
+    /// The value is written as TOML: `Display` is right for a number or a bool,
+    /// and a string is quoted by the loader when it does not parse as anything
+    /// else.
+    fn maybe<T: std::fmt::Display>(&mut self, key: &str, value: Option<T>) {
+        if let Some(v) = value {
+            self.0.push((key.to_string(), v.to_string()));
+        }
+    }
+
+    fn set(&mut self, key: &str, value: impl Into<String>) {
+        self.0.push((key.to_string(), value.into()));
+    }
+}
+
+/// The auth policy is enforced by each edge that admits a request, so a flag
+/// that turns auth on has to reach all of them.
+const AUTHENTICATED: &[&str] = &[
+    "gateways.gateway_http",
+    "gateways.gateway_web",
+    "workers.transport_http_poll",
+];
+
 impl CommonArgs {
-    fn apply(self, mut config: crate::config::Config) -> crate::config::Config {
-        if let Some(v) = self.level {
-            config.level = v;
-        }
+    /// Turn the flags into configuration overrides.
+    ///
+    /// `servers` is what this binary was compiled with — the flags that are
+    /// about *the* server (`--server-url`, `--tasks-retry-timeout`) are written
+    /// to every one of them, because which is active is not settled until the
+    /// file and the environment have been read too. A section that is never the
+    /// active one is never read, so writing it costs nothing.
+    fn overrides(self, servers: &[String]) -> Vec<(String, String)> {
+        let mut o = Overrides::default();
+
+        o.maybe("level", self.level);
         if self.debug {
-            config.debug = true;
+            o.set("debug", "true");
         }
+        o.maybe("shutdown_timeout", self.shutdown_timeout);
 
-        if let Some(v) = self.host {
-            config.server.host = v;
-        }
-        if let Some(v) = self.port {
-            config.server.port = v;
-        }
-        if let Some(v) = self.bind {
-            config.server.bind = v;
-        }
-        if let Some(v) = self.shutdown_timeout {
-            config.server.shutdown_timeout = v;
-        }
-        if let Some(v) = self.url {
-            config.server.url = Some(v);
-        }
-        if config.server.url.is_none() {
-            config.server.url = Some(format!(
-                "http://{}:{}",
-                config.server.host, config.server.port
-            ));
-        }
-
-        if !self.cors_allow_origins.is_empty() {
-            config.server.cors.allow_origins = self.cors_allow_origins;
-        }
-
-        if let Some(v) = self.storage_type {
-            config.storage.storage_type = v;
-        }
-        if let Some(v) = self.postgres_url {
-            config.storage.postgres.url = Some(v);
-        }
-        if let Some(v) = self.postgres_pool_size {
-            config.storage.postgres.pool_size = v;
-        }
-
-        if let Some(url) = &self.mysql_url {
-            config.storage.mysql.url = Some(url.clone());
-            if config.storage.storage_type == "sqlite" {
-                config.storage.storage_type = "mysql".to_string();
-            }
-        }
-        if let Some(v) = self.mysql_pool_size {
-            config.storage.mysql.pool_size = v;
-        }
-
-        if let Some(key) = self.auth_publickey {
-            let auth = config.auth.get_or_insert_with(|| resonate_auth::Config {
-                publickey: String::new(),
-                iss: None,
-                aud: None,
-            });
-            auth.publickey = key;
-            if let Some(v) = self.auth_iss {
-                auth.iss = Some(v);
-            }
-            if let Some(v) = self.auth_aud {
-                auth.aud = Some(v);
-            }
-        }
-
-        if let Some(v) = self.tasks_lease_timeout {
-            config.tasks.lease_timeout = v;
-        }
-        if let Some(v) = self.tasks_retry_timeout {
-            config.tasks.retry_timeout = v;
-        }
-
-        if let Some(v) = self.timeouts_poll_interval {
-            config.timeouts.poll_interval = v;
-        }
-
-        if let Some(v) = self.transports_http_push_enabled {
-            config.transports.http_push.enabled = v;
-        }
-        if let Some(v) = self.transports_http_push_concurrency {
-            config.transports.http_push.concurrency = v;
-        }
-        if let Some(v) = self.transports_http_push_connect_timeout {
-            config.transports.http_push.connect_timeout = v;
-        }
-        if let Some(v) = self.transports_http_push_request_timeout {
-            config.transports.http_push.request_timeout = v;
-        }
-
-        if let Some(v) = self.transports_http_poll_enabled {
-            config.transports.http_poll.enabled = v;
-        }
-        if let Some(v) = self.transports_http_poll_max_connections {
-            config.transports.http_poll.max_connections = v;
-        }
-        if let Some(v) = self.transports_http_poll_buffer_size {
-            config.transports.http_poll.buffer_size = v;
-        }
-
-        if let Some(mode_str) = self.transports_http_push_auth_mode {
-            let mode = match mode_str.as_str() {
-                "bearer" => resonate_transport_http_push::AuthMode::Bearer,
-                "gcp" => resonate_transport_http_push::AuthMode::Gcp,
-                _ => resonate_transport_http_push::AuthMode::None,
+        // --- servers ---
+        if let Some(v) = &self.storage_type {
+            let id = if v.starts_with("server_") {
+                v.clone()
+            } else {
+                format!("server_{v}")
             };
-            let auth = config
-                .transports
-                .http_push
-                .auth
-                .get_or_insert_with(resonate_transport_http_push::AuthConfig::default);
-            auth.mode = mode;
-            if let Some(v) = self.transports_http_push_auth_token {
-                auth.token = Some(v);
+            o.set("servers.active", id);
+        }
+        o.maybe("servers.server_postgres.url", self.postgres_url.clone());
+        o.maybe("servers.server_postgres.pool_size", self.postgres_pool_size);
+        o.maybe("servers.server_mysql.url", self.mysql_url.clone());
+        o.maybe("servers.server_mysql.pool_size", self.mysql_pool_size);
+
+        // The URL a worker is told to call back on, and the one the gateway
+        // announces, are the same URL — so one flag writes both.
+        let url = self.url.clone().or_else(|| {
+            match (&self.host, self.port) {
+                // Derived only when something was said about it. A host and a
+                // port that both came from the file are the file's business.
+                (None, None) => None,
+                (host, port) => Some(format!(
+                    "http://{}:{}",
+                    host.clone().unwrap_or_else(|| "localhost".to_string()),
+                    port.unwrap_or(8001)
+                )),
             }
-            if let Some(v) = self.transports_http_push_auth_audience {
-                auth.audience = Some(v);
+        });
+        for id in servers {
+            o.maybe(&format!("servers.{id}.server_url"), url.clone());
+            o.maybe(
+                &format!("servers.{id}.retry_timeout"),
+                self.tasks_retry_timeout,
+            );
+        }
+
+        // --- workers ---
+        o.maybe(
+            "workers.transport_http_push.enabled",
+            self.transports_http_push_enabled,
+        );
+        o.maybe(
+            "workers.transport_http_push.concurrency",
+            self.transports_http_push_concurrency,
+        );
+        o.maybe(
+            "workers.transport_http_push.connect_timeout",
+            self.transports_http_push_connect_timeout,
+        );
+        o.maybe(
+            "workers.transport_http_push.request_timeout",
+            self.transports_http_push_request_timeout,
+        );
+        o.maybe(
+            "workers.transport_http_push.auth.mode",
+            self.transports_http_push_auth_mode,
+        );
+        o.maybe(
+            "workers.transport_http_push.auth.token",
+            self.transports_http_push_auth_token,
+        );
+        o.maybe(
+            "workers.transport_http_push.auth.audience",
+            self.transports_http_push_auth_audience,
+        );
+        o.maybe(
+            "workers.transport_http_push.auth.header",
+            self.transports_http_push_auth_header,
+        );
+
+        o.maybe(
+            "workers.transport_http_poll.enabled",
+            self.transports_http_poll_enabled,
+        );
+        o.maybe(
+            "workers.transport_http_poll.bind",
+            self.transports_http_poll_bind,
+        );
+        o.maybe(
+            "workers.transport_http_poll.max_connections",
+            self.transports_http_poll_max_connections,
+        );
+        o.maybe(
+            "workers.transport_http_poll.buffer_size",
+            self.transports_http_poll_buffer_size,
+        );
+
+        o.maybe(
+            "workers.transport_gcps.enabled",
+            self.transports_gcps_enabled,
+        );
+        o.maybe(
+            "workers.transport_gcps.project",
+            self.transports_gcps_project,
+        );
+        o.maybe(
+            "workers.transport_gcps.concurrency",
+            self.transports_gcps_concurrency,
+        );
+        o.maybe(
+            "workers.transport_gcps.timeout",
+            self.transports_gcps_timeout,
+        );
+
+        o.maybe(
+            "workers.worker_bash.enabled",
+            self.transports_bash_exec_enabled,
+        );
+        o.maybe(
+            "workers.worker_bash.lease_timeout",
+            self.tasks_lease_timeout,
+        );
+
+        // --- gateways ---
+        o.maybe("gateways.gateway_http.bind", self.bind);
+        o.maybe("gateways.gateway_http.port", self.port);
+        o.maybe("gateways.gateway_http.url", url);
+        if !self.cors_allow_origins.is_empty() {
+            let list = self
+                .cors_allow_origins
+                .iter()
+                .map(|s| format!("{s:?}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            o.set(
+                "gateways.gateway_http.cors_allow_origins",
+                format!("[{list}]"),
+            );
+        }
+        o.maybe("gateways.gateway_web.enabled", self.console_enabled);
+        o.maybe("gateways.gateway_web.bind", self.console_bind);
+        o.maybe(
+            "gateways.gateway_metrics.enabled",
+            self.observability_metrics_enabled,
+        );
+        o.maybe(
+            "gateways.gateway_metrics.bind",
+            self.observability_metrics_bind,
+        );
+
+        // Auth is one policy, applied by every edge that admits a request.
+        if let Some(key) = self.auth_publickey {
+            for edge in AUTHENTICATED {
+                o.set(&format!("{edge}.auth.publickey"), key.clone());
+                o.maybe(&format!("{edge}.auth.iss"), self.auth_iss.clone());
+                o.maybe(&format!("{edge}.auth.aud"), self.auth_aud.clone());
             }
-            if let Some(v) = self.transports_http_push_auth_header {
-                auth.header = v;
+        }
+
+        // Whatever the named flags do not cover.
+        for assignment in self.set {
+            match assignment.split_once('=') {
+                Some((key, value)) => o.set(key.trim(), value),
+                None => o.set(assignment.trim(), "true"),
             }
         }
 
-        if let Some(v) = self.transports_gcps_enabled {
-            config.transports.gcps.enabled = v;
-        }
-        if let Some(project) = self.transports_gcps_project {
-            config.transports.gcps.project = Some(project);
-        }
-        if let Some(v) = self.transports_gcps_concurrency {
-            config.transports.gcps.concurrency = v;
-        }
-        if let Some(v) = self.transports_gcps_timeout {
-            config.transports.gcps.timeout = v;
-        }
-
-        if let Some(v) = self.transports_bash_exec_enabled {
-            config.transports.bash_exec.enabled = v;
-        }
-
-        if let Some(v) = self.observability_metrics_port {
-            config.observability.metrics_port = v;
-        }
-        if let Some(v) = self.observability_otlp_endpoint {
-            config.observability.otlp_endpoint = v;
-        }
-
-        config
+        o.0
     }
 }
 
@@ -344,13 +420,15 @@ pub struct ServeArgs {
 }
 
 impl ServeArgs {
-    /// Apply any explicitly-provided CLI flags on top of an already-loaded `Config`.
-    pub fn apply(self, config: crate::config::Config) -> crate::config::Config {
-        let mut config = self.common.apply(config);
-        if let Some(v) = self.sqlite_path {
-            config.storage.sqlite.path = v;
+    /// Where to read the configuration from, and what these flags override.
+    pub fn options(self, servers: &[String]) -> resonate_base::Options {
+        let file = self.common.config.clone();
+        let sqlite_path = self.sqlite_path;
+        let mut options = base_options(file, self.common.overrides(servers));
+        if let Some(path) = sqlite_path {
+            options = options.set("servers.server_sqlite.path", path);
         }
-        config
+        options
     }
 }
 
@@ -366,13 +444,27 @@ pub struct DevArgs {
 }
 
 impl DevArgs {
-    /// Apply any explicitly-provided CLI flags on top of an already-loaded `Config`,
-    /// defaulting SQLite storage to `:memory:` if no path was given.
-    pub fn apply(self, config: crate::config::Config) -> crate::config::Config {
-        let mut config = self.common.apply(config);
-        config.storage.sqlite.path = self.sqlite_path.unwrap_or_else(|| ":memory:".to_string());
-        config
+    /// The same, with the one difference `dev` is for: storage that does not
+    /// outlive the process.
+    pub fn options(self, servers: &[String]) -> resonate_base::Options {
+        let file = self.common.config.clone();
+        let sqlite_path = self.sqlite_path;
+        base_options(file, self.common.overrides(servers)).set(
+            "servers.server_sqlite.path",
+            sqlite_path.unwrap_or_else(|| ":memory:".to_string()),
+        )
     }
+}
+
+/// The layers every subcommand reads, before its own flags.
+fn base_options(file: Option<String>, overrides: Vec<(String, String)>) -> resonate_base::Options {
+    let mut options = resonate_base::Options::default()
+        .file(file.unwrap_or_else(|| "resonate.toml".to_string()))
+        .env_prefix("RESONATE_");
+    for (key, value) in overrides {
+        options = options.set(key, value);
+    }
+    options
 }
 
 /// CLI flags for the `mcp` subcommand.
