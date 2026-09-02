@@ -8,9 +8,9 @@
 #   1. check-version — Validates Cargo.toml matches release tag
 #   2. publish-dockerhub — Multi-platform Docker images → DockerHub
 #   3. publish-github-image — Multi-platform Docker images → GHCR
-#   4. publish-gcr-image — Multi-platform Docker images → GCR (Artifact Registry)
-#   5. publish-github-artifacts — Cross-platform binary artifacts
-#   6. update-homebrew — Opens PR to update resonatehq/homebrew-tap formula
+#   4. publish-github-artifacts — Cross-platform binary artifacts
+#   5. update-homebrew — Opens PR to update resonatehq/homebrew-tap formula
+#   6. publish-npm — Publishes npm/ as resonate-cli
 #   7. verify-artifacts — Post-publication verification
 #
 # See .github/CD_PIPELINE.md for full documentation.
@@ -105,8 +105,13 @@ jobs:
           echo "**GitHub Tag:** ${{ steps.version.outputs.tag_version }}" >> $GITHUB_STEP_SUMMARY
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # PHASE 2: DOCKER IMAGE PUBLISHING
+  # PHASE 2: DOCKER IMAGE PUBLISHING (DISABLED)
   # ═══════════════════════════════════════════════════════════════════════════
+  # NOTE: Publishing to DockerHub is commented out.
+  # To enable:
+  #   1. Set secrets: DOCKER_USERNAME, DOCKER_PASSWORD
+  #   2. Remove: if: false
+  #   3. Test with workflow_dispatch
 
   publish-dockerhub:
     name: Publish DockerHub Image
@@ -157,8 +162,13 @@ jobs:
           cache-to: type=gha,mode=max
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # PHASE 2.5: GITHUB CONTAINER REGISTRY PUBLISHING
+  # PHASE 2.5: GITHUB CONTAINER REGISTRY PUBLISHING (DISABLED)
   # ═══════════════════════════════════════════════════════════════════════════
+  # NOTE: Publishing to GHCR is commented out.
+  # To enable:
+  #   1. No secrets needed (uses GITHUB_TOKEN)
+  #   2. Remove: if: false
+  #   3. Test with workflow_dispatch
 
   publish-github-image:
     name: Publish GitHub Container Image
@@ -211,89 +221,13 @@ jobs:
           cache-to: type=gha,mode=max
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # PHASE 2.7: GOOGLE ARTIFACT REGISTRY PUBLISHING
+  # PHASE 3: BINARY ARTIFACT PUBLISHING (DISABLED)
   # ═══════════════════════════════════════════════════════════════════════════
-
-  publish-gcr-image:
-    name: Publish GCR Image
-    needs: [check-version]
-
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
-        with:
-          ref: ${{ needs.check-version.outputs.tag }}
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: us-west1-docker.pkg.dev/resonate-cloud/resonate/resonate
-          tags: |
-            type=raw,value=${{ needs.check-version.outputs.tag }}
-            type=raw,value=latest
-
-      # Build first (no auth needed — base images are public Docker Hub).
-      # This does the full Rust compilation and caches the result.
-      # The access token is NOT fetched here, so it can't expire mid-build.
-      - name: Build Docker image (cache only)
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: false
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          provenance: false
-          sbom: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      # Fetch a fresh GCP access token RIGHT before pushing, so it still
-      # has its full 1h lifetime when buildx reaches the registry.
-      - name: Authenticate to Google Cloud
-        id: gcp-auth
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
-          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
-          token_format: access_token
-
-      - name: Log in to Google Artifact Registry
-        uses: docker/login-action@v4
-        with:
-          registry: us-west1-docker.pkg.dev
-          username: oauth2accesstoken
-          password: ${{ steps.gcp-auth.outputs.access_token }}
-
-      # Rebuild from cache (hit — seconds) and push with the fresh token.
-      - name: Push Docker image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          provenance: true
-          sbom: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  # ═══════════════════════════════════════════════════════════════════════════
-  # PHASE 3: BINARY ARTIFACT PUBLISHING
-  # ═══════════════════════════════════════════════════════════════════════════
+  # NOTE: Publishing binary artifacts is commented out.
+  # To enable:
+  #   1. No secrets needed (uses GITHUB_TOKEN)
+  #   2. Remove: if: false
+  #   3. Test with workflow_dispatch
   #
   # Builds for:
   #   - Linux x86_64 (ubuntu-latest)
@@ -392,10 +326,11 @@ jobs:
           echo "✓ Uploaded ${TARBALL} and checksum to release ${TAG}"
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # PHASE 3.5: HOMEBREW FORMULA UPDATE
+  # PHASE 3.5: HOMEBREW FORMULA UPDATE (DISABLED)
   # ═══════════════════════════════════════════════════════════════════════════
   # Updates resonatehq/homebrew-tap with new version and sha256 checksums
   # Opens a pull request for review
+  # Requires: HOMEBREW_TAP_TOKEN secret (personal access token with repo scope)
 
   update-homebrew:
     name: Update Homebrew Formula
@@ -564,8 +499,126 @@ jobs:
           echo "View: https://github.com/resonatehq/homebrew-tap/blob/main/Formula/resonate.rb" >> $GITHUB_STEP_SUMMARY
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # PHASE 4: POST-PUBLICATION VERIFICATION
+  # PHASE 3.6: NPM PACKAGE PUBLISHING
   # ═══════════════════════════════════════════════════════════════════════════
+  # Publishes npm/ as resonate-cli, so that `npx resonate-cli@latest dev` works
+  # for anyone with Node installed. The package carries no implementation: its
+  # postinstall downloads the tarball produced by publish-github-artifacts,
+  # which is why this job waits on that one.
+  #
+  # Requires: NPM_TOKEN secret (automation token for the resonatehq npm org).
+  # Without it the job reports that it skipped rather than failing the release.
+
+  publish-npm:
+    name: Publish npm Package
+    needs: [check-version, publish-github-artifacts]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm provenance
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.check-version.outputs.tag }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Check npm credentials
+        id: creds
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "${NPM_TOKEN}" ]; then
+            echo "has_token=false" >> $GITHUB_OUTPUT
+            echo "⚠️ NPM_TOKEN is not set — skipping npm publish" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "has_token=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set package version
+        env:
+          VERSION: ${{ needs.check-version.outputs.version_bare }}
+        run: |
+          cd npm
+
+          # check-version has already confirmed this matches the release tag,
+          # and the tag is what postinstall.js downloads from — so the package
+          # version is not free to drift from the binary version.
+          npm version "${VERSION}" --no-git-tag-version --allow-same-version
+
+          cp ../LICENSE .
+
+      - name: Smoke test against the published release
+        env:
+          VERSION: ${{ needs.check-version.outputs.version_bare }}
+        run: |
+          cd npm
+
+          # The wrapper is only correct if the asset names, the tag, and the
+          # checksums line up with what the release actually contains. Prove it
+          # here rather than in the first user's terminal.
+          node postinstall.js
+
+          ACTUAL=$(./bin/resonate.js --version)
+          EXPECTED="resonate ${VERSION}"
+
+          if [ "${ACTUAL}" != "${EXPECTED}" ]; then
+            echo "❌ Version mismatch!"
+            echo "  Expected: ${EXPECTED}"
+            echo "  Actual:   ${ACTUAL}"
+            exit 1
+          fi
+
+          echo "✓ ${ACTUAL} downloaded and executed via the npm wrapper"
+
+          # The downloaded binary must not end up inside the published tarball.
+          rm -f bin/resonate
+
+      - name: Check whether the version is already published
+        id: published
+        if: steps.creds.outputs.has_token == 'true'
+        env:
+          VERSION: ${{ needs.check-version.outputs.version_bare }}
+        run: |
+          if npm view "resonate-cli@${VERSION}" version >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "resonate-cli@${VERSION} is already on npm — nothing to do"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Publish to npm
+        if: steps.creds.outputs.has_token == 'true' && steps.published.outputs.exists == 'false'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          cd npm
+          npm publish --provenance --access public
+
+      - name: Display summary
+        env:
+          VERSION: ${{ needs.check-version.outputs.version_bare }}
+        run: |
+          echo "## npm Package ✓" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Package:** resonate-cli@${VERSION}" >> $GITHUB_STEP_SUMMARY
+          echo "**Install:** \`npx resonate-cli@${VERSION} dev\`" >> $GITHUB_STEP_SUMMARY
+          echo "**View:** https://www.npmjs.com/package/resonate-cli" >> $GITHUB_STEP_SUMMARY
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # PHASE 4: POST-PUBLICATION VERIFICATION (DISABLED)
+  # ═══════════════════════════════════════════════════════════════════════════
+  # NOTE: Artifact verification is commented out.
+  # To enable:
+  #   1. No secrets needed (uses GITHUB_TOKEN)
+  #   2. Remove: if: false
+  #   3. Ensure publish jobs are enabled (depends on them)
   #
   # Validates:
   #   - All expected artifacts exist
@@ -580,7 +633,6 @@ jobs:
         check-version,
         publish-dockerhub,
         publish-github-image,
-        publish-gcr-image,
         publish-github-artifacts,
       ]
 

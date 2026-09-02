@@ -1,0 +1,46 @@
+{
+  "name": "resonate-cli",
+  "version": "0.9.8",
+  "description": "The Resonate CLI and server, distributed as an npm package.",
+  "keywords": [
+    "resonate",
+    "durable-execution",
+    "durable-promises",
+    "orchestration",
+    "workflow"
+  ],
+  "homepage": "https://resonatehq.io/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/resonatehq/resonate.git",
+    "directory": "npm"
+  },
+  "bugs": "https://github.com/resonatehq/resonate/issues",
+  "license": "Apache-2.0",
+  "bin": {
+    "resonate": "bin/resonate.js",
+    "resonate-cli": "bin/resonate.js"
+  },
+  "files": [
+    "bin/resonate.js",
+    "install.js",
+    "postinstall.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "postinstall": "node postinstall.js",
+    "prepublishOnly": "cp ../LICENSE ."
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}
