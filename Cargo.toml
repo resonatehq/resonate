@@ -2,6 +2,7 @@
 members = [
     "crates/resonate-auth",
     "crates/resonate-base",
+    "crates/resonate-cli",
     "crates/resonate-core",
     "crates/resonate-gateway-http",
     "crates/resonate-gateway-metrics",
@@ -81,15 +82,12 @@ resonate-gateway-http = { path = "crates/resonate-gateway-http" }
 resonate-gateway-web = { path = "crates/resonate-gateway-web" }
 resonate-gateway-metrics = { path = "crates/resonate-gateway-metrics" }
 
-# The CLI client — `resonate promises`, `resonate invoke`, the MCP server —
-# which talks to a server over HTTP and shares no code with one.
-tokio = { version = "1", features = ["full"] }
-serde_json = { workspace = true }
+# The CLI client, which talks to a server over HTTP and shares no code with
+# one. Its own crate, so this one stays a list of plugins and a `run`.
+resonate-cli = { path = "crates/resonate-cli" }
+
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
 clap = { version = "4", features = ["derive", "env"] }
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-reqwest = { version = "0.12", features = ["json"] }
-tracing = "0.1"
-base64 = "0.22"
 
 [dev-dependencies]
 # `tests/ui.rs` drives the console's read model against every engine that is
@@ -97,4 +95,7 @@ base64 = "0.22"
 resonate-core = { path = "crates/resonate-core" }
 resonate-sql = { path = "crates/resonate-sql" }
 resonate-oracle = { path = "crates/resonate-oracle" }
+serde_json = { workspace = true }
+base64 = "0.22"
+reqwest = { version = "0.12", features = ["json"] }
 fastrand = "2"

@@ -21,9 +21,7 @@
 //! }
 //! ```
 
-mod cli;
-
-mod mcp;
+mod serve;
 
 use clap::{Parser, Subcommand};
 // A server with no storage plugin cannot serve, and `Registry::check` would
@@ -55,24 +53,24 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Start the Resonate server
-    Serve(Box<cli::ServeArgs>),
+    Serve(Box<serve::ServeArgs>),
     /// Start the Resonate server with in-memory storage (ephemeral, for development)
-    Dev(Box<cli::DevArgs>),
+    Dev(Box<serve::DevArgs>),
     /// Promise operations
     #[command(alias = "promise")]
-    Promises(cli::PromiseArgs),
+    Promises(resonate_cli::PromiseArgs),
     /// Task operations
     #[command(alias = "task")]
-    Tasks(cli::TaskArgs),
+    Tasks(resonate_cli::TaskArgs),
     /// Schedule operations
     #[command(alias = "schedule")]
-    Schedules(cli::ScheduleArgs),
+    Schedules(resonate_cli::ScheduleArgs),
     /// Invoke a function via a durable promise
-    Invoke(cli::InvokeArgs),
+    Invoke(resonate_cli::InvokeArgs),
     /// Display the call-graph tree rooted at a promise ID
-    Tree(cli::TreeArgs),
+    Tree(resonate_cli::TreeArgs),
     /// Start the Resonate MCP server (stdio transport)
-    Mcp(Box<cli::McpArgs>),
+    Mcp(Box<resonate_cli::McpArgs>),
 }
 
 /// Everything this binary carries.
@@ -119,22 +117,22 @@ async fn main() -> std::process::ExitCode {
     let cli = Cli::parse();
     match cli.command {
         Commands::Promises(args) => {
-            cli::run_promises(args).await;
+            resonate_cli::run_promises(args).await;
         }
         Commands::Tasks(args) => {
-            cli::run_tasks(args).await;
+            resonate_cli::run_tasks(args).await;
         }
         Commands::Schedules(args) => {
-            cli::run_schedules(args).await;
+            resonate_cli::run_schedules(args).await;
         }
         Commands::Invoke(args) => {
-            cli::run_invoke(args).await;
+            resonate_cli::run_invoke(args).await;
         }
         Commands::Tree(args) => {
-            cli::run_tree(args).await;
+            resonate_cli::run_tree(args).await;
         }
         Commands::Mcp(args) => {
-            cli::run_mcp(args).await;
+            resonate_cli::run_mcp(args).await;
         }
         Commands::Serve(args) => {
             let registry = registry();
