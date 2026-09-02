@@ -18,26 +18,31 @@
 //!
 //! ```ignore
 //! pub static PLUGIN: WorkerPlugin = WorkerPlugin::new(
-//!     Manifest::new("kafka", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))
-//!         .with_summary("Deliver by producing to a Kafka topic")
-//!         .with_schemes(&["kafka"]),
-//!     || serde_json::to_value(Config::default()).unwrap(),
+//!     "kafka",
+//!     env!("CARGO_PKG_NAME"),
+//!     &["kafka"],
 //!     |settings| {
 //!         let config: Config = settings.extract()?;
+//!         if !config.enabled {
+//!             return Ok(None);
+//!         }
 //!         if config.brokers.is_empty() {
 //!             return Err(settings.reject("brokers", "at least one broker is required"));
 //!         }
-//!         Ok(Box::new(move |ctx: &WorkerCtx| {
+//!         Ok(Some(Box::new(move |ctx: &WorkerCtx| {
 //!             Arc::new(KafkaTransport::new(ctx.server.clone(), config)) as Arc<dyn ResonateWorker>
-//!         }))
+//!         })))
 //!     },
 //! );
 //! ```
 //!
-//! The [`Manifest`] is data and the factory is behaviour, split so that reading
-//! a plugin never requires running it. The typed `Config` is captured by the
-//! closure and never named outside the plugin's own crate — the framework holds
-//! a [`ResonateWorker`] and nothing else.
+//! Identity is data and the factory is behaviour, so reading a plugin never
+//! requires running it. Defaults are the `#[serde(default)]` on the plugin's own
+//! `Config` — a section nobody has configured reads as an empty one — so nothing
+//! is declared twice and the loader does not need to know the registry. The
+//! typed `Config` is captured by the closure and never named outside the
+//! plugin's own crate: the framework holds a [`ResonateWorker`] and nothing
+//! else.
 //!
 //! # Assembling a binary
 //!
@@ -57,14 +62,12 @@
 pub mod config;
 pub mod error;
 pub mod handle;
-pub mod manifest;
 pub mod plugin;
 pub mod registry;
 
-pub use config::{Loaded, Loader, Settings, ENABLED};
+pub use config::{Loaded, Loader, Settings};
 pub use error::{ConfigError, RegistryError, StartupError};
 pub use handle::ServerHandle;
-pub use manifest::{Kind, Manifest};
 pub use plugin::{
     GatewayCtx, GatewayFactory, GatewayPlugin, ServerConnect, ServerCtx, ServerFactory,
     ServerPlugin, WorkerCtx, WorkerFactory, WorkerPlugin,

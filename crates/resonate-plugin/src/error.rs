@@ -1,8 +1,6 @@
 //! What a plugin reports when it cannot be configured, and what a *set* of
 //! plugins reports when it does not hang together.
 
-use crate::manifest::Kind;
-
 /// A plugin's settings were missing, malformed, or invalid.
 ///
 /// Carries where the value came from, not just what was wrong with it: the same
@@ -86,7 +84,7 @@ impl std::error::Error for StartupError {}
 pub enum RegistryError {
     /// Two plugins of one kind answer to one id.
     DuplicateId {
-        kind: Kind,
+        kind: &'static str,
         id: String,
         krates: (String, String),
     },

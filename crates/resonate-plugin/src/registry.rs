@@ -5,7 +5,6 @@
 //! and what lets a build carry four of them rather than four hundred.
 
 use crate::error::RegistryError;
-use crate::manifest::{Kind, Manifest};
 use crate::plugin::{GatewayPlugin, ServerPlugin, WorkerPlugin};
 
 /// What a binary is assembled from.
@@ -62,56 +61,44 @@ impl Registry {
         &self.gateways
     }
 
-    /// Every plugin's manifest and kind — what a startup log names and what a
-    /// listing prints.
-    pub fn manifests(&self) -> Vec<(Kind, Manifest)> {
-        let servers = self.servers.iter().map(|p| (Kind::Server, p.manifest));
-        let workers = self.workers.iter().map(|p| (Kind::Worker, p.manifest));
-        let gateways = self.gateways.iter().map(|p| (Kind::Gateway, p.manifest));
-        servers.chain(workers).chain(gateways).collect()
-    }
-
-    /// The server configuration selected, or a report naming both what was
+    /// The server this configuration selected, or a report naming both what was
     /// asked for and what this binary actually carries.
     ///
-    /// The distinction the old string match could not make: a backend that is
-    /// *not compiled in* is a different problem from one that is misspelled,
-    /// and neither should quietly fall through to a different backend.
+    /// The distinction a string match cannot make: a backend that is *not
+    /// compiled in* is a different problem from one that is misspelled, and
+    /// neither should quietly fall through to a different backend.
     pub fn select_server(&self, id: &str) -> Result<&'static ServerPlugin, RegistryError> {
         self.servers
             .iter()
             .copied()
-            .find(|p| p.manifest.id == id)
+            .find(|p| p.id == id)
             .ok_or_else(|| RegistryError::NotCompiledIn {
                 requested: id.to_string(),
-                available: self
-                    .servers
-                    .iter()
-                    .map(|p| p.manifest.id.to_string())
-                    .collect(),
+                available: self.servers.iter().map(|p| p.id.to_string()).collect(),
             })
     }
 
-    /// Everything wrong with this *set* of plugins, from manifests alone.
+    /// Everything wrong with this *set* of plugins, from the plugins alone.
     ///
     /// No configuration is read and nothing is constructed.
     pub fn check(&self) -> Result<(), Vec<RegistryError>> {
         let mut errors = Vec::new();
 
-        for (kind, ids) in [
-            (Kind::Server, self.ids(Kind::Server)),
-            (Kind::Worker, self.ids(Kind::Worker)),
-            (Kind::Gateway, self.ids(Kind::Gateway)),
-        ] {
-            for (i, (id, krate)) in ids.iter().enumerate() {
-                for (other_id, other_krate) in &ids[i + 1..] {
-                    if id == other_id {
-                        errors.push(RegistryError::DuplicateId {
-                            kind,
-                            id: id.clone(),
-                            krates: (krate.clone(), other_krate.clone()),
-                        });
-                    }
+        let ids = self
+            .servers
+            .iter()
+            .map(|p| ("server", p.id, p.krate))
+            .chain(self.workers.iter().map(|p| ("worker", p.id, p.krate)))
+            .chain(self.gateways.iter().map(|p| ("gateway", p.id, p.krate)))
+            .collect::<Vec<_>>();
+        for (i, (kind, id, krate)) in ids.iter().enumerate() {
+            for (other_kind, other_id, other_krate) in &ids[i + 1..] {
+                if kind == other_kind && id == other_id {
+                    errors.push(RegistryError::DuplicateId {
+                        kind,
+                        id: (*id).to_string(),
+                        krates: ((*krate).to_string(), (*other_krate).to_string()),
+                    });
                 }
             }
         }
@@ -121,20 +108,20 @@ impl Registry {
         // not the operator's, so both are caught here.
         let mut seen: Vec<(&str, &'static str)> = Vec::new();
         for p in &self.workers {
-            if p.manifest.schemes.is_empty() {
+            if p.schemes.is_empty() {
                 errors.push(RegistryError::NoSchemes {
-                    id: p.manifest.id.to_string(),
-                    krate: p.manifest.krate.to_string(),
+                    id: p.id.to_string(),
+                    krate: p.krate.to_string(),
                 });
             }
-            for scheme in p.manifest.schemes {
+            for scheme in p.schemes {
                 if let Some((_, other)) = seen.iter().find(|(s, _)| s == scheme) {
                     errors.push(RegistryError::DuplicateScheme {
                         scheme: (*scheme).to_string(),
-                        krates: ((*other).to_string(), p.manifest.krate.to_string()),
+                        krates: ((*other).to_string(), p.krate.to_string()),
                     });
                 } else {
-                    seen.push((scheme, p.manifest.krate));
+                    seen.push((scheme, p.krate));
                 }
             }
         }
@@ -148,13 +135,5 @@ impl Registry {
         } else {
             Err(errors)
         }
-    }
-
-    fn ids(&self, kind: Kind) -> Vec<(String, String)> {
-        self.manifests()
-            .into_iter()
-            .filter(|(k, _)| *k == kind)
-            .map(|(_, m)| (m.id.to_string(), m.krate.to_string()))
-            .collect()
     }
 }

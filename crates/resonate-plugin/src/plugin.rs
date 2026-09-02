@@ -1,4 +1,10 @@
 //! The three kinds of plugin, and what each is handed when it is built.
+//!
+//! Each is a `static` with no `impl` block — less ceremony than a trait for
+//! someone writing their first plugin, and `const`-constructible, so a plugin's
+//! identity is data in the binary rather than something built at startup. (A
+//! trait could not carry `const ID` through `dyn`, so it would be three methods
+//! and an impl block where these are four fields.)
 
 use std::future::Future;
 use std::pin::Pin;
@@ -8,7 +14,6 @@ use resonate_core::{ResonateGateway, ResonateRouter, ResonateServer, ResonateWor
 
 use crate::config::Settings;
 use crate::error::{ConfigError, StartupError};
-use crate::manifest::Manifest;
 
 // ─── Worker ──────────────────────────────────────────────────────────────────
 
@@ -36,37 +41,42 @@ impl WorkerCtx {
     }
 }
 
-/// Phase two: build the worker. Sync and infallible — everything that can fail
-/// belongs in `configure`, and everything that starts background work belongs
-/// in the worker's own `init`.
+/// Build the worker. Sync and infallible: everything that can fail belongs in
+/// `configure`, and everything that starts background work belongs in the
+/// worker's own `init`.
 pub type WorkerFactory = Box<dyn FnOnce(&WorkerCtx) -> Arc<dyn ResonateWorker> + Send>;
 
 /// A plugin that consumes what a server emits.
-///
-/// A `static` with no `impl` block: less ceremony than a trait for someone
-/// writing their first plugin, and `const`-constructible, so the manifest is
-/// data in the binary rather than something built at startup.
 pub struct WorkerPlugin {
-    pub manifest: Manifest,
-    /// This plugin's settings when nobody has said anything. Seeded into the
-    /// defaults layer, so the server's own defaults name no plugin.
-    pub defaults: fn() -> serde_json::Value,
-    /// Phase one: extract and validate. Runs before anything is constructed, so
-    /// a bad setting is a startup error rather than a message that later goes
-    /// quietly nowhere. The typed `Config` is captured by the returned closure
-    /// and never named outside the plugin's own crate.
-    pub configure: fn(&Settings<'_>) -> Result<WorkerFactory, ConfigError>,
+    /// The name this plugin is known by: its configuration key
+    /// (`transports.<id>`), its `--set` path, its log field.
+    pub id: &'static str,
+    /// `env!("CARGO_PKG_NAME")`. What a collision has to name, because the
+    /// person who can fix one is the person assembling the binary.
+    pub krate: &'static str,
+    /// The address schemes this worker claims.
+    pub schemes: &'static [&'static str],
+    /// Extract and validate. Runs before anything is constructed, so a bad
+    /// setting is a startup error rather than a message that later goes quietly
+    /// nowhere. The typed `Config` is captured by the returned closure and never
+    /// named outside the plugin's own crate.
+    ///
+    /// `None` means this plugin's own configuration turned it off: it is not
+    /// registered, and the router reports its schemes as undeliverable.
+    pub configure: fn(&Settings<'_>) -> Result<Option<WorkerFactory>, ConfigError>,
 }
 
 impl WorkerPlugin {
     pub const fn new(
-        manifest: Manifest,
-        defaults: fn() -> serde_json::Value,
-        configure: fn(&Settings<'_>) -> Result<WorkerFactory, ConfigError>,
+        id: &'static str,
+        krate: &'static str,
+        schemes: &'static [&'static str],
+        configure: fn(&Settings<'_>) -> Result<Option<WorkerFactory>, ConfigError>,
     ) -> Self {
         Self {
-            manifest,
-            defaults,
+            id,
+            krate,
+            schemes,
             configure,
         }
     }
@@ -79,8 +89,8 @@ impl WorkerPlugin {
 #[non_exhaustive]
 pub struct ServerCtx {
     pub router: Arc<dyn ResonateRouter>,
-    /// The place in the cycle this server is about to fill. Store it; the
-    /// handle is not yet fulfilled while the factory runs.
+    /// The place this server is about to fill. Store it; the handle is not yet
+    /// fulfilled while the factory runs.
     pub this: Weak<dyn ResonateServer>,
     /// The process-wide debug flag: the clock belongs to the caller, so nothing
     /// may start work that runs on wall time.
@@ -101,12 +111,12 @@ impl ServerCtx {
     }
 }
 
-/// Phase three: build the server, once the router and its workers exist.
+/// Build the server, once the router and its workers exist.
 pub type ServerFactory = Box<dyn FnOnce(&ServerCtx) -> Arc<dyn ResonateServer> + Send>;
 
-/// Phase two: acquire what the server needs — a connection pool, a schema, a
-/// session. Async and fallible, and run before anything else, so a database
-/// that will not answer is a startup failure rather than a half-built process.
+/// Acquire what the server needs — a connection pool, a schema, a session.
+/// Async and fallible, and run before anything else, so a database that will not
+/// answer is a startup failure rather than a half-built process.
 pub type ServerConnect = Box<
     dyn FnOnce() -> Pin<Box<dyn Future<Output = Result<ServerFactory, StartupError>> + Send>>
         + Send,
@@ -119,23 +129,27 @@ pub type ServerConnect = Box<
 /// to somewhere else, a model in memory — is its own business and stays inside
 /// its own crate.
 ///
-/// Three phases rather than two, because connecting is asynchronous and
-/// fallible while the rest of the wiring is neither.
+/// Three phases where the others have two, because connecting is asynchronous
+/// and fallible while the rest of the wiring is neither. And no `Option`: a
+/// binary has one server, chosen by name, so switching it off is not a thing to
+/// express.
 pub struct ServerPlugin {
-    pub manifest: Manifest,
-    pub defaults: fn() -> serde_json::Value,
+    /// Its configuration key is `servers.<id>`, and `servers.active` is how one
+    /// is chosen.
+    pub id: &'static str,
+    pub krate: &'static str,
     pub configure: fn(&Settings<'_>) -> Result<ServerConnect, ConfigError>,
 }
 
 impl ServerPlugin {
     pub const fn new(
-        manifest: Manifest,
-        defaults: fn() -> serde_json::Value,
+        id: &'static str,
+        krate: &'static str,
         configure: fn(&Settings<'_>) -> Result<ServerConnect, ConfigError>,
     ) -> Self {
         Self {
-            manifest,
-            defaults,
+            id,
+            krate,
             configure,
         }
     }
@@ -157,43 +171,44 @@ impl GatewayCtx {
     }
 }
 
-/// Phase two: build the gateway. Binding a port is `init`'s, not this — a
+/// Build the gateway. Binding a port belongs in its `init`, not here — a
 /// gateway is the last thing to start.
 pub type GatewayFactory = Box<dyn FnOnce(GatewayCtx) -> Arc<dyn ResonateGateway> + Send>;
 
 /// A plugin that accepts requests from outside and puts them to the server.
 pub struct GatewayPlugin {
-    pub manifest: Manifest,
-    pub defaults: fn() -> serde_json::Value,
-    pub configure: fn(&Settings<'_>) -> Result<GatewayFactory, ConfigError>,
+    /// Its configuration key is `gateways.<id>`.
+    pub id: &'static str,
+    pub krate: &'static str,
+    /// `None` means this plugin's own configuration turned it off.
+    pub configure: fn(&Settings<'_>) -> Result<Option<GatewayFactory>, ConfigError>,
 }
 
 impl GatewayPlugin {
     pub const fn new(
-        manifest: Manifest,
-        defaults: fn() -> serde_json::Value,
-        configure: fn(&Settings<'_>) -> Result<GatewayFactory, ConfigError>,
+        id: &'static str,
+        krate: &'static str,
+        configure: fn(&Settings<'_>) -> Result<Option<GatewayFactory>, ConfigError>,
     ) -> Self {
         Self {
-            manifest,
-            defaults,
+            id,
+            krate,
             configure,
         }
     }
 }
 
-macro_rules! debug_by_manifest {
+macro_rules! debug_by_id {
     ($($t:ty),*) => {$(
         impl std::fmt::Debug for $t {
-            /// The manifest, which is the printable half. A factory has nothing
-            /// to show and a log line wants the name anyway.
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 f.debug_struct(stringify!($t))
-                    .field("manifest", &self.manifest)
+                    .field("id", &self.id)
+                    .field("krate", &self.krate)
                     .finish_non_exhaustive()
             }
         }
     )*};
 }
 
-debug_by_manifest!(WorkerPlugin, ServerPlugin, GatewayPlugin);
+debug_by_id!(WorkerPlugin, ServerPlugin, GatewayPlugin);

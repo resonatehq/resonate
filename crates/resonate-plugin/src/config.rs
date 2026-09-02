@@ -16,62 +16,27 @@ use figment::{
 };
 
 use crate::error::ConfigError;
-use crate::manifest::Kind;
-use crate::registry::Registry;
-
-/// The framework-owned key under every plugin's section.
-///
-/// Hoisted out of plugin configuration so the registration loop is uniform and
-/// no plugin repeats the field.
-pub const ENABLED: &str = "enabled";
 
 /// Builds the layered configuration: defaults, then a file, then the
 /// environment, then explicit overrides. Each layer wins over the last.
+///
+/// It does not know the registry. A plugin's defaults are the `#[serde(default)]`
+/// on its own `Config` — one source of truth rather than a struct and a JSON
+/// snapshot of the same struct — and [`Settings::extract`] reads a section that
+/// is absent as an empty one, so a plugin nobody has configured gets its own
+/// defaults without anything being seeded on its behalf.
+#[derive(Default)]
 pub struct Loader {
     figment: Figment,
 }
 
 impl Loader {
-    /// Start from the defaults every registered plugin declares.
-    ///
-    /// This is the layer that would otherwise be a `Config::default()` naming
-    /// every plugin by hand. Assembled, so a plugin the binary does not carry
-    /// contributes nothing and cannot be configured by accident.
-    pub fn new(registry: &Registry) -> Self {
-        let mut figment = Figment::new();
-        let defaults = registry
-            .servers()
-            .iter()
-            .map(|p| (Kind::Server, p.manifest, (p.defaults)()))
-            .chain(
-                registry
-                    .workers()
-                    .iter()
-                    .map(|p| (Kind::Worker, p.manifest, (p.defaults)())),
-            )
-            .chain(
-                registry
-                    .gateways()
-                    .iter()
-                    .map(|p| (Kind::Gateway, p.manifest, (p.defaults)())),
-            );
-        for (kind, manifest, value) in defaults {
-            let key = manifest.config_key(kind);
-            figment = figment.merge(Serialized::default(&key, value));
-            if !kind.is_selected() {
-                figment = figment.merge(Serialized::default(
-                    &format!("{key}.{ENABLED}"),
-                    manifest.default_enabled,
-                ));
-            }
-        }
-        Self { figment }
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    /// Merge the server's own defaults — everything that is not a plugin.
+    /// The server's own defaults — everything that is not a plugin.
     pub fn defaults<T: serde::Serialize>(mut self, core: T) -> Self {
-        // Under the plugin layer, not over it: a plugin owns its own section and
-        // the server's defaults must not reach into it.
         self.figment = Figment::from(Serialized::defaults(core)).merge(self.figment);
         self
     }
@@ -127,26 +92,39 @@ pub struct Loaded {
 }
 
 impl Loaded {
-    /// One plugin's slice of the configuration.
-    pub fn settings(&self, kind: Kind, id: &str) -> Settings<'_> {
-        Settings {
-            figment: &self.figment,
-            key: format!("{}.{}", kind.section(), id),
-        }
+    /// `servers.<id>`.
+    pub fn server(&self, id: &str) -> Settings<'_> {
+        self.at("servers", id)
+    }
+
+    /// `transports.<id>`.
+    pub fn worker(&self, id: &str) -> Settings<'_> {
+        self.at("transports", id)
+    }
+
+    /// `gateways.<id>`.
+    pub fn gateway(&self, id: &str) -> Settings<'_> {
+        self.at("gateways", id)
     }
 
     /// Which server this configuration points at, or the fallback when it says
     /// nothing.
     pub fn active_server(&self, fallback: &str) -> String {
         self.figment
-            .extract_inner::<String>(&format!("{}.active", Kind::Server.section()))
+            .extract_inner::<String>("servers.active")
             .unwrap_or_else(|_| fallback.to_string())
     }
 
-    /// Extract the server's own configuration — everything that is not a
-    /// plugin's.
+    /// The server's own configuration — everything that is not a plugin's.
     pub fn extract<T: DeserializeOwned>(&self) -> Result<T, ConfigError> {
         self.figment.extract().map_err(|e| to_config_error("", &e))
+    }
+
+    fn at(&self, section: &str, id: &str) -> Settings<'_> {
+        Settings {
+            figment: &self.figment,
+            key: format!("{section}.{id}"),
+        }
     }
 }
 
@@ -169,16 +147,14 @@ impl Settings<'_> {
     /// factory closure returned alongside it, so the framework holds a port
     /// trait object and nothing else.
     pub fn extract<T: DeserializeOwned>(&self) -> Result<T, ConfigError> {
-        self.figment
+        // An empty table underneath, so a plugin nobody has configured still
+        // has a section and serde's own defaults fill it in. Without this every
+        // plugin would have to hand the loader a snapshot of its own defaults,
+        // which is the same values written down twice.
+        Figment::from(Serialized::default(&self.key, figment::value::Dict::new()))
+            .merge(self.figment)
             .extract_inner(&self.key)
             .map_err(|e| to_config_error(&self.key, &e))
-    }
-
-    /// The framework-owned `enabled` flag.
-    pub fn enabled(&self, default: bool) -> bool {
-        self.figment
-            .extract_inner(&format!("{}.{}", self.key, ENABLED))
-            .unwrap_or(default)
     }
 
     /// Reject a value the plugin's own rules refuse, naming where it came from.
