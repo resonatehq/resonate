@@ -16,7 +16,7 @@
 //!
 //! ```text
 //! TEST_S3_BUCKET=my-bucket TEST_S3_REGION=us-east-1 \
-//!   cargo test --test s3_live -- --nocapture
+//!   cargo test --test live -- --nocapture
 //! ```
 //!
 //! For an S3-compatible service, add `TEST_S3_ENDPOINT` and, for a local one
@@ -249,7 +249,7 @@ async fn a_workflow_runs_end_to_end_against_a_live_store() {
         send(
             &server,
             "promise.create",
-            json!({ "id": "live:a", "timeoutAt": T0 + 600_000, "param": {}, "tags": {} }),
+            json!({ "id": "live:a", "timeoutAt": T0 + 600_000, "param": {}, "tags": { "resonate:external": "true" } }),
             T0 + 1_000,
         )
         .await
