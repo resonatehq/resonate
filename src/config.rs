@@ -141,7 +141,7 @@ impl Default for ServerConfig {
 /// Backend-specific settings are in the `sqlite`, `postgres`, and `mysql` sub-structs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageConfig {
-    /// Active backend: "sqlite", "postgres", or "mysql"
+    /// Active backend: "sqlite", "postgres", "mysql", or "blob"
     #[serde(default = "default_storage_type", rename = "type")]
     pub storage_type: String,
 
@@ -156,10 +156,98 @@ pub struct StorageConfig {
     /// MySQL-specific configuration
     #[serde(default)]
     pub mysql: MysqlConfig,
+
+    /// Blob (object storage) backend configuration
+    #[serde(default)]
+    pub blob: BlobConfig,
 }
 
 fn default_storage_type() -> String {
     "sqlite".to_string()
+}
+
+/// The blob backend: one CAS'd object per origin, over `object_store`.
+///
+/// The store must have real conditional writes (If-Match / If-None-Match).
+/// S3, R2, GCS and Azure qualify; MinIO, B2 and Spaces do not and lose writes
+/// silently if pointed at.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlobConfig {
+    /// Bucket holding every object. When unset the backend runs against an
+    /// in-process, in-memory store — nothing survives the process. That is a
+    /// test and development mode, and startup says so loudly.
+    #[serde(default)]
+    pub bucket: Option<String>,
+
+    /// Region. Defaults to whatever the environment or instance metadata says.
+    #[serde(default)]
+    pub region: Option<String>,
+
+    /// Endpoint override, for an S3-compatible service.
+    #[serde(default)]
+    pub endpoint: Option<String>,
+
+    /// Allow a plain-HTTP endpoint. Only for a local test service.
+    #[serde(default)]
+    pub allow_http: bool,
+
+    /// Prefix under which every key lives, so one bucket can hold several
+    /// deployments.
+    #[serde(default)]
+    pub prefix: String,
+
+    /// How many prefixes the timer keys are spread across.
+    ///
+    /// Timer keys carry their deadline, so they increase monotonically — the
+    /// classic S3 hot-prefix anti-pattern. Sharding spreads the writes.
+    #[serde(default = "default_timer_shards")]
+    pub timer_shards: u32,
+
+    /// Documents held in the read cache.
+    #[serde(default = "default_cache_capacity")]
+    pub cache_capacity: usize,
+
+    /// How many times a batch is re-decided after losing a race before the
+    /// caller is told there is no answer.
+    #[serde(default = "default_max_cas_retries")]
+    pub max_cas_retries: u32,
+
+    /// How many branch siblings a task response may carry.
+    #[serde(default = "default_preload_limit")]
+    pub preload_limit: u32,
+
+    /// Whether the search operations are answered. Each search reads every
+    /// document in the store — O(origins) GETs — so they are off unless a
+    /// deployment opts in.
+    #[serde(default)]
+    pub search_enabled: bool,
+}
+
+fn default_timer_shards() -> u32 {
+    4
+}
+fn default_cache_capacity() -> usize {
+    10_000
+}
+fn default_max_cas_retries() -> u32 {
+    8
+}
+
+impl Default for BlobConfig {
+    fn default() -> Self {
+        Self {
+            bucket: None,
+            region: None,
+            endpoint: None,
+            allow_http: false,
+            prefix: String::new(),
+            timer_shards: default_timer_shards(),
+            cache_capacity: default_cache_capacity(),
+            max_cas_retries: default_max_cas_retries(),
+            preload_limit: default_preload_limit(),
+            search_enabled: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -268,6 +356,7 @@ impl Default for StorageConfig {
             sqlite: SqliteConfig::default(),
             postgres: PostgresConfig::default(),
             mysql: MysqlConfig::default(),
+            blob: BlobConfig::default(),
         }
     }
 }
@@ -453,10 +542,10 @@ impl Config {
     fn validate(&self) -> Result<(), String> {
         // Validate storage type
         match self.storage.storage_type.as_str() {
-            "sqlite" | "postgres" | "mysql" => {}
+            "sqlite" | "postgres" | "mysql" | "blob" => {}
             other => {
                 return Err(format!(
-                    "Unknown storage backend: '{}'. Valid options are 'sqlite', 'postgres', and 'mysql'.",
+                    "Unknown storage backend: '{}'. Valid options are 'sqlite', 'postgres', 'mysql', and 'blob'.",
                     other
                 ));
             }

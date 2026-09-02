@@ -4,6 +4,7 @@ members = [
     "crates/resonate-core",
     "crates/resonate-gateway-http",
     "crates/resonate-gateway-web",
+    "crates/resonate-server-blob",
     "crates/resonate-server-dbms",
     "crates/resonate-timer-wheel",
     "crates/resonate-transport-gcps",
@@ -51,11 +52,14 @@ path = "test/test_workos_startup.rs"
 required-features = ["sqlite", "postgres", "mysql"]
 
 [features]
-# All forwarded: the cfg'd code lives in resonate-server-dbms.
-default = ["sqlite", "postgres", "mysql"]
+# All forwarded: the cfg'd code lives in resonate-server-dbms, except blob,
+# which is its own crate — gating it keeps object_store out of a build that
+# does not run it.
+default = ["sqlite", "postgres", "mysql", "blob"]
 sqlite = ["resonate-server-dbms/sqlite"]
 postgres = ["resonate-server-dbms/postgres"]
 mysql = ["resonate-server-dbms/mysql"]
+blob = ["dep:resonate-server-blob", "dep:object_store"]
 concurrency-stress = ["resonate-server-dbms/concurrency-stress"]
 
 [dependencies]
@@ -63,6 +67,7 @@ resonate-auth = { path = "crates/resonate-auth" }
 resonate-core = { path = "crates/resonate-core" }
 resonate-gateway-http = { path = "crates/resonate-gateway-http" }
 resonate-gateway-web = { path = "crates/resonate-gateway-web" }
+resonate-server-blob = { path = "crates/resonate-server-blob", optional = true }
 resonate-server-dbms = { path = "crates/resonate-server-dbms", default-features = false }
 resonate-timer-wheel = { path = "crates/resonate-timer-wheel" }
 resonate-transport-gcps = { path = "crates/resonate-transport-gcps" }
@@ -90,6 +95,7 @@ async-trait = { workspace = true }
 validator = { workspace = true }
 url = { workspace = true }
 base64 = "0.22"
+object_store = { version = "0.14.1", features = ["aws"], optional = true }
 tower-http = { version = "0.6", features = ["trace", "catch-panic", "cors"] }
 
 [dev-dependencies]

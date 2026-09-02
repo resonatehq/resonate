@@ -17,12 +17,38 @@ use resonate_core::{scheme_of, Cause, ResonateRouter, ResonateWorker, Unavailabl
 /// Registering a new scheme is therefore the whole cost of adding a worker —
 /// nothing here, and nothing in `core`, has to change.
 pub struct TransportDispatcher {
-    workers: HashMap<String, Arc<dyn ResonateWorker>>,
+    /// Set-once: either at construction (`new`) or one statement later
+    /// (`deferred` + `register_workers`). The deferred form exists for the
+    /// blob path, where the server takes the router as a constructor argument
+    /// and the workers take a handle to the server — so the router is built
+    /// empty, the server around it, and the workers registered before
+    /// anything listens. Unset is the same observable state as an unknown
+    /// scheme: every address is unroutable.
+    workers: std::sync::OnceLock<HashMap<String, Arc<dyn ResonateWorker>>>,
 }
 
 impl TransportDispatcher {
     pub fn new(workers: HashMap<String, Arc<dyn ResonateWorker>>) -> Self {
-        Self { workers }
+        let slot = std::sync::OnceLock::new();
+        let _ = slot.set(workers);
+        Self { workers: slot }
+    }
+
+    /// A dispatcher with no workers yet. Fill it exactly once with
+    /// [`TransportDispatcher::register_workers`], before `init`.
+    pub fn deferred() -> Self {
+        Self {
+            workers: std::sync::OnceLock::new(),
+        }
+    }
+
+    /// Register the workers. Returns false if they were already registered.
+    pub fn register_workers(&self, workers: HashMap<String, Arc<dyn ResonateWorker>>) -> bool {
+        self.workers.set(workers).is_ok()
+    }
+
+    fn workers(&self) -> impl Iterator<Item = (&String, &Arc<dyn ResonateWorker>)> {
+        self.workers.get().into_iter().flatten()
     }
 }
 
@@ -30,9 +56,13 @@ impl TransportDispatcher {
     async fn route_inner(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
         let scheme = scheme_of(address)
             .ok_or_else(|| Unavailable::unroutable(format!("address is not a URI: {address}")))?;
-        let worker = self.workers.get(&scheme).ok_or_else(|| {
-            Unavailable::unroutable(format!("no worker registered for scheme '{scheme}'"))
-        })?;
+        let worker = self
+            .workers
+            .get()
+            .and_then(|w| w.get(&scheme))
+            .ok_or_else(|| {
+                Unavailable::unroutable(format!("no worker registered for scheme '{scheme}'"))
+            })?;
         worker.send(address, msg).await
     }
 }
@@ -47,7 +77,7 @@ impl ResonateRouter for TransportDispatcher {
     /// worker may be registered under several schemes; each gets its own
     /// `init`, which is the behaviour that was here before this moved.
     async fn init(&self, debug: bool) -> Result<(), Unavailable> {
-        for (scheme, worker) in &self.workers {
+        for (scheme, worker) in self.workers() {
             worker.init(debug).await.map_err(|e| {
                 Unavailable::new(format!("transport '{scheme}' failed to start: {e}"))
             })?;
@@ -61,7 +91,7 @@ impl ResonateRouter for TransportDispatcher {
     /// down, and one transport refusing to drain is no reason to leave the
     /// others running.
     async fn stop(&self) -> Result<(), Unavailable> {
-        for (scheme, worker) in &self.workers {
+        for (scheme, worker) in self.workers() {
             if let Err(e) = worker.stop().await {
                 tracing::warn!(scheme = %scheme, error = %e, "transport did not stop cleanly");
             }
