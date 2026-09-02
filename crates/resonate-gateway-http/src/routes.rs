@@ -105,8 +105,7 @@ impl axum::extract::FromRef<AppState> for PollState {
 pub fn api_routes() -> Router<AppState> {
     Router::new()
         .route("/", post(handle_api))
-        .route("/health", get(handle_health))
-        .route("/ready", get(handle_health))
+        .route("/ready", get(handle_ready))
         .route("/promises", any(handle_legacy))
         .route("/promises/*path", any(handle_legacy))
         .route("/schedules", any(handle_legacy))
@@ -133,14 +132,13 @@ pub fn poll_routes() -> Router<AppState> {
     Router::new().route("/poll/:group/:id", get(handle_poll))
 }
 
-/// Liveness: this process is running.
+/// The one probe: this process is running and serving.
 ///
-/// `/ready` answers the same thing. It used to ask the server, which pinged its
-/// storage, so a pod whose database had gone away reported 503 and stopped
-/// being sent traffic. The route is kept because a probe that 404s marks a pod
-/// unready, but it no longer distinguishes: nothing here can tell a server that
-/// cannot serve from one that can.
-async fn handle_health() -> StatusCode {
+/// It used to ask the server, which pinged its storage, so a pod whose database
+/// had gone away answered 503. Nothing here can tell that any more — the port
+/// has no `ready` — so this is liveness, and `/health` alongside it said the
+/// same thing twice.
+async fn handle_ready() -> StatusCode {
     StatusCode::OK
 }
 
