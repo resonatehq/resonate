@@ -271,7 +271,7 @@ fn merged() -> Router {
             enabled: true,
             max_connections: 4,
             buffer_size: 4,
-            keepalive_interval_secs: 0,
+            keepalive_interval_ms: 0,
         },
     ));
     let console = resonate_gateway_web::routes::<resonate_gateway_http::AppState>(

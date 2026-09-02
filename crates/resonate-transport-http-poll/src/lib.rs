@@ -30,11 +30,11 @@ pub struct Config {
     #[serde(default = "default_buffer_size")]
     pub buffer_size: usize,
 
-    /// SSE keepalive interval in seconds. A comment line is sent to every
+    /// SSE keepalive interval in milliseconds. A comment line is sent to every
     /// connected client this often to prevent proxies and load balancers from
-    /// closing the connection. Set to 0 to disable. [default: 30]
-    #[serde(default = "default_keepalive_interval_secs")]
-    pub keepalive_interval_secs: u64,
+    /// closing the connection. Set to 0 to disable. [default: 30_000]
+    #[serde(default = "default_keepalive_interval_ms")]
+    pub keepalive_interval_ms: u64,
 }
 
 fn default_enabled() -> bool {
@@ -46,7 +46,7 @@ fn default_max_connections() -> usize {
 fn default_buffer_size() -> usize {
     100
 }
-fn default_keepalive_interval_secs() -> u64 {
+fn default_keepalive_interval_ms() -> u64 {
     0
 }
 
@@ -56,7 +56,7 @@ impl Default for Config {
             enabled: default_enabled(),
             max_connections: default_max_connections(),
             buffer_size: default_buffer_size(),
-            keepalive_interval_secs: default_keepalive_interval_secs(),
+            keepalive_interval_ms: default_keepalive_interval_ms(),
         }
     }
 }
@@ -121,7 +121,7 @@ pub struct PollRegistry {
     next_conn_id: AtomicU64,
     pub max_connections: usize,
     pub buffer_size: usize,
-    pub keepalive_interval_secs: u64,
+    pub keepalive_interval_ms: u64,
     /// Held so a delivery failure can be reported back to the server (e.g.
     /// releasing the task instead of dropping it). Not used yet.
     ///
@@ -138,7 +138,7 @@ impl PollRegistry {
             next_conn_id: AtomicU64::new(1),
             max_connections: config.max_connections,
             buffer_size: config.buffer_size,
-            keepalive_interval_secs: config.keepalive_interval_secs,
+            keepalive_interval_ms: config.keepalive_interval_ms,
             server,
         }
     }
@@ -310,16 +310,16 @@ mod tests {
     use super::Config;
 
     #[test]
-    fn keepalive_default_is_zero_seconds() {
-        assert_eq!(Config::default().keepalive_interval_secs, 0);
+    fn keepalive_default_is_zero_ms() {
+        assert_eq!(Config::default().keepalive_interval_ms, 0);
     }
 
     #[test]
     fn keepalive_can_be_overridden() {
         let config = Config {
-            keepalive_interval_secs: 42,
+            keepalive_interval_ms: 42,
             ..Default::default()
         };
-        assert_eq!(config.keepalive_interval_secs, 42);
+        assert_eq!(config.keepalive_interval_ms, 42);
     }
 }

@@ -320,7 +320,7 @@ async fn handle_poll(
             // clears its registry, which drops the only sender. There is no
             // shutdown signal to keep in step with, because the thing that owns
             // the connection is the thing that ends it.
-            let keepalive_secs = registry.keepalive_interval_secs;
+            let keepalive_ms = registry.keepalive_interval_ms;
             let stream = async_stream::stream! {
                 let _guard = PollGuard {
                     registry: poll_state.poll_registry.clone(),
@@ -333,10 +333,10 @@ async fn handle_poll(
             };
 
             let mut sse = Sse::new(stream);
-            if keepalive_secs > 0 {
+            if keepalive_ms > 0 {
                 sse = sse.keep_alive(
                     KeepAlive::new()
-                        .interval(Duration::from_secs(keepalive_secs))
+                        .interval(Duration::from_millis(keepalive_ms))
                         .text("ping"),
                 );
             }
