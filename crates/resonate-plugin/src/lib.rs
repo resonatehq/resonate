@@ -62,19 +62,25 @@
 //! let server = (chosen.configure)(&config.server(chosen.id), deps)?;
 //!
 //! // 3. The workers, each downgrading the server that now exists.
-//! let mut workers = HashMap::new();
+//! //    Two collections, because they answer different questions: `workers` is
+//! //    what was built, `routes` is how to reach it. One worker can claim
+//! //    several schemes, so it appears once in the first and several times in
+//! //    the second.
+//! let mut workers = Vec::new();
+//! let mut routes = HashMap::new();
 //! for plugin in registry.workers() {
 //!     let deps = WorkerDependencies::new(Arc::downgrade(&server));
 //!     let Some(worker) = (plugin.configure)(&config.worker(plugin.id), deps)? else {
 //!         continue; // turned itself off
 //!     };
 //!     for scheme in plugin.schemes {
-//!         workers.insert(scheme.to_string(), Arc::clone(&worker));
+//!         routes.insert(scheme.to_string(), Arc::clone(&worker));
 //!     }
+//!     workers.push(worker);
 //! }
 //!
 //! // 4. Install them. The router is complete from here and never changes again.
-//! router.install(workers);
+//! router.install(routes);
 //!
 //! // 5. The gateways, holding the server strongly. Nothing is bound yet.
 //! let gateways = /* (plugin.configure)(&config.gateway(plugin.id), deps)? */;
@@ -82,8 +88,8 @@
 //! // 6. Start, in the order things were built.
 //! router.init(debug).await?;
 //! server.init(debug).await?;
-//! for worker in workers.values() { worker.init(debug).await?; }
-//! for gateway in &gateways       { gateway.init(debug).await?; }
+//! for worker in &workers   { worker.init(debug).await?; }
+//! for gateway in &gateways { gateway.init(debug).await?; }
 //! ```
 //!
 //! Init order is construction order — one rule, no special case to remember —
@@ -94,7 +100,9 @@
 //! last.
 //!
 //! Each thing is started by whoever built it, which is this loop. A router does
-//! not drive its workers' lifecycle just because it holds them.
+//! not drive its workers' lifecycle just because it holds them — and the routing
+//! table is the wrong thing to iterate for it, because a worker claiming two
+//! schemes is in there twice and would be started twice.
 //!
 //! Step 4 is what closes the cycle — server holds router, router holds workers,
 //! workers hold server — and the router is the only participant that starts
