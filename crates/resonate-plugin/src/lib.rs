@@ -111,7 +111,7 @@ pub mod error;
 pub mod plugin;
 pub mod registry;
 
-pub use config::{Loaded, Loader, Settings};
+pub use config::{Configuration, Loader, Settings};
 pub use error::{ConfigError, RegistryError, StartupError};
 pub use plugin::{
     GatewayCtx, GatewayFactory, GatewayPlugin, ServerConnect, ServerCtx, ServerFactory,

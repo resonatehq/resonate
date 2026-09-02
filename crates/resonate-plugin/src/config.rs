@@ -79,19 +79,24 @@ impl Loader {
         Ok(self)
     }
 
-    pub fn load(self) -> Loaded {
-        Loaded {
+    /// Merge the layers. Nothing is constructed and no plugin is consulted.
+    pub fn load(self) -> Configuration {
+        Configuration {
             figment: self.figment,
         }
     }
 }
 
 /// Configuration, merged and ready to be handed out one plugin at a time.
-pub struct Loaded {
+///
+/// It builds nothing. It is what the operator said, sliced per plugin — a
+/// plugin turns its slice into a factory, and the composition root calls the
+/// factories in order.
+pub struct Configuration {
     figment: Figment,
 }
 
-impl Loaded {
+impl Configuration {
     /// `servers.<id>`.
     pub fn server(&self, id: &str) -> Settings<'_> {
         self.at("servers", id)
