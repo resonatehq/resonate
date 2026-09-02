@@ -1,15 +1,15 @@
 //! The web console: a built single-page app, embedded, and the route that
 //! answers its requests.
 //!
-//! # What this crate is, and is not
+//! # What this crate is
 //!
-//! It is not a [`ResonateGateway`](resonate_core::ResonateGateway). It binds
-//! no socket and owns no lifecycle — it hands back a set of axum routes, and
-//! the HTTP gateway merges them into the router it already serves. One port,
-//! one process, one origin: the console is served by the server it reads, so
-//! there is no CORS to configure and no second listener to operate.
+//! A [`ResonateGateway`](resonate_core::ResonateGateway), like every other
+//! edge: it binds its own socket, on its own port, and enforces its own auth.
+//! It used to hand a set of routes to the HTTP gateway to merge, which meant
+//! the composition root had to know that one plugin was routes rather than a
+//! gateway, and had to hand them to another. A plugin owns what it owns.
 //!
-//! What it does own is the boundary. The console's `ui.*` requests are
+//! What it also owns is the boundary. The console's `ui.*` requests are
 //! answered **here and nowhere else**: the worker route refuses the whole
 //! namespace (see `resonate_gateway_http::routes`), so the read model the
 //! console needs cannot be reached through the API workers use, and can change
@@ -86,6 +86,19 @@ pub struct Config {
     #[serde(default = "yes")]
     pub enabled: bool,
 
+    /// Where to listen [default: 0.0.0.0:8003].
+    ///
+    /// Its own port, because a plugin owns what it owns. It used to be merged
+    /// into the HTTP gateway's router, which meant the composition root had to
+    /// know that the console was routes rather than a gateway, and had to hand
+    /// one plugin's routes to another.
+    #[serde(default = "default_bind")]
+    pub bind: String,
+
+    /// Who may reach it. Its own, because it enforces it.
+    #[serde(default)]
+    pub auth: Option<resonate_auth::Config>,
+
     /// Answer `GET /` with a redirect to the console.
     ///
     /// The API's root is `POST /`, so a `GET` there is a person with a
@@ -99,10 +112,16 @@ fn yes() -> bool {
     true
 }
 
+fn default_bind() -> String {
+    "0.0.0.0:8003".to_string()
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
             enabled: true,
+            bind: default_bind(),
+            auth: None,
             redirect_root: true,
         }
     }
@@ -328,5 +347,90 @@ mod tests {
         assert_eq!(content_type("fonts/inter-latin.woff2"), "font/woff2");
         assert_eq!(content_type("favicon.svg"), "image/svg+xml");
         assert_eq!(content_type("noextension"), "application/octet-stream");
+    }
+}
+
+// ─── The gateway ─────────────────────────────────────────────────────────────
+
+/// This console, as a plugin. Its own listener, its own port, its own policy.
+pub static PLUGIN: resonate_plugin::GatewayPlugin =
+    resonate_plugin::GatewayPlugin::new(env!("CARGO_PKG_NAME"), configure);
+
+/// Read `[gateways.gateway_web]`, and build it unless it is off.
+fn configure(
+    settings: &resonate_plugin::Settings<'_>,
+    deps: resonate_plugin::GatewayDependencies,
+) -> Result<Option<Arc<dyn resonate_plugin::ResonateGateway>>, resonate_plugin::ConfigError> {
+    let config: Config = settings.extract()?;
+    if !config.enabled {
+        return Ok(None);
+    }
+    Ok(Some(Arc::new(Console {
+        config,
+        server: deps.server,
+        serving: std::sync::Mutex::new(None),
+    })))
+}
+
+struct Serving {
+    task: tokio::task::JoinHandle<()>,
+    shutdown: tokio::sync::oneshot::Sender<()>,
+}
+
+/// The console, serving itself.
+struct Console {
+    config: Config,
+    server: Arc<dyn ResonateServer>,
+    serving: std::sync::Mutex<Option<Serving>>,
+}
+
+#[async_trait::async_trait]
+impl resonate_plugin::ResonateGateway for Console {
+    async fn init(&self, _debug: bool) -> Result<(), resonate_plugin::Unavailable> {
+        let auth = match &self.config.auth {
+            Some(cfg) => Some(Arc::new(cfg.load().map_err(|e| {
+                resonate_plugin::Unavailable::new(format!("console auth: {e}"))
+            })?)),
+            None => None,
+        };
+        let app: Router<()> = routes(
+            &self.config,
+            ConsoleState {
+                server: Arc::clone(&self.server),
+                auth,
+            },
+        )
+        .expect("enabled was checked in configure");
+
+        let listener = tokio::net::TcpListener::bind(&self.config.bind)
+            .await
+            .map_err(|e| {
+                resonate_plugin::Unavailable::new(format!(
+                    "console cannot bind {}: {e}",
+                    self.config.bind
+                ))
+            })?;
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            let served = axum::serve(listener, app).with_graceful_shutdown(async move {
+                let _ = rx.await;
+            });
+            if let Err(e) = served.await {
+                tracing::error!(error = %e, "Console listener stopped");
+            }
+        });
+        *self.serving.lock().expect("console serving mutex") = Some(Serving { task, shutdown: tx });
+        tracing::info!(bind = %self.config.bind, mount = MOUNT, "Console listening");
+        Ok(())
+    }
+
+    async fn stop(&self) -> Result<(), resonate_plugin::Unavailable> {
+        // Out of the guard before the await: a std MutexGuard is not Send.
+        let serving = self.serving.lock().expect("console serving mutex").take();
+        if let Some(serving) = serving {
+            let _ = serving.shutdown.send(());
+            let _ = serving.task.await;
+        }
+        Ok(())
     }
 }

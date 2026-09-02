@@ -248,60 +248,24 @@ async fn a_disabled_console_serves_nothing() {
     let routes = resonate_gateway_web::routes::<()>(
         &resonate_gateway_web::Config {
             enabled: false,
-            redirect_root: true,
+            ..Default::default()
         },
         ConsoleState { server, auth: None },
     );
     assert!(routes.is_none(), "nothing to merge when it is off");
 }
 
-// --- composition ------------------------------------------------------------
+// --- the boundary ------------------------------------------------------------
 //
-// The console is merged into the gateway's own router and served on its port,
-// so the two have to fit: no path collides, and the boundary between the two
-// endpoints is real rather than a comment.
+// The console listens on its own port now, so there is no shared router to
+// test. What is still real, and still worth pinning down, is the boundary: a
+// `ui.*` request is answered on the console and refused on the worker edge.
 
-fn merged() -> Router {
-    let oracle = Arc::new(SharedOracle::with_preload_limit(10));
-    let server: Arc<dyn ResonateServer> = oracle.clone();
-    let console = resonate_gateway_web::routes::<resonate_gateway_http::AppState>(
-        &resonate_gateway_web::Config::default(),
-        ConsoleState {
-            server: server.clone(),
-            auth: None,
-        },
-    )
-    .expect("enabled");
-
-    // This is the merge the composition root performs. It panics if the two
-    // routers claim the same method on the same path — `POST /` and `GET /`
-    // are the pair that has to stay apart.
+/// The worker edge, built the way its gateway builds it.
+fn worker_edge() -> Router {
+    let server: Arc<dyn ResonateServer> = Arc::new(SharedOracle::with_preload_limit(10));
     resonate_gateway_http::routes::api_routes()
-        .merge(console)
         .with_state(resonate_gateway_http::AppState { server, auth: None })
-}
-
-#[tokio::test]
-async fn the_console_and_the_protocol_share_one_port() {
-    let app = merged();
-
-    // The worker endpoint, unchanged.
-    let (status, body) = post(
-        &app,
-        "/",
-        envelope("promise.get", json!({ "id": "nothing" })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
-
-    // The console, on the same router.
-    let (status, _, html) = get(&app, "/console/").await;
-    assert_eq!(status, StatusCode::OK);
-    assert!(html.contains("Resonate Console"));
-
-    // And the probe still answers.
-    let (status, _, _) = get(&app, "/ready").await;
-    assert_eq!(status, StatusCode::OK);
 }
 
 #[tokio::test]
@@ -309,9 +273,10 @@ async fn the_worker_endpoint_refuses_the_console_namespace() {
     // The boundary, stated as a test: `ui.*` is answered on the console's route
     // and nowhere else, so an SDK cannot come to depend on a request that
     // exists to draw a table.
-    let app = merged();
+    let edge = worker_edge();
+    let console = console();
     for kind in resonate_gateway_web::ui_kinds() {
-        let (status, body) = post(&app, "/", envelope(kind, json!({}))).await;
+        let (status, body) = post(&edge, "/", envelope(kind, json!({}))).await;
         assert_eq!(
             status,
             StatusCode::NOT_FOUND,
@@ -325,11 +290,11 @@ async fn the_worker_endpoint_refuses_the_console_namespace() {
             "{kind}: {body}"
         );
 
-        // The same request, on the console's route, is *answered* — with a
-        // page, or with this namespace's own structured refusal. An empty
-        // server has no execution called `absent`, and `not_found` is an
-        // answer to the question, not a refusal to hear it.
-        let (status, body) = post(&app, RPC_PATH, envelope(kind, ui_probe(kind))).await;
+        // The same request, on the console, is *answered* — with a page, or
+        // with this namespace's own structured refusal. An empty server has no
+        // execution called `absent`, and `not_found` is an answer to the
+        // question, not a refusal to hear it.
+        let (status, body) = post(&console, RPC_PATH, envelope(kind, ui_probe(kind))).await;
         assert!(
             status.is_success() || body["data"]["error"] == "not_found",
             "{kind} must be served at {RPC_PATH}: {status} {body}"

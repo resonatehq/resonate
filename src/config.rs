@@ -472,13 +472,6 @@ impl Config {
         // Both the override and the value it falls back to: guarding only the
         // override would leave `tasks.lease_timeout = 0` reaching `task.acquire`
         // through `resolve_lease_timeout`, which is the same failure.
-        if let Some(ttl) = self.transports.bash_exec.lease_timeout {
-            if ttl < 1 {
-                return Err(format!(
-                    "transports.bash_exec.lease_timeout must be at least 1 (got {ttl})"
-                ));
-            }
-        }
         if self.tasks.lease_timeout < 1 {
             return Err(format!(
                 "tasks.lease_timeout must be at least 1 (got {})",
@@ -495,35 +488,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bash_lease_timeout_defaults_to_the_server_task_lease() {
-        let mut config = Config::default();
-        config.tasks.lease_timeout = 120_000;
-        assert_eq!(config.transports.bash_exec.lease_timeout, None);
-        assert_eq!(
-            config
-                .transports
-                .bash_exec
-                .resolve_lease_timeout(config.tasks.lease_timeout),
-            120_000,
-            "unset means follow tasks.lease_timeout, including when that is customised"
-        );
-    }
-
-    #[test]
-    fn bash_lease_timeout_overrides_the_server_task_lease() {
-        let mut config = Config::default();
-        config.tasks.lease_timeout = 15_000;
-        config.transports.bash_exec.lease_timeout = Some(600_000);
-        assert_eq!(
-            config
-                .transports
-                .bash_exec
-                .resolve_lease_timeout(config.tasks.lease_timeout),
-            600_000
-        );
-    }
-
-    #[test]
     fn non_positive_task_lease_timeout_is_rejected() {
         // It is what bash_exec.lease_timeout falls back to, so it reaches
         // `task.acquire` as the ttl and must clear the same bar.
@@ -532,18 +496,6 @@ mod tests {
             config.tasks.lease_timeout = ttl;
             let err = config.validate().expect_err("would 400 every acquire");
             assert!(err.contains("tasks.lease_timeout"), "{err}");
-        }
-    }
-
-    #[test]
-    fn non_positive_bash_lease_timeout_is_rejected() {
-        for ttl in [0, -1] {
-            let mut config = Config::default();
-            config.transports.bash_exec.lease_timeout = Some(ttl);
-            let err = config
-                .validate()
-                .expect_err("task.acquire would 400 on every acquire");
-            assert!(err.contains("bash_exec.lease_timeout"), "{err}");
         }
     }
 

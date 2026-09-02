@@ -3,6 +3,7 @@ members = [
     "crates/resonate-auth",
     "crates/resonate-core",
     "crates/resonate-gateway-http",
+    "crates/resonate-gateway-metrics",
     "crates/resonate-gateway-web",
     "crates/resonate-plugin",
     "crates/resonate-sql",
@@ -70,6 +71,7 @@ concurrency-stress = [
 resonate-auth = { path = "crates/resonate-auth" }
 resonate-core = { path = "crates/resonate-core" }
 resonate-gateway-http = { path = "crates/resonate-gateway-http" }
+resonate-gateway-metrics = { path = "crates/resonate-gateway-metrics" }
 resonate-gateway-web = { path = "crates/resonate-gateway-web" }
 resonate-plugin = { path = "crates/resonate-plugin" }
 resonate-sql = { path = "crates/resonate-sql" }

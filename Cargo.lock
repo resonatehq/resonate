@@ -2797,6 +2797,7 @@ dependencies = [
  "resonate-auth",
  "resonate-core",
  "resonate-gateway-http",
+ "resonate-gateway-metrics",
  "resonate-gateway-web",
  "resonate-oracle",
  "resonate-plugin",
@@ -2857,10 +2858,26 @@ dependencies = [
  "prometheus",
  "resonate-auth",
  "resonate-core",
+ "resonate-plugin",
  "serde",
  "serde_json",
  "tokio",
  "tower-http",
+ "tracing",
+]
+
+[[package]]
+name = "resonate-gateway-metrics"
+version = "0.9.8"
+dependencies = [
+ "async-trait",
+ "axum",
+ "http-body-util",
+ "resonate-core",
+ "resonate-plugin",
+ "serde",
+ "tokio",
+ "tower",
  "tracing",
 ]
 
@@ -2875,6 +2892,7 @@ dependencies = [
  "resonate-core",
  "resonate-gateway-http",
  "resonate-oracle",
+ "resonate-plugin",
  "rust-embed",
  "serde",
  "serde_json",
@@ -3019,7 +3037,7 @@ version = "0.9.8"
 dependencies = [
  "async-trait",
  "google-cloud-pubsub",
- "resonate-core",
+ "resonate-plugin",
  "serde",
  "serde_json",
  "tokio",
@@ -3067,7 +3085,7 @@ dependencies = [
  "base64 0.22.1",
  "fastrand",
  "reqwest 0.12.28",
- "resonate-core",
+ "resonate-plugin",
  "serde",
  "serde_json",
  "tokio",

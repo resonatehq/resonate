@@ -28,6 +28,22 @@ use tokio::task::JoinHandle;
 
 pub use routes::AppState;
 
+/// This gateway, as a plugin. The worker-facing HTTP edge.
+pub static PLUGIN: resonate_plugin::GatewayPlugin =
+    resonate_plugin::GatewayPlugin::new(env!("CARGO_PKG_NAME"), configure);
+
+/// Read `[gateways.gateway_http]`, and build the gateway unless it is off.
+fn configure(
+    settings: &resonate_plugin::Settings<'_>,
+    deps: resonate_plugin::GatewayDependencies,
+) -> Result<Option<Arc<dyn ResonateGateway>>, resonate_plugin::ConfigError> {
+    let config: Config = settings.extract()?;
+    if !config.enabled {
+        return Ok(None);
+    }
+    Ok(Some(Arc::new(HttpGateway::new(deps.server, config))))
+}
+
 /// Where to listen, and how to behave once we do.
 ///
 /// Plain data, like every transport's `Config`, so it deserializes straight
@@ -35,6 +51,10 @@ pub use routes::AppState;
 /// [`HttpGateway::init`]'s.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
+    /// Serve at all.
+    #[serde(default = "yes")]
+    pub enabled: bool,
+
     /// Address to listen on [default: 0.0.0.0]
     #[serde(default = "default_bind")]
     pub bind: String,
@@ -69,6 +89,10 @@ pub struct Config {
     pub abort_on_panic: bool,
 }
 
+fn yes() -> bool {
+    true
+}
+
 fn default_bind() -> String {
     "0.0.0.0".to_string()
 }
@@ -80,6 +104,7 @@ fn default_port() -> u16 {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            enabled: true,
             bind: default_bind(),
             port: default_port(),
             url: None,

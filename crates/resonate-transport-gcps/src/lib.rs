@@ -10,6 +10,31 @@
 /// The address scheme this transport serves.
 pub const SCHEME: &str = "gcps";
 
+/// This transport, as a plugin. The one thing a binary names to get `gcps://`
+/// addresses delivered.
+pub static PLUGIN: resonate_plugin::WorkerPlugin =
+    resonate_plugin::WorkerPlugin::new(env!("CARGO_PKG_NAME"), &[SCHEME], configure);
+
+/// Read `[workers.transport_gcps]`, and build the transport unless it is off.
+fn configure(
+    settings: &resonate_plugin::Settings<'_>,
+    deps: resonate_plugin::WorkerDependencies,
+) -> Result<Option<std::sync::Arc<dyn ResonateWorker>>, resonate_plugin::ConfigError> {
+    let config: Config = settings.extract()?;
+    if !config.enabled {
+        return Ok(None);
+    }
+    // Zero permits sizes the publish semaphore to nothing, so nothing could
+    // ever acquire a slot and every message would queue forever.
+    if config.concurrency == 0 {
+        return Err(settings.reject("concurrency", "must be at least 1 (got 0)"));
+    }
+    Ok(Some(std::sync::Arc::new(GcpsPubSubTransport::new(
+        deps.server,
+        config,
+    ))))
+}
+
 /// Everything under `[transports.gcps]`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Config {
@@ -55,8 +80,8 @@ use std::time::Duration;
 use google_cloud_pubsub::client::Publisher;
 use tokio::sync::{mpsc, Mutex, Semaphore};
 
-use resonate_core::types::Message;
-use resonate_core::{ResonateServer, ResonateWorker, Unavailable};
+use resonate_plugin::types::Message;
+use resonate_plugin::{ResonateServer, ResonateWorker, Unavailable};
 
 /// A `gcps://` destination: `gcps://<project>/<topic>`.
 #[derive(Debug, Clone)]

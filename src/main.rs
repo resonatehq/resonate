@@ -272,7 +272,6 @@ async fn run_server(config: Config) -> Result<(), String> {
             Arc::new(resonate_worker_bash::BashExecTransport::new(
                 server_handle.clone(),
                 config.transports.bash_exec.clone(),
-                config.tasks.lease_timeout,
             )),
         );
     }

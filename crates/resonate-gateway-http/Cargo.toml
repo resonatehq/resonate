@@ -12,6 +12,7 @@ path = "src/lib.rs"
 [dependencies]
 resonate-auth = { path = "../resonate-auth" }
 resonate-core = { path = "../resonate-core" }
+resonate-plugin = { path = "../resonate-plugin" }
 async-trait = { workspace = true }
 serde = { workspace = true }
 axum = { version = "0.7", features = ["json"] }

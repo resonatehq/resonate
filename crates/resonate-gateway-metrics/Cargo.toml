@@ -1,0 +1,24 @@
+[package]
+name = "resonate-gateway-metrics"
+description = "The Prometheus endpoint: the process-wide default registry, served over HTTP."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "resonate_gateway_metrics"
+path = "src/lib.rs"
+
+[dependencies]
+resonate-core = { path = "../resonate-core" }
+resonate-plugin = { path = "../resonate-plugin" }
+async-trait = { workspace = true }
+axum = "0.7"
+serde = { workspace = true }
+tokio = { version = "1", features = ["rt", "net", "sync", "macros"] }
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

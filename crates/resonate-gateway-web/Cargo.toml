@@ -12,7 +12,10 @@ path = "src/lib.rs"
 [dependencies]
 resonate-auth = { path = "../resonate-auth" }
 resonate-core = { path = "../resonate-core" }
+resonate-plugin = { path = "../resonate-plugin" }
 axum = { version = "0.7", features = ["json"] }
+async-trait = { workspace = true }
+tokio = { version = "1", features = ["rt", "net", "sync", "macros"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = "0.1"
@@ -27,7 +30,6 @@ rust-embed = { version = "8", features = ["debug-embed"] }
 # about a console.
 resonate-gateway-http = { path = "../resonate-gateway-http" }
 resonate-oracle = { path = "../resonate-oracle" }
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
-async-trait = { workspace = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

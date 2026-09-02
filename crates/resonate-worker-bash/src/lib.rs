@@ -3,7 +3,7 @@
 //! A worker rather than a transport: the other end of a `bash://` address is
 //! this process, so it does not deliver anywhere — it acquires the task, runs
 //! the script, and settles the promise. Every state change goes through the
-//! [`ResonateServer`](resonate_core::ResonateServer) port, the same path a
+//! [`ResonateServer`](resonate_plugin::ResonateServer) port, the same path a
 //! remote worker's HTTP calls take.
 //!
 //! Three backends behind one scheme: `bash://` runs locally, `bash://docker/<image>`
@@ -12,8 +12,33 @@
 /// The address scheme this worker serves.
 pub const SCHEME: &str = "bash";
 
+/// This worker, as a plugin. The one thing a binary names to get `bash://`
+/// addresses executed in this process.
+pub static PLUGIN: resonate_plugin::WorkerPlugin =
+    resonate_plugin::WorkerPlugin::new(env!("CARGO_PKG_NAME"), &[SCHEME], configure);
+
+/// Read `[workers.worker_bash]`, and build the worker unless it is off.
+fn configure(
+    settings: &resonate_plugin::Settings<'_>,
+    deps: resonate_plugin::WorkerDependencies,
+) -> Result<Option<std::sync::Arc<dyn ResonateWorker>>, resonate_plugin::ConfigError> {
+    let config: Config = settings.extract()?;
+    if !config.enabled {
+        return Ok(None);
+    }
+    // `task.acquire` validates ttl >= 1, so a non-positive lease would 400 on
+    // every acquire and this worker would silently never run anything.
+    if config.lease_timeout < 1 {
+        return Err(settings.reject("lease_timeout", "must be at least 1"));
+    }
+    Ok(Some(std::sync::Arc::new(BashExecTransport::new(
+        deps.server,
+        config,
+    ))))
+}
+
 /// Everything under `[transports.bash_exec]`.
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Config {
     /// Enable the bash:// address scheme [default: false]
     #[serde(default)]
@@ -25,16 +50,23 @@ pub struct Config {
     /// The lease has to outlast the script: if it expires the task is
     /// redispatched to another worker while this one is still running.
     ///
-    /// Unset means "follow `tasks.lease_timeout`" — the server-wide default
-    /// this worker used before it had a setting of its own.
-    #[serde(default)]
-    pub lease_timeout: Option<i64>,
+    /// Its own, with its own default. It used to be unset-means-follow
+    /// `tasks.lease_timeout`, which was a cross-section read no other plugin
+    /// makes: config stops at a plugin's own edge.
+    #[serde(default = "default_lease_timeout")]
+    pub lease_timeout: i64,
 }
 
-impl Config {
-    /// The lease TTL to request, falling back to the server-wide task default.
-    pub fn resolve_lease_timeout(&self, server_default: i64) -> i64 {
-        self.lease_timeout.unwrap_or(server_default)
+fn default_lease_timeout() -> i64 {
+    15_000
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            lease_timeout: default_lease_timeout(),
+        }
     }
 }
 
@@ -46,11 +78,11 @@ use async_trait::async_trait;
 use serde_json::json;
 use tokio::process::Command;
 
-use resonate_core::types::{
+use resonate_plugin::types::{
     Message, RequestEnvelope, RequestHead, ResponseEnvelope, TaskAcquireResponseData,
     PROTOCOL_VERSION,
 };
-use resonate_core::{ResonateServer, ResonateWorker, Unavailable};
+use resonate_plugin::{ResonateServer, ResonateWorker, Unavailable};
 
 // ─── Backend trait ────────────────────────────────────────────────────────────
 //
@@ -174,12 +206,8 @@ pub struct BashExecTransport {
 }
 
 impl BashExecTransport {
-    pub fn new(
-        server: Weak<dyn ResonateServer>,
-        config: Config,
-        server_lease_default: i64,
-    ) -> Self {
-        let lease_timeout = config.resolve_lease_timeout(server_lease_default);
+    pub fn new(server: Weak<dyn ResonateServer>, config: Config) -> Self {
+        let lease_timeout = config.lease_timeout;
         Self {
             server,
             lease_timeout,
