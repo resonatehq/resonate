@@ -1,27 +1,26 @@
-//! Resonate's durable state, over a relational database.
+//! What Resonate's SQL servers share, and only they.
 //!
-//! Holds the [`engine_port::ResonateEngine`] contract — every transition the
-//! system makes — and the three implementations of it, one per SQL dialect.
-//! Each is complete on its own: it parses a request, applies the transition in
-//! its own SQL, shapes the response, and returns the messages it emitted.
+//! `resonate-server-sqlite`, `-postgres` and `-mysql` are three plugins in
+//! three crates, each complete on its own: it parses a request, applies the
+//! transition in its own SQL, shapes the response, and returns what it emitted.
+//! There is no shared engine over a storage trait — lifting the state machine
+//! into shared Rust would cost Postgres its single-round-trip CTE, which is the
+//! property that makes it fast. What keeps them honest is the differential, run
+//! in lock step against `resonate-server-oracle`.
 //!
-//! There is no shared engine over a storage trait. Lifting the state machine
-//! into shared Rust would cost Postgres its single-round-trip CTE, which is
-//! the property that makes it fast; what keeps three implementations honest is
-//! the differential, run in lock step against [`oracle`].
+//! So what is here is what all three genuinely share and nothing more: the
+//! [`engine::Engine`] contract they implement, the error they report, the
+//! parameter and record structs an operation passes down, and the migration
+//! runner.
 //!
-//! What is left here is what all three genuinely share: the error type, the
-//! parameter structs an operation passes down, and the record types.
+//! Deliberately not named `resonate-server-*`. That prefix means a server
+//! plugin, and a plugin depends on no other plugin. This is a family library,
+//! and a server outside the family has no business here — a ScyllaDB server
+//! reaching in for the engine trait is precisely the mistake the name is
+//! shaped to prevent.
 
-#[cfg(feature = "mysql")]
-pub mod engine_mysql;
-pub mod engine_port;
-#[cfg(feature = "postgres")]
-pub mod engine_postgres;
-#[cfg(feature = "sqlite")]
-pub mod engine_sqlite;
+pub mod engine;
 pub mod migrate;
-pub mod oracle;
 
 use resonate_core::types::{PromiseRecord, ResponseEnvelope, TaskState};
 use resonate_core::ui::UiError;

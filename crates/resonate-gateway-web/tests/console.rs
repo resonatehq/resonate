@@ -12,7 +12,7 @@ use axum::Router;
 use http_body_util::BodyExt;
 use resonate_core::ResonateServer;
 use resonate_gateway_web::{ConsoleState, MOUNT, RPC_PATH};
-use resonate_server_dbms::oracle::SharedOracle;
+use resonate_server_oracle::SharedOracle;
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -313,8 +313,8 @@ async fn the_console_and_the_protocol_share_one_port() {
     assert_eq!(status, StatusCode::OK);
     assert!(html.contains("Resonate Console"));
 
-    // And health still answers.
-    let (status, _, _) = get(&app, "/health").await;
+    // And the probe still answers.
+    let (status, _, _) = get(&app, "/ready").await;
     assert_eq!(status, StatusCode::OK);
 }
 

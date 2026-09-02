@@ -35,13 +35,12 @@ fn db_lock() -> &'static Mutex<()> {
 
 use resonate_core::types::{RequestEnvelope, RequestHead, ResponseEnvelope, SUPPORTED_VERSIONS};
 
-use resonate_server_dbms::{
-    engine_mysql::MysqlEngine,
-    engine_port::{Input, Outgoing, ResonateEngine, Scheduled, Timeout},
-    engine_postgres::PostgresEngine,
-    engine_sqlite::SqliteEngine,
-    oracle::{Oracle, SharedOracle},
-};
+use resonate_sql::engine::{Engine, Input, Outgoing, Scheduled, Timeout};
+
+use resonate_server_mysql::MysqlEngine;
+use resonate_server_oracle::{Oracle, SharedOracle};
+use resonate_server_postgres::PostgresEngine;
+use resonate_server_sqlite::SqliteEngine;
 use serde_json::{json, Value};
 
 const TASK_RETRY_TIMEOUT_MS: i64 = 30_000;
@@ -102,7 +101,7 @@ fn req(kind: &str, data: Value) -> RequestEnvelope {
 // than servers keeps the server layer — envelope validation, the clock gate,
 // the HTTP edge — out of the comparison, so a divergence is a divergence in
 // the thing being tested.
-type Backend = Arc<dyn ResonateEngine>;
+type Backend = Arc<dyn Engine>;
 
 /// Send one request to a backend at time `now`.
 ///

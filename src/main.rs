@@ -26,12 +26,12 @@ use resonate_core::{ResonateGateway, ResonateRouter, ResonateServer, ResonateWor
 use resonate_gateway_http::{Config as GatewayConfig, HttpGateway};
 use resonate_gateway_web as console;
 #[cfg(feature = "mysql")]
-use resonate_server_dbms::engine_mysql::MysqlEngine;
-use resonate_server_dbms::engine_port::ResonateEngine;
+use resonate_server_mysql::MysqlEngine;
 #[cfg(feature = "postgres")]
-use resonate_server_dbms::engine_postgres::PostgresEngine;
+use resonate_server_postgres::PostgresEngine;
 #[cfg(feature = "sqlite")]
-use resonate_server_dbms::engine_sqlite::SqliteEngine;
+use resonate_server_sqlite::SqliteEngine;
+use resonate_sql::engine::Engine;
 use resonate_transport_http_poll::PollRegistry;
 use server::Server;
 use std::collections::HashMap;
@@ -176,7 +176,7 @@ async fn run_server(config: Config) -> Result<(), String> {
 
     // Backend selection. Each is a complete engine, not a storage handle
     // behind a shared one.
-    let engine: Arc<dyn ResonateEngine> = match config.storage.storage_type.as_str() {
+    let engine: Arc<dyn Engine> = match config.storage.storage_type.as_str() {
         #[cfg(feature = "postgres")]
         "postgres" => {
             let url = config.storage.postgres.url.as_ref().unwrap();

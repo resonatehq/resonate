@@ -1,28 +1,40 @@
-//! The MySQL engine.
+//! The PostgreSQL engine.
 //!
-//! A complete implementation of the protocol over MySQL: it parses and
+//! A complete implementation of the protocol over PostgreSQL: it parses and
 //! validates a request, applies the transition in its own SQL, and shapes the
 //! response — with no `Db` trait between the two halves and no shared engine
 //! above them.
 //!
-//! There is no outbox. MySQL applies a transition as a sequence of statements
-//! rather than one CTE, so — as in `engine_sqlite.rs` — a message is pushed
-//! onto the transition's emission list at the point the statement that owes it
-//! runs, and `transact` hands the list back. `engine_postgres.rs` is the one
-//! that has to work for this, because there the whole transition is a single
-//! statement.
+//! A promise is one row, and what sits beside it is `schedules`. There is no
+//! `outbox`: a message is not something a transition leaves behind for a pump
+//! to find, it is something the transition returns.
+//!
+//! # Emitting from inside a CTE
+//!
+//! This is the one place the collapse costs something. Every operation is a
+//! single statement, and that single round trip is the property the CTE design
+//! exists for — so emissions cannot be a second query. Each `INSERT INTO
+//! outbox ... RETURNING key` CTE became a plain `SELECT` producing the message
+//! instead, and the statement's final `SELECT` aggregates them into one JSON
+//! column with [`emitted_json`]. Same round trip, and the messages come back
+//! on the same row as the response.
 //!
 //! See `persistence_sqlite.rs` for what the promise row's columns replaced;
-//! the collapse is the same.
+//! the collapse is the same, minus `callbacks`/`listeners`/`resumes`, which
+//! are TEXT[] columns here because Postgres has arrays.
 
-use super::{
+use async_trait::async_trait;
+use resonate_sql::engine::{Engine, Input, Outgoing, Output, Scheduled, Timeout};
+use resonate_sql::{
     PromiseCreateParams, PromiseCreateResult, PromiseSettleParams, PromiseSettleResult,
     RegisterCallbackResult, ScheduleCreateParams, StorageError, StorageResult, TaskAcquireParams,
     TaskAcquireResult, TaskContinueResult, TaskCreateParams, TaskCreateResult,
     TaskFenceCreateParams, TaskFenceResult, TaskFenceSettleParams, TaskFulfillParams,
     TaskFulfillResult, TaskHaltResult, TaskReleaseResult, TaskSuspendResult,
 };
-use async_trait::async_trait;
+use serde_json::Value;
+use validator::Validate;
+
 use resonate_core::types::{
     format_validation_errors, PromiseCreateData, PromiseGetData, PromiseRecord,
     PromiseRegisterCallbackData, PromiseRegisterListenerData, PromiseResponseData,
@@ -36,25 +48,76 @@ use resonate_core::types::{
     TaskReleaseData, TaskResponseData, TaskSearchData, TaskSearchResponseData, TaskState,
     TaskSuspendData, TaskSuspendPreloadData,
 };
-use serde_json::Value;
-use sqlx::mysql::MySqlRow;
-use sqlx::{MySqlPool, Row};
-use std::cell::{RefCell, UnsafeCell};
-use validator::Validate;
-
-use crate::engine_port::{Input, Outgoing, Output, ResonateEngine, Scheduled, Timeout};
 use resonate_core::ui;
 use resonate_core::util;
+use sqlx::postgres::PgRow;
+use sqlx::{PgPool, Row};
+use std::cell::{RefCell, UnsafeCell};
 
-pub struct MysqlEngine {
-    pool: MySqlPool,
+pub struct PostgresEngine {
+    pool: PgPool,
     task_retry_timeout: i64,
     preload_limit: u32,
     /// Whether `debug.*` operations are permitted at all.
     debug: bool,
 }
 
-impl MysqlEngine {
+/// The promise columns every read projects. `param_headers`/`value_headers` are
+/// `NOT NULL DEFAULT '{}'` here (the catalogue's
+/// `well_formed_promise_pending_has_no_value` compares against `'{}'::jsonb`),
+/// so `NULLIF` restores the wire-level distinction the API draws between
+/// "no headers" and "headers present".
+const P_COLS: &str =
+    "id, state, NULLIF(param_headers, '{}'::jsonb)::text AS param_headers, param_data, \
+                      NULLIF(value_headers, '{}'::jsonb)::text AS value_headers, value_data, \
+                      tags::text, timeout_at, created_at, settled_at";
+
+/// Same projection, qualified — for statements that alias the table.
+fn p_cols(alias: &str) -> String {
+    format!(
+        "{a}.id, {a}.state, NULLIF({a}.param_headers, '{{}}'::jsonb)::text AS param_headers, {a}.param_data, \
+         NULLIF({a}.value_headers, '{{}}'::jsonb)::text AS value_headers, {a}.value_data, \
+         {a}.tags::text, {a}.timeout_at, {a}.created_at, {a}.settled_at",
+        a = alias
+    )
+}
+
+/// The columns every emission CTE produces, so several can be `UNION ALL`ed
+/// into one list regardless of which kind they carry.
+const MSG_COLS: &str = "kind, address, task_id, version, promise";
+
+/// Aggregate the named emission CTEs into one JSON column on the result row.
+///
+/// A scalar subquery rather than a join, because the statement's own result is
+/// one row (or a small fixed set) and the messages are a list beside it, not a
+/// dimension of it.
+fn emitted_json(ctes: &[&str]) -> String {
+    let parts: Vec<String> = ctes
+        .iter()
+        .map(|c| format!("SELECT {MSG_COLS} FROM {c}"))
+        .collect();
+    format!(
+        "(SELECT COALESCE(json_agg(json_build_object(\
+           'kind', kind, 'address', address, 'task_id', task_id, \
+           'version', version, 'promise', promise) \
+           ORDER BY kind, address, task_id), '[]'::json) \
+         FROM ({}) e) AS messages",
+        parts.join(" UNION ALL ")
+    )
+}
+
+/// Arguments to `resonate._promise_json`, in declaration order.
+const PROMISE_JSON_ARGS: &str = "id, state, param_headers, param_data, value_headers, value_data, tags, timeout_at, created_at, settled_at";
+
+fn promise_json(alias: &str) -> String {
+    let args: Vec<String> = PROMISE_JSON_ARGS
+        .split(", ")
+        .map(|c| format!("{}.{}", alias, c))
+        .collect();
+    format!("resonate._promise_json({})", args.join(", "))
+}
+
+impl PostgresEngine {
     pub async fn connect(
         url: &str,
         pool_size: u32,
@@ -62,16 +125,12 @@ impl MysqlEngine {
         preload_limit: u32,
         debug: bool,
     ) -> Result<Self, sqlx::Error> {
-        // Use READ COMMITTED so every statement sees the latest committed row version.
-        // REPEATABLE READ's consistent snapshot causes promise_get to miss rows created
-        // by concurrent transactions after the snapshot was established, returning 404
-        // for promises that actually exist.
-        let pool = sqlx::mysql::MySqlPoolOptions::new()
+        let pool = sqlx::postgres::PgPoolOptions::new()
             .max_connections(pool_size)
             .after_connect(|conn, _meta| {
                 Box::pin(async move {
-                    sqlx::query("SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED")
-                        .execute(&mut *conn)
+                    sqlx::query("SET search_path TO resonate, public")
+                        .execute(conn)
                         .await?;
                     Ok(())
                 })
@@ -86,53 +145,77 @@ impl MysqlEngine {
         })
     }
 
-    /// Migrate the schema. An error stops startup: a server whose schema did
-    /// not migrate must not serve.
+    /// Migrate the schema, constraints and all.
+    ///
+    /// One entry point, because there is one schema and one mechanism. The
+    /// constraints are statements in the same migration, so a database
+    /// carrying the tables carries the invariants too, and no configuration
+    /// can start a server that enforces fewer of them. An error here stops
+    /// startup: a server whose schema did not migrate must not serve.
     pub async fn init(&self, migrate: bool) -> Result<(), sqlx::Error> {
-        let migrator = sqlx::migrate!("./migrations/mysql");
+        // The migrator's own bookkeeping table follows `search_path`, so the
+        // schema has to exist before it runs.
+        sqlx::raw_sql("CREATE SCHEMA IF NOT EXISTS resonate")
+            .execute(&self.pool)
+            .await?;
+        let migrator = sqlx::migrate!("./migrations");
         // COUNT over a table that may not exist yet: a missing table is an
         // empty database, which is the always-create case.
         let applied: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations")
             .fetch_one(&self.pool)
             .await
             .unwrap_or(0);
-        crate::migrate::may_apply(applied as usize, migrator.iter().count(), migrate)
+        resonate_sql::migrate::may_apply(applied as usize, migrator.iter().count(), migrate)
             .map_err(|e| sqlx::Error::Configuration(Box::new(e)))?;
         migrator.run(&self.pool).await.map_err(|e| match e {
             // The initial schema was edited after this database was created.
-            sqlx::migrate::MigrateError::VersionMismatch(v) => sqlx::Error::Configuration(
-                Box::new(crate::migrate::MigrateError(crate::migrate::stale_schema(
-                    &format!("migration {v} was applied with a different checksum"),
-                ))),
-            ),
+            sqlx::migrate::MigrateError::VersionMismatch(v) => {
+                sqlx::Error::Configuration(Box::new(resonate_sql::migrate::MigrateError(
+                    resonate_sql::migrate::stale_schema(&format!(
+                        "migration {v} was applied with a different checksum"
+                    )),
+                )))
+            }
             other => sqlx::Error::Migrate(Box::new(other)),
         })
     }
 
     /// Run one transition, and hand back what it emitted along with its result.
     ///
-    /// A retried attempt starts with an empty list, so a message is never
-    /// emitted for an attempt that did not commit.
+    /// The emissions are dropped if the transaction rolls back or a
+    /// serialization retry restarts it — a retried attempt starts with an
+    /// empty list, so a message is never emitted twice for one attempt that
+    /// did not commit. That is the atomicity the port promises, which an
+    /// outbox got for free by being a table.
     async fn transact<F, T>(&self, f: F) -> StorageResult<(T, Vec<Outgoing>, Vec<Scheduled>)>
     where
-        F: FnMut(&MysqlDb) -> StorageResult<T> + Send + 'static,
+        F: FnMut(&PostgresDb) -> StorageResult<T> + Send + 'static,
         T: Send + 'static,
     {
-        // On deadlock (1213) or lock wait timeout (1205), retry once immediately.
-        // If the retry also fails, return Serialization error (maps to 503).
-        let max_retries: u32 = 1;
+        // One retry, unconditionally, as MySQL does. A serialization failure
+        // means the transaction aborted with nothing committed — the emissions
+        // above are dropped with it — so re-running the closure from scratch
+        // is safe, and `promise_create` raises this error itself precisely to
+        // ask for that. It used to be gated on a `serializable` flag that
+        // every one of the seven call sites passed `false`, so the retry never
+        // ran and the request the code asked to retry became a 503 instead.
+        const MAX_RETRIES: u32 = 1;
 
         let mut f = f;
-        for attempt in 0..=max_retries {
+        for attempt in 0..=MAX_RETRIES {
             #[cfg(feature = "concurrency-stress")]
             tokio::task::yield_now().await;
 
+            // READ COMMITTED, the connection default, and what the
+            // single-round-trip CTEs are written against: they take their own
+            // row locks with `FOR UPDATE` rather than relying on the isolation
+            // level to serialize them.
             let tx = self.pool.begin().await.map_err(StorageError::from)?;
 
             let task_retry_timeout = self.task_retry_timeout;
             let preload_limit = self.preload_limit;
             let (result, emitted, armed, tx) = tokio::task::block_in_place(|| {
-                let db = MysqlDb {
+                let db = PostgresDb {
                     tx: UnsafeCell::new(tx),
                     task_retry_timeout,
                     preload_limit,
@@ -156,23 +239,17 @@ impl MysqlEngine {
                 (result, emitted, armed, tx)
             });
 
-            // If business logic failed with a serialization error, retry.
-            // Other errors propagate immediately (tx is dropped → auto-rollback).
             let result = match result {
                 Ok(v) => v,
                 Err(StorageError::Serialization) => {
-                    if attempt < max_retries {
+                    if attempt < MAX_RETRIES {
                         tracing::warn!(
                             attempt = attempt + 1,
-                            "Serialization failure (1213/1205) in query, retrying"
+                            "Serialization failure (40001) in query, retrying"
                         );
                         continue;
-                    } else {
-                        tracing::warn!(
-                            "Serialization failure (1213/1205) in query after retry, returning 503"
-                        );
-                        return Err(StorageError::Serialization);
                     }
+                    return Err(StorageError::Serialization);
                 }
                 Err(e) => return Err(e),
             };
@@ -182,23 +259,14 @@ impl MysqlEngine {
             }) {
                 Ok(_) => return Ok((result, emitted, armed)),
                 Err(e) => {
-                    let mysql_err = e
+                    let pg_err = e
                         .as_database_error()
                         .and_then(|dbe| dbe.code().map(|c| c.to_string()));
-                    if mysql_err.as_deref() == Some("1213") || mysql_err.as_deref() == Some("1205")
-                    {
-                        if attempt < max_retries {
-                            tracing::warn!(
-                                attempt = attempt + 1,
-                                "Serialization failure (1213/1205) at commit, retrying"
-                            );
+                    if pg_err.as_deref() == Some("40001") || pg_err.as_deref() == Some("40P01") {
+                        if attempt < MAX_RETRIES {
                             continue;
-                        } else {
-                            tracing::warn!(
-                                "Serialization failure (1213/1205) at commit after retry, returning 503"
-                            );
-                            return Err(StorageError::Serialization);
                         }
+                        return Err(StorageError::Serialization);
                     }
                     return Err(StorageError::from(e));
                 }
@@ -210,11 +278,11 @@ impl MysqlEngine {
 
     /// One operation: run it, and turn a storage failure into a response.
     ///
-    /// Same tail for all 21, so it lives here once. `InvalidInput` maps to 400
-    /// — MySQL raises it for an id past VARCHAR(255).
+    /// Same tail for all 21, so it lives here once. `Serialization` maps to
+    /// 503 — a CTE snapshot race committed nothing, and the caller may retry.
     async fn run<F>(&self, req: &RequestEnvelope, f: F) -> Output
     where
-        F: FnMut(&MysqlDb) -> StorageResult<ResponseEnvelope> + Send + 'static,
+        F: FnMut(&PostgresDb) -> StorageResult<ResponseEnvelope> + Send + 'static,
     {
         match self.transact(f).await {
             Ok((response, messages, timeouts)) => Output {
@@ -246,7 +314,7 @@ impl MysqlEngine {
     /// A read. Nothing is emitted, so nothing comes back but the result.
     async fn query<F, T>(&self, f: F) -> StorageResult<T>
     where
-        F: FnMut(&MysqlDb) -> StorageResult<T> + Send + 'static,
+        F: FnMut(&PostgresDb) -> StorageResult<T> + Send + 'static,
         T: Send + 'static,
     {
         self.transact(f).await.map(|(v, _, _)| v)
@@ -2178,7 +2246,7 @@ impl MysqlEngine {
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
         self.run(req, move |db| {
-            let q = match crate::ui_resolve::<ui::ExecutionsSearchData, _>(
+            let q = match resonate_sql::ui_resolve::<ui::ExecutionsSearchData, _>(
                 &data,
                 &kind_str,
                 &corr_id,
@@ -2207,7 +2275,7 @@ impl MysqlEngine {
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
         self.run(req, move |db| {
-            let q = match crate::ui_resolve::<ui::ExecutionGetData, _>(
+            let q = match resonate_sql::ui_resolve::<ui::ExecutionGetData, _>(
                 &data,
                 &kind_str,
                 &corr_id,
@@ -2234,7 +2302,7 @@ impl MysqlEngine {
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
         self.run(req, move |db| {
-            let q = match crate::ui_resolve::<ui::SchedulesSearchData, _>(
+            let q = match resonate_sql::ui_resolve::<ui::SchedulesSearchData, _>(
                 &data,
                 &kind_str,
                 &corr_id,
@@ -2353,38 +2421,24 @@ impl MysqlEngine {
     }
 }
 
-/// Wraps a MySQL transaction for use within the synchronous `Db` trait.
-///
-/// Uses `UnsafeCell` for interior mutability: `Db` trait methods take `&self`,
-/// but `sqlx` requires `&mut Transaction` for query execution. This is safe because:
-/// - `MysqlDb` is created and dropped within a single `block_in_place` call
-/// - Only one `&MysqlDb` reference exists at a time (no aliasing)
-/// - The `UnsafeCell` is never accessed concurrently
-struct MysqlDb<'a> {
-    tx: UnsafeCell<sqlx::Transaction<'a, sqlx::MySql>>,
+/// Wraps a PostgreSQL transaction for use within the synchronous `Db` trait.
+/// Same `UnsafeCell` rationale as `persistence_postgres::PostgresDb`.
+struct PostgresDb<'a> {
+    tx: UnsafeCell<sqlx::Transaction<'a, sqlx::Postgres>>,
     task_retry_timeout: i64,
     preload_limit: u32,
-    /// What this transition has emitted so far. See `engine_sqlite.rs`.
+    /// What this transition has emitted so far. See `engine_sqlite.rs`
+    /// — same reasoning, and the same reason it is not in a return type.
     emitted: RefCell<Vec<Outgoing>>,
     /// What deadlines this transition armed or moved. A hint; see
     /// `engine_sqlite.rs`.
     armed: RefCell<Vec<Scheduled>>,
 }
 
-impl<'a> MysqlDb<'a> {
-    /// Returns a mutable reference to the underlying transaction.
-    ///
-    /// # Safety
-    /// Safe because `MysqlDb` is only used within a single synchronous closure
-    /// in `transact()` — there is no concurrent or aliased access to the `UnsafeCell`.
+impl<'a> PostgresDb<'a> {
     #[allow(clippy::mut_from_ref)]
-    fn tx(&self) -> &mut sqlx::Transaction<'a, sqlx::MySql> {
+    fn tx(&self) -> &mut sqlx::Transaction<'a, sqlx::Postgres> {
         unsafe { &mut *self.tx.get() }
-    }
-
-    /// Queue a message for the caller of `process`.
-    fn emit(&self, message: Outgoing) {
-        self.emitted.borrow_mut().push(message);
     }
 
     /// Report a deadline this transition just wrote.
@@ -2422,272 +2476,82 @@ impl<'a> MysqlDb<'a> {
         );
     }
 
-    /// Emit an unblock message carrying the promise as it now stands.
+    /// Absorb a statement's messages, and arm a retry deadline for each task it
+    /// redispatched.
     ///
-    /// The outbox stored `(promise_id, address)` and joined back to `promises`
-    /// at delivery time; captured here instead, inside the settlement that just
-    /// made the promise final.
-    fn emit_unblock(&self, promise_id: &str, address: &str) -> StorageResult<()> {
-        let row = rt_block_on(
-            sqlx::query(
-                "SELECT id, state, param_headers, param_data, value_headers, value_data, tags, timeout_at, created_at, settled_at FROM promises WHERE id = ?",
-            )
-            .bind(promise_id)
-            .fetch_optional(self.tx().as_mut()),
-        )?;
-        if let Some(row) = row {
-            self.emit(Outgoing::Unblock {
-                address: address.to_string(),
-                promise: row_to_promise(&row),
-            });
+    /// Every execute message this backend emits accompanies a task whose retry
+    /// deadline the same statement just wrote — a resumed awaiter, a released
+    /// task, a redispatched one, a newly created one. So the fan-out case,
+    /// which is the only one where the armed rows are not the rows the
+    /// statement returns, needs no extra SQL: the emission already names them.
+    /// `at` is per statement, because the deadline each one writes differs.
+    fn absorb_and_arm_retries(&self, row: &PgRow, at: i64) -> Vec<String> {
+        let before = self.emitted.borrow().len();
+        self.absorb(row);
+        let armed: Vec<String> = self.emitted.borrow()[before..]
+            .iter()
+            .filter_map(|m| match m {
+                Outgoing::Execute { task_id, .. } => Some(task_id.clone()),
+                Outgoing::Unblock { .. } => None,
+            })
+            .collect();
+        for task_id in &armed {
+            self.arm_retry(task_id, at);
         }
-        Ok(())
+        armed
     }
 
-    /// Emit an execute message for `task_id`, if it has somewhere to go.
-    fn emit_execute(&self, task_id: &str) -> StorageResult<()> {
-        let row = rt_block_on(
-            sqlx::query("SELECT task_version, target FROM promises WHERE id = ?")
-                .bind(task_id)
-                .fetch_optional(self.tx().as_mut()),
-        )?;
-        if let Some(row) = row {
-            if let Some(address) = row.get::<Option<String>, _>("target") {
-                self.emit(Outgoing::Execute {
-                    address,
-                    task_id: task_id.to_string(),
-                    version: row.get::<i32, _>("task_version") as i64,
-                });
-            }
-        }
-        Ok(())
-    }
-
-    /// Marks the owning task fulfilled, drops its timeout, and deletes callbacks
-    /// registered by it (as awaiter). Used when a promise that owns a task is settled.
+    /// Take the `messages` column off a statement's result row.
     ///
-    /// The fulfil and the timeout delete were two statements against two
-    /// tables; they are one row now, so they are one `SET` with a `CASE` — the
-    /// deadline columns clear unconditionally, exactly as the `DELETE` did,
-    /// while `task_state` moves only when it is a task that is not yet
-    /// fulfilled.
-    fn settlement_enqueued(&self, task_id: &str) -> StorageResult<()> {
-        rt_block_on(
-            sqlx::query(
-                "UPDATE promises SET
-                   task_state = CASE WHEN task_state IS NOT NULL AND task_state != 'fulfilled'
-                                THEN 'fulfilled' ELSE task_state END,
-                   retry_timeout_at = NULL, lease_timeout_at = NULL, ttl = NULL, pid = NULL
-                 WHERE id = ?",
-            )
-            .bind(task_id)
-            .execute(self.tx().as_mut()),
-        )?;
-        rt_block_on(
-            sqlx::query("DELETE FROM callbacks WHERE awaiter_id = ?")
-                .bind(task_id)
-                .execute(self.tx().as_mut()),
-        )?;
-        Ok(())
-    }
-
-    /// Finds all suspended tasks waiting on `awaited_id` via not-yet-ready callbacks,
-    /// marks those callbacks ready, resumes the tasks, and queues outgoing execute
-    /// messages and task timeouts.
-    fn resumption_enqueued(&self, awaited_id: &str, time: i64) -> StorageResult<()> {
-        let trt = self.task_retry_timeout;
-
-        // Snapshot resumed tasks BEFORE marking callbacks ready. The task is
-        // on the promise row now, so the join is to `promises`.
-        let rows = rt_block_on(
-            sqlx::query(
-                "SELECT p.id, p.task_version AS version FROM promises p
-                 JOIN callbacks c ON c.awaiter_id = p.id
-                 WHERE c.awaited_id = ? AND c.ready = false AND p.task_state = 'suspended'",
-            )
-            .bind(awaited_id)
-            .fetch_all(self.tx().as_mut()),
-        )?;
-
-        // Mark all callbacks for this promise as ready
-        rt_block_on(
-            sqlx::query("UPDATE callbacks SET ready = true WHERE awaited_id = ?")
-                .bind(awaited_id)
-                .execute(self.tx().as_mut()),
-        )?;
-
-        for row in &rows {
-            let task_id: String = row.get("id");
-
-            // Resuming and re-arming the retry deadline are one write: writing
-            // `retry_timeout_at` and clearing `lease_timeout_at` is what flipping the
-            // timeout row from type 1 to type 0 used to be.
-            rt_block_on(
-                sqlx::query(
-                    "UPDATE promises SET task_state = 'pending', retry_timeout_at = ?,
-                                         lease_timeout_at = NULL, ttl = NULL, pid = NULL
-                     WHERE id = ? AND task_state = 'suspended'",
-                )
-                .bind(time + trt)
-                .bind(&task_id)
-                .execute(self.tx().as_mut()),
-            )?;
-
-            self.arm_retry(&task_id, time + trt);
-            self.emit_execute(&task_id)?;
-        }
-        Ok(())
-    }
-
-    /// Settles a list of already-updated promise IDs and runs the full cascade:
-    /// delete promise timeouts, fulfill owning tasks, mark callbacks ready,
-    /// resume suspended tasks, notify listeners.
-    fn batch_settle_cascade(&self, expired_ids: &[String], time: i64) -> StorageResult<()> {
-        if expired_ids.is_empty() {
-            return Ok(());
-        }
-        let trt = self.task_retry_timeout;
-        let ph = |n: usize| -> String { vec!["?"; n].join(", ") };
-        let n = expired_ids.len();
-
-        // Nothing to delete from `promise_timeouts`: the settling UPDATE the
-        // caller has already run took these rows out of the queue.
-
-        // Fulfill owning tasks and drop their timeouts — same row, so the
-        // three statements this replaces are one `SET`.
-        {
-            let sql = format!(
-                "UPDATE promises SET
-                   task_state = CASE WHEN task_state IS NOT NULL AND task_state != 'fulfilled'
-                                THEN 'fulfilled' ELSE task_state END,
-                   retry_timeout_at = NULL, lease_timeout_at = NULL, ttl = NULL, pid = NULL
-                 WHERE id IN ({})",
-                ph(n)
-            );
-            let mut q = sqlx::query(&sql);
-            for id in expired_ids {
-                q = q.bind(id.as_str());
-            }
-            rt_block_on(q.execute(self.tx().as_mut()))?;
-        }
-
-        // Delete callbacks where expired task is the awaiter
-        {
-            let sql = format!("DELETE FROM callbacks WHERE awaiter_id IN ({})", ph(n));
-            let mut q = sqlx::query(&sql);
-            for id in expired_ids {
-                q = q.bind(id.as_str());
-            }
-            rt_block_on(q.execute(self.tx().as_mut()))?;
-        }
-
-        // Snapshot suspended tasks waiting on any expired promise (exclude newly-fulfilled tasks)
-        let resumed_rows = {
-            let sql = format!(
-                "SELECT p.id, p.task_version AS version FROM promises p
-                 JOIN callbacks c ON c.awaiter_id = p.id
-                 WHERE c.awaited_id IN ({}) AND c.ready = false AND p.task_state = 'suspended'
-                   AND p.id NOT IN ({})",
-                ph(n),
-                ph(n)
-            );
-            let mut q = sqlx::query(&sql);
-            for id in expired_ids {
-                q = q.bind(id.as_str());
-            }
-            for id in expired_ids {
-                q = q.bind(id.as_str());
-            }
-            rt_block_on(q.fetch_all(self.tx().as_mut()))?
+    /// Every statement that can emit carries one, built by `emitted_json`. A
+    /// row without the column is a statement that cannot emit, and is ignored.
+    fn absorb(&self, row: &PgRow) {
+        let Ok(value) = row.try_get::<serde_json::Value, _>("messages") else {
+            return;
         };
-
-        // Mark callbacks ready (exclude awaiter_ids that are now fulfilled)
-        {
-            let sql = format!(
-                "UPDATE callbacks SET ready = true
-                 WHERE awaited_id IN ({}) AND awaiter_id NOT IN ({})",
-                ph(n),
-                ph(n)
-            );
-            let mut q = sqlx::query(&sql);
-            for id in expired_ids {
-                q = q.bind(id.as_str());
-            }
-            for id in expired_ids {
-                q = q.bind(id.as_str());
-            }
-            rt_block_on(q.execute(self.tx().as_mut()))?;
-        }
-
-        // Resume each suspended task
-        for row in &resumed_rows {
-            let task_id: String = row.get("id");
-
-            rt_block_on(
-                sqlx::query(
-                    "UPDATE promises SET task_state = 'pending', retry_timeout_at = ?,
-                                         lease_timeout_at = NULL, ttl = NULL, pid = NULL
-                     WHERE id = ? AND task_state = 'suspended'",
-                )
-                .bind(time + trt)
-                .bind(&task_id)
-                .execute(self.tx().as_mut()),
-            )?;
-            self.arm_retry(&task_id, time + trt);
-            self.emit_execute(&task_id)?;
-        }
-
-        // Collect and insert outgoing unblock messages, then delete listeners
-        {
-            let sql = format!(
-                "SELECT promise_id, address FROM listeners WHERE promise_id IN ({})",
-                ph(n)
-            );
-            let mut q = sqlx::query(&sql);
-            for id in expired_ids {
-                q = q.bind(id.as_str());
-            }
-            let listener_rows = rt_block_on(q.fetch_all(self.tx().as_mut()))?;
-
-            for row in &listener_rows {
-                let pid: String = row.get("promise_id");
-                let addr: String = row.get("address");
-                self.emit_unblock(&pid, &addr)?;
+        let Some(items) = value.as_array() else {
+            return;
+        };
+        let mut out = self.emitted.borrow_mut();
+        for m in items {
+            let address = m
+                .get("address")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            match m.get("kind").and_then(|v| v.as_str()) {
+                Some("execute") => out.push(Outgoing::Execute {
+                    address: address.to_string(),
+                    task_id: m
+                        .get("task_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
+                    version: m.get("version").and_then(|v| v.as_i64()).unwrap_or(0),
+                }),
+                Some("unblock") => {
+                    if let Some(promise) = m.get("promise") {
+                        if let Ok(promise) =
+                            serde_json::from_value::<PromiseRecord>(promise.clone())
+                        {
+                            out.push(Outgoing::Unblock {
+                                address: address.to_string(),
+                                promise,
+                            });
+                        }
+                    }
+                }
+                _ => {}
             }
         }
-
-        {
-            let sql = format!("DELETE FROM listeners WHERE promise_id IN ({})", ph(n));
-            let mut q = sqlx::query(&sql);
-            for id in expired_ids {
-                q = q.bind(id.as_str());
-            }
-            rt_block_on(q.execute(self.tx().as_mut()))?;
-        }
-
-        Ok(())
     }
+}
 
-    /// Queues outgoing unblock messages for all listeners on the promise,
-    /// then deletes those listeners.
-    fn listener_unblocked(&self, promise_id: &str) -> StorageResult<()> {
-        let listeners = rt_block_on(
-            sqlx::query("SELECT address FROM listeners WHERE promise_id = ?")
-                .bind(promise_id)
-                .fetch_all(self.tx().as_mut()),
-        )?;
-
-        for row in &listeners {
-            let address: String = row.get("address");
-            self.emit_unblock(promise_id, &address)?;
-        }
-
-        rt_block_on(
-            sqlx::query("DELETE FROM listeners WHERE promise_id = ?")
-                .bind(promise_id)
-                .execute(self.tx().as_mut()),
-        )?;
-        Ok(())
+/// A keyset cursor as two bindable halves. `None` for both when there is no
+/// cursor, which is what the `IS NULL OR` in every keyset predicate reads.
+fn split_keyset(after: Option<&ui::Keyset>) -> (Option<i64>, Option<String>) {
+    match after {
+        Some(k) => (Some(k.key), Some(k.id.clone())),
+        None => (None, None),
     }
 }
 
@@ -2705,16 +2569,7 @@ fn parse_task_state(s: &str) -> TaskState {
         .unwrap_or_else(|e| panic!("corrupt task state in DB: {}", e))
 }
 
-/// A keyset cursor as two bindable halves. `None` for both when there is no
-/// cursor, which is what the `IS NULL OR` in every keyset predicate reads.
-fn split_keyset(after: Option<&ui::Keyset>) -> (Option<i64>, Option<String>) {
-    match after {
-        Some(k) => (Some(k.key), Some(k.id.clone())),
-        None => (None, None),
-    }
-}
-
-fn row_to_promise(row: &MySqlRow) -> PromiseRecord {
+fn row_to_promise(row: &sqlx::postgres::PgRow) -> PromiseRecord {
     let param_headers: Option<String> = row.get("param_headers");
     let value_headers: Option<String> = row.get("value_headers");
     let tags_str: String = row.get("tags");
@@ -2738,7 +2593,19 @@ fn row_to_promise(row: &MySqlRow) -> PromiseRecord {
     }
 }
 
-fn row_to_schedule(row: &MySqlRow) -> ScheduleRecord {
+fn row_to_task(r: &sqlx::postgres::PgRow) -> TaskRecord {
+    let resumes: Vec<String> = r.get("resumes");
+    TaskRecord {
+        id: r.get("id"),
+        state: parse_task_state(&r.get::<String, _>("task_state")),
+        version: r.get::<i32, _>("task_version") as i64,
+        resumes: resumes.len() as i64,
+        ttl: r.get("ttl"),
+        pid: r.get("pid"),
+    }
+}
+
+fn row_to_schedule(row: &sqlx::postgres::PgRow) -> ScheduleRecord {
     let param_headers: Option<String> = row.get("promise_param_headers");
     let tags_str: String = row.get("promise_tags");
 
@@ -2758,119 +2625,324 @@ fn row_to_schedule(row: &MySqlRow) -> ScheduleRecord {
     }
 }
 
-#[allow(dead_code)]
-fn row_to_task(row: &MySqlRow) -> TaskRecord {
-    let resumes: i32 = row.get("resumes");
-    TaskRecord {
-        id: row.get("id"),
-        state: parse_task_state(&row.get::<String, _>("state")),
-        version: row.get::<i32, _>("version") as i64,
-        resumes: resumes as i64,
-        ttl: row.get("ttl"),
-        pid: row.get("pid"),
+// ============================================================================
+// Shared SQL fragments
+//
+// Templates use `:NAME` placeholders substituted by `fill` rather than
+// `format!`, so SQL array literals (`'{}'`) need no brace escaping.
+// ============================================================================
+
+fn fill(template: &str, subs: &[(&str, &str)]) -> String {
+    let mut out = template.to_string();
+    for (k, v) in subs {
+        out = out.replace(k, v);
     }
+    out
+}
+
+/// The half of the settlement cascade that lives on the settling row itself.
+///
+/// Stands in for `fulfilled_task`, `deleted_ttimeout`, the awaiter-side
+/// `deleted_callbacks` and `deleted_listeners` — four CTEs in the multi-table
+/// backend, one `SET` list here, because they all target the same row.
+///
+/// `:FULFILLED` is the predicate "this settlement also fulfils the row's task".
+const SETTLE_SELF: &str = "
+    task_state = CASE WHEN :FULFILLED THEN 'fulfilled' ELSE p.task_state END,
+    retry_timeout_at   = CASE WHEN :FULFILLED THEN NULL ELSE p.retry_timeout_at END,
+    lease_timeout_at = CASE WHEN :FULFILLED THEN NULL ELSE p.lease_timeout_at END,
+    ttl        = CASE WHEN :FULFILLED THEN NULL ELSE p.ttl END,
+    pid        = CASE WHEN :FULFILLED THEN NULL ELSE p.pid END,
+    resumes    = CASE WHEN :FULFILLED THEN '{}' ELSE p.resumes END,
+    callbacks   = '{}',
+    listeners  = '{}'";
+
+/// The half of the settlement cascade that fans out to *other* rows.
+///
+/// Merges `marked_ready` + `resumed_tasks` (awaited side) with
+/// `deleted_callbacks` (awaiter side) into one `UPDATE`: in a two-promise await
+/// cycle a single row is both, and two CTEs updating it would be undefined.
+///
+/// `:AWAITERS` is a scalar subquery yielding the awaiter ids to wake (or NULL
+/// when the settlement did not fire); `:FULFILLED` says whether the settling
+/// row's own task was fulfilled and so must be unlinked from everything it was
+/// itself blocked on.
+///
+/// `suspended_awaiters` is read from the pre-update snapshot rather than from
+/// the `UPDATE`'s `RETURNING`, because `RETURNING` yields post-update values and
+/// the outbox needs to know *which* awaiters were suspended. The multi-table
+/// backend gets this from `resumed_tasks RETURNING`, which is re-checked under
+/// EPQ; this snapshot read is not. The exposure is a concurrent write to an
+/// awaiter row between this statement's snapshot and its row locks — see the
+/// module docs on lock scope.
+const SETTLE_FANOUT: &str = "
+suspended_awaiters AS (
+  SELECT id, task_version, target FROM promises
+  WHERE id = ANY(:AWAITERS) AND task_state = 'suspended'
+),
+fanout AS (
+  UPDATE promises q SET
+    callbacks = CASE WHEN :FULFILLED THEN array_remove(q.callbacks, :AWAITED) ELSE q.callbacks END,
+    resumes = CASE WHEN q.id = ANY(:AWAITERS) AND NOT (q.resumes @> ARRAY[:AWAITED])
+                THEN q.resumes || :AWAITED ELSE q.resumes END,
+    task_state = CASE WHEN q.id = ANY(:AWAITERS) AND q.task_state = 'suspended'
+                THEN 'pending' ELSE q.task_state END,
+    retry_timeout_at = CASE WHEN q.id = ANY(:AWAITERS) AND q.task_state = 'suspended'
+                THEN :TIME + :TRT ELSE q.retry_timeout_at END,
+    lease_timeout_at = CASE WHEN q.id = ANY(:AWAITERS) AND q.task_state = 'suspended'
+                THEN NULL ELSE q.lease_timeout_at END,
+    ttl = CASE WHEN q.id = ANY(:AWAITERS) AND q.task_state = 'suspended'
+                THEN NULL ELSE q.ttl END,
+    pid = CASE WHEN q.id = ANY(:AWAITERS) AND q.task_state = 'suspended'
+                THEN NULL ELSE q.pid END
+  WHERE q.id <> :AWAITED
+    AND ( q.id = ANY(:AWAITERS)
+          OR (:FULFILLED AND q.callbacks @> ARRAY[:AWAITED]) )
+  RETURNING q.id
+),
+emit_resume AS (
+  SELECT 'execute'::text AS kind, s.target AS address, s.id AS task_id,
+         s.task_version::int AS version, NULL::jsonb AS promise
+  FROM suspended_awaiters s WHERE s.target IS NOT NULL
+)";
+
+/// Queue one `unblock` message per listener of the row `:SRC` just settled.
+/// `:SRC` must be a CTE with the post-settlement promise columns; `:LISTENERS`
+/// a scalar subquery yielding the listener addresses as they were *before* the
+/// settlement cleared them.
+const SETTLE_UNBLOCK: &str = "
+emit_unblock AS (
+  SELECT 'unblock'::text AS kind, l AS address, NULL::text AS task_id,
+         NULL::int AS version, :PROMISE_JSON AS promise
+  FROM :SRC u CROSS JOIN LATERAL unnest(COALESCE(:LISTENERS, '{}')) AS l
+)";
+
+fn settle_self(fulfilled: &str) -> String {
+    fill(SETTLE_SELF, &[(":FULFILLED", fulfilled)])
+}
+
+fn settle_fanout(awaited: &str, awaiters: &str, fulfilled: &str, time: &str, trt: i64) -> String {
+    // `x = ANY((SELECT ...))` parses as the *subquery* form of ANY, which
+    // compares text against text[]. Wrapping the scalar subquery in COALESCE
+    // makes it an ordinary array expression, and gives the "settlement did not
+    // fire" case an empty array rather than NULL.
+    let awaiters = String::from("COALESCE(") + awaiters + ", '{}'::text[])";
+    fill(
+        SETTLE_FANOUT,
+        &[
+            (":AWAITED", awaited),
+            (":AWAITERS", &awaiters),
+            (":FULFILLED", fulfilled),
+            (":TIME", time),
+            (":TRT", &trt.to_string()),
+        ],
+    )
+}
+
+fn settle_unblock(src: &str, listeners: &str) -> String {
+    fill(
+        SETTLE_UNBLOCK,
+        &[
+            (":SRC", src),
+            (":LISTENERS", listeners),
+            (":PROMISE_JSON", &promise_json("u")),
+        ],
+    )
+}
+
+/// The batch settlement cascade, shared by `try_timeout` (explicit id list) and
+/// `process_timeouts` (the sweep queue). `selection` is the WHERE clause that
+/// picks the rows to expire; it may reference the `promises` table directly.
+///
+/// This is the one place where the collapse costs something: expiring N
+/// promises may touch a row that is both an expiring promise's awaiter and
+/// another's, so `marked_ready` becomes an aggregate (`ready_agg`) rather than
+/// a plain `UPDATE ... WHERE awaited_id IN (...)`.
+fn expire_batch_sql(selection: &str, time_param: &str, trt: i64) -> String {
+    let self_set = settle_self("(p.task_state IS NOT NULL AND p.task_state <> 'fulfilled')");
+    fill(
+        "
+WITH expired AS (
+  SELECT id, callbacks, listeners, task_state FROM promises
+  WHERE :SELECTION
+  FOR UPDATE
+),
+-- The same rows, unlocked, for the emissions to read.
+--
+-- `expired` cannot serve them: the final SELECT references the emission CTEs,
+-- which would re-evaluate `expired`, whose FOR UPDATE then finds rows this
+-- same command has already settled and yields nothing — silently dropping
+-- every unblock message. A plain scan sees the statement's snapshot, which is
+-- exactly the pre-settlement state the listeners live in.
+expired_snap AS (
+  SELECT id, listeners FROM promises WHERE :SELECTION
+),
+fulfilled AS (
+  SELECT id FROM expired WHERE task_state IS NOT NULL AND task_state <> 'fulfilled'
+),
+fulfilled_ids AS (
+  SELECT COALESCE(array_agg(id), '{}') AS ids FROM fulfilled
+),
+-- marked_ready, aggregated: one awaiter may be woken by several expiring promises
+ready_agg AS (
+  SELECT aw AS awaiter, array_agg(DISTINCT e.id) AS awaited_ids
+  FROM expired e CROSS JOIN LATERAL unnest(e.callbacks) aw
+  WHERE aw NOT IN (SELECT id FROM fulfilled)
+  GROUP BY aw
+),
+suspended_awaiters AS (
+  SELECT p.id, p.task_version, p.target FROM promises p
+  WHERE p.task_state = 'suspended' AND p.id IN (SELECT awaiter FROM ready_agg)
+),
+updated_expired AS (
+  UPDATE promises p SET
+    state = CASE WHEN p.is_timer THEN 'resolved' ELSE 'rejected_timedout' END,
+    settled_at = p.timeout_at,
+    :SELF_SET
+  WHERE p.id IN (SELECT id FROM expired)
+  RETURNING p.*
+),
+emit_unblock AS (
+  SELECT 'unblock'::text AS kind, l AS address, NULL::text AS task_id,
+         NULL::int AS version, :PROMISE_JSON AS promise
+  FROM updated_expired u
+  JOIN expired_snap e ON e.id = u.id
+  CROSS JOIN LATERAL unnest(e.listeners) AS l
+),
+fanout AS (
+  UPDATE promises q SET
+    callbacks = (SELECT COALESCE(array_agg(b), '{}') FROM unnest(q.callbacks) b
+                WHERE b NOT IN (SELECT id FROM fulfilled)),
+    resumes = q.resumes || COALESCE((SELECT r.awaited_ids FROM ready_agg r WHERE r.awaiter = q.id), '{}'),
+    task_state = CASE WHEN q.task_state = 'suspended' AND EXISTS (SELECT 1 FROM ready_agg r WHERE r.awaiter = q.id)
+                   THEN 'pending' ELSE q.task_state END,
+    retry_timeout_at = CASE WHEN q.task_state = 'suspended' AND EXISTS (SELECT 1 FROM ready_agg r WHERE r.awaiter = q.id)
+                   THEN :TIME + :TRT ELSE q.retry_timeout_at END,
+    lease_timeout_at = CASE WHEN q.task_state = 'suspended' AND EXISTS (SELECT 1 FROM ready_agg r WHERE r.awaiter = q.id)
+                   THEN NULL ELSE q.lease_timeout_at END,
+    ttl = CASE WHEN q.task_state = 'suspended' AND EXISTS (SELECT 1 FROM ready_agg r WHERE r.awaiter = q.id)
+                   THEN NULL ELSE q.ttl END,
+    pid = CASE WHEN q.task_state = 'suspended' AND EXISTS (SELECT 1 FROM ready_agg r WHERE r.awaiter = q.id)
+                   THEN NULL ELSE q.pid END
+  WHERE q.id NOT IN (SELECT id FROM expired)
+    AND ( EXISTS (SELECT 1 FROM ready_agg r WHERE r.awaiter = q.id)
+          OR q.callbacks && (SELECT ids FROM fulfilled_ids) )
+  RETURNING q.id
+),
+emit_resume AS (
+  SELECT 'execute'::text AS kind, s.target AS address, s.id AS task_id,
+         s.task_version::int AS version, NULL::jsonb AS promise
+  FROM suspended_awaiters s WHERE s.target IS NOT NULL
+)
+SELECT :MESSAGES",
+        &[
+            (":SELECTION", selection),
+            (":SELF_SET", &self_set),
+            (":PROMISE_JSON", &promise_json("u")),
+            (":TIME", time_param),
+            (":TRT", &trt.to_string()),
+            (":MESSAGES", &emitted_json(&["emit_unblock", "emit_resume"])),
+        ],
+    )
 }
 
 // ============================================================================
-// Db implementation — stubbed; every method returns todo!()
+// Db implementation — one row per promise
 // ============================================================================
 
-impl MysqlDb<'_> {
+impl PostgresDb<'_> {
     fn task_retry_timeout(&self) -> i64 {
         self.task_retry_timeout
     }
 
+    // Ghost operation — runs before every user operation.
     fn try_timeout(&self, ids: &[&str], time: i64) -> StorageResult<()> {
         if ids.is_empty() {
             return Ok(());
         }
         let ids: Vec<String> = ids.iter().map(|s| s.to_string()).collect();
-        let ph = |n: usize| -> String { vec!["?"; n].join(", ") };
-        let n = ids.len();
-
-        // Find which of the given promises are expired and still pending
-        let expired_rows = {
-            let sql = format!(
-                "SELECT id FROM promises WHERE id IN ({}) AND state = 'pending' AND timeout_at <= ? ORDER BY id",
-                ph(n)
-            );
-            let mut q = sqlx::query(&sql);
-            for id in &ids {
-                q = q.bind(id.as_str());
-            }
-            q = q.bind(time);
-            rt_block_on(q.fetch_all(self.tx().as_mut()))?
-        };
-
-        if expired_rows.is_empty() {
-            return Ok(());
-        }
-
-        let expired_ids: Vec<String> = expired_rows
-            .iter()
-            .map(|r| r.get::<String, _>("id"))
-            .collect();
-        let m = expired_ids.len();
-
-        // Settle them
-        {
-            let sql = format!(
-                "UPDATE promises
-                 SET state = CASE WHEN is_timer THEN 'resolved' ELSE 'rejected_timedout' END,
-                     settled_at = timeout_at
-                 WHERE id IN ({}) AND state = 'pending' AND timeout_at <= ?",
-                ph(m)
-            );
-            let mut q = sqlx::query(&sql);
-            for id in &expired_ids {
-                q = q.bind(id.as_str());
-            }
-            q = q.bind(time);
-            rt_block_on(q.execute(self.tx().as_mut()))?;
-        }
-
-        self.batch_settle_cascade(&expired_ids, time)
-    }
-
-    fn lock_for_update(&self, id: &str) -> StorageResult<(bool, bool)> {
-        // One row, so one lock: the promise and its task were never separately
-        // lockable in the first place.
+        let sql = expire_batch_sql(
+            "id = ANY($1) AND state = 'pending' AND timeout_at <= $2",
+            "$2",
+            self.task_retry_timeout,
+        );
         let row = rt_block_on(
-            sqlx::query(
-                "SELECT (task_state IS NOT NULL) AS has_task FROM promises WHERE id = ? FOR UPDATE",
-            )
-            .bind(id)
-            .fetch_optional(self.tx().as_mut()),
-        )?;
-        match row {
-            Some(r) => Ok((true, r.get::<i8, _>("has_task") != 0)),
-            None => Ok((false, false)),
-        }
-    }
-
-    fn process_callbacks(&self, promise_id: &str, time: i64) -> StorageResult<()> {
-        let settled = rt_block_on(
-            sqlx::query("SELECT id FROM promises WHERE id = ? AND state != 'pending'")
-                .bind(promise_id)
+            sqlx::query(&sql)
+                .bind(&ids)
+                .bind(time)
                 .fetch_optional(self.tx().as_mut()),
         )?;
-        if settled.is_some() {
-            self.resumption_enqueued(promise_id, time)?;
+        if let Some(row) = row {
+            self.absorb_and_arm_retries(&row, time + self.task_retry_timeout);
         }
         Ok(())
     }
 
+    // Lock preamble. One row now, where the multi-table backend locked the
+    // promise row and then the task row.
+    fn lock_for_update(&self, id: &str) -> StorageResult<(bool, bool)> {
+        let row = rt_block_on(
+            sqlx::query("SELECT (task_state IS NOT NULL) AS has_task FROM promises WHERE id = $1 FOR UPDATE")
+                .bind(id)
+                .fetch_optional(self.tx().as_mut()),
+        )?;
+        match row {
+            Some(r) => Ok((true, r.get::<bool, _>("has_task"))),
+            None => Ok((false, false)),
+        }
+    }
+
+    // Fire callbacks for an already-settled promise, as its own statement so it
+    // gets a fresh READ COMMITTED snapshot and sees callbacks committed by
+    // concurrent transactions.
+    fn process_callbacks(&self, promise_id: &str, time: i64) -> StorageResult<()> {
+        let fanout = settle_fanout(
+            "$1",
+            "(SELECT b.callbacks FROM before b)",
+            "false",
+            "$2",
+            self.task_retry_timeout,
+        );
+        let sql = format!(
+            "
+            WITH before AS (
+              SELECT id, callbacks FROM promises WHERE id = $1 AND state <> 'pending'
+            ),
+            cleared AS (
+              UPDATE promises SET callbacks = '{{}}'
+              WHERE id = $1 AND EXISTS (SELECT 1 FROM before)
+              RETURNING id
+            ),
+            {fanout}
+            SELECT {messages}",
+            messages = emitted_json(&["emit_resume"])
+        );
+        let row = rt_block_on(
+            sqlx::query(&sql)
+                .bind(promise_id)
+                .bind(time)
+                .fetch_optional(self.tx().as_mut()),
+        )?;
+        if let Some(row) = row {
+            self.absorb_and_arm_retries(&row, time + self.task_retry_timeout);
+        }
+        Ok(())
+    }
+
+    // P-01: promise.get
     fn promise_get(&self, id: &str) -> StorageResult<Option<PromiseRecord>> {
         let row = rt_block_on(
-            sqlx::query(
-                "SELECT id, state, param_headers, param_data, value_headers, value_data, tags, timeout_at, created_at, settled_at FROM promises WHERE id = ?",
-            )
-            .bind(id)
-            .fetch_optional(self.tx().as_mut()),
+            sqlx::query(&format!("SELECT {P_COLS} FROM promises WHERE id = $1"))
+                .bind(id)
+                .fetch_optional(self.tx().as_mut()),
         )?;
         Ok(row.as_ref().map(row_to_promise))
     }
 
+    // P-02: promise.create
+    //
+    // Five CTEs in the multi-table backend — promise, promise_timeout, task,
+    // task_timeout, outgoing_execute — collapse to one INSERT plus the outbox.
     fn promise_create(&self, params: &PromiseCreateParams) -> StorageResult<PromiseCreateResult> {
         let PromiseCreateParams {
             id,
@@ -2884,77 +2956,56 @@ impl MysqlDb<'_> {
             already_timedout,
             address,
         } = *params;
-        if id.len() > 255 {
-            return Err(StorageError::InvalidInput(
-                "id exceeds maximum length of 255 characters".to_string(),
-            ));
-        }
         let trt = self.task_retry_timeout;
 
-        let res = rt_block_on(
-            sqlx::query(
-                "INSERT IGNORE INTO promises (id, state, param_headers, param_data, tags, timeout_at, created_at, settled_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        let rows = rt_block_on(sqlx::query(&format!("
+            WITH inserted_or_skipped_promise AS (
+              INSERT INTO promises (id, state, param_headers, param_data, tags, timeout_at, created_at, settled_at,
+                                    task_state, task_version, retry_timeout_at)
+              VALUES ($1, $2, COALESCE($3::jsonb, '{{}}'), $4, $5::jsonb, $6, $7, $8,
+                      CASE WHEN $10::text IS NOT NULL
+                           THEN (CASE WHEN $9 THEN 'fulfilled' ELSE 'pending' END) END,
+                      0,
+                      CASE WHEN $10::text IS NOT NULL AND NOT $9 THEN $7 + {trt} END)
+              ON CONFLICT (id) DO NOTHING
+              RETURNING *
+            ),
+            emit_new AS (
+              SELECT 'execute'::text AS kind, $10::text AS address, p.id AS task_id,
+                     0::int AS version, NULL::jsonb AS promise
+              FROM inserted_or_skipped_promise p WHERE p.task_state = 'pending'
+            ),
+            result AS (
+              SELECT *, TRUE AS was_created FROM inserted_or_skipped_promise
+              UNION ALL
+              SELECT *, FALSE AS was_created FROM promises
+              WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM inserted_or_skipped_promise)
             )
-            .bind(id)
-            .bind(state)
-            .bind(param_headers)
-            .bind(param_data)
-            .bind(tags)
-            .bind(timeout_at)
-            .bind(created_at)
-            .bind(settled_at)
-            .execute(self.tx().as_mut()),
-        )?;
+            SELECT {P_COLS}, was_created, {messages} FROM result
+        ", messages = emitted_json(&["emit_new"])))
+            .bind(id).bind(state).bind(param_headers).bind(param_data).bind(tags)  // $1-$5
+            .bind(timeout_at).bind(created_at).bind(settled_at)                     // $6-$8
+            .bind(already_timedout).bind(address)                                   // $9-$10
+            .fetch_all(self.tx().as_mut()))?;
 
-        let was_created = res.rows_affected() > 0;
-        if was_created {
-            // No promise timeout to write: `state = 'pending' AND target IS NOT
-            // NULL` is the queue, and the INSERT above already put the row in
-            // it. Creating the task is an UPDATE of that same row, and
-            // `task_state IS NULL` is the guard `INSERT IGNORE INTO tasks`
-            // used to be — a promise carries at most one task.
-            if let Some(addr) = address {
-                let task_state = if already_timedout {
-                    "fulfilled"
-                } else {
-                    "pending"
-                };
-                let task_res = rt_block_on(
-                    sqlx::query(
-                        "UPDATE promises SET task_state = ?, task_version = 0,
-                                             retry_timeout_at = CASE WHEN ? THEN NULL ELSE ? END
-                         WHERE id = ? AND task_state IS NULL",
-                    )
-                    .bind(task_state)
-                    .bind(already_timedout)
-                    .bind(created_at + trt)
-                    .bind(id)
-                    .execute(self.tx().as_mut()),
-                )?;
-
-                if task_res.rows_affected() > 0 && !already_timedout {
-                    self.arm_promise_timeout(id, timeout_at, true);
-                    self.arm_retry(id, created_at + trt);
-                    self.emit(Outgoing::Execute {
-                        address: addr.to_string(),
-                        task_id: id.to_string(),
-                        version: 0,
-                    });
-                }
-            }
+        if rows.is_empty() {
+            // CTE snapshot race: a concurrent INSERT committed after our
+            // snapshot, so the UNION ALL fallback saw neither row. Nothing was
+            // committed — signal the caller to retry.
+            return Err(StorageError::Serialization);
         }
-
-        // Return canonical record (INSERT IGNORE is idempotent — always SELECT to get state)
-        let promise = self.promise_get(id)?.ok_or_else(|| {
-            StorageError::Backend(format!("promise not found after create: {}", id))
-        })?;
+        self.absorb_and_arm_retries(&rows[0], created_at + trt);
+        let was_created: bool = rows[0].get("was_created");
+        if was_created && !already_timedout {
+            self.arm_promise_timeout(id, timeout_at, address.is_some());
+        }
         Ok(PromiseCreateResult {
             was_created,
-            promise,
+            promise: row_to_promise(&rows[0]),
         })
     }
 
+    // P-03: promise.settle — lock preamble + one cascade statement
     fn promise_settle(&self, params: &PromiseSettleParams) -> StorageResult<PromiseSettleResult> {
         let PromiseSettleParams {
             id,
@@ -2964,46 +3015,66 @@ impl MysqlDb<'_> {
             settled_at,
         } = *params;
 
-        // Statement 1: acquire lock — blocks concurrent task.suspend etc.
+        // Statement 1: acquire the row lock — blocks until a concurrent
+        // task.suspend writing our `callbacks` finishes.
         rt_block_on(
-            sqlx::query("SELECT id FROM promises WHERE id = ? FOR UPDATE")
+            sqlx::query("SELECT id FROM promises WHERE id = $1 FOR UPDATE")
                 .bind(id)
                 .fetch_optional(self.tx().as_mut()),
         )?;
 
-        // Statement 2: try to settle
-        let res = rt_block_on(
-            sqlx::query(
-                "UPDATE promises SET state = ?, value_headers = ?, value_data = ?, settled_at = ?
-                 WHERE id = ? AND state = 'pending'",
+        // Statement 2: fresh snapshot, so `before` sees those awaiters.
+        let self_set = settle_self(
+            "(SELECT b.task_state IS NOT NULL AND b.task_state <> 'fulfilled' FROM before b)",
+        );
+        let unblock = settle_unblock("updated_promise", "(SELECT b.listeners FROM before b)");
+        let fanout = settle_fanout(
+            "$1",
+            "(SELECT CASE WHEN b.state = 'pending' THEN b.callbacks END FROM before b)",
+            "(SELECT b.state = 'pending' AND b.task_state IS NOT NULL AND b.task_state <> 'fulfilled' FROM before b)",
+            "$5",
+            self.task_retry_timeout,
+        );
+
+        let rows = rt_block_on(sqlx::query(&format!("
+            WITH before AS (
+              SELECT id, state, task_state, callbacks, listeners FROM promises WHERE id = $1
+            ),
+            updated_promise AS (
+              UPDATE promises p
+              SET state = $2, value_headers = COALESCE($3::jsonb, '{{}}'), value_data = $4, settled_at = $5,
+                  {self_set}
+              WHERE p.id = $1 AND p.state = 'pending'
+              RETURNING p.*
+            ),
+            {unblock},
+            {fanout},
+            result AS (
+              SELECT *, true AS was_settled FROM updated_promise
+              UNION ALL
+              SELECT *, false AS was_settled FROM promises
+              WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM updated_promise)
             )
-            .bind(state)
-            .bind(value_headers)
-            .bind(value_data)
-            .bind(settled_at)
-            .bind(id)
-            .execute(self.tx().as_mut()),
-        )?;
+            SELECT {P_COLS}, was_settled, {messages} FROM result
+        ", messages = emitted_json(&["emit_unblock", "emit_resume"])))
+            .bind(id).bind(state).bind(value_headers).bind(value_data).bind(settled_at)
+            .fetch_all(self.tx().as_mut()))?;
 
-        let was_settled = res.rows_affected() > 0;
-
-        if was_settled {
-            // No promise timeout to delete — the UPDATE above took this row
-            // out of the queue.
-            // Fulfill owning task (same id), drop its timeout, delete its callbacks-as-awaiter
-            self.settlement_enqueued(id)?;
-            // Mark callbacks-as-awaited ready, resume suspended tasks, queue outgoing
-            self.resumption_enqueued(id, settled_at)?;
-            // Notify listeners
-            self.listener_unblocked(id)?;
+        if rows.is_empty() {
+            return Ok(PromiseSettleResult {
+                was_settled: false,
+                promise: None,
+            });
         }
-
+        let row = &rows[0];
+        self.absorb_and_arm_retries(row, settled_at + self.task_retry_timeout);
         Ok(PromiseSettleResult {
-            was_settled,
-            promise: self.promise_get(id)?,
+            was_settled: row.get("was_settled"),
+            promise: Some(row_to_promise(row)),
         })
     }
 
+    // P-04: promise.register_callback
     fn promise_register_callback(
         &self,
         awaited_id: &str,
@@ -3011,137 +3082,137 @@ impl MysqlDb<'_> {
         time: i64,
     ) -> StorageResult<RegisterCallbackResult> {
         let trt = self.task_retry_timeout;
-
-        // Lock both promises (ORDER BY id for consistent lock ordering to prevent deadlocks)
-        let rows = rt_block_on(
-            sqlx::query(
-                "SELECT id, state, target, tags FROM promises WHERE id IN (?, ?) ORDER BY id FOR UPDATE",
+        let rows = rt_block_on(sqlx::query(&format!("
+            WITH awaited AS (
+              SELECT * FROM promises WHERE id = $1 FOR UPDATE
+            ),
+            awaiter AS (
+              SELECT * FROM promises WHERE id = $2 FOR UPDATE
+            ),
+            -- An awaited that may not be awaited is refused by the caller with
+            -- a 422, so nothing below may write for it: not the link, and not
+            -- the direct resume, which would wake the awaiter for a
+            -- registration that never happened.
+            awaitable AS (
+              SELECT EXISTS (SELECT 1 FROM awaited WHERE external) AS ok
+            ),
+            -- link: awaited still pending and awaitable, awaiter targeted and pending
+            linked AS (
+              UPDATE promises p SET callbacks = p.callbacks || $2
+              WHERE p.id = $1
+                AND NOT (p.callbacks @> ARRAY[$2])
+                AND (SELECT ok FROM awaitable)
+                AND EXISTS (SELECT 1 FROM awaited WHERE state = 'pending')
+                AND EXISTS (SELECT 1 FROM awaiter WHERE target IS NOT NULL AND state = 'pending')
+              RETURNING p.id
+            ),
+            -- direct resume: awaited already settled. A suspended awaiter is
+            -- woken; a pending/acquired one only records the ready callback.
+            resumed AS (
+              UPDATE promises p SET
+                task_state = CASE WHEN p.task_state = 'suspended' THEN 'pending' ELSE p.task_state END,
+                retry_timeout_at   = CASE WHEN p.task_state = 'suspended' THEN $3 + {trt} ELSE p.retry_timeout_at END,
+                lease_timeout_at = CASE WHEN p.task_state = 'suspended' THEN NULL ELSE p.lease_timeout_at END,
+                ttl        = CASE WHEN p.task_state = 'suspended' THEN NULL ELSE p.ttl END,
+                pid        = CASE WHEN p.task_state = 'suspended' THEN NULL ELSE p.pid END,
+                -- 'suspended' too: the row is being woken in this same
+                -- statement, so the pre-update state is what this CASE sees,
+                -- and a woken awaiter records the resume that woke it — which
+                -- is what SQLite and MySQL do by marking the callback ready
+                -- after their resume UPDATE.
+                resumes    = CASE WHEN p.task_state IN ('pending', 'acquired', 'suspended')
+                                    AND NOT (p.resumes @> ARRAY[$1])
+                                  THEN p.resumes || $1 ELSE p.resumes END
+              WHERE p.id = $2
+                AND p.task_state IN ('pending', 'acquired', 'suspended')
+                AND (SELECT ok FROM awaitable)
+                AND EXISTS (SELECT 1 FROM awaited WHERE state <> 'pending')
+              RETURNING p.id, p.task_version, p.target,
+                        (SELECT a.task_state FROM awaiter a) AS prev_task_state
+            ),
+            -- Read from the pre-update snapshot, not from `resumed`.
+            --
+            -- `outbox_resume` was a data-modifying CTE, so it ran on its own
+            -- and the final SELECT never depended on the UPDATE. A plain CTE
+            -- does not: referencing it pulls `resumed` into the final scan,
+            -- and `awaiter`'s FOR UPDATE then finds a row this same command
+            -- has already updated and yields nothing for it — losing the
+            -- awaiter from the result entirely. The emission is a function of
+            -- the pre-state anyway: a suspended, targeted awaiter of a settled
+            -- promise, at a version the resume does not change.
+            emit_resume AS (
+              SELECT 'execute'::text AS kind, a.target AS address, a.id AS task_id,
+                     a.task_version::int AS version, NULL::jsonb AS promise
+              FROM awaiter a
+              WHERE a.task_state = 'suspended' AND a.target IS NOT NULL
+                AND (SELECT ok FROM awaitable)
+                AND EXISTS (SELECT 1 FROM awaited WHERE state <> 'pending')
             )
-            .bind(awaited_id)
-            .bind(awaiter_id)
-            .fetch_all(self.tx().as_mut()),
-        )?;
+            SELECT 'awaited' AS type, {awaited_cols}, {messages} FROM awaited
+            UNION ALL
+            SELECT 'awaiter' AS type, {awaiter_cols}, {messages} FROM awaiter
+        ",
+            awaited_cols = p_cols("awaited"),
+            awaiter_cols = p_cols("awaiter"),
+            messages = emitted_json(&["emit_resume"]),
+        ))
+            .bind(awaited_id).bind(awaiter_id).bind(time)
+            .fetch_all(self.tx().as_mut()))?;
 
-        let mut awaited_state: Option<String> = None;
-        let mut awaiter_state: Option<String> = None;
-        let mut awaiter_target: Option<String> = None;
-        let mut awaited_awaitable = false;
-
+        if let Some(row) = rows.first() {
+            self.absorb_and_arm_retries(row, time + trt);
+        }
+        let mut awaited = None;
+        let mut awaiter = None;
         for row in &rows {
-            let rid: String = row.get("id");
-            let rstate: String = row.get("state");
-            let rtarget: Option<String> = row.get("target");
-            if rid == awaited_id {
-                awaited_state = Some(rstate);
-                let tags: String = row.get("tags");
-                awaited_awaitable =
-                    serde_json::from_str::<std::collections::HashMap<String, String>>(&tags)
-                        .map(|t| resonate_core::types::is_external(&t))
-                        .unwrap_or(false);
-            } else {
-                awaiter_state = Some(rstate);
-                awaiter_target = rtarget;
+            let typ: String = row.get("type");
+            let promise = row_to_promise(row);
+            match typ.as_str() {
+                "awaited" => awaited = Some(promise),
+                "awaiter" => awaiter = Some(promise),
+                _ => {}
             }
         }
-
-        // An awaited that may not be awaited is refused by the caller with a
-        // 422, so neither arm below may run: not the link, and not the direct
-        // resume, which would wake the awaiter for a registration that never
-        // happened.
-        let arms = if awaited_awaitable {
-            (awaited_state.clone(), awaiter_state.clone())
-        } else {
-            (None, None)
-        };
-        match (&arms.0, &arms.1) {
-            (Some(as_), Some(aw_))
-                if as_ == "pending" && aw_ == "pending" && awaiter_target.is_some() =>
-            {
-                // Insert callback if awaited is pending and awaiter is a runnable task-promise
-                rt_block_on(
-                    sqlx::query(
-                        "INSERT IGNORE INTO callbacks (awaited_id, awaiter_id) VALUES (?, ?)",
-                    )
-                    .bind(awaited_id)
-                    .bind(awaiter_id)
-                    .execute(self.tx().as_mut()),
-                )?;
-            }
-            (Some(as_), _) if as_ != "pending" => {
-                // Awaited already settled — directly resume the awaiter task if suspended
-                let upd = rt_block_on(
-                    sqlx::query(
-                        "UPDATE promises SET task_state = 'pending', retry_timeout_at = ?,
-                                             lease_timeout_at = NULL, ttl = NULL, pid = NULL
-                         WHERE id = ? AND task_state = 'suspended'",
-                    )
-                    .bind(time + trt)
-                    .bind(awaiter_id)
-                    .execute(self.tx().as_mut()),
-                )?;
-                // Only enqueue the execute message if the task was actually transitioned
-                if upd.rows_affected() > 0 {
-                    self.arm_retry(awaiter_id, time + trt);
-                    self.emit_execute(awaiter_id)?;
-                }
-
-                // EnqueueResume #96/#97: insert ready callback for pending/acquired awaiters
-                rt_block_on(
-                    sqlx::query(
-                        "INSERT IGNORE INTO callbacks (awaited_id, awaiter_id, ready)
-                         SELECT ?, ?, true FROM promises
-                         WHERE id = ? AND task_state IN ('pending', 'acquired')",
-                    )
-                    .bind(awaited_id)
-                    .bind(awaiter_id)
-                    .bind(awaiter_id)
-                    .execute(self.tx().as_mut()),
-                )?;
-            }
-            _ => {}
-        }
-
-        Ok(RegisterCallbackResult {
-            awaited: self.promise_get(awaited_id)?,
-            awaiter: self.promise_get(awaiter_id)?,
-        })
+        Ok(RegisterCallbackResult { awaited, awaiter })
     }
 
+    // P-05: promise.register_listener
     fn promise_register_listener(
         &self,
         awaited_id: &str,
         address: &str,
     ) -> StorageResult<Option<PromiseRecord>> {
-        let row = rt_block_on(
-            sqlx::query("SELECT id, state, tags FROM promises WHERE id = ? FOR UPDATE")
-                .bind(awaited_id)
-                .fetch_optional(self.tx().as_mut()),
+        let rows = rt_block_on(
+            sqlx::query(&format!(
+                "
+            WITH locked_promise AS (
+              SELECT * FROM promises WHERE id = $1 FOR UPDATE
+            ),
+            -- A listener is an obligation, and `external` is where the server
+            -- owes an observation. Refused by the caller with a 422, so nothing
+            -- is written for a promise that may not be awaited.
+            linked AS (
+              UPDATE promises p SET listeners = p.listeners || $2
+              WHERE p.id = $1
+                AND NOT (p.listeners @> ARRAY[$2])
+                AND EXISTS (SELECT 1 FROM locked_promise WHERE state = 'pending' AND external)
+              RETURNING p.id
+            )
+            SELECT {cols} FROM locked_promise",
+                cols = p_cols("locked_promise")
+            ))
+            .bind(awaited_id)
+            .bind(address)
+            .fetch_all(self.tx().as_mut()),
         )?;
 
-        let promise_state: Option<String> = row.as_ref().map(|r| r.get("state"));
-        // A listener is an obligation, and the server owes an observation only
-        // where someone can be blocked. Refused by the caller with a 422, so
-        // nothing is written here.
-        let awaitable = row.as_ref().is_some_and(|r| {
-            serde_json::from_str::<std::collections::HashMap<String, String>>(
-                &r.get::<String, _>("tags"),
-            )
-            .map(|t| resonate_core::types::is_external(&t))
-            .unwrap_or(false)
-        });
-
-        if promise_state.as_deref() == Some("pending") && awaitable {
-            rt_block_on(
-                sqlx::query("INSERT IGNORE INTO listeners (promise_id, address) VALUES (?, ?)")
-                    .bind(awaited_id)
-                    .bind(address)
-                    .execute(self.tx().as_mut()),
-            )?;
+        if rows.is_empty() {
+            return Ok(None);
         }
-
-        self.promise_get(awaited_id)
+        Ok(Some(row_to_promise(&rows[0])))
     }
 
+    // P-06: promise.search
     fn promise_search(
         &self,
         state: Option<&str>,
@@ -3150,55 +3221,36 @@ impl MysqlDb<'_> {
         limit: i64,
     ) -> StorageResult<Vec<PromiseRecord>> {
         let rows = rt_block_on(
-            sqlx::query(
-                "SELECT id, state, param_headers, param_data, value_headers, value_data, tags, timeout_at, created_at, settled_at
-                 FROM promises
-                 WHERE (? IS NULL OR state = ?)
-                   AND (? IS NULL OR JSON_CONTAINS(tags, ?))
-                   AND (? IS NULL OR id > ?)
-                 ORDER BY id ASC
-                 LIMIT ?",
-            )
-            .bind(state).bind(state)
-            .bind(tags).bind(tags)
-            .bind(cursor).bind(cursor)
+            sqlx::query(&format!(
+                "SELECT {P_COLS} FROM promises
+                 WHERE ($1::text IS NULL OR state = $1)
+                   AND ($2::jsonb IS NULL OR tags @> $2::jsonb)
+                   AND ($3::text IS NULL OR id > $3)
+                 ORDER BY id ASC LIMIT $4"
+            ))
+            .bind(state)
+            .bind(tags)
+            .bind(cursor)
             .bind(limit)
             .fetch_all(self.tx().as_mut()),
         )?;
         Ok(rows.iter().map(row_to_promise).collect())
     }
 
+    // T-01: task.get — `resumes` is a local array now, not a COUNT over a join
     fn task_get(&self, id: &str) -> StorageResult<Option<TaskRecord>> {
         let row = rt_block_on(
             sqlx::query(
-                "SELECT p.id, p.task_state AS state, p.task_version AS version,
-                   CASE WHEN p.task_state = 'acquired' THEN p.ttl ELSE NULL END AS ttl,
-                   CASE WHEN p.task_state = 'acquired' THEN p.pid ELSE NULL END AS pid,
-                   COALESCE(
-                     (SELECT CAST(COUNT(*) AS SIGNED) FROM callbacks c WHERE c.awaiter_id = p.id AND c.ready = true),
-                     0
-                   ) AS resumes
-                 FROM promises p WHERE p.id = ? AND p.task_state IS NOT NULL",
+                "SELECT id, task_state, task_version, ttl, pid, resumes
+                 FROM promises WHERE id = $1 AND task_state IS NOT NULL",
             )
             .bind(id)
             .fetch_optional(self.tx().as_mut()),
         )?;
-        match row {
-            Some(r) => {
-                let resumes: i64 = r.get("resumes");
-                Ok(Some(TaskRecord {
-                    id: r.get("id"),
-                    state: parse_task_state(&r.get::<String, _>("state")),
-                    version: r.get::<i32, _>("version") as i64,
-                    resumes,
-                    ttl: r.get("ttl"),
-                    pid: r.get("pid"),
-                }))
-            }
-            None => Ok(None),
-        }
+        Ok(row.as_ref().map(row_to_task))
     }
 
+    // T-02: task.create
     fn task_create(&self, params: &TaskCreateParams) -> StorageResult<TaskCreateResult> {
         let TaskCreateParams {
             promise_id,
@@ -3213,62 +3265,45 @@ impl MysqlDb<'_> {
             ttl,
             pid,
         } = *params;
-        if promise_id.len() > 255 {
-            return Err(StorageError::InvalidInput(
-                "id exceeds maximum length of 255 characters".to_string(),
-            ));
-        }
-        // No retry deadline here: task.create claims the task at birth, so it
-        // goes straight onto the lease queue.
         let task_initial_state = if already_timedout {
             "fulfilled"
         } else {
             "acquired"
         };
-        let task_initial_version: i32 = if already_timedout { 0 } else { 1 };
 
-        // Insert promise (idempotent)
-        let promise_res = rt_block_on(
-            sqlx::query(
-                "INSERT IGNORE INTO promises (id, state, param_headers, param_data, tags, timeout_at, created_at, settled_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-            ).bind(promise_id).bind(state).bind(param_headers).bind(param_data).bind(tags)
-             .bind(timeout_at).bind(created_at).bind(settled_at)
-             .execute(self.tx().as_mut())
-        )?;
-        let promise_inserted = promise_res.rows_affected() > 0;
+        let rows = rt_block_on(sqlx::query(&format!("
+            WITH inserted_promise AS (
+              INSERT INTO promises (id, state, param_headers, param_data, tags, timeout_at, created_at, settled_at,
+                                    task_state, task_version, lease_timeout_at, ttl, pid)
+              VALUES ($1, $2, COALESCE($3::jsonb, '{{}}'), $4, $5::jsonb, $6, $7, $8,
+                      $12, CASE WHEN $12 = 'acquired' THEN 1 ELSE 0 END,
+                      CASE WHEN NOT $9 THEN $7 + $10 END,
+                      CASE WHEN NOT $9 THEN $10 END,
+                      CASE WHEN NOT $9 THEN $11 END)
+              ON CONFLICT (id) DO NOTHING
+              RETURNING *
+            ),
+            promise AS (
+              SELECT * FROM inserted_promise
+              UNION ALL
+              SELECT * FROM promises WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM inserted_promise)
+            )
+            SELECT {cols},
+              EXISTS (SELECT 1 FROM inserted_promise) AS task_created,
+              p.task_state, p.task_version
+            FROM promise p
+        ", cols = p_cols("p")))
+            .bind(promise_id).bind(state).bind(param_headers).bind(param_data).bind(tags) // $1-$5
+            .bind(timeout_at).bind(created_at).bind(settled_at)                            // $6-$8
+            .bind(already_timedout).bind(ttl).bind(pid).bind(task_initial_state)           // $9-$12
+            .fetch_all(self.tx().as_mut()))?;
 
-        let mut task_created = false;
-
-        if promise_inserted {
-            // task.create claims the task at birth, so the lease columns are
-            // written with the state that owns them — no intermediate retry
-            // deadline to insert and then upgrade.
-            let task_res = rt_block_on(
-                sqlx::query(
-                    "UPDATE promises SET task_state = ?, task_version = ?,
-                                         lease_timeout_at = CASE WHEN ? THEN NULL ELSE ? END,
-                                         ttl = CASE WHEN ? THEN NULL ELSE ? END,
-                                         pid = CASE WHEN ? THEN NULL ELSE ? END
-                     WHERE id = ? AND task_state IS NULL",
-                )
-                .bind(task_initial_state)
-                .bind(task_initial_version)
-                .bind(already_timedout)
-                .bind(created_at + ttl)
-                .bind(already_timedout)
-                .bind(ttl)
-                .bind(already_timedout)
-                .bind(pid)
-                .bind(promise_id)
-                .execute(self.tx().as_mut()),
-            )?;
-            task_created = task_res.rows_affected() > 0;
+        if rows.is_empty() {
+            return Err(StorageError::Serialization);
         }
-
-        let promise = self
-            .promise_get(promise_id)?
-            .unwrap_or_else(|| unreachable!("promise missing after insert in task_create"));
+        let row = &rows[0];
+        let promise = row_to_promise(row);
+        let task_created: bool = row.get("task_created");
 
         if task_created {
             if !already_timedout {
@@ -3283,27 +3318,26 @@ impl MysqlDb<'_> {
                 promise,
                 task_created: true,
                 task_state: Some(task_initial_state.to_string()),
-                task_version: Some(task_initial_version as i64),
+                task_version: Some(if already_timedout { 0 } else { 1 }),
             });
         }
 
-        let task_row = rt_block_on(
-            sqlx::query(
-                "SELECT task_state, task_version FROM promises WHERE id = ? AND task_state IS NOT NULL",
-            )
-            .bind(promise_id)
-            .fetch_optional(self.tx().as_mut()),
-        )?;
         Ok(TaskCreateResult {
             promise,
             task_created: false,
-            task_state: task_row.as_ref().map(|r| r.get::<String, _>("task_state")),
-            task_version: task_row
-                .as_ref()
-                .map(|r| r.get::<i32, _>("task_version") as i64),
+            task_state: row
+                .try_get::<Option<String>, _>("task_state")
+                .ok()
+                .flatten(),
+            task_version: row
+                .try_get::<Option<i32>, _>("task_version")
+                .ok()
+                .flatten()
+                .map(|v| v as i64),
         })
     }
 
+    // T-03: task.acquire
     fn task_acquire(&self, params: &TaskAcquireParams) -> StorageResult<TaskAcquireResult> {
         let TaskAcquireParams {
             task_id,
@@ -3312,63 +3346,52 @@ impl MysqlDb<'_> {
             ttl,
             pid,
         } = *params;
-
-        // Claiming the task and taking the lease are one write now: the type-0
-        // deadline becomes a type-1 one by clearing `retry_timeout_at` and setting
-        // `lease_timeout_at`, `ttl` and `pid`.
-        let res = rt_block_on(
-            sqlx::query(
-                "UPDATE promises SET task_state = 'acquired', task_version = task_version + 1,
-                                     retry_timeout_at = NULL, lease_timeout_at = ?, ttl = ?, pid = ?
-                 WHERE id = ? AND task_version = ? AND task_state = 'pending'",
+        let rows = rt_block_on(sqlx::query(&format!("
+            WITH before AS (
+              SELECT id, task_state, task_version FROM promises WHERE id = $1 AND task_state IS NOT NULL
+            ),
+            acquired_task AS (
+              UPDATE promises p SET
+                task_state = 'acquired', task_version = p.task_version + 1,
+                lease_timeout_at = $3 + $4, ttl = $4, pid = $5, retry_timeout_at = NULL,
+                resumes = '{{}}'                    -- deleted_ready_callbacks
+              WHERE p.id = $1 AND p.task_version = $2 AND p.task_state = 'pending'
+              RETURNING p.id, p.task_state, p.task_version
             )
-            .bind(time + ttl)
-            .bind(ttl)
-            .bind(pid)
-            .bind(task_id)
-            .bind(version as i32)
-            .execute(self.tx().as_mut()),
-        )?;
-        let was_acquired = res.rows_affected() > 0;
+            SELECT {cols},
+              COALESCE(a.task_state, b.task_state)     AS task_state,
+              COALESCE(a.task_version, b.task_version) AS task_version,
+              (a.id IS NOT NULL)                       AS was_acquired
+            FROM before b
+            JOIN promises p ON p.id = b.id
+            LEFT JOIN acquired_task a ON a.id = b.id
+        ", cols = p_cols("p")))
+            .bind(task_id).bind(version as i32).bind(time).bind(ttl).bind(pid)
+            .fetch_all(self.tx().as_mut()))?;
 
+        if rows.is_empty() {
+            return Ok(TaskAcquireResult {
+                promise: None,
+                was_acquired: false,
+                task_state: None,
+                task_version: None,
+            });
+        }
+        let row = &rows[0];
+        let task_state: String = row.get("task_state");
+        let was_acquired: bool = row.get("was_acquired");
         if was_acquired {
             self.arm_lease(task_id, pid, time + ttl);
-            rt_block_on(
-                sqlx::query("DELETE FROM callbacks WHERE awaiter_id = ? AND ready = true")
-                    .bind(task_id)
-                    .execute(self.tx().as_mut()),
-            )?;
         }
-
-        let promise = rt_block_on(
-            sqlx::query(
-                "SELECT p.id, p.state, p.param_headers, p.param_data, p.value_headers, p.value_data,
-                        p.tags, p.timeout_at, p.created_at, p.settled_at
-                 FROM promises p WHERE p.id = ? AND p.task_state IS NOT NULL"
-            ).bind(task_id).fetch_optional(self.tx().as_mut())
-        )?;
-        let task_row = rt_block_on(
-            sqlx::query(
-                "SELECT task_state, task_version FROM promises WHERE id = ? AND task_state IS NOT NULL",
-            )
-            .bind(task_id)
-            .fetch_optional(self.tx().as_mut()),
-        )?;
-        let task_state = task_row
-            .as_ref()
-            .map(|r| parse_task_state(&r.get::<String, _>("task_state")));
-        let task_version = task_row
-            .as_ref()
-            .map(|r| r.get::<i32, _>("task_version") as i64);
-
         Ok(TaskAcquireResult {
-            promise: promise.as_ref().map(row_to_promise),
+            promise: Some(row_to_promise(row)),
             was_acquired,
-            task_state,
-            task_version,
+            task_state: Some(parse_task_state(&task_state)),
+            task_version: Some(row.get::<i32, _>("task_version") as i64),
         })
     }
 
+    // T-04: task.fence (create variant) — fence on one row, insert another
     fn task_fence_create(&self, params: &TaskFenceCreateParams) -> StorageResult<TaskFenceResult> {
         let TaskFenceCreateParams {
             task_id,
@@ -3386,73 +3409,71 @@ impl MysqlDb<'_> {
         } = *params;
         let trt = self.task_retry_timeout;
 
-        let task_row = rt_block_on(
-            sqlx::query(
-                "SELECT id, task_state, task_version FROM promises WHERE id = ? AND task_state IS NOT NULL",
+        let rows = rt_block_on(sqlx::query(&format!("
+            WITH fence_check AS (
+              SELECT id, task_state, task_version FROM promises WHERE id = $1 AND task_state IS NOT NULL
+            ),
+            fence_ok AS (
+              SELECT EXISTS (SELECT 1 FROM fence_check WHERE task_state = 'acquired' AND task_version = $2) AS ok
+            ),
+            inserted_or_skipped_promise AS (
+              INSERT INTO promises (id, state, param_headers, param_data, tags, timeout_at, created_at, settled_at,
+                                    task_state, task_version, retry_timeout_at)
+              SELECT $3, $4, COALESCE($5::jsonb, '{{}}'), $6, $7::jsonb, $8, $9, $10,
+                     CASE WHEN $12::text IS NOT NULL
+                          THEN (CASE WHEN $11::bool THEN 'fulfilled' ELSE 'pending' END) END,
+                     0,
+                     CASE WHEN $12::text IS NOT NULL AND NOT $11::bool THEN $9 + {trt} END
+              WHERE (SELECT ok FROM fence_ok)
+              ON CONFLICT (id) DO NOTHING
+              RETURNING *
+            ),
+            emit_new AS (
+              SELECT 'execute'::text AS kind, $12::text AS address, p.id AS task_id,
+                     0::int AS version, NULL::jsonb AS promise
+              FROM inserted_or_skipped_promise p WHERE p.task_state = 'pending'
+            ),
+            result AS (
+              SELECT * FROM inserted_or_skipped_promise
+              UNION ALL
+              SELECT * FROM promises
+              WHERE id = $3 AND (SELECT ok FROM fence_ok)
+                AND NOT EXISTS (SELECT 1 FROM inserted_or_skipped_promise)
             )
-            .bind(task_id)
-            .fetch_optional(self.tx().as_mut()),
-        )?;
+            SELECT
+              EXISTS (SELECT 1 FROM fence_check) AS task_exists,
+              (SELECT ok FROM fence_ok) AS fence_ok,
+              {cols}, {messages}
+            FROM (SELECT 1) AS dummy
+            LEFT JOIN result r ON true
+        ", cols = p_cols("r"), messages = emitted_json(&["emit_new"])))
+            .bind(task_id).bind(version as i32)                                            // $1-$2
+            .bind(promise_id).bind(state).bind(param_headers).bind(param_data).bind(tags)  // $3-$7
+            .bind(timeout_at).bind(created_at).bind(settled_at)                             // $8-$10
+            .bind(already_timedout).bind(address)                                           // $11-$12
+            .fetch_all(self.tx().as_mut()))?;
 
-        let task_exists = task_row.is_some();
-        let fence_ok = task_row.as_ref().is_some_and(|r| {
-            let s: String = r.get("task_state");
-            let v: i32 = r.get("task_version");
-            s == "acquired" && v == version as i32
-        });
-
-        let promise = if fence_ok {
-            let res = rt_block_on(
-                sqlx::query(
-                    "INSERT IGNORE INTO promises (id, state, param_headers, param_data, tags, timeout_at, created_at, settled_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-                ).bind(promise_id).bind(state).bind(param_headers).bind(param_data).bind(tags)
-                 .bind(timeout_at).bind(created_at).bind(settled_at)
-                 .execute(self.tx().as_mut())
-            )?;
-
-            if res.rows_affected() > 0 {
-                if let Some(addr) = address {
-                    let task_state = if already_timedout {
-                        "fulfilled"
-                    } else {
-                        "pending"
-                    };
-                    let task_res = rt_block_on(
-                        sqlx::query(
-                            "UPDATE promises SET task_state = ?, task_version = 0,
-                                                 retry_timeout_at = CASE WHEN ? THEN NULL ELSE ? END
-                             WHERE id = ? AND task_state IS NULL",
-                        )
-                        .bind(task_state)
-                        .bind(already_timedout)
-                        .bind(created_at + trt)
-                        .bind(promise_id)
-                        .execute(self.tx().as_mut()),
-                    )?;
-                    if task_res.rows_affected() > 0 && !already_timedout {
-                        self.arm_promise_timeout(promise_id, timeout_at, true);
-                        self.arm_retry(promise_id, created_at + trt);
-                        self.emit(Outgoing::Execute {
-                            address: addr.to_string(),
-                            task_id: promise_id.to_string(),
-                            version: 0,
-                        });
-                    }
-                }
-            }
-            self.promise_get(promise_id)?
-        } else {
-            self.promise_get(promise_id)?
-        };
-
+        if rows.is_empty() {
+            return Err(StorageError::Serialization);
+        }
+        let row = &rows[0];
+        let armed = self.absorb_and_arm_retries(row, created_at + trt);
+        let promise_id_val: Option<String> = row.get("id");
+        // A promise joins the eager sweep under exactly the condition its task
+        // gets a retry deadline: newly created, targeted, not already timed
+        // out. So the retries this statement armed name the promises too, and
+        // there is no separate `was_created` to read.
+        for id in &armed {
+            self.arm_promise_timeout(id, timeout_at, true);
+        }
         Ok(TaskFenceResult {
-            task_exists,
-            fence_ok,
-            promise,
+            task_exists: row.get("task_exists"),
+            fence_ok: row.get("fence_ok"),
+            promise: promise_id_val.map(|_| row_to_promise(row)),
         })
     }
 
+    // T-04: task.fence (settle variant) — fence on one row, settlement cascade on another
     fn task_fence_settle(&self, params: &TaskFenceSettleParams) -> StorageResult<TaskFenceResult> {
         let TaskFenceSettleParams {
             task_id,
@@ -3464,281 +3485,212 @@ impl MysqlDb<'_> {
             settled_at,
         } = *params;
 
-        let task_row = rt_block_on(
-            sqlx::query(
-                "SELECT id, task_state, task_version FROM promises WHERE id = ? AND task_state IS NOT NULL",
+        let self_set = settle_self(
+            "(SELECT b.task_state IS NOT NULL AND b.task_state <> 'fulfilled' FROM before b)",
+        );
+        let unblock = settle_unblock("updated_promise", "(SELECT b.listeners FROM before b)");
+        let fanout = settle_fanout(
+            "$3",
+            "(SELECT CASE WHEN b.state = 'pending' THEN b.callbacks END FROM before b)",
+            "(SELECT b.state = 'pending' AND b.task_state IS NOT NULL AND b.task_state <> 'fulfilled' FROM before b)",
+            "$7",
+            self.task_retry_timeout,
+        );
+
+        let rows = rt_block_on(sqlx::query(&format!("
+            WITH fence_check AS (
+              SELECT id, task_state, task_version FROM promises WHERE id = $1 AND task_state IS NOT NULL
+            ),
+            fence_ok AS (
+              SELECT EXISTS (SELECT 1 FROM fence_check WHERE task_state = 'acquired' AND task_version = $2) AS ok
+            ),
+            locked_promise AS (
+              SELECT * FROM promises WHERE id = $3 AND (SELECT ok FROM fence_ok) FOR UPDATE
+            ),
+            before AS (
+              SELECT id, state, task_state, callbacks, listeners FROM locked_promise
+            ),
+            updated_promise AS (
+              UPDATE promises p
+              SET state = $4, value_headers = COALESCE($5::jsonb, '{{}}'), value_data = $6, settled_at = $7,
+                  {self_set}
+              WHERE p.id = $3 AND p.state = 'pending' AND (SELECT ok FROM fence_ok)
+                AND EXISTS (SELECT 1 FROM locked_promise)
+              RETURNING p.*
+            ),
+            {unblock},
+            {fanout},
+            result AS (
+              SELECT * FROM updated_promise
+              UNION ALL
+              SELECT * FROM locked_promise WHERE NOT EXISTS (SELECT 1 FROM updated_promise)
             )
-            .bind(task_id)
-            .fetch_optional(self.tx().as_mut()),
-        )?;
+            SELECT
+              EXISTS (SELECT 1 FROM fence_check) AS task_exists,
+              (SELECT ok FROM fence_ok) AS fence_ok,
+              {cols}, {messages}
+            FROM (SELECT 1) AS dummy
+            LEFT JOIN result r ON true
+        ", cols = p_cols("r"), messages = emitted_json(&["emit_unblock", "emit_resume"])))
+            .bind(task_id).bind(version as i32)                                                     // $1-$2
+            .bind(promise_id).bind(state).bind(value_headers).bind(value_data).bind(settled_at)     // $3-$7
+            .fetch_all(self.tx().as_mut()))?;
 
-        let task_exists = task_row.is_some();
-        let fence_ok = task_row.as_ref().is_some_and(|r| {
-            let s: String = r.get("task_state");
-            let v: i32 = r.get("task_version");
-            s == "acquired" && v == version as i32
-        });
-
-        if fence_ok {
-            // Lock the promise
-            rt_block_on(
-                sqlx::query("SELECT id FROM promises WHERE id = ? FOR UPDATE")
-                    .bind(promise_id)
-                    .fetch_optional(self.tx().as_mut()),
-            )?;
-
-            let res = rt_block_on(
-                sqlx::query(
-                    "UPDATE promises SET state = ?, value_headers = ?, value_data = ?, settled_at = ?
-                     WHERE id = ? AND state = 'pending'"
-                ).bind(state).bind(value_headers).bind(value_data).bind(settled_at).bind(promise_id)
-                 .execute(self.tx().as_mut())
-            )?;
-
-            if res.rows_affected() > 0 {
-                self.settlement_enqueued(promise_id)?;
-                self.resumption_enqueued(promise_id, settled_at)?;
-                self.listener_unblocked(promise_id)?;
-            }
+        if rows.is_empty() {
+            return Ok(TaskFenceResult {
+                task_exists: false,
+                fence_ok: false,
+                promise: None,
+            });
         }
-
+        let row = &rows[0];
+        self.absorb_and_arm_retries(row, settled_at + self.task_retry_timeout);
+        let promise_id_val: Option<String> = row.get("id");
         Ok(TaskFenceResult {
-            task_exists,
-            fence_ok,
-            promise: self.promise_get(promise_id)?,
+            task_exists: row.get("task_exists"),
+            fence_ok: row.get("fence_ok"),
+            promise: promise_id_val.map(|_| row_to_promise(row)),
         })
     }
 
+    // T-05: task.heartbeat — extend the lease of every task this pid still holds
     fn task_heartbeat(&self, pid: &str, tasks: &[(&str, i64)], time: i64) -> StorageResult<()> {
-        for (task_id, version) in tasks {
-            // The three-table join collapses: the lease, the task and the
-            // promise it guards are all this one row.
-            let res = rt_block_on(
-                sqlx::query(
-                    "UPDATE promises SET lease_timeout_at = ? + ttl
-                     WHERE id = ? AND task_version = ? AND task_state = 'acquired' AND pid = ?
-                       AND (state != 'pending' OR timeout_at > ?)",
-                )
-                .bind(time)
-                .bind(task_id)
-                .bind(*version as i32)
-                .bind(pid)
-                .bind(time)
-                .execute(self.tx().as_mut()),
-            )?;
-            // The new deadline is `? + ttl` and `ttl` is a column, so it has to
-            // be read back. MySQL has no RETURNING, so this is a second
-            // statement — taken only when the heartbeat actually landed, which
-            // keeps the no-op case (the common one on a stale task) free.
-            if res.rows_affected() > 0 {
-                let row = rt_block_on(
-                    sqlx::query("SELECT lease_timeout_at FROM promises WHERE id = ?")
-                        .bind(task_id)
-                        .fetch_optional(self.tx().as_mut()),
-                )?;
-                if let Some(row) = row {
-                    if let Some(at) = row.get::<Option<i64>, _>("lease_timeout_at") {
-                        self.arm_lease(task_id, pid, at);
-                    }
-                }
-            }
+        if tasks.is_empty() {
+            return Ok(());
+        }
+        let ids: Vec<String> = tasks.iter().map(|(id, _)| id.to_string()).collect();
+        let versions: Vec<i32> = tasks.iter().map(|(_, v)| *v as i32).collect();
+
+        // RETURNING, because the new deadline is `$3 + p.ttl` and `ttl` is a
+        // column: the caller cannot compute what was written without reading
+        // it back. The only statement in this backend that needed new SQL to
+        // announce its deadline.
+        let rows = rt_block_on(
+            sqlx::query(
+                "
+            WITH task_data AS (
+              SELECT unnest($1::text[]) AS id, unnest($2::int[]) AS version
+            )
+            UPDATE promises p SET lease_timeout_at = $3 + p.ttl
+            FROM task_data td
+            WHERE p.id = td.id AND p.task_version = td.version
+              AND p.task_state = 'acquired' AND p.pid = $4
+            -- The promise-liveness guard: a heartbeat on a task whose promise
+            -- is pending-but-expired is a no-op. This is the one operation
+            -- that does not sweep first, so without it the lease would be
+            -- extended in the window before the wheel reaches the row.
+              AND (p.state != 'pending' OR p.timeout_at > $3)
+            RETURNING p.id, p.lease_timeout_at
+        ",
+            )
+            .bind(&ids)
+            .bind(&versions)
+            .bind(time)
+            .bind(pid)
+            .fetch_all(self.tx().as_mut()),
+        )?;
+        for row in &rows {
+            let id: String = row.get("id");
+            let lease_timeout_at: i64 = row.get("lease_timeout_at");
+            self.arm_lease(&id, pid, lease_timeout_at);
         }
         Ok(())
     }
 
+    // T-06: task.suspend
     fn task_suspend(
         &self,
         task_id: &str,
         version: i64,
         awaited_ids: &[&str],
     ) -> StorageResult<TaskSuspendResult> {
-        let awaited_ids: Vec<String> = awaited_ids.iter().map(|s| s.to_string()).collect();
+        let awaited: Vec<String> = awaited_ids.iter().map(|s| s.to_string()).collect();
 
-        // 1. Lock all awaited promises in id order (deadlock prevention)
-        if !awaited_ids.is_empty() {
-            let placeholders = awaited_ids
-                .iter()
-                .map(|_| "?")
-                .collect::<Vec<_>>()
-                .join(", ");
-            let sql = format!(
-                "SELECT id FROM promises WHERE id IN ({}) ORDER BY id FOR UPDATE",
-                placeholders
-            );
-            let mut q = sqlx::query(&sql);
-            for id in &awaited_ids {
-                q = q.bind(id.as_str());
-            }
-            rt_block_on(q.fetch_all(self.tx().as_mut()))?;
-        }
-
-        // 2. Lock the task — the same row as its promise
+        // Statement 1: lock every row this touches, lowest id first, so a
+        // concurrent settle taking the same rows cannot deadlock with us.
+        let mut lock_ids: Vec<String> = awaited.clone();
+        lock_ids.push(task_id.to_string());
         rt_block_on(
-            sqlx::query(
-                "SELECT id FROM promises WHERE id = ? AND task_state IS NOT NULL FOR UPDATE",
-            )
-            .bind(task_id)
-            .fetch_optional(self.tx().as_mut()),
+            sqlx::query("SELECT id FROM promises WHERE id = ANY($1) ORDER BY id FOR UPDATE")
+                .bind(&lock_ids)
+                .fetch_all(self.tx().as_mut()),
         )?;
 
-        // 3. Check task version/state
-        let task_row = rt_block_on(
-            sqlx::query(
-                "SELECT task_state, task_version FROM promises WHERE id = ? AND task_state IS NOT NULL",
+        // Statement 2: fresh snapshot — sees everything committed before the locks.
+        let rows = rt_block_on(sqlx::query("
+            WITH me AS (
+              SELECT id, task_state, task_version FROM promises WHERE id = $1 AND task_state IS NOT NULL
+            ),
+            matched AS (
+              SELECT EXISTS (SELECT 1 FROM me WHERE task_version = $2 AND task_state = 'acquired') AS ok
+            ),
+            awaited AS (
+              SELECT id, state, external
+              FROM promises WHERE id = ANY($3) AND (SELECT ok FROM matched)
+            ),
+            missing AS (
+              SELECT (COALESCE(array_length($3::text[], 1), 0) - COUNT(*)::INT) AS cnt FROM awaited
+            ),
+            -- `external` is the generated column of the same three tags as
+            -- `resonate_core::types::is_external`. A promise nothing outside
+            -- its own execution can settle may not be awaited.
+            non_awaitable AS (
+              SELECT COUNT(*)::INT AS cnt FROM awaited WHERE NOT external
+            ),
+            can_suspend AS (
+              SELECT 1 WHERE (SELECT ok FROM matched)
+                AND (SELECT cnt FROM missing) = 0
+                AND (SELECT cnt FROM non_awaitable) = 0
+                AND NOT EXISTS (SELECT 1 FROM awaited WHERE state <> 'pending')
+            ),
+            -- link the awaited rows (other than the task's own, handled below)
+            linked AS (
+              UPDATE promises p SET callbacks = p.callbacks || $1
+              WHERE p.id = ANY($3) AND p.id <> $1
+                AND NOT (p.callbacks @> ARRAY[$1])
+                AND EXISTS (SELECT 1 FROM can_suspend)
+              RETURNING p.id
+            ),
+            suspended AS (
+              UPDATE promises p SET
+                task_state = CASE WHEN EXISTS (SELECT 1 FROM can_suspend) THEN 'suspended' ELSE p.task_state END,
+                retry_timeout_at   = CASE WHEN EXISTS (SELECT 1 FROM can_suspend) THEN NULL ELSE p.retry_timeout_at END,
+                lease_timeout_at = CASE WHEN EXISTS (SELECT 1 FROM can_suspend) THEN NULL ELSE p.lease_timeout_at END,
+                ttl        = CASE WHEN EXISTS (SELECT 1 FROM can_suspend) THEN NULL ELSE p.ttl END,
+                pid        = CASE WHEN EXISTS (SELECT 1 FROM can_suspend) THEN NULL ELSE p.pid END,
+                -- deleted_ready_callbacks: fires on a version match even when
+                -- the suspend itself is refused because an awaited promise settled
+                resumes    = CASE WHEN (SELECT ok FROM matched) AND (SELECT cnt FROM missing) = 0
+                                    AND (SELECT cnt FROM non_awaitable) = 0
+                               THEN '{}' ELSE p.resumes END,
+                callbacks   = CASE WHEN $1 = ANY($3) AND EXISTS (SELECT 1 FROM can_suspend)
+                                    AND NOT (p.callbacks @> ARRAY[$1])
+                               THEN p.callbacks || $1 ELSE p.callbacks END
+              WHERE p.id = $1
+                AND ((SELECT ok FROM matched) AND (SELECT cnt FROM missing) = 0
+                     AND (SELECT cnt FROM non_awaitable) = 0)
+              RETURNING p.id
             )
-            .bind(task_id)
-            .fetch_optional(self.tx().as_mut()),
-        )?;
-        let task_matched = task_row.as_ref().is_some_and(|r| {
-            r.get::<String, _>("task_state") == "acquired"
-                && r.get::<i32, _>("task_version") == version as i32
-        });
-        if !task_matched {
-            return Ok(TaskSuspendResult {
-                task_matched: false,
-                was_suspended: false,
-                missing_count: 0,
-                non_awaitable_count: 0,
-            });
-        }
+            SELECT
+              (SELECT ok FROM matched) AS task_matched,
+              EXISTS (SELECT 1 FROM can_suspend) AS was_suspended,
+              (SELECT cnt FROM missing) AS missing_count,
+              (SELECT cnt FROM non_awaitable) AS non_awaitable_count
+        ")
+            .bind(task_id).bind(version as i32).bind(&awaited)
+            .fetch_one(self.tx().as_mut()))?;
 
-        // 4. Count missing awaited promises
-        let missing_count = if awaited_ids.is_empty() {
-            0i32
-        } else {
-            let placeholders = awaited_ids
-                .iter()
-                .map(|_| "?")
-                .collect::<Vec<_>>()
-                .join(", ");
-            let sql = format!(
-                "SELECT COUNT(*) AS cnt FROM promises WHERE id IN ({})",
-                placeholders
-            );
-            let mut q = sqlx::query(&sql);
-            for id in &awaited_ids {
-                q = q.bind(id.as_str());
-            }
-            let row = rt_block_on(q.fetch_one(self.tx().as_mut()))?;
-            let found: i64 = row.get("cnt");
-            (awaited_ids.len() as i64 - found) as i32
-        };
-        if missing_count > 0 {
-            return Ok(TaskSuspendResult {
-                task_matched: true,
-                was_suspended: false,
-                missing_count,
-                non_awaitable_count: 0,
-            });
-        }
-
-        // 4b. Count awaited promises that may not be awaited — the three tags
-        // of `resonate_core::types::is_external`, two of them already stored
-        // as generated columns.
-        let non_awaitable_count = if awaited_ids.is_empty() {
-            0i32
-        } else {
-            let placeholders = awaited_ids
-                .iter()
-                .map(|_| "?")
-                .collect::<Vec<_>>()
-                .join(", ");
-            let sql = format!(
-                "SELECT COUNT(*) AS cnt FROM promises WHERE id IN ({}) \
-                 AND NOT (COALESCE(tags->>'$.\"resonate:scope\"', '') = 'global' \
-                          OR COALESCE(tags->>'$.\"resonate:external\"', '') = 'true' \
-                          OR target IS NOT NULL OR is_timer)",
-                placeholders
-            );
-            let mut q = sqlx::query(&sql);
-            for id in &awaited_ids {
-                q = q.bind(id.as_str());
-            }
-            let row = rt_block_on(q.fetch_one(self.tx().as_mut()))?;
-            row.get::<i64, _>("cnt") as i32
-        };
-        if non_awaitable_count > 0 {
-            return Ok(TaskSuspendResult {
-                task_matched: true,
-                was_suspended: false,
-                missing_count: 0,
-                non_awaitable_count,
-            });
-        }
-
-        // 5. Count already-settled awaited promises
-        let settled_count: i64 = if awaited_ids.is_empty() {
-            0
-        } else {
-            let placeholders = awaited_ids
-                .iter()
-                .map(|_| "?")
-                .collect::<Vec<_>>()
-                .join(", ");
-            let sql = format!(
-                "SELECT COUNT(*) AS cnt FROM promises WHERE id IN ({}) AND state != 'pending'",
-                placeholders
-            );
-            let mut q = sqlx::query(&sql);
-            for id in &awaited_ids {
-                q = q.bind(id.as_str());
-            }
-            let row = rt_block_on(q.fetch_one(self.tx().as_mut()))?;
-            row.get("cnt")
-        };
-
-        if settled_count == 0 {
-            // 6. Can suspend: clear stale ready callbacks, insert new ones, transition task
-            rt_block_on(
-                sqlx::query("DELETE FROM callbacks WHERE awaiter_id = ? AND ready = true")
-                    .bind(task_id)
-                    .execute(self.tx().as_mut()),
-            )?;
-            for awaited_id in &awaited_ids {
-                rt_block_on(
-                    sqlx::query(
-                        "INSERT IGNORE INTO callbacks (awaited_id, awaiter_id) VALUES (?, ?)",
-                    )
-                    .bind(awaited_id.as_str())
-                    .bind(task_id)
-                    .execute(self.tx().as_mut()),
-                )?;
-            }
-            // A suspended task is on neither timeout queue, which is what
-            // deleting its `task_timeouts` row used to say.
-            rt_block_on(
-                sqlx::query(
-                    "UPDATE promises SET task_state = 'suspended',
-                                         retry_timeout_at = NULL, lease_timeout_at = NULL, ttl = NULL, pid = NULL
-                     WHERE id = ? AND task_version = ? AND task_state = 'acquired'",
-                )
-                .bind(task_id)
-                .bind(version as i32)
-                .execute(self.tx().as_mut()),
-            )?;
-            Ok(TaskSuspendResult {
-                task_matched: true,
-                was_suspended: true,
-                missing_count: 0,
-                non_awaitable_count: 0,
-            })
-        } else {
-            // 7. Cannot suspend — at least one awaited promise is already settled.
-            // Delete ready callbacks (re-entry cleanup, same semantics as postgres).
-            rt_block_on(
-                sqlx::query("DELETE FROM callbacks WHERE awaiter_id = ? AND ready = true")
-                    .bind(task_id)
-                    .execute(self.tx().as_mut()),
-            )?;
-            Ok(TaskSuspendResult {
-                task_matched: true,
-                was_suspended: false,
-                missing_count: 0,
-                non_awaitable_count: 0,
-            })
-        }
+        Ok(TaskSuspendResult {
+            task_matched: rows.get("task_matched"),
+            was_suspended: rows.get("was_suspended"),
+            missing_count: rows.get("missing_count"),
+            non_awaitable_count: rows.get("non_awaitable_count"),
+        })
     }
 
+    // T-07: task.fulfill — the task and the promise are the same row, so the
+    // multi-table backend's `fulfilled_acquired_task` and `updated_promise`
+    // must become one UPDATE.
     fn task_fulfill(&self, params: &TaskFulfillParams) -> StorageResult<TaskFulfillResult> {
         let TaskFulfillParams {
             task_id,
@@ -3749,68 +3701,85 @@ impl MysqlDb<'_> {
             value_data,
             settled_at,
         } = *params;
+        debug_assert_eq!(
+            task_id, promise_id,
+            "task.fulfill assumes the task and its promise are one row"
+        );
 
-        // 1. Lock: promise first, then task (consistent ordering prevents deadlocks)
+        // Statement 1: lock preamble.
         rt_block_on(
-            sqlx::query("SELECT id FROM promises WHERE id = ? FOR UPDATE")
+            sqlx::query("SELECT id FROM promises WHERE id = $1 FOR UPDATE")
                 .bind(promise_id)
                 .fetch_optional(self.tx().as_mut()),
         )?;
-        let task_lock = rt_block_on(
-            sqlx::query(
-                "SELECT id FROM promises WHERE id = ? AND task_state IS NOT NULL FOR UPDATE",
+
+        // `fulfilled` here is the task transition, which also drives the
+        // promise settlement — hence one shared guard.
+        let guard = "(SELECT b.task_state = 'acquired' AND b.task_version = $2 FROM before b)";
+        let settle_guard =
+            "(SELECT b.task_state = 'acquired' AND b.task_version = $2 AND b.state = 'pending' FROM before b)";
+        let self_set = settle_self(guard);
+        let unblock = settle_unblock("updated_promise", "(SELECT b.listeners FROM before b)");
+        let fanout = settle_fanout(
+            "$3",
+            &format!("(SELECT CASE WHEN {settle_guard} THEN b.callbacks END FROM before b)"),
+            guard,
+            "$7",
+            self.task_retry_timeout,
+        );
+
+        let rows = rt_block_on(sqlx::query(&format!("
+            WITH before AS (
+              SELECT id, state, task_state, task_version, callbacks, listeners FROM promises WHERE id = $3
+            ),
+            updated_promise AS (
+              UPDATE promises p
+              SET state = CASE WHEN p.state = 'pending' THEN $4 ELSE p.state END,
+                  value_headers = CASE WHEN p.state = 'pending' THEN COALESCE($5::jsonb, '{{}}') ELSE p.value_headers END,
+                  value_data    = CASE WHEN p.state = 'pending' THEN $6 ELSE p.value_data END,
+                  settled_at    = CASE WHEN p.state = 'pending' THEN $7 ELSE p.settled_at END,
+                  {self_set}
+              WHERE p.id = $3 AND p.task_state = 'acquired' AND p.task_version = $2
+              RETURNING p.*
+            ),
+            {unblock},
+            {fanout},
+            result AS (
+              SELECT * FROM updated_promise
+              UNION ALL
+              SELECT * FROM promises WHERE id = $3 AND NOT EXISTS (SELECT 1 FROM updated_promise)
             )
-            .bind(task_id)
-            .fetch_optional(self.tx().as_mut()),
-        )?;
-        let task_exists = task_lock.is_some();
+            SELECT {cols},
+              EXISTS (SELECT 1 FROM updated_promise) AS task_fulfilled,
+              (SELECT b.task_state IS NOT NULL FROM before b) AS task_exists,
+              {messages}
+            FROM result r
+        ", cols = p_cols("r"), messages = emitted_json(&["emit_unblock", "emit_resume"])))
+            .bind(task_id).bind(version as i32)                                                 // $1-$2
+            .bind(promise_id).bind(state).bind(value_headers).bind(value_data).bind(settled_at) // $3-$7
+            .fetch_all(self.tx().as_mut()))?;
 
-        // 2. Fulfill the task (version + state guard), and with it drop the lease
-        let task_res = rt_block_on(
-            sqlx::query(
-                "UPDATE promises SET task_state = 'fulfilled',
-                                     retry_timeout_at = NULL, lease_timeout_at = NULL, ttl = NULL, pid = NULL
-                 WHERE id = ? AND task_version = ? AND task_state = 'acquired'",
-            )
-            .bind(task_id)
-            .bind(version as i32)
-            .execute(self.tx().as_mut()),
-        )?;
-        let task_fulfilled = task_res.rows_affected() > 0;
-
-        if task_fulfilled {
-            // 3. Clean up task infrastructure
-            rt_block_on(
-                sqlx::query("DELETE FROM callbacks WHERE awaiter_id = ?")
-                    .bind(task_id)
-                    .execute(self.tx().as_mut()),
-            )?;
-
-            // 4. Settle the promise
-            let promise_res = rt_block_on(
-                sqlx::query(
-                    "UPDATE promises SET state = ?, value_headers = ?, value_data = ?, settled_at = ?
-                     WHERE id = ? AND state = 'pending'"
-                ).bind(state).bind(value_headers).bind(value_data).bind(settled_at).bind(promise_id)
-                 .execute(self.tx().as_mut())
-            )?;
-
-            if promise_res.rows_affected() > 0 {
-                // 5. No promise timeout to delete — settling took the row out
-                //    of the queue.
-                // 6. Resume suspended tasks waiting on this promise + notify listeners
-                self.resumption_enqueued(promise_id, settled_at)?;
-                self.listener_unblocked(promise_id)?;
-            }
+        if rows.is_empty() {
+            return Ok(TaskFulfillResult {
+                task_exists: false,
+                task_fulfilled: false,
+                promise: None,
+            });
         }
-
+        let row = &rows[0];
+        self.absorb_and_arm_retries(row, settled_at + self.task_retry_timeout);
         Ok(TaskFulfillResult {
-            task_exists,
-            task_fulfilled,
-            promise: self.promise_get(promise_id)?,
+            task_exists: row
+                .try_get::<Option<bool>, _>("task_exists")
+                .ok()
+                .flatten()
+                .unwrap_or(false),
+            task_fulfilled: row.get("task_fulfilled"),
+            promise: Some(row_to_promise(row)),
         })
     }
 
+    // T-08: task.release
     fn task_release(
         &self,
         task_id: &str,
@@ -3818,113 +3787,115 @@ impl MysqlDb<'_> {
         time: i64,
         ttl: i64,
     ) -> StorageResult<TaskReleaseResult> {
-        // Handing the task back moves it from the lease queue to the retry
-        // queue: `lease_timeout_at` out, `retry_timeout_at` in.
-        let res = rt_block_on(
+        let row = rt_block_on(
             sqlx::query(
-                "UPDATE promises SET task_state = 'pending', retry_timeout_at = ? + ?,
-                                     lease_timeout_at = NULL, ttl = NULL, pid = NULL
-                 WHERE id = ? AND task_version = ? AND task_state = 'acquired'",
+                "
+            WITH released_task AS (
+              UPDATE promises p SET
+                task_state = 'pending', retry_timeout_at = $3 + $4,
+                lease_timeout_at = NULL, ttl = NULL, pid = NULL
+              WHERE p.id = $1 AND p.task_version = $2 AND p.task_state = 'acquired'
+              RETURNING p.id, p.task_version, p.target
+            ),
+            emit_released AS (
+              SELECT 'execute'::text AS kind, t.target AS address, t.id AS task_id,
+                     t.task_version::int AS version, NULL::jsonb AS promise
+              FROM released_task t WHERE t.target IS NOT NULL
             )
-            .bind(time)
-            .bind(ttl)
+            SELECT
+              EXISTS (SELECT 1 FROM released_task) AS task_released,
+              EXISTS (SELECT 1 FROM promises WHERE id = $1 AND task_state IS NOT NULL) AS task_exists,
+              :MESSAGES
+        "
+            .replace(":MESSAGES", &emitted_json(&["emit_released"]))
+            .as_str(),
+            )
             .bind(task_id)
             .bind(version as i32)
-            .execute(self.tx().as_mut()),
+            .bind(time)
+            .bind(ttl)
+            .fetch_one(self.tx().as_mut()),
         )?;
-        let task_released = res.rows_affected() > 0;
 
-        if task_released {
-            self.arm_retry(task_id, time + ttl);
-            self.emit_execute(task_id)?;
-        }
-        let task_exists = rt_block_on(
-            sqlx::query("SELECT id FROM promises WHERE id = ? AND task_state IS NOT NULL")
-                .bind(task_id)
-                .fetch_optional(self.tx().as_mut()),
-        )?
-        .is_some();
+        self.absorb_and_arm_retries(&row, time + ttl);
         Ok(TaskReleaseResult {
-            task_released,
-            task_exists,
+            task_released: row.get("task_released"),
+            task_exists: row.get("task_exists"),
         })
     }
 
+    // T-09: task.halt
     fn task_halt(&self, task_id: &str) -> StorageResult<TaskHaltResult> {
         let row = rt_block_on(
             sqlx::query(
-                "SELECT id, task_state FROM promises WHERE id = ? AND task_state IS NOT NULL FOR UPDATE",
+                "
+            WITH locked_task AS (
+              SELECT id, task_state FROM promises WHERE id = $1 AND task_state IS NOT NULL FOR UPDATE
+            ),
+            halted_task AS (
+              UPDATE promises p SET
+                task_state = 'halted', retry_timeout_at = NULL, lease_timeout_at = NULL, ttl = NULL, pid = NULL
+              WHERE p.id = $1 AND p.task_state IS NOT NULL
+                AND p.task_state NOT IN ('fulfilled', 'halted')
+              RETURNING p.id
+            )
+            SELECT
+              EXISTS (SELECT 1 FROM locked_task) AS task_exists,
+              EXISTS (SELECT 1 FROM locked_task WHERE task_state = 'fulfilled') AS task_fulfilled
+        ",
             )
             .bind(task_id)
-            .fetch_optional(self.tx().as_mut()),
+            .fetch_one(self.tx().as_mut()),
         )?;
-
-        let task_exists = row.is_some();
-        let task_state: Option<String> = row.as_ref().map(|r| r.get("task_state"));
-        let task_fulfilled = task_state.as_deref() == Some("fulfilled");
-
-        if task_exists && !task_fulfilled && task_state.as_deref() != Some("halted") {
-            // Halting and dropping the timeout are one row, so one statement.
-            rt_block_on(
-                sqlx::query(
-                    "UPDATE promises SET task_state = 'halted',
-                                         retry_timeout_at = NULL, lease_timeout_at = NULL, ttl = NULL, pid = NULL
-                     WHERE id = ?",
-                )
-                .bind(task_id)
-                .execute(self.tx().as_mut()),
-            )?;
-        }
 
         Ok(TaskHaltResult {
-            task_exists,
-            task_fulfilled,
+            task_exists: row.get("task_exists"),
+            task_fulfilled: row.get("task_fulfilled"),
         })
     }
 
+    // T-10: task.continue
     fn task_continue(&self, task_id: &str, time: i64) -> StorageResult<TaskContinueResult> {
         let trt = self.task_retry_timeout;
-
-        // Lock the task first — the same row as its promise
-        rt_block_on(
-            sqlx::query(
-                "SELECT id FROM promises WHERE id = ? AND task_state IS NOT NULL FOR UPDATE",
+        let row = rt_block_on(
+            sqlx::query(&format!(
+                "
+            WITH locked_task AS (
+              SELECT id, task_state, task_version, target FROM promises
+              WHERE id = $1 AND task_state IS NOT NULL FOR UPDATE
+            ),
+            continued_task AS (
+              UPDATE promises p SET task_state = 'pending', retry_timeout_at = $2 + {trt}
+              WHERE p.id = $1 AND p.task_state = 'halted'
+              RETURNING p.id, p.task_version, p.target
+            ),
+            -- From the snapshot, not from `continued_task` — see
+            -- `promise_register_callback` for why.
+            emit_continued AS (
+              SELECT 'execute'::text AS kind, t.target AS address, t.id AS task_id,
+                     t.task_version::int AS version, NULL::jsonb AS promise
+              FROM locked_task t WHERE t.task_state = 'halted' AND t.target IS NOT NULL
             )
+            SELECT
+              EXISTS (SELECT 1 FROM locked_task) AS task_exists,
+              EXISTS (SELECT 1 FROM continued_task) AS continued,
+              {messages}
+        ",
+                messages = emitted_json(&["emit_continued"])
+            ))
             .bind(task_id)
-            .fetch_optional(self.tx().as_mut()),
+            .bind(time)
+            .fetch_one(self.tx().as_mut()),
         )?;
 
-        // A halted task carries no deadline, so putting it back on the retry
-        // queue is the same write that makes it pending again.
-        let res = rt_block_on(
-            sqlx::query(
-                "UPDATE promises SET task_state = 'pending', retry_timeout_at = ?
-                 WHERE id = ? AND task_state = 'halted'",
-            )
-            .bind(time + trt)
-            .bind(task_id)
-            .execute(self.tx().as_mut()),
-        )?;
-        let continued = res.rows_affected() > 0;
-
-        if continued {
-            self.arm_retry(task_id, time + trt);
-            self.emit_execute(task_id)?;
-        }
-
-        let task_exists = rt_block_on(
-            sqlx::query("SELECT id FROM promises WHERE id = ? AND task_state IS NOT NULL")
-                .bind(task_id)
-                .fetch_optional(self.tx().as_mut()),
-        )?
-        .is_some();
-
+        self.absorb_and_arm_retries(&row, time + trt);
         Ok(TaskContinueResult {
-            task_exists,
-            continued,
+            task_exists: row.get("task_exists"),
+            continued: row.get("continued"),
         })
     }
 
+    // T-11: task.search
     fn task_search(
         &self,
         state: Option<&str>,
@@ -3933,57 +3904,28 @@ impl MysqlDb<'_> {
     ) -> StorageResult<Vec<TaskRecord>> {
         let rows = rt_block_on(
             sqlx::query(
-                "SELECT p.id, p.task_state AS state, p.task_version AS version,
-                   CASE WHEN p.task_state = 'acquired' THEN p.ttl ELSE NULL END AS ttl,
-                   CASE WHEN p.task_state = 'acquired' THEN p.pid ELSE NULL END AS pid,
-                   COALESCE(
-                     (SELECT CAST(COUNT(*) AS SIGNED) FROM callbacks c WHERE c.awaiter_id = p.id AND c.ready = true),
-                     0
-                   ) AS resumes
-                 FROM promises p
-                 WHERE p.task_state IS NOT NULL
-                   AND (? IS NULL OR p.task_state = ?) AND (? IS NULL OR p.id > ?)
-                 ORDER BY p.id ASC LIMIT ?",
+                "SELECT id, task_state, task_version, ttl, pid, resumes FROM promises
+                 WHERE task_state IS NOT NULL
+                   AND ($1::text IS NULL OR task_state = $1)
+                   AND ($2::text IS NULL OR id > $2)
+                 ORDER BY id ASC LIMIT $3",
             )
-            .bind(state).bind(state)
-            .bind(cursor).bind(cursor)
+            .bind(state)
+            .bind(cursor)
             .bind(limit)
             .fetch_all(self.tx().as_mut()),
         )?;
-        Ok(rows
-            .iter()
-            .map(|r| {
-                let resumes: i64 = r.get("resumes");
-                TaskRecord {
-                    id: r.get("id"),
-                    state: parse_task_state(&r.get::<String, _>("state")),
-                    version: r.get::<i32, _>("version") as i64,
-                    resumes,
-                    ttl: r.get("ttl"),
-                    pid: r.get("pid"),
-                }
-            })
-            .collect())
+        Ok(rows.iter().map(row_to_task).collect())
     }
 
     fn compute_preload(&self, promise_id: &str) -> StorageResult<Vec<PromiseRecord>> {
-        let branch_row = rt_block_on(
-            sqlx::query("SELECT branch_id FROM promises WHERE id = ?")
-                .bind(promise_id)
-                .fetch_optional(self.tx().as_mut()),
-        )?;
-        let branch: Option<String> = branch_row.and_then(|r| r.get("branch_id"));
-        let branch = match branch {
-            Some(b) => b,
-            None => return Ok(Vec::new()),
-        };
-
         let rows = rt_block_on(
-            sqlx::query(
-                "SELECT id, state, param_headers, param_data, value_headers, value_data, tags, timeout_at, created_at, settled_at
-                 FROM promises WHERE branch_id = ? AND id != ? ORDER BY id ASC LIMIT ?",
-            )
-            .bind(&branch)
+            sqlx::query(&format!(
+                "SELECT {P_COLS} FROM promises
+                 WHERE branch_id = (SELECT branch_id FROM promises WHERE id = $1)
+                   AND branch_id IS NOT NULL AND id <> $1
+                 ORDER BY id ASC LIMIT $2"
+            ))
             .bind(promise_id)
             .bind(self.preload_limit as i64)
             .fetch_all(self.tx().as_mut()),
@@ -3991,17 +3933,17 @@ impl MysqlDb<'_> {
         Ok(rows.iter().map(row_to_promise).collect())
     }
 
+    // S-01: schedule.get
     fn schedule_get(&self, id: &str) -> StorageResult<Option<ScheduleRecord>> {
-        let row = rt_block_on(
-            sqlx::query(
-                "SELECT id, cron, promise_id, promise_timeout, promise_param_headers, promise_param_data, promise_tags, created_at, next_run_at, last_run_at FROM schedules WHERE id = ?",
-            )
-            .bind(id)
-            .fetch_optional(self.tx().as_mut()),
-        )?;
+        let row = rt_block_on(sqlx::query(
+            "SELECT id, cron, promise_id, promise_timeout, NULLIF(promise_param_headers, '{}'::jsonb)::text AS promise_param_headers,
+                    promise_param_data, promise_tags::text, created_at, next_run_at, last_run_at
+             FROM schedules WHERE id = $1")
+            .bind(id).fetch_optional(self.tx().as_mut()))?;
         Ok(row.as_ref().map(row_to_schedule))
     }
 
+    // S-03: schedule.create — schedule_timeouts is gone, next_run_at *is* the queue
     fn schedule_create(&self, params: &ScheduleCreateParams) -> StorageResult<ScheduleRecord> {
         let ScheduleCreateParams {
             id,
@@ -4015,27 +3957,32 @@ impl MysqlDb<'_> {
             next_run_at,
         } = *params;
 
-        let res = rt_block_on(
-            sqlx::query(
-                "INSERT IGNORE INTO schedules
-                 (id, cron, promise_id, promise_timeout, promise_param_headers,
-                  promise_param_data, promise_tags, created_at, next_run_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        let row = rt_block_on(sqlx::query("
+            WITH inserted_or_skipped_schedule AS (
+              INSERT INTO schedules (id, cron, promise_id, promise_timeout, promise_param_headers,
+                                     promise_param_data, promise_tags, created_at, next_run_at)
+              VALUES ($1, $2, $3, $4, COALESCE($5::jsonb, '{}'), $6, $7::jsonb, $8, $9)
+              ON CONFLICT (id) DO NOTHING
+              RETURNING *
+            ),
+            result AS (
+              SELECT * FROM inserted_or_skipped_schedule
+              UNION ALL
+              SELECT * FROM schedules WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM inserted_or_skipped_schedule)
             )
-            .bind(id)
-            .bind(cron)
-            .bind(promise_id)
-            .bind(promise_timeout)
-            .bind(promise_param_headers)
-            .bind(promise_param_data)
-            .bind(promise_tags)
-            .bind(created_at)
-            .bind(next_run_at)
-            .execute(self.tx().as_mut()),
-        )?;
+            SELECT id, cron, promise_id, promise_timeout, NULLIF(promise_param_headers, '{}'::jsonb)::text AS promise_param_headers,
+                   promise_param_data, promise_tags::text, created_at, next_run_at, last_run_at,
+                   EXISTS (SELECT 1 FROM inserted_or_skipped_schedule) AS was_created
+            FROM result
+        ")
+            .bind(id).bind(cron).bind(promise_id).bind(promise_timeout)
+            .bind(promise_param_headers).bind(promise_param_data).bind(promise_tags)
+            .bind(created_at).bind(next_run_at)
+            .fetch_one(self.tx().as_mut()))?;
+
         // Only a create that actually happened arms a deadline — an idempotent
         // re-create leaves the existing next_run_at where it was.
-        if res.rows_affected() > 0 {
+        if row.get::<bool, _>("was_created") {
             self.arm(
                 next_run_at,
                 Timeout::ScheduleDue {
@@ -4043,43 +3990,33 @@ impl MysqlDb<'_> {
                 },
             );
         }
-
-        // No schedule timeout to insert: `next_run_at` on the row above is it.
-        let _ = res;
-
-        Ok(self
-            .schedule_get(id)?
-            .unwrap_or_else(|| panic!("schedule not found after create: {}", id)))
+        Ok(row_to_schedule(&row))
     }
 
+    // S-04: schedule.delete
     fn schedule_delete(&self, id: &str) -> StorageResult<bool> {
         let res = rt_block_on(
-            sqlx::query("DELETE FROM schedules WHERE id = ?")
+            sqlx::query("DELETE FROM schedules WHERE id = $1")
                 .bind(id)
                 .execute(self.tx().as_mut()),
         )?;
         Ok(res.rows_affected() > 0)
     }
 
+    // S-05: schedule.search
     fn schedule_search(
         &self,
         tags: Option<&str>,
         cursor: Option<&str>,
         limit: i64,
     ) -> StorageResult<Vec<ScheduleRecord>> {
-        let rows = rt_block_on(
-            sqlx::query(
-                "SELECT id, cron, promise_id, promise_timeout, promise_param_headers, promise_param_data, promise_tags, created_at, next_run_at, last_run_at
-                 FROM schedules
-                 WHERE (? IS NULL OR JSON_CONTAINS(promise_tags, ?))
-                   AND (? IS NULL OR id > ?)
-                 ORDER BY id ASC LIMIT ?",
-            )
-            .bind(tags).bind(tags)
-            .bind(cursor).bind(cursor)
-            .bind(limit)
-            .fetch_all(self.tx().as_mut()),
-        )?;
+        let rows = rt_block_on(sqlx::query(
+            "SELECT id, cron, promise_id, promise_timeout, NULLIF(promise_param_headers, '{}'::jsonb)::text AS promise_param_headers,
+                    promise_param_data, promise_tags::text, created_at, next_run_at, last_run_at
+             FROM schedules
+             WHERE ($1::jsonb IS NULL OR promise_tags @> $1::jsonb) AND ($2::text IS NULL OR id > $2)
+             ORDER BY id ASC LIMIT $3")
+            .bind(tags).bind(cursor).bind(limit).fetch_all(self.tx().as_mut()))?;
         Ok(rows.iter().map(row_to_schedule).collect())
     }
 
@@ -4088,46 +4025,37 @@ impl MysqlDb<'_> {
     // Three statements, one per screen. Everything a client can vary — sort,
     // direction, cursor, limits — is resolved in `resonate_core::ui` before it
     // gets here, so what these build is a `format!` over constants and a bind
-    // list, never caller text. MySQL's placeholders are positional, so a value
-    // read twice is bound twice.
+    // list, never caller text.
 
     /// The executions list: root promises, sorted, one keyset page.
     ///
     /// `id = origin_id` is root-ness — an id is `<origin>:<lineage>`, so a
     /// promise with no lineage is a root. `origin_id` is a stored generated
-    /// column, so this is a comparison rather than a scan of the tags.
+    /// column with its own index, so this is a comparison rather than a scan
+    /// of the tags.
     fn ui_executions_search(&self, q: &ui::ExecutionsQuery) -> StorageResult<Vec<PromiseRecord>> {
         let (expr, cmp, dir) = (q.sort.key.expr(), q.sort.dir.cmp_sql(), q.sort.dir.sql());
         let sql = format!(
-            "SELECT id, state, param_headers, param_data, value_headers, value_data, tags,
-                    timeout_at, created_at, settled_at
-             FROM promises
+            "SELECT {P_COLS} FROM promises
              WHERE id = origin_id{states}
-               AND (? IS NULL OR id >= ?)
-               AND (? IS NULL OR id < ?)
-               AND (? IS NULL OR JSON_CONTAINS(tags, ?))
-               AND (? IS NULL OR created_at >= ?)
-               AND (? IS NULL OR created_at <= ?)
-               AND (? IS NULL OR {expr} {cmp} ? OR ({expr} = ? AND id {cmp} ?))
+               AND ($1::text IS NULL OR id >= $1)
+               AND ($2::text IS NULL OR id < $2)
+               AND ($3::jsonb IS NULL OR tags @> $3::jsonb)
+               AND ($4::bigint IS NULL OR created_at >= $4)
+               AND ($5::bigint IS NULL OR created_at <= $5)
+               AND ($6::bigint IS NULL OR {expr} {cmp} $6 OR ({expr} = $6 AND id {cmp} $7))
              ORDER BY {expr} {dir}, id {dir}
-             LIMIT ?",
+             LIMIT $8",
             states = q.states_sql(),
         );
         let (after_key, after_id) = split_keyset(q.after.as_ref());
         let rows = rt_block_on(
             sqlx::query(&sql)
                 .bind(q.id_from.as_deref())
-                .bind(q.id_from.as_deref())
-                .bind(q.id_to.as_deref())
                 .bind(q.id_to.as_deref())
                 .bind(q.tags_json.as_deref())
-                .bind(q.tags_json.as_deref())
-                .bind(q.created_from)
                 .bind(q.created_from)
                 .bind(q.created_to)
-                .bind(q.created_to)
-                .bind(after_key)
-                .bind(after_key)
                 .bind(after_key)
                 .bind(after_id)
                 .bind(q.fetch + 1)
@@ -4142,24 +4070,19 @@ impl MysqlDb<'_> {
         let sql = format!(
             "SELECT COUNT(*) AS n FROM promises
              WHERE id = origin_id{states}
-               AND (? IS NULL OR id >= ?)
-               AND (? IS NULL OR id < ?)
-               AND (? IS NULL OR JSON_CONTAINS(tags, ?))
-               AND (? IS NULL OR created_at >= ?)
-               AND (? IS NULL OR created_at <= ?)",
+               AND ($1::text IS NULL OR id >= $1)
+               AND ($2::text IS NULL OR id < $2)
+               AND ($3::jsonb IS NULL OR tags @> $3::jsonb)
+               AND ($4::bigint IS NULL OR created_at >= $4)
+               AND ($5::bigint IS NULL OR created_at <= $5)",
             states = q.states_sql(),
         );
         let row = rt_block_on(
             sqlx::query(&sql)
                 .bind(q.id_from.as_deref())
-                .bind(q.id_from.as_deref())
-                .bind(q.id_to.as_deref())
                 .bind(q.id_to.as_deref())
                 .bind(q.tags_json.as_deref())
-                .bind(q.tags_json.as_deref())
                 .bind(q.created_from)
-                .bind(q.created_from)
-                .bind(q.created_to)
                 .bind(q.created_to)
                 .fetch_one(self.tx().as_mut()),
         )?;
@@ -4170,24 +4093,19 @@ impl MysqlDb<'_> {
     /// task columns that sit on the same row.
     ///
     /// This is the request that replaces `resonate-ui`'s recursive fan-out —
-    /// one read on `origin_id` instead of one round trip per level, re-run
-    /// every 5s.
+    /// one indexed read on `origin_id` instead of one round trip per level,
+    /// re-run every 5s.
     fn ui_execution_nodes(&self, q: &ui::ExecutionQuery) -> StorageResult<Vec<ui::NodeRow>> {
         let rows = rt_block_on(
-            sqlx::query(
-                "SELECT p.id, p.state, p.param_headers, p.param_data, p.value_headers,
-                        p.value_data, p.tags, p.timeout_at, p.created_at, p.settled_at,
-                        p.task_state, p.task_version,
-                        COALESCE((SELECT CAST(COUNT(*) AS SIGNED) FROM callbacks c
-                                  WHERE c.awaiter_id = p.id AND c.ready = true), 0) AS resumes,
-                        CASE WHEN p.task_state = 'acquired' THEN p.ttl ELSE NULL END AS ttl,
-                        CASE WHEN p.task_state = 'acquired' THEN p.pid ELSE NULL END AS pid,
-                        p.retry_timeout_at, p.lease_timeout_at
-                 FROM promises p
-                 WHERE p.origin_id = ?
-                 ORDER BY p.created_at ASC, p.id ASC
-                 LIMIT ?",
-            )
+            sqlx::query(&format!(
+                "SELECT {P_COLS}, task_state, task_version,
+                        cardinality(resumes) AS resumes,
+                        ttl, pid, retry_timeout_at, lease_timeout_at
+                 FROM promises
+                 WHERE origin_id = $1
+                 ORDER BY created_at ASC, id ASC
+                 LIMIT $2"
+            ))
             .bind(&q.root_id)
             .bind(q.max_nodes + 1)
             .fetch_all(self.tx().as_mut()),
@@ -4200,7 +4118,7 @@ impl MysqlDb<'_> {
                     promise: row_to_promise(row),
                     task_state: task_state.as_deref().map(parse_task_state),
                     task_version: row.get::<i32, _>("task_version") as i64,
-                    resumes: row.get("resumes"),
+                    resumes: row.get::<i32, _>("resumes") as i64,
                     ttl: row.get("ttl"),
                     pid: row.get("pid"),
                     retry_timeout_at: row.get("retry_timeout_at"),
@@ -4213,27 +4131,23 @@ impl MysqlDb<'_> {
     fn ui_schedules_search(&self, q: &ui::SchedulesQuery) -> StorageResult<Vec<ScheduleRecord>> {
         let (expr, cmp, dir) = (q.sort.key.expr(), q.sort.dir.cmp_sql(), q.sort.dir.sql());
         let sql = format!(
-            "SELECT id, cron, promise_id, promise_timeout, promise_param_headers,
-                    promise_param_data, promise_tags, created_at, next_run_at, last_run_at
+            "SELECT id, cron, promise_id, promise_timeout,
+                    NULLIF(promise_param_headers, '{{}}'::jsonb)::text AS promise_param_headers,
+                    promise_param_data, promise_tags::text, created_at, next_run_at, last_run_at
              FROM schedules
-             WHERE (? IS NULL OR id >= ?)
-               AND (? IS NULL OR id < ?)
-               AND (? IS NULL OR JSON_CONTAINS(promise_tags, ?))
-               AND (? IS NULL OR {expr} {cmp} ? OR ({expr} = ? AND id {cmp} ?))
+             WHERE ($1::text IS NULL OR id >= $1)
+               AND ($2::text IS NULL OR id < $2)
+               AND ($3::jsonb IS NULL OR promise_tags @> $3::jsonb)
+               AND ($4::bigint IS NULL OR {expr} {cmp} $4 OR ({expr} = $4 AND id {cmp} $5))
              ORDER BY {expr} {dir}, id {dir}
-             LIMIT ?"
+             LIMIT $6"
         );
         let (after_key, after_id) = split_keyset(q.after.as_ref());
         let rows = rt_block_on(
             sqlx::query(&sql)
                 .bind(q.id_from.as_deref())
-                .bind(q.id_from.as_deref())
-                .bind(q.id_to.as_deref())
                 .bind(q.id_to.as_deref())
                 .bind(q.tags_json.as_deref())
-                .bind(q.tags_json.as_deref())
-                .bind(after_key)
-                .bind(after_key)
                 .bind(after_key)
                 .bind(after_id)
                 .bind(q.limit + 1)
@@ -4246,15 +4160,12 @@ impl MysqlDb<'_> {
         let row = rt_block_on(
             sqlx::query(
                 "SELECT COUNT(*) AS n FROM schedules
-                 WHERE (? IS NULL OR id >= ?)
-                   AND (? IS NULL OR id < ?)
-                   AND (? IS NULL OR JSON_CONTAINS(promise_tags, ?))",
+                 WHERE ($1::text IS NULL OR id >= $1)
+                   AND ($2::text IS NULL OR id < $2)
+                   AND ($3::jsonb IS NULL OR promise_tags @> $3::jsonb)",
             )
             .bind(q.id_from.as_deref())
-            .bind(q.id_from.as_deref())
             .bind(q.id_to.as_deref())
-            .bind(q.id_to.as_deref())
-            .bind(q.tags_json.as_deref())
             .bind(q.tags_json.as_deref())
             .fetch_one(self.tx().as_mut()),
         )?;
@@ -4274,30 +4185,20 @@ impl MysqlDb<'_> {
     fn upcoming(&self, limit: usize) -> StorageResult<Vec<Scheduled>> {
         let rows = rt_block_on(
             sqlx::query(
-                // The kind is an integer, not the label the other two backends
-                // select. A string literal in a UNION carries the connection's
-                // collation, the columns carry the table's, and MySQL refuses
-                // to unify them — "Illegal mix of collations". An integer has
-                // no collation, so the discriminant travels as a number and is
-                // named on the Rust side.
-                //
-                // `pid` is a bare NULL for the same reason: `CAST(NULL AS
-                // CHAR)` would introduce a collation of its own, where an
-                // untyped NULL takes the one the third branch supplies.
                 "SELECT deadline, kind, id, pid FROM (
-                     SELECT timeout_at AS deadline, 0 AS kind, id AS id, NULL AS pid
+                     SELECT timeout_at AS deadline, 'promise' AS kind, id AS id, NULL::text AS pid
                        FROM promises WHERE state = 'pending' AND target IS NOT NULL
                      UNION ALL
-                     SELECT retry_timeout_at, 1, id, NULL
+                     SELECT retry_timeout_at, 'retry', id, NULL
                        FROM promises WHERE task_state = 'pending' AND retry_timeout_at IS NOT NULL
                      UNION ALL
-                     SELECT lease_timeout_at, 2, id, pid
+                     SELECT lease_timeout_at, 'lease', id, pid
                        FROM promises WHERE task_state = 'acquired' AND lease_timeout_at IS NOT NULL
                      UNION ALL
-                     SELECT next_run_at, 3, id, NULL FROM schedules
+                     SELECT next_run_at, 'schedule', id, NULL FROM schedules
                  ) d
                  ORDER BY deadline ASC, id ASC
-                 LIMIT ?",
+                 LIMIT $1",
             )
             .bind(limit as i64)
             .fetch_all(self.tx().as_mut()),
@@ -4306,15 +4207,10 @@ impl MysqlDb<'_> {
             .iter()
             .filter_map(|r| {
                 let at: i64 = r.get("deadline");
-                let kind = match r.get::<i64, _>("kind") {
-                    0 => "promise",
-                    1 => "retry",
-                    2 => "lease",
-                    _ => "schedule",
-                };
+                let kind: String = r.get("kind");
                 let id: String = r.get("id");
                 let pid: Option<String> = r.get("pid");
-                Timeout::from_parts(kind, id, pid).map(|timeout| Scheduled { at, timeout })
+                Timeout::from_parts(&kind, id, pid).map(|timeout| Scheduled { at, timeout })
             })
             .collect())
     }
@@ -4327,11 +4223,10 @@ impl MysqlDb<'_> {
         let rows = rt_block_on(
             sqlx::query(
                 "SELECT id, next_run_at FROM schedules
-                 WHERE next_run_at <= ? AND (? IS NULL OR id = ?)
+                 WHERE next_run_at <= $1 AND ($2::text IS NULL OR id = $2)
                  ORDER BY id",
             )
             .bind(time)
-            .bind(only)
             .bind(only)
             .fetch_all(self.tx().as_mut()),
         )?;
@@ -4351,296 +4246,72 @@ impl MysqlDb<'_> {
     ) -> StorageResult<Option<ScheduleRecord>> {
         let trt = self.task_retry_timeout;
         let promise_tags_json = serde_json::to_string(promise_tags).unwrap();
+        // $1=schedule_id, $2=fired_at, $3=next_run_at, $4=promise_tags, $5=time
+        let rows = rt_block_on(sqlx::query(&format!("
+            WITH schedule AS (
+              SELECT *,
+                REPLACE(REPLACE(promise_id, '{{{{.id}}}}', id), '{{{{.timestamp}}}}', CAST($2 AS TEXT)) AS computed_promise_id,
+                ($2 + promise_timeout) AS computed_timeout_at,
+                (promise_tags->>'resonate:target') AS address,
+                ($5 >= ($2 + promise_timeout)) AS already_timedout
+              FROM schedules
+              WHERE id = $1 AND next_run_at = $2
+            ),
+            inserted_or_skipped_promise AS (
+              INSERT INTO promises (id, state, param_headers, param_data, tags, timeout_at, created_at, settled_at,
+                                    task_state, task_version, retry_timeout_at)
+              SELECT s.computed_promise_id,
+                CASE WHEN s.already_timedout
+                     THEN (CASE WHEN ($4::jsonb->>'resonate:timer') = 'true' THEN 'resolved' ELSE 'rejected_timedout' END)
+                     ELSE 'pending' END,
+                COALESCE(s.promise_param_headers, '{{}}'), s.promise_param_data, $4::jsonb,
+                s.computed_timeout_at, $2,
+                CASE WHEN s.already_timedout THEN s.computed_timeout_at END,
+                CASE WHEN s.address IS NOT NULL
+                     THEN (CASE WHEN s.already_timedout THEN 'fulfilled' ELSE 'pending' END) END,
+                0,
+                CASE WHEN s.address IS NOT NULL AND NOT s.already_timedout THEN $5 + {trt} END
+              FROM schedule s
+              ON CONFLICT (id) DO NOTHING
+              RETURNING *
+            ),
+            emit_new AS (
+              SELECT 'execute'::text AS kind, s.address AS address, p.id AS task_id,
+                     0::int AS version, NULL::jsonb AS promise
+              FROM inserted_or_skipped_promise p, schedule s
+              WHERE p.task_state = 'pending'
+            ),
+            updated_schedule AS (
+              UPDATE schedules SET last_run_at = $2, next_run_at = $3
+              WHERE id = $1 AND next_run_at = $2
+              RETURNING *
+            )
+            SELECT id, cron, promise_id, promise_timeout, NULLIF(promise_param_headers, '{{}}'::jsonb)::text AS promise_param_headers,
+                   promise_param_data, promise_tags::text, created_at, next_run_at, last_run_at,
+                   {messages}
+            FROM updated_schedule
+        ", messages = emitted_json(&["emit_new"])))
+            .bind(schedule_id).bind(fired_at).bind(next_run_at).bind(promise_tags_json).bind(time)
+            .fetch_all(self.tx().as_mut()))?;
 
-        // 1. Verify the schedule has not already been advanced past this
-        //    firing. `next_run_at` is the queue, so the idempotency guard reads
-        //    the schedule row it is about to advance.
-        let timeout_row = rt_block_on(
-            sqlx::query("SELECT id FROM schedules WHERE id = ? AND next_run_at = ?")
-                .bind(schedule_id)
-                .bind(fired_at)
-                .fetch_optional(self.tx().as_mut()),
-        )?;
-        if timeout_row.is_none() {
+        if rows.is_empty() {
             return Ok(None);
         }
-
-        // 2. Load schedule
-        let schedule_row = rt_block_on(
-            sqlx::query(
-                "SELECT id, promise_id, promise_timeout, promise_param_headers, promise_param_data
-                 FROM schedules WHERE id = ?",
-            )
-            .bind(schedule_id)
-            .fetch_optional(self.tx().as_mut()),
-        )?;
-        let schedule_row = match schedule_row {
-            Some(r) => r,
-            None => return Ok(None),
-        };
-
-        // 3. Template substitution (in Rust)
-        let promise_id_template: String = schedule_row.get("promise_id");
-        let computed_promise_id = promise_id_template
-            .replace("{{.id}}", schedule_id)
-            .replace("{{.timestamp}}", &fired_at.to_string());
-        let promise_timeout: i64 = schedule_row.get("promise_timeout");
-        let computed_timeout_at = fired_at + promise_timeout;
-        let param_headers: Option<String> = schedule_row.get("promise_param_headers");
-        let param_data: Option<String> = schedule_row.get("promise_param_data");
-
-        // 4. Address from promise_tags
-        let address = promise_tags.get("resonate:target").cloned();
-
-        let already_timedout = time >= computed_timeout_at;
-        let is_timer = promise_tags.get("resonate:timer").map(|v| v.as_str()) == Some("true");
-        let (state, settled_at, created_at): (&str, Option<i64>, i64) = if already_timedout {
-            let s = if is_timer {
-                "resolved"
-            } else {
-                "rejected_timedout"
-            };
-            (s, Some(computed_timeout_at), fired_at)
-        } else {
-            ("pending", None, fired_at)
-        };
-
-        // 5. Create promise (idempotent)
-        let promise_res = rt_block_on(
-            sqlx::query(
-                "INSERT IGNORE INTO promises
-                 (id, state, param_headers, param_data, tags, timeout_at, created_at, settled_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            )
-            .bind(&computed_promise_id)
-            .bind(state)
-            .bind(param_headers.as_deref())
-            .bind(param_data.as_deref())
-            .bind(&promise_tags_json)
-            .bind(computed_timeout_at)
-            .bind(created_at)
-            .bind(settled_at)
-            .execute(self.tx().as_mut()),
-        )?;
-
-        if promise_res.rows_affected() > 0 {
-            // 6a is gone with `promise_timeouts`: the INSERT above already put
-            // a pending, targeted promise on the queue.
-            if already_timedout {
-                // Promise is immediately settled — create fulfilled task if resonate:target is set
-                if address.is_some() {
-                    rt_block_on(
-                        sqlx::query(
-                            "UPDATE promises SET task_state = 'fulfilled', task_version = 0
-                             WHERE id = ? AND task_state IS NULL",
-                        )
-                        .bind(&computed_promise_id)
-                        .execute(self.tx().as_mut()),
-                    )?;
-                }
-            } else if let Some(ref addr) = address {
-                // 6b. Task infrastructure if address is present
-                let task_res = rt_block_on(
-                    sqlx::query(
-                        "UPDATE promises SET task_state = 'pending', task_version = 0, retry_timeout_at = ?
-                         WHERE id = ? AND task_state IS NULL",
-                    )
-                    .bind(time + trt)
-                    .bind(&computed_promise_id)
-                    .execute(self.tx().as_mut()),
-                )?;
-                if task_res.rows_affected() > 0 {
-                    self.arm_promise_timeout(&computed_promise_id, computed_timeout_at, true);
-                    self.arm_retry(&computed_promise_id, time + trt);
-                    self.emit(Outgoing::Execute {
-                        address: addr.to_string(),
-                        task_id: computed_promise_id.clone(),
-                        version: 0,
-                    });
-                }
-            }
+        let armed = self.absorb_and_arm_retries(&rows[0], time + trt);
+        // The schedule advanced, so its own deadline moved. The promise this
+        // firing created has one too, if it is still pending and targeted —
+        // which is exactly when a retry deadline was armed for it.
+        let schedule = row_to_schedule(&rows[0]);
+        for id in &armed {
+            self.arm_promise_timeout(id, fired_at + schedule.promise_timeout, true);
         }
-
-        // 7. Update schedule
-        rt_block_on(
-            sqlx::query("UPDATE schedules SET last_run_at = ?, next_run_at = ? WHERE id = ?")
-                .bind(fired_at)
-                .bind(next_run_at)
-                .bind(schedule_id)
-                .execute(self.tx().as_mut()),
-        )?;
         self.arm(
-            next_run_at,
+            schedule.next_run_at,
             Timeout::ScheduleDue {
                 schedule_id: schedule_id.to_string(),
             },
         );
-
-        // 8 is gone: advancing the schedule above advanced the queue.
-
-        // 9. Return updated schedule record
-        self.schedule_get(schedule_id)
-    }
-
-    /// Fire expired timeouts, either all of them or one named.
-    ///
-    /// `only` is what makes the precise form precise, and it costs one bound
-    /// parameter: every statement below already selects the rows of one queue
-    /// past their deadline, and `? IS NULL OR id = ?` narrows that to a single
-    /// id. A named timeout runs the statement for its own queue and skips the
-    /// other two, so the narrow form is the sweep restricted to one row rather
-    /// than a second implementation of it.
-    fn process_timeouts(&self, time: i64, only: Option<&Timeout>) -> StorageResult<()> {
-        let trt = self.task_retry_timeout;
-        let selected = |kind: &str| match only {
-            None => Some(None::<&str>),
-            Some(t) if t.kind() == kind => Some(Some(t.id())),
-            Some(_) => None,
-        };
-
-        // Statement 1: Expire all pending promises with timeout_at <= time
-        // (with resonate:target).
-        //
-        // `state = 'pending' AND target IS NOT NULL` is the whole of what
-        // `promise_timeouts` held: rows entered on create and left on settle,
-        // and only a targeted promise was ever swept eagerly. Untargeted ones
-        // still time out lazily, through `try_timeout`.
-        let expired_rows = match selected("promise") {
-            None => Vec::new(),
-            Some(id) => rt_block_on(
-                sqlx::query(
-                    "SELECT id FROM promises
-                     WHERE state = 'pending' AND target IS NOT NULL AND timeout_at <= ?
-                       AND (? IS NULL OR id = ?)
-                     ORDER BY id",
-                )
-                .bind(time)
-                .bind(id)
-                .bind(id)
-                .fetch_all(self.tx().as_mut()),
-            )?,
-        };
-
-        if !expired_rows.is_empty() {
-            let expired_ids: Vec<String> = expired_rows
-                .iter()
-                .map(|r| r.get::<String, _>("id"))
-                .collect();
-            let n = expired_ids.len();
-            let ph = |k: usize| -> String { vec!["?"; k].join(", ") };
-
-            {
-                let sql = format!(
-                    "UPDATE promises
-                     SET state = CASE WHEN is_timer THEN 'resolved' ELSE 'rejected_timedout' END,
-                         settled_at = timeout_at
-                     WHERE id IN ({})",
-                    ph(n)
-                );
-                let mut q = sqlx::query(&sql);
-                for id in &expired_ids {
-                    q = q.bind(id.as_str());
-                }
-                rt_block_on(q.execute(self.tx().as_mut()))?;
-            }
-
-            self.batch_settle_cascade(&expired_ids, time)?;
-        }
-
-        // Statement 2: Process expired task retry deadlines — what was
-        // `timeout_type = 0`, now a non-NULL `retry_timeout_at` on a pending task.
-        let retry_rows = match selected("retry") {
-            None => Vec::new(),
-            Some(id) => rt_block_on(
-                sqlx::query(
-                    "SELECT id FROM promises
-                     WHERE task_state = 'pending' AND retry_timeout_at IS NOT NULL AND retry_timeout_at <= ?
-                       AND (? IS NULL OR id = ?)
-                     ORDER BY id",
-                )
-                .bind(time)
-                .bind(id)
-                .bind(id)
-                .fetch_all(self.tx().as_mut()),
-            )?,
-        };
-
-        if !retry_rows.is_empty() {
-            let retry_ids: Vec<String> = retry_rows
-                .iter()
-                .map(|r| r.get::<String, _>("id"))
-                .collect();
-            let n = retry_ids.len();
-            let ph = |k: usize| -> String { vec!["?"; k].join(", ") };
-
-            {
-                let sql = format!(
-                    "UPDATE promises SET retry_timeout_at = ? + ?, pid = NULL WHERE id IN ({})",
-                    ph(n)
-                );
-                let mut q = sqlx::query(&sql).bind(time).bind(trt);
-                for id in &retry_ids {
-                    q = q.bind(id.as_str());
-                }
-                rt_block_on(q.execute(self.tx().as_mut()))?;
-            }
-
-            for id in &retry_ids {
-                self.arm_retry(id, time + trt);
-                self.emit_execute(id)?;
-            }
-        }
-
-        // Statement 3: Process expired leases — what was `timeout_type = 1`,
-        // now a non-NULL `lease_timeout_at` on an acquired task. The holder went
-        // away; hand the task back to the retry queue.
-        let lease_rows = match selected("lease") {
-            None => Vec::new(),
-            Some(id) => rt_block_on(
-                sqlx::query(
-                    "SELECT id FROM promises
-                     WHERE task_state = 'acquired' AND lease_timeout_at IS NOT NULL AND lease_timeout_at <= ?
-                       AND (? IS NULL OR id = ?)
-                     ORDER BY id",
-                )
-                .bind(time)
-                .bind(id)
-                .bind(id)
-                .fetch_all(self.tx().as_mut()),
-            )?,
-        };
-
-        if !lease_rows.is_empty() {
-            let lease_ids: Vec<String> = lease_rows
-                .iter()
-                .map(|r| r.get::<String, _>("id"))
-                .collect();
-            let n = lease_ids.len();
-            let ph = |k: usize| -> String { vec!["?"; k].join(", ") };
-
-            {
-                // Handing the task back and moving it between queues are the
-                // same row, so the two statements this replaces are one `SET`.
-                let sql = format!(
-                    "UPDATE promises SET task_state = 'pending', retry_timeout_at = ? + ?,
-                                         lease_timeout_at = NULL, ttl = NULL, pid = NULL
-                     WHERE id IN ({})",
-                    ph(n)
-                );
-                let mut q = sqlx::query(&sql).bind(time).bind(trt);
-                for id in &lease_ids {
-                    q = q.bind(id.as_str());
-                }
-                rt_block_on(q.execute(self.tx().as_mut()))?;
-            }
-
-            for id in &lease_ids {
-                self.arm_retry(id, time + trt);
-                self.emit_execute(id)?;
-            }
-        }
-
-        Ok(())
+        Ok(Some(schedule))
     }
 
     #[allow(dead_code)] // the liveness probe the server will call
@@ -4650,24 +4321,140 @@ impl MysqlDb<'_> {
     }
 
     fn debug_reset(&self) -> StorageResult<()> {
-        rt_block_on(sqlx::raw_sql("DELETE FROM listeners").execute(self.tx().as_mut()))?;
-        rt_block_on(sqlx::raw_sql("DELETE FROM callbacks").execute(self.tx().as_mut()))?;
-        rt_block_on(sqlx::raw_sql("DELETE FROM schedules").execute(self.tx().as_mut()))?;
-        rt_block_on(sqlx::raw_sql("DELETE FROM promises").execute(self.tx().as_mut()))?;
+        rt_block_on(
+            sqlx::raw_sql("TRUNCATE promises, schedules CASCADE").execute(self.tx().as_mut()),
+        )?;
         Ok(())
     }
 
+    // Timeout processing — three sequential statements, as in the multi-table
+    // backend. Statement 1 is the same cascade as `try_timeout`, driven by the
+    // sweep predicate instead of an explicit id list.
+    /// Fire expired timeouts, either all of them or one named.
+    ///
+    /// `only` is what makes the precise form precise, and it costs one bound
+    /// parameter: every statement below already selects the rows of one queue
+    /// past their deadline, and `$2` narrows that to a single id. A named
+    /// timeout runs the statement for its own queue and skips the other two,
+    /// so the narrow form is the sweep restricted to one row rather than a
+    /// second implementation of it.
+    ///
+    /// `$2::text IS NULL` is the full sweep. The cast is load-bearing: without
+    /// it Postgres cannot infer the parameter's type in a comparison against
+    /// `NULL`.
+    fn process_timeouts(&self, time: i64, only: Option<&Timeout>) -> StorageResult<()> {
+        let trt = self.task_retry_timeout;
+        let selected = |kind: &str| match only {
+            None => Some(None::<String>),
+            Some(t) if t.kind() == kind => Some(Some(t.id().to_string())),
+            Some(_) => None,
+        };
+
+        // Statement 1: expired promises.
+        //
+        // `state = 'pending' AND target IS NOT NULL` is the whole of what
+        // promise_timeouts held: rows enter on create and leave on settle, and
+        // only targeted promises are ever swept eagerly.
+        if let Some(id) = selected("promise") {
+            let sql = expire_batch_sql(
+                "state = 'pending' AND target IS NOT NULL AND timeout_at <= $1
+                 AND ($2::text IS NULL OR id = $2)",
+                "$1",
+                trt,
+            );
+            let expired_row = rt_block_on(
+                sqlx::query(&sql)
+                    .bind(time)
+                    .bind(&id)
+                    .fetch_optional(self.tx().as_mut()),
+            )?;
+            if let Some(row) = expired_row {
+                self.absorb_and_arm_retries(&row, time + trt);
+            }
+        }
+
+        // Statement 2: expired task retry deadlines — re-enqueue the execute
+        // message and push the deadline out.
+        if let Some(id) = selected("retry") {
+            let retry_row = rt_block_on(
+                sqlx::query(&format!(
+                    "
+            WITH expired_retry AS (
+              SELECT id, task_version, target FROM promises
+              WHERE task_state = 'pending' AND retry_timeout_at IS NOT NULL AND retry_timeout_at <= $1
+                AND ($2::text IS NULL OR id = $2)
+              FOR UPDATE
+            ),
+            updated_retry AS (
+              UPDATE promises SET retry_timeout_at = $1 + {trt}, pid = NULL
+              WHERE id IN (SELECT id FROM expired_retry)
+              RETURNING id
+            ),
+            emit_retry AS (
+              SELECT 'execute'::text AS kind, e.target AS address, e.id AS task_id,
+                     e.task_version::int AS version, NULL::jsonb AS promise
+              FROM expired_retry e WHERE e.target IS NOT NULL
+            )
+            SELECT {messages}
+        ",
+                    messages = emitted_json(&["emit_retry"])
+                ))
+                .bind(time)
+                .bind(&id)
+                .fetch_optional(self.tx().as_mut()),
+            )?;
+            if let Some(row) = retry_row {
+                self.absorb_and_arm_retries(&row, time + trt);
+            }
+        }
+
+        // Statement 3: expired leases — the holder went away, hand the task back.
+        if let Some(id) = selected("lease") {
+            let lease_row = rt_block_on(
+                sqlx::query(&format!(
+                    "
+            WITH expired_lease AS (
+              SELECT id, task_version, target FROM promises
+              WHERE task_state = 'acquired' AND lease_timeout_at IS NOT NULL AND lease_timeout_at <= $1
+                AND ($2::text IS NULL OR id = $2)
+              FOR UPDATE
+            ),
+            released AS (
+              UPDATE promises SET
+                task_state = 'pending', retry_timeout_at = $1 + {trt},
+                lease_timeout_at = NULL, ttl = NULL, pid = NULL
+              WHERE id IN (SELECT id FROM expired_lease)
+              RETURNING id
+            ),
+            emit_released AS (
+              SELECT 'execute'::text AS kind, e.target AS address, e.id AS task_id,
+                     e.task_version::int AS version, NULL::jsonb AS promise
+              FROM expired_lease e WHERE e.target IS NOT NULL
+            )
+            SELECT {messages}
+        ",
+                    messages = emitted_json(&["emit_released"])
+                ))
+                .bind(time)
+                .bind(&id)
+                .fetch_optional(self.tx().as_mut()),
+            )?;
+            if let Some(row) = lease_row {
+                self.absorb_and_arm_retries(&row, time + trt);
+            }
+        }
+
+        Ok(())
+    }
+
+    // D-04: debug.snap — every section is now a projection of the one table
     fn snap(&self) -> StorageResult<Snapshot> {
         let promise_rows = rt_block_on(
-            sqlx::query(
-                "SELECT id, state, param_headers, param_data, value_headers, value_data, tags, timeout_at, created_at, settled_at FROM promises ORDER BY id",
-            )
-            .fetch_all(self.tx().as_mut()),
+            sqlx::query(&format!("SELECT {P_COLS} FROM promises ORDER BY id"))
+                .fetch_all(self.tx().as_mut()),
         )?;
         let promises: Vec<PromiseRecord> = promise_rows.iter().map(row_to_promise).collect();
 
-        // Every section below is a projection of the one table now. The
-        // predicates are the membership rules the deleted tables carried.
         let pt_rows = rt_block_on(
             sqlx::query(
                 "SELECT id, timeout_at FROM promises
@@ -4683,9 +4470,12 @@ impl MysqlDb<'_> {
             })
             .collect();
 
+        // Non-ready callbacks only — the ready ones live in `resumes`.
         let cb_rows = rt_block_on(
             sqlx::query(
-                "SELECT awaiter_id, awaited_id FROM callbacks WHERE NOT ready ORDER BY awaiter_id, awaited_id",
+                "SELECT aw AS awaiter_id, id AS awaited_id
+                 FROM promises CROSS JOIN LATERAL unnest(callbacks) AS aw
+                 ORDER BY aw, id",
             )
             .fetch_all(self.tx().as_mut()),
         )?;
@@ -4698,8 +4488,12 @@ impl MysqlDb<'_> {
             .collect();
 
         let li_rows = rt_block_on(
-            sqlx::query("SELECT promise_id, address FROM listeners ORDER BY promise_id, address")
-                .fetch_all(self.tx().as_mut()),
+            sqlx::query(
+                "SELECT id AS promise_id, l AS address
+                 FROM promises CROSS JOIN LATERAL unnest(listeners) AS l
+                 ORDER BY id, l",
+            )
+            .fetch_all(self.tx().as_mut()),
         )?;
         let listeners: Vec<SnapshotListener> = li_rows
             .iter()
@@ -4711,40 +4505,19 @@ impl MysqlDb<'_> {
 
         let task_rows = rt_block_on(
             sqlx::query(
-                "SELECT p.id, p.task_state AS state, p.task_version AS version,
-                   CASE WHEN p.task_state = 'acquired' THEN p.ttl ELSE NULL END AS ttl,
-                   CASE WHEN p.task_state = 'acquired' THEN p.pid ELSE NULL END AS pid,
-                   COALESCE(
-                     (SELECT CAST(COUNT(*) AS SIGNED) FROM callbacks c WHERE c.awaiter_id = p.id AND c.ready = true),
-                     0
-                   ) AS resumes
-                 FROM promises p WHERE p.task_state IS NOT NULL ORDER BY p.id",
+                "SELECT id, task_state, task_version, ttl, pid, resumes
+                 FROM promises WHERE task_state IS NOT NULL ORDER BY id",
             )
             .fetch_all(self.tx().as_mut()),
         )?;
-        let tasks: Vec<TaskRecord> = task_rows
-            .iter()
-            .map(|r| {
-                let resumes: i64 = r.get("resumes");
-                TaskRecord {
-                    id: r.get("id"),
-                    state: parse_task_state(&r.get::<String, _>("state")),
-                    version: r.get::<i32, _>("version") as i64,
-                    resumes,
-                    ttl: r.get("ttl"),
-                    pid: r.get("pid"),
-                }
-            })
-            .collect();
+        let tasks: Vec<TaskRecord> = task_rows.iter().map(row_to_task).collect();
 
-        // One row per task at most, as before: the two deadlines are mutually
-        // exclusive because each is live only in the state that owns it.
         let tt_rows = rt_block_on(
             sqlx::query(
-                "SELECT id, CAST(0 AS SIGNED) AS timeout_type, retry_timeout_at AS timeout_at FROM promises
+                "SELECT id, 0 AS timeout_type, retry_timeout_at AS timeout_at FROM promises
                    WHERE task_state = 'pending' AND retry_timeout_at IS NOT NULL
                  UNION ALL
-                 SELECT id, CAST(1 AS SIGNED) AS timeout_type, lease_timeout_at AS timeout_at FROM promises
+                 SELECT id, 1 AS timeout_type, lease_timeout_at AS timeout_at FROM promises
                    WHERE task_state = 'acquired' AND lease_timeout_at IS NOT NULL
                  ORDER BY id",
             )
@@ -4752,18 +4525,15 @@ impl MysqlDb<'_> {
         )?;
         let task_timeouts: Vec<SnapshotTaskTimeout> = tt_rows
             .iter()
-            .map(|r| {
-                let tt: i64 = r.get("timeout_type");
-                SnapshotTaskTimeout {
-                    id: r.get("id"),
-                    timeout_type: tt as i32,
-                    timeout: r.get("timeout_at"),
-                }
+            .map(|r| SnapshotTaskTimeout {
+                id: r.get("id"),
+                timeout_type: r.get::<i32, _>("timeout_type"),
+                timeout: r.get("timeout_at"),
             })
             .collect();
 
         // Nothing queued, so nothing to report — the messages left with the
-        // transitions that emitted them. See `engine_sqlite.rs`.
+        // transitions that emitted them. See `persistence_sqlite.rs`.
         let messages: Vec<SnapshotMessage> = Vec::new();
 
         Ok(Snapshot {
@@ -4780,14 +4550,18 @@ impl MysqlDb<'_> {
 
 /// One tick of the timer wheel: the three timeout sweeps, then expired
 /// schedules. Returns how many schedules fired, for the caller to record.
-fn process_all_timeouts(db: &MysqlDb, time: i64) -> StorageResult<usize> {
+fn process_all_timeouts(db: &PostgresDb, time: i64) -> StorageResult<usize> {
     tracing::debug!(time = time, "Processing expired timeouts");
     db.process_timeouts(time, None)?;
     process_schedule_timeouts(db, time, None)
 }
 
 /// Process expired schedule timeouts.
-fn process_schedule_timeouts(db: &MysqlDb, time: i64, only: Option<&str>) -> StorageResult<usize> {
+fn process_schedule_timeouts(
+    db: &PostgresDb,
+    time: i64,
+    only: Option<&str>,
+) -> StorageResult<usize> {
     let expired = db.get_expired_schedule_timeouts(time, only)?;
     let mut fired = 0usize;
 
@@ -4829,7 +4603,7 @@ fn process_schedule_timeouts(db: &MysqlDb, time: i64, only: Option<&str>) -> Sto
 }
 
 #[async_trait]
-impl ResonateEngine for MysqlEngine {
+impl Engine for PostgresEngine {
     async fn process(&self, input: Input<'_>, now: i64) -> Output {
         match input {
             Input::External(req) => self.dispatch(req, now).await,
@@ -4854,8 +4628,8 @@ impl ResonateEngine for MysqlEngine {
     }
 }
 
-impl MysqlEngine {
-    /// Fire one timeout the system asked of itself. See `engine_sqlite.rs`.
+impl PostgresEngine {
+    /// Fire one timeout the system asked of itself. See `persistence_sqlite.rs`.
     async fn fire(&self, timeout: Timeout, now: i64) -> Output {
         let swept = match timeout {
             Timeout::ScheduleDue { schedule_id } => {

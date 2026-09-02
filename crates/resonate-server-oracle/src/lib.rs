@@ -9,8 +9,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use serde_json::{json, Value};
 use validator::Validate;
 
-use crate::engine_port::{Input, Outgoing, Output, ResonateEngine, Scheduled, Timeout};
-use crate::StorageResult;
 use async_trait::async_trait;
 use resonate_core::types::{
     format_validation_errors, PromiseCreateData, PromiseGetData, PromiseRecord,
@@ -28,6 +26,8 @@ use resonate_core::types::{
 use resonate_core::ui;
 use resonate_core::util;
 use resonate_core::{ResonateServer, Unavailable};
+use resonate_sql::engine::{Engine, Input, Outgoing, Output, Scheduled, Timeout};
+use resonate_sql::StorageResult;
 use std::sync::Mutex;
 
 const PENDING_RETRY_TTL: i64 = 30_000;
@@ -753,7 +753,7 @@ impl Oracle {
     // a worker operation, that settles it.
 
     fn op_ui_executions_search(&self, req: &RequestEnvelope) -> ResponseEnvelope {
-        let q = match crate::ui_resolve::<ui::ExecutionsSearchData, _>(
+        let q = match resonate_sql::ui_resolve::<ui::ExecutionsSearchData, _>(
             &req.data,
             &req.kind,
             &req.head.corr_id,
@@ -809,7 +809,7 @@ impl Oracle {
     }
 
     fn op_ui_execution_get(&self, req: &RequestEnvelope) -> ResponseEnvelope {
-        let q = match crate::ui_resolve::<ui::ExecutionGetData, _>(
+        let q = match resonate_sql::ui_resolve::<ui::ExecutionGetData, _>(
             &req.data,
             &req.kind,
             &req.head.corr_id,
@@ -854,7 +854,7 @@ impl Oracle {
     }
 
     fn op_ui_schedules_search(&self, req: &RequestEnvelope) -> ResponseEnvelope {
-        let q = match crate::ui_resolve::<ui::SchedulesSearchData, _>(
+        let q = match resonate_sql::ui_resolve::<ui::SchedulesSearchData, _>(
             &req.data,
             &req.kind,
             &req.head.corr_id,
@@ -2789,7 +2789,7 @@ impl ResonateServer for SharedOracle {
 /// engine contract — same request, same instant, same response — is what it
 /// has always provided.
 #[async_trait]
-impl ResonateEngine for SharedOracle {
+impl Engine for SharedOracle {
     /// The model is the bridge across the transition.
     ///
     /// It returns what each transition emitted *and* keeps the queue, so it

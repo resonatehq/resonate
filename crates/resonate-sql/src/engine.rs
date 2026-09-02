@@ -1,7 +1,10 @@
-//! The engine port.
+//! The engine: what the SQL servers implement, and nothing else does.
 //!
-//! What every implementation of Resonate's durable state must do, named so the
-//! differential can hold several and compare them.
+//! An internal contract, not a port. It is public because three crates in this
+//! family implement it and the shell in the composition root drives it — not
+//! because anything outside the family should. A server that is not SQL brings
+//! its own internals; if they happen to look like this, that is a resemblance
+//! and not a dependency.
 //!
 //! One method, because a timeout is just a request the system makes of itself:
 //! an engine takes an [`Input`] and returns an [`Output`]. What a transition
@@ -97,7 +100,7 @@ impl Timeout {
         }
     }
 
-    /// Rebuild a timeout from the columns [`ResonateEngine::upcoming`] selects.
+    /// Rebuild a timeout from the columns [`Engine::upcoming`] selects.
     ///
     /// The inverse of [`Timeout::kind`] and [`Timeout::id`], so the four
     /// backends can share one shape for a query that is otherwise four
@@ -184,7 +187,7 @@ impl Output {
 /// implementation must produce the same response and emit the same messages.
 /// Nothing about *how* state is stored appears here.
 #[async_trait]
-pub trait ResonateEngine: Send + Sync {
+pub trait Engine: Send + Sync {
     /// Apply one input at `now`.
     ///
     /// `now` is passed rather than read from a clock so a test can drive

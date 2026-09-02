@@ -5,7 +5,11 @@ members = [
     "crates/resonate-gateway-http",
     "crates/resonate-gateway-web",
     "crates/resonate-plugin",
-    "crates/resonate-server-dbms",
+    "crates/resonate-sql",
+    "crates/resonate-server-sqlite",
+    "crates/resonate-server-postgres",
+    "crates/resonate-server-mysql",
+    "crates/resonate-server-oracle",
     "crates/resonate-timer-wheel",
     "crates/resonate-transport-gcps",
     "crates/resonate-transport-http-poll",
@@ -48,19 +52,28 @@ path = "diff/differential.rs"
 required-features = ["sqlite", "postgres", "mysql"]
 
 [features]
-# All forwarded: the cfg'd code lives in resonate-server-dbms.
+# One optional dependency per engine now, rather than features forwarded into
+# a crate that held all three. This is the same mechanism a binary assembled
+# outside this repository uses: name the plugins you want.
 default = ["sqlite", "postgres", "mysql"]
-sqlite = ["resonate-server-dbms/sqlite"]
-postgres = ["resonate-server-dbms/postgres"]
-mysql = ["resonate-server-dbms/mysql"]
-concurrency-stress = ["resonate-server-dbms/concurrency-stress"]
+sqlite = ["dep:resonate-server-sqlite"]
+postgres = ["dep:resonate-server-postgres"]
+mysql = ["dep:resonate-server-mysql"]
+concurrency-stress = [
+    "resonate-server-sqlite?/concurrency-stress",
+    "resonate-server-mysql?/concurrency-stress",
+]
 
 [dependencies]
 resonate-auth = { path = "crates/resonate-auth" }
 resonate-core = { path = "crates/resonate-core" }
 resonate-gateway-http = { path = "crates/resonate-gateway-http" }
 resonate-gateway-web = { path = "crates/resonate-gateway-web" }
-resonate-server-dbms = { path = "crates/resonate-server-dbms", default-features = false }
+resonate-sql = { path = "crates/resonate-sql" }
+resonate-server-sqlite = { path = "crates/resonate-server-sqlite", optional = true }
+resonate-server-postgres = { path = "crates/resonate-server-postgres", optional = true }
+resonate-server-mysql = { path = "crates/resonate-server-mysql", optional = true }
+resonate-server-oracle = { path = "crates/resonate-server-oracle" }
 resonate-timer-wheel = { path = "crates/resonate-timer-wheel" }
 resonate-transport-gcps = { path = "crates/resonate-transport-gcps" }
 resonate-transport-http-poll = { path = "crates/resonate-transport-http-poll" }

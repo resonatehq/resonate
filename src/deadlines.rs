@@ -1,6 +1,6 @@
 //! The in-memory timer, and what it takes to point it at the engine.
 //!
-//! [`ResonateEngine`] reports every deadline a transition arms, and the durable
+//! [`Engine`] reports every deadline a transition arms, and the durable
 //! row it wrote is the truth. This is the cache in front of that: a wheel of
 //! the near future, so a deadline fires when it comes due rather than whenever
 //! the sweep next runs.
@@ -17,7 +17,7 @@
 use std::sync::{Arc, Weak};
 
 use resonate_core::util;
-use resonate_server_dbms::engine_port::{Scheduled, Timeout};
+use resonate_sql::engine::{Scheduled, Timeout};
 use resonate_timer_wheel::timer::{BoxFuture, Clock, OnBackfill, OnFire, TimerConfig};
 use resonate_timer_wheel::{Comparator, Timer};
 

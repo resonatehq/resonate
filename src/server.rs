@@ -10,9 +10,7 @@ use resonate_core::types::{
 use resonate_core::types::{RequestEnvelope, ResponseEnvelope};
 use resonate_core::util;
 use resonate_core::{ResonateServer, Unavailable};
-use resonate_server_dbms::engine_port::{
-    Input, Outgoing, Output, ResonateEngine, Scheduled, Timeout,
-};
+use resonate_sql::engine::{Engine, Input, Outgoing, Output, Scheduled, Timeout};
 
 use crate::deadlines::DeadlineTimer;
 use crate::metrics;
@@ -22,7 +20,7 @@ pub struct Server {
     pub config: Config,
     /// Durable state and every transition over it. The server validates,
     /// hands over, and shapes what comes back.
-    pub engine: Arc<dyn ResonateEngine>,
+    pub engine: Arc<dyn Engine>,
     /// Where a transition's messages go.
     ///
     /// A server without one could not deliver anything it produced, so it is
@@ -54,7 +52,7 @@ pub struct Server {
 impl Server {
     pub fn new(
         config: Config,
-        engine: Arc<dyn ResonateEngine>,
+        engine: Arc<dyn Engine>,
         router: Arc<dyn ResonateRouter>,
         timer: DeadlineTimer,
     ) -> Self {

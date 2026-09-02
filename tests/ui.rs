@@ -16,8 +16,8 @@ use std::collections::HashMap;
 use resonate_core::types::{
     PromiseState, RequestEnvelope, RequestHead, ResponseEnvelope, SUPPORTED_VERSIONS,
 };
-use resonate_server_dbms::engine_port::{Input, ResonateEngine};
-use resonate_server_dbms::oracle::SharedOracle;
+use resonate_server_oracle::SharedOracle;
+use resonate_sql::engine::{Engine, Input};
 use serde_json::{json, Value};
 
 const T0: i64 = 1_700_000_000_000;
@@ -36,7 +36,7 @@ fn req(kind: &str, data: Value) -> RequestEnvelope {
     }
 }
 
-async fn call(engine: &dyn ResonateEngine, kind: &str, data: Value, now: i64) -> ResponseEnvelope {
+async fn call(engine: &dyn Engine, kind: &str, data: Value, now: i64) -> ResponseEnvelope {
     let r = req(kind, data);
     engine
         .process(Input::External(&r), now)
@@ -45,7 +45,7 @@ async fn call(engine: &dyn ResonateEngine, kind: &str, data: Value, now: i64) ->
         .expect("an external request always has a response")
 }
 
-async fn ok(engine: &dyn ResonateEngine, kind: &str, data: Value, now: i64) -> Value {
+async fn ok(engine: &dyn Engine, kind: &str, data: Value, now: i64) -> Value {
     let resp = call(engine, kind, data, now).await;
     assert_eq!(resp.head.status, 200, "{kind} failed: {:?}", resp.data);
     resp.data
@@ -64,7 +64,7 @@ fn param(func: &str) -> Value {
 /// Written through the ordinary worker protocol, never straight into the
 /// tables: what the console reads has to be what a worker actually leaves
 /// behind.
-async fn seed(engine: &dyn ResonateEngine) {
+async fn seed(engine: &dyn Engine) {
     // A settled root, no children.
     ok(
         engine,
@@ -151,7 +151,7 @@ fn ids(items: &Value) -> Vec<String> {
 }
 
 /// Everything the console asks for, against one engine.
-async fn console_reads(engine: &dyn ResonateEngine, backend: &str) {
+async fn console_reads(engine: &dyn Engine, backend: &str) {
     seed(engine).await;
     let now = T0 + 10_000;
 
@@ -467,7 +467,7 @@ async fn console_reads(engine: &dyn ResonateEngine, backend: &str) {
 /// console, which is where a dialect's opinion about NULL ordering or JSON
 /// containment would otherwise show up as a UI that looks different depending
 /// on which database is behind it.
-async fn same_answers(engines: &[(&str, &dyn ResonateEngine)]) {
+async fn same_answers(engines: &[(&str, &dyn Engine)]) {
     if engines.len() < 2 {
         return;
     }
@@ -496,8 +496,8 @@ async fn same_answers(engines: &[(&str, &dyn ResonateEngine)]) {
     }
 }
 
-fn sqlite() -> resonate_server_dbms::engine_sqlite::SqliteEngine {
-    resonate_server_dbms::engine_sqlite::SqliteEngine::open(":memory:", 30_000, 10, true, false)
+fn sqlite() -> resonate_server_sqlite::SqliteEngine {
+    resonate_server_sqlite::SqliteEngine::open(":memory:", 30_000, 10, true, false)
         .expect("in-memory sqlite")
 }
 
@@ -520,8 +520,7 @@ async fn every_backend_gives_the_same_answer() {
     let sqlite = sqlite();
     let oracle = oracle();
     #[allow(unused_mut)] // only postgres and mysql push onto it
-    let mut engines: Vec<(&str, &dyn ResonateEngine)> =
-        vec![("sqlite", &sqlite), ("oracle", &oracle)];
+    let mut engines: Vec<(&str, &dyn Engine)> = vec![("sqlite", &sqlite), ("oracle", &oracle)];
 
     // Postgres and MySQL join when a database is named, as in the
     // differential. `debug.reset` first: these are shared databases.
@@ -529,11 +528,9 @@ async fn every_backend_gives_the_same_answer() {
     let pg;
     #[cfg(feature = "postgres")]
     if let Ok(url) = std::env::var("TEST_POSTGRES_URL") {
-        pg = resonate_server_dbms::engine_postgres::PostgresEngine::connect(
-            &url, 4, 30_000, 10, true,
-        )
-        .await
-        .expect("postgres");
+        pg = resonate_server_postgres::PostgresEngine::connect(&url, 4, 30_000, 10, true)
+            .await
+            .expect("postgres");
         pg.init(true).await.expect("postgres schema");
         reset(&pg).await;
         engines.push(("postgres", &pg));
@@ -543,7 +540,7 @@ async fn every_backend_gives_the_same_answer() {
     let my;
     #[cfg(feature = "mysql")]
     if let Ok(url) = std::env::var("TEST_MYSQL_URL") {
-        my = resonate_server_dbms::engine_mysql::MysqlEngine::connect(&url, 4, 30_000, 10, true)
+        my = resonate_server_mysql::MysqlEngine::connect(&url, 4, 30_000, 10, true)
             .await
             .expect("mysql");
         my.init(true).await.expect("mysql schema");
@@ -555,7 +552,7 @@ async fn every_backend_gives_the_same_answer() {
 }
 
 #[allow(dead_code)] // only the optional backends need clearing
-async fn reset(engine: &dyn ResonateEngine) {
+async fn reset(engine: &dyn Engine) {
     let _ = call(engine, "debug.reset", json!({}), T0).await;
 }
 

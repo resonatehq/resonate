@@ -27,7 +27,7 @@ rust-embed = { version = "8", features = ["debug-embed"] }
 # about a console.
 resonate-gateway-http = { path = "../resonate-gateway-http" }
 resonate-transport-http-poll = { path = "../resonate-transport-http-poll" }
-resonate-server-dbms = { path = "../resonate-server-dbms", default-features = false, features = ["sqlite"] }
+resonate-server-oracle = { path = "../resonate-server-oracle" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
