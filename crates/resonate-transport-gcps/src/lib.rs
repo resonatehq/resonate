@@ -1,7 +1,7 @@
 //! Resonate transport: Google Cloud Pub/Sub.
 //!
 //! Delivers a message by publishing it to a topic. A transport rather than a
-//! plugin: it knows how to put a message on the wire and nothing about what
+//! router: it knows how to put a message on the wire and nothing about what
 //! the message means.
 //!
 //! Authentication uses Application Default Credentials. Address format:
@@ -35,7 +35,7 @@ fn configure(
     ))))
 }
 
-/// Everything under `[transports.gcps]`.
+/// Everything under `[workers.transport_gcps]`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Config {
     /// Enable the gcps:// address scheme [default: false]

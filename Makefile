@@ -5,11 +5,16 @@ PROFILE := $(STORAGE)-auth
 serve:
 	docker compose --profile $(PROFILE) up --build
 
+# Every profile by name, because compose has no "all": a profile that is not
+# named is not brought down, and `make clean` leaving services running is the
+# kind of thing nobody notices until a port is taken.
+PROFILES := sqlite postgres mysql sqlite-auth postgres-auth mysql-auth
+
 .PHONY: clean
 clean:
-	docker compose --profile all down -v --remove-orphans
+	docker compose $(foreach p,$(PROFILES),--profile $(p)) down -v --remove-orphans
 	docker network rm resonate 2>/dev/null || true
-	docker compose -f test/docker-compose.yml --profile all down -v
+	docker compose -f test/docker-compose.yml $(foreach p,$(PROFILES),--profile $(p)) down -v
 
 # The web console.
 #

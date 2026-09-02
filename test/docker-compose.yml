@@ -46,7 +46,7 @@ services:
     build: ..
     profiles: [sqlite]
     environment:
-      - RESONATE_GATEWAYS__GATEWAY_HTTP__PORT=8001
+      - RESONATE_GATEWAYS__GATEWAY_HTTP__BIND=0.0.0.0:8001
       - RESONATE_GATEWAYS__GATEWAY_METRICS__BIND=0.0.0.0:9090
       - RESONATE_LEVEL=error
       - RESONATE_DEBUG=true
@@ -68,7 +68,7 @@ services:
     build: ..
     profiles: [postgres]
     environment:
-      - RESONATE_GATEWAYS__GATEWAY_HTTP__PORT=8001
+      - RESONATE_GATEWAYS__GATEWAY_HTTP__BIND=0.0.0.0:8001
       - RESONATE_GATEWAYS__GATEWAY_METRICS__BIND=0.0.0.0:9090
       - RESONATE_LEVEL=error
       - RESONATE_SERVERS__ACTIVE=server_postgres
@@ -96,7 +96,7 @@ services:
     build: ..
     profiles: [mysql]
     environment:
-      - RESONATE_GATEWAYS__GATEWAY_HTTP__PORT=8001
+      - RESONATE_GATEWAYS__GATEWAY_HTTP__BIND=0.0.0.0:8001
       - RESONATE_GATEWAYS__GATEWAY_METRICS__BIND=0.0.0.0:9090
       - RESONATE_LEVEL=error
       - RESONATE_SERVERS__ACTIVE=server_mysql
@@ -124,7 +124,7 @@ services:
     build: ..
     profiles: [sqlite-auth]
     environment:
-      - RESONATE_GATEWAYS__GATEWAY_HTTP__PORT=8001
+      - RESONATE_GATEWAYS__GATEWAY_HTTP__BIND=0.0.0.0:8001
       - RESONATE_GATEWAYS__GATEWAY_METRICS__BIND=0.0.0.0:9090
       - RESONATE_LEVEL=error
       - RESONATE_DEBUG=true
@@ -151,7 +151,7 @@ services:
     build: ..
     profiles: [mysql-auth]
     environment:
-      - RESONATE_GATEWAYS__GATEWAY_HTTP__PORT=8001
+      - RESONATE_GATEWAYS__GATEWAY_HTTP__BIND=0.0.0.0:8001
       - RESONATE_GATEWAYS__GATEWAY_METRICS__BIND=0.0.0.0:9090
       - RESONATE_LEVEL=error
       - RESONATE_SERVERS__ACTIVE=server_mysql
@@ -184,7 +184,7 @@ services:
     build: ..
     profiles: [postgres-auth]
     environment:
-      - RESONATE_GATEWAYS__GATEWAY_HTTP__PORT=8001
+      - RESONATE_GATEWAYS__GATEWAY_HTTP__BIND=0.0.0.0:8001
       - RESONATE_GATEWAYS__GATEWAY_METRICS__BIND=0.0.0.0:9090
       - RESONATE_LEVEL=error
       - RESONATE_SERVERS__ACTIVE=server_postgres

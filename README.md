@@ -120,8 +120,6 @@ enabled = false
 
 or `RESONATE_GATEWAYS__GATEWAY_WEB__ENABLED=false`.
 
-### What to try
-
 ## More ways to install the server
 
 For more Resonate Server deployment information see the [Set up and run a Resonate Server](https://docs.resonatehq.io/operate/run-server) guide.
@@ -149,11 +147,14 @@ You will see log output like the following:
 2026-04-02T05:05:32.480430Z  INFO resonate_base: Server plugin selected server=server_sqlite
 2026-04-02T05:05:32.480805Z  INFO resonate_base: Worker plugin registered worker=transport_http_push schemes=["http", "https"]
 2026-04-02T05:05:32.481102Z  INFO resonate_base: Worker plugin registered worker=transport_http_poll schemes=["poll"]
-2026-04-02T05:05:32.486547Z  INFO resonate_server_sqlite: SQLite initialized path=resonate.db
-2026-04-02T05:05:32.490331Z  INFO resonate_transport_http_poll: Poll listening bind=0.0.0.0:8002
-2026-04-02T05:05:32.492915Z  INFO resonate_gateway_http: Server listening bind=0.0.0.0 port=8001
-2026-04-02T05:05:32.493204Z  INFO resonate_gateway_web: Console listening bind=0.0.0.0:8003
-2026-04-02T05:05:32.492689Z  INFO resonate_gateway_metrics: Metrics listening bind=0.0.0.0:9090
+2026-04-02T05:05:32.481540Z  INFO resonate_base: Gateway plugin registered gateway=gateway_http
+2026-04-02T05:05:32.481712Z  INFO resonate_base: Gateway plugin registered gateway=gateway_web
+2026-04-02T05:05:32.481884Z  INFO resonate_base: Gateway plugin registered gateway=gateway_metrics
+2026-04-02T05:05:32.490331Z  INFO resonate_transport_http_poll: Poll listener started bind=0.0.0.0:8002
+2026-04-02T05:05:32.492689Z  INFO resonate_sql::server: Timer and sweep started sweep_interval_ms=60000
+2026-04-02T05:05:32.492915Z  INFO resonate_gateway_http: Server listening bind=0.0.0.0:8001
+2026-04-02T05:05:32.493204Z  INFO resonate_gateway_web: Console listening bind=0.0.0.0:8003 mount=/console
+2026-04-02T05:05:32.493388Z  INFO resonate_gateway_metrics: Metrics listening bind=0.0.0.0:9090
 ```
 
 Each of those is a plugin, and each owns its own listener: the protocol on
@@ -168,11 +169,18 @@ The SDKs are all configured to use these defaults unless otherwise specified.
 The Resonate Server repository contains a Dockerfile that you can use to build and run the server in a Docker container.
 You can also clone the repository and start the server using Docker Compose:
 
+Every server service sits behind a profile naming its storage, so a bare
+`docker compose up` starts the observability stack and no server. Pick one:
+
 ```shell
 git clone https://github.com/resonatehq/resonate
 cd resonate
-docker-compose up
+docker compose --profile sqlite up
 ```
+
+`postgres` and `mysql` are the other two, and each has an `-auth` variant that
+serves with the dev key under `config/auth/dev`. `make serve` runs
+`sqlite-auth`; `make serve STORAGE=postgres` runs `postgres-auth`.
 
 ### Build from source
 
@@ -185,7 +193,7 @@ cd resonate
 cargo build --release
 ```
 
-After it is built, you can compile and run it as a Go program using the following command:
+After it is built, you can run it through Cargo using the following command:
 
 ```
 cargo run serve
@@ -220,8 +228,7 @@ tokio = { version = "1", features = ["full"] }
 `src/main.rs`:
 
 ```rust
-use resonate_base::Options;
-use resonate_plugin::Registry;
+use resonate_base::{Options, Registry};
 
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
@@ -236,12 +243,17 @@ async fn main() -> std::process::ExitCode {
 }
 ```
 
-That is the whole binary. It reads the same `resonate.toml`, the same
-`RESONATE_*` variables and the same `--set key=value` overrides as the one this
-repository ships; each plugin reads its own section, at `servers.<id>`,
-`workers.<id>` or `gateways.<id>`, where `<id>` is its crate name with the
-`resonate-` prefix dropped and dashes turned into underscores — so
-`acme-worker-kafka` configures itself under `[workers.acme_worker_kafka]`.
+That is the whole binary. It reads the same `resonate.toml` and the same
+`RESONATE_*` variables as the one this repository ships: each plugin reads its
+own section, at `servers.<id>`, `workers.<id>` or `gateways.<id>`, where `<id>`
+is its crate name with the `resonate-` prefix dropped and dashes turned into
+underscores — so `acme-worker-kafka` configures itself under
+`[workers.acme_worker_kafka]`.
+
+It has no command-line flags of its own. `Options` is where a binary adds them:
+`resonate serve`'s flags are just `Options::set` calls over those same keys, and
+a custom binary can parse whatever it likes and do the same, or parse nothing at
+all and let the file and the environment say everything.
 
 ## Outbound authentication for HTTP push
 
@@ -257,8 +269,8 @@ mode = "gcp"
 
 Equivalent environment variables:
 ```
-RESONATE_TRANSPORTS__HTTP_PUSH__AUTH__MODE=gcp
-RESONATE_TRANSPORTS__HTTP_PUSH__AUTH__AUDIENCE=https://...   # optional
+RESONATE_WORKERS__TRANSPORT_HTTP_PUSH__AUTH__MODE=gcp
+RESONATE_WORKERS__TRANSPORT_HTTP_PUSH__AUTH__AUDIENCE=https://...   # optional
 ```
 
 Equivalent CLI flags:

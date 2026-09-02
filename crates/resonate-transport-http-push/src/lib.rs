@@ -1,7 +1,7 @@
 //! Resonate transport: HTTP(S) push.
 //!
 //! Delivers a message by POSTing it to the worker's URL. A transport rather
-//! than a plugin: it knows nothing about what the message means, only how to
+//! than a router: it knows nothing about what the message means, only how to
 //! put it on the wire.
 
 /// The address schemes this transport serves.
@@ -33,7 +33,7 @@ fn configure(
     ))))
 }
 
-/// Everything under `[transports.http_push]`.
+/// Everything under `[workers.transport_http_push]`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     /// Enable the http:// and https:// address schemes [default: true]
@@ -112,14 +112,14 @@ impl Default for AuthConfig {
 ///
 /// Example config:
 /// ```toml
-/// [transports.http_push.auth]
+/// [workers.transport_http_push.auth]
 /// mode = "gcp"
 /// # audience = "https://my-function.example.com"  # optional; defaults to delivery URL
 /// ```
 ///
 /// Equivalent env vars (double-underscore nesting):
-///   RESONATE_TRANSPORTS__HTTP_PUSH__AUTH__MODE=gcp
-///   RESONATE_TRANSPORTS__HTTP_PUSH__AUTH__AUDIENCE=https://...
+///   RESONATE_WORKERS__TRANSPORT_HTTP_PUSH__AUTH__MODE=gcp
+///   RESONATE_WORKERS__TRANSPORT_HTTP_PUSH__AUTH__AUDIENCE=https://...
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthConfig {
     /// Auth mode. Default: `none`.
@@ -127,7 +127,9 @@ pub struct AuthConfig {
     pub mode: AuthMode,
 
     /// Static bearer token. Used only when `mode = "bearer"`.
-    /// Falls back to the `RESONATE_TRANSPORTS__HTTP_PUSH__AUTH__TOKEN` env var.
+    /// Set in the file, or as
+    /// `RESONATE_WORKERS__TRANSPORT_HTTP_PUSH__AUTH__TOKEN` — the same key by
+    /// the environment's spelling, not a separate fallback this crate reads.
     #[serde(default)]
     pub token: Option<String>,
 

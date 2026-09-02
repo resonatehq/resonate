@@ -123,7 +123,7 @@
 //!
 //! ```ignore
 //! #[tokio::main]
-//! async fn main() -> ExitCode {
+//! async fn main() -> std::process::ExitCode {
 //!     resonate_base::main(
 //!         Registry::new()
 //!             .server(&resonate_server_postgres::PLUGIN)
@@ -183,7 +183,9 @@ pub use resonate_core::{types, Unavailable};
 ///
 /// async fn init(&self, _debug: bool) -> Result<(), Unavailable> {
 ///     let app = axum::Router::new().route("/callback/:id", axum::routing::post(handle));
-///     let listener = tokio::net::TcpListener::bind(&self.config.bind).await?;
+///     let listener = tokio::net::TcpListener::bind(&self.config.bind)
+///         .await
+///         .map_err(|e| Unavailable::new(format!("cannot bind {}: {e}", self.config.bind)))?;
 ///     tokio::spawn(async move { axum::serve(listener, app).await });
 ///     Ok(())
 /// }

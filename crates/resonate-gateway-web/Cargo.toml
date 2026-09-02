@@ -17,6 +17,7 @@ async-trait = { workspace = true }
 tokio = { version = "1", features = ["rt", "net", "sync", "macros"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+tower-http = { version = "0.6", features = ["catch-panic"] }
 tracing = "0.1"
 # `debug-embed`: the assets are compiled in for every profile, not read off the
 # disk in dev. A console that is embedded in release and a directory read in

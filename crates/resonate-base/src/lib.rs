@@ -31,11 +31,16 @@ use std::sync::Arc;
 
 use resonate_core::{ResonateGateway, ResonateRouter, ResonateServer, ResonateWorker};
 use resonate_plugin::{
-    Configuration, GatewayDependencies, Loader, Registry, ServerDependencies, WorkerDependencies,
+    Configuration, GatewayDependencies, Loader, ServerDependencies, WorkerDependencies,
 };
 use serde::{Deserialize, Serialize};
 
 pub use router::Router;
+
+// What a composition root needs, so a custom binary names one dependency for
+// the wiring and one per plugin — rather than `resonate-plugin` as well, to say
+// the one word `Registry`.
+pub use resonate_plugin::Registry;
 
 /// How to find the configuration, and what to do when it says nothing.
 ///

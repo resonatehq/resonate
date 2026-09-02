@@ -10,10 +10,11 @@ GET  /console/<anything>   → an embedded asset, or the shell (SPA fallback)
 POST /console/rpc          → one envelope in, one envelope out
 ```
 
-It is **not** a gateway in the `ResonateGateway` sense — it binds no socket and
-has no lifecycle. It hands back axum routes, and `resonate-gateway-http` merges
-them into the router it already serves. One port, one process, one origin: the
-console is served by the server it reads, so there is no CORS to configure.
+It is a `ResonateGateway` like every other edge: it binds its own socket, on
+its own port (`0.0.0.0:8003` by default), and enforces its own auth policy. It
+used to hand a set of routes to `resonate-gateway-http` to merge, which meant
+the composition root had to know that one plugin was routes rather than a
+gateway, and had to hand them to another. A plugin owns what it owns.
 
 ## The boundary
 
@@ -27,7 +28,8 @@ them apart means an SDK cannot come to depend on a request that exists to draw a
 table, and the read model can change without touching the protocol workers speak.
 
 Three requests, all read-only, defined in `resonate-core/src/ui.rs` and
-implemented by every backend (SQLite, Postgres, MySQL, and the reference oracle):
+implemented by the SQL backends (SQLite, Postgres, MySQL) and the reference
+oracle:
 
 | Kind | Backs | Answered in |
 | --- | --- | --- |
@@ -65,7 +67,7 @@ For a hot-reloading loop against a server you started yourself:
 
 ```shell
 resonate dev &        # or `resonate serve`
-make console-dev      # vite on :5173, proxying /console/rpc to :8001
+make console-dev      # vite on :5173, proxying /console/rpc to :8003
 ```
 
 ## The app
@@ -102,10 +104,18 @@ operator supplies a token.
 ## Configuration
 
 ```toml
-[console]
-enabled = true        # RESONATE_CONSOLE__ENABLED
-redirect_root = true  # RESONATE_CONSOLE__REDIRECT_ROOT — GET / → /console/
+[gateways.gateway_web]
+enabled = true            # RESONATE_GATEWAYS__GATEWAY_WEB__ENABLED
+bind = "0.0.0.0:8003"     # RESONATE_GATEWAYS__GATEWAY_WEB__BIND
+redirect_root = true      # GET / → /console/, on this port
+abort_on_panic = false    # see resonate-gateway-http; this edge writes too
+
+[gateways.gateway_web.auth]
+publickey = "/etc/resonate/auth/public.pem"
 ```
+
+The section is named for the crate: `resonate-gateway-web` → `gateway_web`,
+which is how every plugin's key is derived.
 
 The mount point is not configurable: SvelteKit bakes `base` in at build time, so
 `/console` is a constant on both sides.

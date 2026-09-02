@@ -296,8 +296,10 @@ impl CommonArgs {
         o.maybe_str("servers.server_mysql.url", self.mysql_url.clone());
         o.maybe("servers.server_mysql.pool_size", self.mysql_pool_size);
 
-        // The URL a worker is told to call back on, and the one the gateway
-        // announces, are the same URL — so one flag writes both.
+        // The URL a worker is told to call back on. The server stamps it into
+        // every execute message, so it is the server's setting — the gateway
+        // used to carry a copy of it that nothing read, and two settings that
+        // can disagree are worse than one.
         let url = self.url.clone().or_else(|| {
             match (&self.host, self.port) {
                 // Derived only when something was said about it. A host and a
@@ -396,9 +398,20 @@ impl CommonArgs {
         );
 
         // --- gateways ---
-        o.maybe_str("gateways.gateway_http.bind", self.bind);
-        o.maybe("gateways.gateway_http.port", self.port);
-        o.maybe_str("gateways.gateway_http.url", url);
+        //
+        // One key, from two flags: the gateway listens on one address like
+        // every other listening plugin, and `--server-bind` and `--server-port`
+        // are two halves of it.
+        if self.bind.is_some() || self.port.is_some() {
+            o.set_str(
+                "gateways.gateway_http.bind",
+                &format!(
+                    "{}:{}",
+                    self.bind.clone().unwrap_or_else(|| "0.0.0.0".to_string()),
+                    self.port.unwrap_or(8001)
+                ),
+            );
+        }
         if !self.cors_allow_origins.is_empty() {
             let list = self
                 .cors_allow_origins

@@ -27,7 +27,7 @@ use axum::Json;
 use resonate_core::types::ResponseEnvelope;
 use resonate_core::{ResonateGateway, ResonateServer, Unavailable};
 use serde::{Deserialize, Serialize};
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
 pub use routes::AppState;
@@ -59,18 +59,13 @@ pub struct Config {
     #[serde(default = "yes")]
     pub enabled: bool,
 
-    /// Address to listen on [default: 0.0.0.0]
+    /// Where to listen [default: 0.0.0.0:8001].
+    ///
+    /// One string, like every other listening plugin's. It used to be a host
+    /// and a port in two fields, which made this the one edge configured
+    /// differently from the other three for no reason anybody could name.
     #[serde(default = "default_bind")]
     pub bind: String,
-
-    /// Port to listen on [default: 8001]
-    #[serde(default = "default_port")]
-    pub port: u16,
-
-    /// The URL clients reach this server on. Announced in execute messages,
-    /// so a worker knows where to call back.
-    #[serde(default)]
-    pub url: Option<String>,
 
     /// Origins to allow. Empty disables CORS; `*` is permissive.
     #[serde(default)]
@@ -98,11 +93,7 @@ fn yes() -> bool {
 }
 
 fn default_bind() -> String {
-    "0.0.0.0".to_string()
-}
-
-fn default_port() -> u16 {
-    8001
+    "0.0.0.0:8001".to_string()
 }
 
 impl Default for Config {
@@ -110,13 +101,17 @@ impl Default for Config {
         Self {
             enabled: true,
             bind: default_bind(),
-            port: default_port(),
-            url: None,
             cors_allow_origins: Vec::new(),
             auth: None,
             abort_on_panic: false,
         }
     }
+}
+
+/// The listener, once `init` has bound it, and the switch that ends it.
+struct Serving {
+    task: JoinHandle<()>,
+    shutdown: oneshot::Sender<()>,
 }
 
 /// axum, hosting the Resonate protocol over HTTP.
@@ -126,12 +121,7 @@ pub struct HttpGateway {
     /// handed to the routes when `init` builds them. Strong, unlike a worker's
     /// handle: nothing points back at a gateway, so there is no cycle to break.
     server: Arc<dyn ResonateServer>,
-    /// The application, built by `init` — which is also the only place a
-    /// socket is bound.
-    app: Mutex<Option<axum::Router>>,
-    /// Set by `stop` to release the graceful-shutdown future.
-    shutdown: Mutex<Option<oneshot::Sender<()>>>,
-    task: Mutex<Option<JoinHandle<()>>>,
+    serving: std::sync::Mutex<Option<Serving>>,
 }
 
 impl HttpGateway {
@@ -140,9 +130,7 @@ impl HttpGateway {
         Self {
             config,
             server,
-            app: Mutex::new(None),
-            shutdown: Mutex::new(None),
-            task: Mutex::new(None),
+            serving: std::sync::Mutex::new(None),
         }
     }
 }
@@ -217,53 +205,36 @@ fn cors_layer(allow_origins: &[String]) -> Option<tower_http::cors::CorsLayer> {
 #[async_trait]
 impl ResonateGateway for HttpGateway {
     async fn init(&self, _debug: bool) -> Result<(), Unavailable> {
-        {
-            let mut app = self.app.lock().await;
-            if app.is_some() {
-                return Ok(()); // already started
+        // Reading the key material is this crate's, not its caller's: it
+        // touches the disk and it can fail, which is what `init` is for. A bad
+        // key path stops the process here rather than surfacing later as a
+        // request nobody can authenticate.
+        let auth = match &self.config.auth {
+            Some(cfg) => Some(Arc::new(cfg.load().map_err(Unavailable::new)?)),
+            None => {
+                tracing::info!("Auth disabled — all requests accepted");
+                None
             }
-            // Reading the key material is this crate's, not its caller's: it
-            // touches the disk and it can fail, which is what `init` is for. A
-            // bad key path stops the process here rather than surfacing later
-            // as a request nobody can authenticate.
-            let auth = match &self.config.auth {
-                Some(cfg) => Some(Arc::new(cfg.load().map_err(Unavailable::new)?)),
-                None => {
-                    tracing::info!("Auth disabled — all requests accepted");
-                    None
-                }
-            };
-            *app = Some(build_app(
-                routes::AppState {
-                    server: Arc::clone(&self.server),
-                    auth,
-                },
-                &self.config,
-            ));
-        }
-        let app = self
-            .app
-            .lock()
-            .await
-            .take()
-            .expect("the block above just set it");
-
-        let addr = format!("{}:{}", self.config.bind, self.config.port);
-        let listener = tokio::net::TcpListener::bind(&addr)
-            .await
-            .map_err(|e| Unavailable::new(format!("failed to bind {addr}: {e}")))?;
-
-        let (tx, rx) = oneshot::channel();
-        *self.shutdown.lock().await = Some(tx);
-
-        tracing::info!(
-            bind = %self.config.bind,
-            port = self.config.port,
-            server_url = %self.config.url.clone().unwrap_or_default(),
-            "Server listening"
+        };
+        let app = build_app(
+            routes::AppState {
+                server: Arc::clone(&self.server),
+                auth,
+            },
+            &self.config,
         );
 
-        let handle = tokio::spawn(async move {
+        let listener = tokio::net::TcpListener::bind(&self.config.bind)
+            .await
+            .map_err(|e| {
+                Unavailable::new(format!(
+                    "http gateway cannot bind {}: {e}",
+                    self.config.bind
+                ))
+            })?;
+
+        let (tx, rx) = oneshot::channel();
+        let task = tokio::spawn(async move {
             let served = axum::serve(listener, app)
                 .with_graceful_shutdown(async move {
                     // An error means `stop` dropped the sender rather than
@@ -275,7 +246,9 @@ impl ResonateGateway for HttpGateway {
                 tracing::error!(error = %e, "HTTP gateway stopped with an error");
             }
         });
-        *self.task.lock().await = Some(handle);
+        *self.serving.lock().expect("http gateway serving mutex") =
+            Some(Serving { task, shutdown: tx });
+        tracing::info!(bind = %self.config.bind, "Server listening");
         Ok(())
     }
 
@@ -286,12 +259,15 @@ impl ResonateGateway for HttpGateway {
     /// Every response this gateway serves is a request/response pair, so the
     /// wait is bounded by the slowest one.
     async fn stop(&self) -> Result<(), Unavailable> {
-        if let Some(tx) = self.shutdown.lock().await.take() {
-            let _ = tx.send(());
-        }
-        let handle = self.task.lock().await.take();
-        if let Some(handle) = handle {
-            let _ = handle.await;
+        // Out of the guard before the await: a std MutexGuard is not Send.
+        let serving = self
+            .serving
+            .lock()
+            .expect("http gateway serving mutex")
+            .take();
+        if let Some(serving) = serving {
+            let _ = serving.shutdown.send(());
+            let _ = serving.task.await;
         }
         Ok(())
     }

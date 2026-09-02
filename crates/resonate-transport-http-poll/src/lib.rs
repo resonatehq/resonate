@@ -2,7 +2,7 @@
 //!
 //! For workers that cannot be dialled: the worker opens an SSE connection to
 //! the server and messages are pushed down it. A transport rather than a
-//! plugin — it knows how to reach a worker, not what the message means.
+//! router — it knows how to reach a worker, not what the message means.
 //!
 //! Unlike the dialled transports this one has an inbound half: the endpoint
 //! workers connect to. So it binds its own socket and serves it — one plugin,
@@ -44,7 +44,7 @@ fn configure(
     Ok(Some(PollRegistry::new(deps.server, config)))
 }
 
-/// Everything under `[transports.http_poll]`.
+/// Everything under `[workers.transport_http_poll]`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Config {
     /// Enable the poll:// address scheme [default: true]

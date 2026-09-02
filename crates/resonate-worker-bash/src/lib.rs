@@ -37,7 +37,7 @@ fn configure(
     ))))
 }
 
-/// Everything under `[transports.bash_exec]`.
+/// Everything under `[workers.worker_bash]`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Config {
     /// Enable the bash:// address scheme [default: false]

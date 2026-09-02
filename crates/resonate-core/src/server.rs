@@ -58,8 +58,16 @@ pub trait ResonateServer: Send + Sync {
 
     /// Stop background work and release resources.
     ///
-    /// Called once, after every gateway and worker has stopped. Implementations
-    /// should be safe to call when `init` was never called.
+    /// Called once, and **first** — before the workers and before the gateways.
+    /// A server's own timer is the only thing that can still hand it work of
+    /// its own, so stopping it is what makes the rest of the drain finite.
+    ///
+    /// The consequence for an implementation: a gateway is still accepting
+    /// requests and still calling [`process`](Self::process) after this
+    /// returns. Halt what you spawned; do not close what answers. A pool torn
+    /// down here becomes 500s for the length of the drain.
+    ///
+    /// Implementations must be safe to call when `init` was never called.
     async fn stop(&self) -> Result<(), Unavailable> {
         Ok(())
     }

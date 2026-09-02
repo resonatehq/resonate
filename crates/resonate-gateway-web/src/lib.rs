@@ -103,6 +103,17 @@ pub struct Config {
     #[serde(default)]
     pub auth: Option<resonate_auth::Config>,
 
+    /// Abort the process when a handler panics, rather than answering 500.
+    ///
+    /// The same setting the HTTP gateway carries, and for the same reason: this
+    /// edge writes. `promise.settle` (cancel) and `promise.create` (invoke)
+    /// arrive here as the protocol's own requests, so for a single-process
+    /// store a panic mid-transaction can leave in-memory state the next request
+    /// would read. A guarantee with one write path inside it and one outside is
+    /// not a guarantee.
+    #[serde(default)]
+    pub abort_on_panic: bool,
+
     /// Answer `GET /` with a redirect to the console.
     ///
     /// The API's root is `POST /`, so a `GET` there is a person with a
@@ -126,6 +137,7 @@ impl Default for Config {
             enabled: true,
             bind: default_bind(),
             auth: None,
+            abort_on_panic: false,
             redirect_root: true,
         }
     }
@@ -139,14 +151,45 @@ pub struct ConsoleState {
     pub auth: Option<Arc<AuthConfig>>,
 }
 
-/// The console's routes, ready to merge into any router.
+/// Turn a panic in a handler into a 500, or into an abort.
 ///
-/// Generic in the host router's state because the console carries its own:
-/// `with_state` closes over [`ConsoleState`] here, so what comes back needs
-/// nothing from whoever merges it.
+/// The same layer the HTTP gateway applies, because this edge carries the same
+/// writes — see [`Config::abort_on_panic`]. Written inline rather than returned
+/// from a helper: `CatchPanicLayer::custom` is generic over the responder, and
+/// an `impl Trait` return loses the bounds `Router::layer` needs.
+macro_rules! panic_guard {
+    ($abort:expr) => {{
+        let abort = $abort;
+        tower_http::catch_panic::CatchPanicLayer::custom(
+            move |err: Box<dyn std::any::Any + Send + 'static>| {
+                let message = if let Some(s) = err.downcast_ref::<&str>() {
+                    s.to_string()
+                } else if let Some(s) = err.downcast_ref::<String>() {
+                    s.clone()
+                } else {
+                    "internal server error".to_string()
+                };
+                tracing::error!(message = %message, "panic in a console handler");
+                if abort {
+                    std::process::abort();
+                }
+                let body =
+                    ResponseEnvelope::error("unknown".to_string(), "0".to_string(), 500, &message);
+                (StatusCode::INTERNAL_SERVER_ERROR, Json(body)).into_response()
+            },
+        )
+    }};
+}
+
+/// The console's routes, with its state and its panic guard already applied.
 ///
-/// Returns `None` when the console is disabled, so a caller merges an option
-/// rather than deciding what an empty router means.
+/// Its one caller in production is this crate's own [`ResonateGateway::init`];
+/// the tests are the others. It stays generic in the host router's state, and
+/// public, because that costs nothing and is what makes the routes testable
+/// without a socket.
+///
+/// Returns `None` when the console is disabled, so a caller gets an option
+/// rather than having to decide what an empty router means.
 pub fn routes<S>(config: &Config, state: ConsoleState) -> Option<Router<S>>
 where
     S: Clone + Send + Sync + 'static,
@@ -164,7 +207,11 @@ where
         router = router.route("/", get(handle_root));
     }
     tracing::info!(mount = MOUNT, "Web console enabled");
-    Some(router.with_state(state))
+    Some(
+        router
+            .layer(panic_guard!(config.abort_on_panic))
+            .with_state(state),
+    )
 }
 
 /// A browser at the API's root wants the console.

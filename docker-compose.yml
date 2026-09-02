@@ -8,7 +8,7 @@ services:
       - "8003:8003"   # the console
       - "9090:9090"   # prometheus
     environment:
-      - RESONATE_GATEWAYS__GATEWAY_HTTP__PORT=8001
+      - RESONATE_GATEWAYS__GATEWAY_HTTP__BIND=0.0.0.0:8001
       - RESONATE_GATEWAYS__GATEWAY_METRICS__BIND=0.0.0.0:9090
       - RESONATE_LEVEL=info
     healthcheck:
@@ -29,7 +29,7 @@ services:
       - "8003:8003"   # the console
       - "9090:9090"   # prometheus
     environment:
-      - RESONATE_GATEWAYS__GATEWAY_HTTP__PORT=8001
+      - RESONATE_GATEWAYS__GATEWAY_HTTP__BIND=0.0.0.0:8001
       - RESONATE_GATEWAYS__GATEWAY_METRICS__BIND=0.0.0.0:9090
       - RESONATE_LEVEL=info
       - RESONATE_SERVERS__ACTIVE=server_postgres
@@ -56,7 +56,7 @@ services:
       - "8003:8003"   # the console
       - "9090:9090"   # prometheus
     environment:
-      - RESONATE_GATEWAYS__GATEWAY_HTTP__PORT=8001
+      - RESONATE_GATEWAYS__GATEWAY_HTTP__BIND=0.0.0.0:8001
       - RESONATE_GATEWAYS__GATEWAY_METRICS__BIND=0.0.0.0:9090
       - RESONATE_LEVEL=info
       - RESONATE_SERVERS__ACTIVE=server_mysql
@@ -83,7 +83,7 @@ services:
       - "8003:8003"   # the console
       - "9090:9090"   # prometheus
     environment:
-      - RESONATE_GATEWAYS__GATEWAY_HTTP__PORT=8001
+      - RESONATE_GATEWAYS__GATEWAY_HTTP__BIND=0.0.0.0:8001
       - RESONATE_GATEWAYS__GATEWAY_METRICS__BIND=0.0.0.0:9090
       - RESONATE_LEVEL=info
       - RESONATE_GATEWAYS__GATEWAY_HTTP__AUTH__PUBLICKEY=/etc/resonate/auth/public.pem
@@ -109,7 +109,7 @@ services:
       - "8003:8003"   # the console
       - "9090:9090"   # prometheus
     environment:
-      - RESONATE_GATEWAYS__GATEWAY_HTTP__PORT=8001
+      - RESONATE_GATEWAYS__GATEWAY_HTTP__BIND=0.0.0.0:8001
       - RESONATE_GATEWAYS__GATEWAY_METRICS__BIND=0.0.0.0:9090
       - RESONATE_LEVEL=info
       - RESONATE_GATEWAYS__GATEWAY_HTTP__AUTH__PUBLICKEY=/etc/resonate/auth/public.pem
@@ -141,7 +141,7 @@ services:
       - "8003:8003"   # the console
       - "9090:9090"   # prometheus
     environment:
-      - RESONATE_GATEWAYS__GATEWAY_HTTP__PORT=8001
+      - RESONATE_GATEWAYS__GATEWAY_HTTP__BIND=0.0.0.0:8001
       - RESONATE_GATEWAYS__GATEWAY_METRICS__BIND=0.0.0.0:9090
       - RESONATE_LEVEL=info
       - RESONATE_GATEWAYS__GATEWAY_HTTP__AUTH__PUBLICKEY=/etc/resonate/auth/public.pem

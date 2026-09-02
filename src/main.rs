@@ -9,7 +9,7 @@
 //!
 //! ```ignore
 //! #[tokio::main]
-//! async fn main() -> ExitCode {
+//! async fn main() -> std::process::ExitCode {
 //!     resonate_base::main(
 //!         Registry::new()
 //!             .server(&resonate_server_postgres::PLUGIN)
@@ -37,7 +37,7 @@ compile_error!(
     "at least one storage engine must be enabled: --features sqlite, postgres, mysql or scylladb"
 );
 
-use resonate_plugin::Registry;
+use resonate_base::Registry;
 
 #[derive(Parser)]
 #[command(

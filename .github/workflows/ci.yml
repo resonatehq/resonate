@@ -205,7 +205,7 @@ jobs:
               export RESONATE_SERVERS__SERVER_SQLITE__PATH=/tmp/conccheck.db
               ;;
           esac
-          RESONATE_DEBUG=true RESONATE_GATEWAYS__GATEWAY_HTTP__PORT=8021 ./target/release/resonate serve &
+          RESONATE_DEBUG=true RESONATE_GATEWAYS__GATEWAY_HTTP__BIND=0.0.0.0:8021 ./target/release/resonate serve &
           for _ in $(seq 1 40); do
             curl -sf -o /dev/null -X POST http://127.0.0.1:8021/ -d '{}' && break
             sleep 1

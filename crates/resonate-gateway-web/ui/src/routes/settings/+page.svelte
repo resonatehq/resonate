@@ -81,7 +81,7 @@
           spellcheck="false"
           autocomplete="off"
         />
-        <em>Another server's origin, e.g. http://localhost:8001. It must also serve the console, and allow this origin.</em>
+        <em>Another server's origin, e.g. http://localhost:8003. It must also serve the console, and allow this origin.</em>
       </label>
 
       <label>

@@ -11,6 +11,6 @@ export default defineConfig({
   },
   server: {
     // `npm run dev` talks to a Resonate server started separately.
-    proxy: { '/console/rpc': { target: 'http://localhost:8001', changeOrigin: true } }
+    proxy: { '/console/rpc': { target: 'http://localhost:8003', changeOrigin: true } }
   }
 });

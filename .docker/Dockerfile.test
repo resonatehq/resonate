@@ -4,8 +4,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libs
 
 WORKDIR /app
 
+# The workspace members all live under `crates/`, so copying `src` alone gives
+# cargo a manifest whose members do not exist.
 COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
 COPY src ./src
+COPY diff ./diff
+COPY examples ./examples
+COPY tests ./tests
 
 RUN cargo build 2>&1
 
