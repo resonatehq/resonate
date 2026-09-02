@@ -193,19 +193,19 @@ jobs:
         run: |
           case "$BACKEND" in
             postgres)
-              export RESONATE_STORAGE__TYPE=postgres
-              export RESONATE_STORAGE__POSTGRES__URL=postgres://resonate:resonate@localhost:5432/resonate
+              export RESONATE_SERVERS__ACTIVE=server_postgres
+              export RESONATE_SERVERS__SERVER_POSTGRES__URL=postgres://resonate:resonate@localhost:5432/resonate
               ;;
             mysql)
-              export RESONATE_STORAGE__TYPE=mysql
-              export RESONATE_STORAGE__MYSQL__URL=mysql://resonate:resonate@localhost:3306/resonate
+              export RESONATE_SERVERS__ACTIVE=server_mysql
+              export RESONATE_SERVERS__SERVER_MYSQL__URL=mysql://resonate:resonate@localhost:3306/resonate
               ;;
             *)
-              export RESONATE_STORAGE__TYPE=sqlite
-              export RESONATE_STORAGE__SQLITE__PATH=/tmp/conccheck.db
+              export RESONATE_SERVERS__ACTIVE=server_sqlite
+              export RESONATE_SERVERS__SERVER_SQLITE__PATH=/tmp/conccheck.db
               ;;
           esac
-          RESONATE_DEBUG=true RESONATE_SERVER__PORT=8021 ./target/release/resonate serve &
+          RESONATE_DEBUG=true RESONATE_GATEWAYS__GATEWAY_HTTP__PORT=8021 ./target/release/resonate serve &
           for _ in $(seq 1 40); do
             curl -sf -o /dev/null -X POST http://127.0.0.1:8021/ -d '{}' && break
             sleep 1

@@ -100,7 +100,7 @@ Done!
 ### 8. Watch it in the console
 
 The server serves a web console on its own port. Open it at
-[http://localhost:8001/console/](http://localhost:8001/console/) — `http://localhost:8001/`
+[http://localhost:8003/console/](http://localhost:8003/console/) — `http://localhost:8003/`
 redirects there — and `countdown.1` is on the list.
 
 The console is three screens: **Durable Executions** (every root promise,
@@ -114,11 +114,11 @@ Nothing to install: the app is compiled into the binary, fonts included, so it
 works on an air-gapped or on-prem host. Turn it off with
 
 ```toml
-[console]
+[gateways.gateway_web]
 enabled = false
 ```
 
-or `RESONATE_CONSOLE__ENABLED=false`.
+or `RESONATE_GATEWAYS__GATEWAY_WEB__ENABLED=false`.
 
 ### What to try
 
@@ -146,14 +146,19 @@ resonate serve
 You will see log output like the following:
 
 ```shell
-2026-04-02T05:05:32.480430Z  INFO resonate: Resonate Server starting on port 8001
-2026-04-02T05:05:32.480805Z  INFO resonate: Using SQLite backend: resonate.db
-2026-04-02T05:05:32.486547Z  INFO resonate: SQLite initialized
-2026-04-02T05:05:32.492689Z  INFO resonate: Metrics server listening on 0.0.0.0:9090
-2026-04-02T05:05:32.492915Z  INFO resonate: Server listening on 0.0.0.0:8001
+2026-04-02T05:05:32.480430Z  INFO resonate_base: Server plugin selected server=server_sqlite
+2026-04-02T05:05:32.480805Z  INFO resonate_base: Worker plugin registered worker=transport_http_push schemes=["http", "https"]
+2026-04-02T05:05:32.481102Z  INFO resonate_base: Worker plugin registered worker=transport_http_poll schemes=["poll"]
+2026-04-02T05:05:32.486547Z  INFO resonate_server_sqlite: SQLite initialized path=resonate.db
+2026-04-02T05:05:32.490331Z  INFO resonate_transport_http_poll: Poll listening bind=0.0.0.0:8002
+2026-04-02T05:05:32.492915Z  INFO resonate_gateway_http: Server listening bind=0.0.0.0 port=8001
+2026-04-02T05:05:32.493204Z  INFO resonate_gateway_web: Console listening bind=0.0.0.0:8003
+2026-04-02T05:05:32.492689Z  INFO resonate_gateway_metrics: Metrics listening bind=0.0.0.0:9090
 ```
 
-The output indicates that the server has HTTP endpoints available at port 8001 and a metrics endpoint at port 9090.
+Each of those is a plugin, and each owns its own listener: the protocol on
+8001, the poll (SSE) transport on 8002, the console on 8003, and Prometheus on
+9090.
 
 These are the default ports and can be changed via configuration.
 The SDKs are all configured to use these defaults unless otherwise specified.
@@ -194,12 +199,12 @@ Or, you can run it as an executable using the following command:
 
 ## Outbound authentication for HTTP push
 
-When the Resonate Server delivers execute messages to protected Cloud Functions or Cloud Run services, it can attach an outbound authentication header. Configure this under `[transports.http_push.auth]`.
+When the Resonate Server delivers execute messages to protected Cloud Functions or Cloud Run services, it can attach an outbound authentication header. Configure this under `[workers.transport_http_push.auth]`.
 
 ### Google Cloud ID token (recommended for Cloud Run / Cloud Functions)
 
 ```toml
-[transports.http_push.auth]
+[workers.transport_http_push.auth]
 mode = "gcp"
 # audience = "https://my-function.example.com"  # optional; defaults to the delivery URL
 ```
@@ -220,7 +225,7 @@ Tokens are obtained via [Application Default Credentials](https://cloud.google.c
 ### Static bearer token
 
 ```toml
-[transports.http_push.auth]
+[workers.transport_http_push.auth]
 mode = "bearer"
 token = "my-static-token"
 ```
@@ -228,7 +233,7 @@ token = "my-static-token"
 ### No auth (default)
 
 ```toml
-[transports.http_push.auth]
+[workers.transport_http_push.auth]
 mode = "none"
 ```
 
@@ -237,7 +242,7 @@ mode = "none"
 The auth header defaults to `Authorization`. Override with:
 
 ```toml
-[transports.http_push.auth]
+[workers.transport_http_push.auth]
 mode = "gcp"
 header = "X-Custom-Auth"
 ```

@@ -16,7 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 
 COPY --from=builder /app/target/release/resonate /usr/local/bin/resonate-server
 
-EXPOSE 8001 9090
+EXPOSE 8001 8002 8003 9090
 
 ENTRYPOINT ["resonate-server"]
 CMD ["serve"]

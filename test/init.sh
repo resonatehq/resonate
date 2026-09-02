@@ -31,9 +31,9 @@ cargo build --release
 
 # Start server in background
 echo "Starting resonate server on :3000..."
-RESONATE_STORAGE__TYPE=postgres \
-RESONATE_STORAGE__POSTGRES__URL="postgres://resonate:resonate@localhost:5432/resonate" \
-RESONATE_STORAGE__POSTGRES__POOL_SIZE=20 \
+RESONATE_SERVERS__ACTIVE=server_postgres \
+RESONATE_SERVERS__SERVER_POSTGRES__URL="postgres://resonate:resonate@localhost:5432/resonate" \
+RESONATE_SERVERS__SERVER_POSTGRES__POOL_SIZE=20 \
 RESONATE_DEBUG=true \
 RESONATE_LEVEL=info \
 ./target/release/resonate serve &
@@ -42,7 +42,7 @@ echo $! > "$PID_FILE"
 sleep 2
 
 # Health check
-if curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/health | grep -q "200"; then
+if curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/ready | grep -q "200"; then
   echo "Server is up. Run test.sh http://localhost:3000"
 else
   echo "Warning: server may not be ready yet"
