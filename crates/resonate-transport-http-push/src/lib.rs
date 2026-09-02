@@ -467,7 +467,7 @@ mod tests {
     // crate's re-export for why. Only the tests here serve HTTP; what this
     // worker does is dial it.
     use resonate_plugin::axum;
-    use resonate_plugin::axum::{extract::State, routing::post, Router};
+    use resonate_plugin::axum::{extract::State, routing::post};
     use std::sync::Arc;
     use tokio::net::TcpListener;
     use tokio::sync::mpsc;
@@ -516,7 +516,7 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let tx = Arc::new(tx);
 
-        let app = Router::new()
+        let app = axum::Router::new()
             .route("/", post(capture_handler))
             .with_state(tx);
 

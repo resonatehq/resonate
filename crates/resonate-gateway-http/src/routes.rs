@@ -78,7 +78,7 @@ impl axum::extract::FromRef<AppState> for ApiState {
 
 /// API routes: the RPC endpoint, the readiness probe, and the legacy paths.
 pub fn api_routes() -> Router<AppState> {
-    Router::new()
+    axum::Router::new()
         .route("/", post(handle_api))
         .route("/ready", get(handle_ready))
         .route("/promises", any(handle_legacy))

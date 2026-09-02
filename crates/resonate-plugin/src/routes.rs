@@ -47,6 +47,9 @@
 //! It also means one policy at one edge. A plugin does not carry its own `auth`
 //! setting for a listener it does not own.
 
+// Note the two `Router`s. What a plugin registers here is an `axum::Router` —
+// HTTP path to handler. The workspace's bare `Router` is the other one, which
+// routes an address to a worker and has nothing to do with HTTP.
 use std::sync::{Arc, Mutex};
 
 /// A router, built once the gateway's auth policy is known.

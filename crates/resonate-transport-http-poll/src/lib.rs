@@ -49,7 +49,7 @@ fn configure(
     // wherever the protocol is.
     let handler = Arc::clone(&registry);
     deps.routes.add(PLUGIN.id(), move |auth| {
-        Router::new()
+        axum::Router::new()
             .route(POLL_PATH, get(handle))
             .with_state((handler, auth))
     });
@@ -369,7 +369,6 @@ use axum::extract::{Path, State};
 use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use axum::Router;
 
 /// Serve `GET /poll/{group}/{id}` until `stop`.
 /// What the handler needs: the registry to register into, and the gateway's

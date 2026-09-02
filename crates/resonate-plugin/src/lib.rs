@@ -55,7 +55,7 @@
 //!
 //! ```ignore
 //! // 1. The router, empty.
-//! let router = Arc::new(Router::new());
+//! let router = Arc::new(Router::new());   // the message router, not axum's
 //!
 //! // 2. The server, handed that router. Nothing is connected yet.
 //! let deps = ServerDependencies::new(Arc::clone(&router) as _);

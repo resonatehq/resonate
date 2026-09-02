@@ -140,7 +140,7 @@ where
         tracing::info!("Web console disabled");
         return None;
     }
-    let mut router = Router::new()
+    let mut router = axum::Router::new()
         .route(RPC_PATH, post(handle_rpc))
         .route(MOUNT, get(handle_index))
         .route("/console/", get(handle_index))

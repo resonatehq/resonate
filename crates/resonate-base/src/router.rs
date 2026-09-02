@@ -1,5 +1,10 @@
 //! The router: one worker per address scheme, and the counter that sees every
 //! message.
+//!
+//! Not an `axum::Router`, which routes an HTTP path to a handler. This one
+//! routes an *address* to a worker: `poll://any@default` reaches the poll
+//! transport. Bare `Router` in this workspace is always this one; axum's is
+//! always written `axum::Router`.
 
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
