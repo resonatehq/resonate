@@ -106,7 +106,7 @@ pub fn api_routes() -> Router<AppState> {
     Router::new()
         .route("/", post(handle_api))
         .route("/health", get(handle_health))
-        .route("/ready", get(handle_ready))
+        .route("/ready", get(handle_health))
         .route("/promises", any(handle_legacy))
         .route("/promises/*path", any(handle_legacy))
         .route("/schedules", any(handle_legacy))
@@ -133,17 +133,15 @@ pub fn poll_routes() -> Router<AppState> {
     Router::new().route("/poll/:group/:id", get(handle_poll))
 }
 
+/// Liveness: this process is running.
+///
+/// `/ready` answers the same thing. It used to ask the server, which pinged its
+/// storage, so a pod whose database had gone away reported 503 and stopped
+/// being sent traffic. The route is kept because a probe that 404s marks a pod
+/// unready, but it no longer distinguishes: nothing here can tell a server that
+/// cannot serve from one that can.
 async fn handle_health() -> StatusCode {
     StatusCode::OK
-}
-
-async fn handle_ready(State(state): State<ApiState>) -> StatusCode {
-    if state.server.ready().await {
-        StatusCode::OK
-    } else {
-        tracing::error!("Readiness check failed: server reports not ready");
-        StatusCode::SERVICE_UNAVAILABLE
-    }
 }
 
 fn into_response(resp: ResponseEnvelope) -> (axum::http::StatusCode, Json<ResponseEnvelope>) {

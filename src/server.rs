@@ -201,18 +201,6 @@ impl Server {
 
 #[async_trait]
 impl ResonateServer for Server {
-    /// Ready when storage answers. That is the only thing that can be down and
-    /// still leave this process running.
-    async fn ready(&self) -> bool {
-        match self.engine.ping().await {
-            Ok(()) => true,
-            Err(e) => {
-                tracing::error!(error = %e, "Readiness check failed: storage database unavailable");
-                false
-            }
-        }
-    }
-
     async fn process(&self, req: &RequestEnvelope) -> Result<ResponseEnvelope, Unavailable> {
         // Debug-time overrides are gated by config, so a caller cannot move the
         // server's clock. The gate lives here rather than at the HTTP edge so
