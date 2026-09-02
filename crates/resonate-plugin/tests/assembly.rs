@@ -3,9 +3,12 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+#[rustfmt::skip]
 use resonate_plugin::{
-    ConfigError, GatewayPlugin, Loader, Registry, RegistryError, ResonateServer, ResonateWorker,
-    ServerPlugin, Settings, StartupError, WorkerDependencies, WorkerPlugin,
+    ServerPlugin, WorkerDependencies, WorkerPlugin, GatewayPlugin,
+    ResonateServer, ResonateWorker,
+    ConfigError, StartupError, RegistryError,
+    Loader, Registry, Settings,
 };
 use serde::{Deserialize, Serialize};
 
@@ -180,10 +183,10 @@ fn a_binary_with_no_server_is_not_a_server() {
 fn a_whole_binary_checks_out() {
     Registry::new()
         .server(&SQLITE)
-        .gateway(&HTTP)
         .worker(&KAFKA)
+        .gateway(&HTTP)
         .check()
-        .expect("a server, a gateway and a worker");
+        .expect("a server, a worker and a gateway");
 }
 
 #[test]

@@ -5,15 +5,16 @@
 //! and what lets a build carry four of them rather than four hundred.
 
 use crate::error::RegistryError;
-use crate::plugin::{GatewayPlugin, ServerPlugin, WorkerPlugin};
+#[rustfmt::skip]
+use crate::plugin::{ServerPlugin, WorkerPlugin, GatewayPlugin};
 
 /// What a binary is assembled from.
 ///
 /// ```ignore
 /// resonate::run(Registry::new()
 ///     .server(&resonate_server_dbms::SQLITE)
-///     .gateway(&resonate_gateway_http::PLUGIN)
-///     .worker(&resonate_worker_kafka::PLUGIN))
+///     .worker(&resonate_worker_kafka::PLUGIN)
+///     .gateway(&resonate_gateway_http::PLUGIN))
 /// ```
 ///
 /// Explicit registration, not link-time collection. `inventory` and `linkme`

@@ -101,8 +101,8 @@
 //! fn main() -> ExitCode {
 //!     resonate::run(Registry::new()
 //!         .server(&resonate_server_dbms::SQLITE)
-//!         .gateway(&resonate_gateway_http::PLUGIN)
-//!         .worker(&resonate_worker_kafka::PLUGIN))
+//!         .worker(&resonate_worker_kafka::PLUGIN)
+//!         .gateway(&resonate_gateway_http::PLUGIN))
 //! }
 //! ```
 
@@ -114,22 +114,19 @@ pub mod registry;
 pub use registry::Registry;
 
 // Server, worker, gateway: the order a binary builds them in, and the order
-// everything in this crate is written in. The blank lines are load-bearing —
-// rustfmt sorts a contiguous run of `use` statements, and would put these back
-// into alphabetical order without them.
-pub use plugin::{ServerDependencies, ServerFuture, ServerPlugin};
-
-pub use plugin::{WorkerDependencies, WorkerPlugin};
-
-pub use plugin::{GatewayDependencies, GatewayPlugin};
+// everything in this crate is written in. Skipped, because rustfmt would sort
+// these alphabetically and put the gateway first.
+#[rustfmt::skip]
+pub use plugin::{
+    ServerDependencies, ServerFuture, ServerPlugin,
+    WorkerDependencies, WorkerPlugin,
+    GatewayDependencies, GatewayPlugin,
+};
 
 pub use config::{Configuration, Loader, Settings};
 pub use error::{ConfigError, RegistryError, StartupError};
 
 // The port traits a plugin implements, re-exported so a plugin crate names one
 // dependency rather than two.
-pub use resonate_core::{ResonateRouter, ResonateServer};
-
-pub use resonate_core::ResonateWorker;
-
-pub use resonate_core::ResonateGateway;
+#[rustfmt::skip]
+pub use resonate_core::{ResonateServer, ResonateWorker, ResonateGateway, ResonateRouter};
