@@ -13,6 +13,10 @@ pub mod routes;
 
 use std::sync::Arc;
 
+// axum comes from `resonate-plugin`, so a build has one of it — see that
+// crate's re-export for why.
+use resonate_plugin::axum;
+
 use async_trait::async_trait;
 use axum::http::{
     header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ORIGIN},

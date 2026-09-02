@@ -50,6 +50,10 @@
 
 use std::sync::Arc;
 
+// axum comes from `resonate-plugin`, so a build has one of it — see that
+// crate's re-export for why.
+use resonate_plugin::axum;
+
 use axum::{
     body::Bytes,
     extract::{Path, State},

@@ -3821,12 +3821,6 @@ impl<'a> SqliteDb<'a> {
         self.schedule_get(schedule_id)
     }
 
-    #[allow(dead_code)] // the liveness probe the server will call
-    fn ping(&self) -> StorageResult<()> {
-        self.conn.execute_batch("SELECT 1")?;
-        Ok(())
-    }
-
     fn debug_reset(&self) -> StorageResult<()> {
         self.conn.execute_batch(
             "DELETE FROM listeners; DELETE FROM callbacks;
@@ -4268,10 +4262,6 @@ impl Engine for SqliteEngine {
 
     async fn upcoming(&self, limit: usize) -> StorageResult<Vec<Scheduled>> {
         self.query(move |db| db.upcoming(limit)).await
-    }
-
-    async fn ping(&self) -> StorageResult<()> {
-        self.query(|db| db.ping()).await
     }
 
     fn returns_messages(&self) -> bool {

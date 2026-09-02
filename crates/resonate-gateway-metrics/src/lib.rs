@@ -14,6 +14,10 @@
 
 use std::sync::Arc;
 
+// axum comes from `resonate-plugin`, so a build has one of it — see that
+// crate's re-export for why.
+use resonate_plugin::axum;
+
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;

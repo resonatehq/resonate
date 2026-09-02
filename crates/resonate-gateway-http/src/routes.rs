@@ -7,6 +7,8 @@
 //! are made here — what the protocol admits is `core`'s, and what an operation
 //! does is the server's.
 
+use crate::axum;
+
 use std::sync::Arc;
 
 use axum::{

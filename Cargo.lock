@@ -2844,7 +2844,6 @@ name = "resonate-gateway-http"
 version = "0.9.8"
 dependencies = [
  "async-trait",
- "axum",
  "lazy_static",
  "prometheus",
  "resonate-auth",
@@ -2862,7 +2861,6 @@ name = "resonate-gateway-metrics"
 version = "0.9.8"
 dependencies = [
  "async-trait",
- "axum",
  "http-body-util",
  "resonate-core",
  "resonate-plugin",
@@ -2877,7 +2875,6 @@ name = "resonate-gateway-web"
 version = "0.9.8"
 dependencies = [
  "async-trait",
- "axum",
  "http-body-util",
  "resonate-auth",
  "resonate-core",
@@ -2912,6 +2909,7 @@ name = "resonate-plugin"
 version = "0.9.8"
 dependencies = [
  "async-trait",
+ "axum",
  "figment",
  "prometheus",
  "resonate-core",
@@ -3042,7 +3040,6 @@ version = "0.9.8"
 dependencies = [
  "async-stream",
  "async-trait",
- "axum",
  "fastrand",
  "resonate-auth",
  "resonate-plugin",
@@ -3058,7 +3055,6 @@ name = "resonate-transport-http-push"
 version = "0.9.8"
 dependencies = [
  "async-trait",
- "axum",
  "google-cloud-auth",
  "reqwest 0.12.28",
  "resonate-plugin",

@@ -2832,10 +2832,6 @@ impl Engine for SharedOracle {
         Ok(self.lock().upcoming(limit))
     }
 
-    async fn ping(&self) -> StorageResult<()> {
-        Ok(())
-    }
-
     fn returns_messages(&self) -> bool {
         true
     }

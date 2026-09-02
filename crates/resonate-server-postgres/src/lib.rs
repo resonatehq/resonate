@@ -4314,12 +4314,6 @@ impl PostgresDb<'_> {
         Ok(Some(schedule))
     }
 
-    #[allow(dead_code)] // the liveness probe the server will call
-    fn ping(&self) -> StorageResult<()> {
-        rt_block_on(sqlx::raw_sql("SELECT 1").execute(self.tx().as_mut()))?;
-        Ok(())
-    }
-
     fn debug_reset(&self) -> StorageResult<()> {
         rt_block_on(
             sqlx::raw_sql("TRUNCATE promises, schedules CASCADE").execute(self.tx().as_mut()),
@@ -4617,10 +4611,6 @@ impl Engine for PostgresEngine {
 
     async fn upcoming(&self, limit: usize) -> StorageResult<Vec<Scheduled>> {
         self.query(move |db| db.upcoming(limit)).await
-    }
-
-    async fn ping(&self) -> StorageResult<()> {
-        self.query(|db| db.ping()).await
     }
 
     fn returns_messages(&self) -> bool {

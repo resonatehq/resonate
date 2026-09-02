@@ -220,9 +220,6 @@ pub trait Engine: Send + Sync {
     /// a wheel that skipped them would wait for the sweep instead.
     async fn upcoming(&self, limit: usize) -> StorageResult<Vec<Scheduled>>;
 
-    /// Lightweight liveness probe.
-    async fn ping(&self) -> StorageResult<()>;
-
     /// Whether this engine returns what it emitted.
     ///
     /// Every engine does now. Kept while the differential still holds the

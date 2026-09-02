@@ -4,13 +4,17 @@
 //! the server and messages are pushed down it. A transport rather than a
 //! plugin — it knows how to reach a worker, not what the message means.
 //!
-//! Unlike the dialled transports this one has an inbound half: the server must
-//! host the endpoint workers connect to. [`PollRegistry`] is that connection
-//! pool, and the server mounts the route.
-
+//! Unlike the dialled transports this one has an inbound half: the endpoint
+//! workers connect to. So it binds its own socket and serves it — one plugin,
+//! one listener, and no gateway hosting a route on another plugin's behalf.
+//!
 //! Workers connect via `GET /poll/{group}/{id}` and receive messages as
-//! Server-Sent Events; the server holds the connections open and pushes to
-//! them based on poll:// address routing.
+//! Server-Sent Events; [`PollRegistry`] holds those connections open and
+//! pushes to them based on `poll://` address routing.
+
+// axum comes from `resonate-plugin`, so a build has one of it — see that
+// crate's re-export for why.
+use resonate_plugin::axum;
 
 /// The address scheme this transport serves.
 pub const SCHEME: &str = "poll";

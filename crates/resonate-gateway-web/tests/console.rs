@@ -6,13 +6,15 @@
 
 use std::sync::Arc;
 
-use axum::body::Body;
-use axum::http::{Request, StatusCode};
-use axum::Router;
+// axum comes from `resonate-plugin`, so a build has one of it — see that
+// crate's re-export for why.
 use http_body_util::BodyExt;
 use resonate_core::ResonateServer;
 use resonate_gateway_web::{ConsoleState, MOUNT, RPC_PATH};
 use resonate_oracle::SharedOracle;
+use resonate_plugin::axum::body::Body;
+use resonate_plugin::axum::http::{Request, StatusCode};
+use resonate_plugin::axum::Router;
 use serde_json::{json, Value};
 use tower::ServiceExt;
 

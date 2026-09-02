@@ -167,6 +167,29 @@ pub use resonate_core::{ResonateServer, ResonateWorker, ResonateGateway, Resonat
 // name resonate-core, and the pair would have to version together anyway.
 pub use resonate_core::{types, Unavailable};
 
+/// HTTP, for any plugin that serves it.
+///
+/// Re-exported for the same reason as `prometheus` below: so a build has one
+/// version of it by construction. A plugin that listens — a gateway, or a
+/// worker with a callback route — owns its socket and builds its own
+/// `axum::Router`, and two semver-major axums in the graph would make those
+/// routers different types that no shared helper could take.
+///
+/// It also means a plugin crate names one dependency. `resonate-plugin` is
+/// already the crate every plugin pins; the HTTP it serves comes with it.
+///
+/// ```ignore
+/// use resonate_plugin::axum;   // in lib.rs; `use crate::axum;` in a submodule
+///
+/// async fn init(&self, _debug: bool) -> Result<(), Unavailable> {
+///     let app = axum::Router::new().route("/callback/:id", axum::routing::post(handle));
+///     let listener = tokio::net::TcpListener::bind(&self.config.bind).await?;
+///     tokio::spawn(async move { axum::serve(listener, app).await });
+///     Ok(())
+/// }
+/// ```
+pub use axum;
+
 /// Metrics, for any plugin that wants them.
 ///
 /// Re-exported rather than depended on directly, and that is the whole point:

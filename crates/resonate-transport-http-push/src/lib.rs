@@ -461,7 +461,11 @@ async fn deliver(client: Client, auth: Arc<Auth>, job: DeliveryJob) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{extract::State, routing::post, Router};
+    // axum comes from `resonate-plugin`, so a build has one of it — see that
+    // crate's re-export for why. Only the tests here serve HTTP; what this
+    // worker does is dial it.
+    use resonate_plugin::axum;
+    use resonate_plugin::axum::{extract::State, routing::post, Router};
     use std::sync::Arc;
     use tokio::net::TcpListener;
     use tokio::sync::mpsc;
