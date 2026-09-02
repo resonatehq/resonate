@@ -6,6 +6,7 @@ members = [
     "crates/resonate-gateway-web",
     "crates/resonate-plugin",
     "crates/resonate-sql",
+    "crates/resonate-server-scylladb",
     "crates/resonate-server-sqlite",
     "crates/resonate-server-postgres",
     "crates/resonate-server-mysql",
@@ -55,10 +56,11 @@ required-features = ["sqlite", "postgres", "mysql"]
 # One optional dependency per engine now, rather than features forwarded into
 # a crate that held all three. This is the same mechanism a binary assembled
 # outside this repository uses: name the plugins you want.
-default = ["sqlite", "postgres", "mysql"]
+default = ["sqlite", "postgres", "mysql", "scylladb"]
 sqlite = ["dep:resonate-server-sqlite"]
 postgres = ["dep:resonate-server-postgres"]
 mysql = ["dep:resonate-server-mysql"]
+scylladb = ["dep:resonate-server-scylladb"]
 concurrency-stress = [
     "resonate-server-sqlite?/concurrency-stress",
     "resonate-server-mysql?/concurrency-stress",
@@ -74,6 +76,7 @@ resonate-sql = { path = "crates/resonate-sql" }
 resonate-server-sqlite = { path = "crates/resonate-server-sqlite", optional = true }
 resonate-server-postgres = { path = "crates/resonate-server-postgres", optional = true }
 resonate-server-mysql = { path = "crates/resonate-server-mysql", optional = true }
+resonate-server-scylladb = { path = "crates/resonate-server-scylladb", optional = true }
 resonate-oracle = { path = "crates/resonate-oracle" }
 resonate-timer-wheel = { path = "crates/resonate-timer-wheel" }
 resonate-transport-gcps = { path = "crates/resonate-transport-gcps" }

@@ -139,6 +139,10 @@ fn registry() -> Registry {
     {
         registry = registry.server(&resonate_server_mysql::PLUGIN);
     }
+    #[cfg(feature = "scylladb")]
+    {
+        registry = registry.server(&resonate_server_scylladb::PLUGIN);
+    }
     registry
 }
 
