@@ -5,7 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use resonate_plugin::{
     ConfigError, GatewayPlugin, Loader, Registry, RegistryError, ResonateServer, ResonateWorker,
-    ServerPlugin, Settings, StartupError, WorkerDependencies, WorkerFactory, WorkerPlugin,
+    ServerPlugin, Settings, StartupError, WorkerDependencies, WorkerPlugin,
 };
 use serde::{Deserialize, Serialize};
 
@@ -55,7 +55,10 @@ impl ResonateWorker for KafkaWorker {
     }
 }
 
-fn kafka_configure(settings: &Settings<'_>) -> Result<Option<WorkerFactory>, ConfigError> {
+fn kafka_configure(
+    settings: &Settings<'_>,
+    _deps: WorkerDependencies,
+) -> Result<Option<Arc<dyn ResonateWorker>>, ConfigError> {
     let config: KafkaConfig = settings.extract()?;
     if !config.enabled {
         return Ok(None);
@@ -66,9 +69,13 @@ fn kafka_configure(settings: &Settings<'_>) -> Result<Option<WorkerFactory>, Con
         // the one place that knows.
         return Err(settings.reject("concurrency", "must be at least 1 (got 0)"));
     }
-    Ok(Some(Box::new(move |_deps: WorkerDependencies| {
-        Arc::new(KafkaWorker { config }) as Arc<dyn ResonateWorker>
-    })))
+    Ok(Some(Arc::new(KafkaWorker { config })))
+}
+
+/// The dangling handle a worker is given in these tests. A real one is a
+/// `Weak` to the server built at step 2.
+fn no_server() -> WorkerDependencies {
+    WorkerDependencies::new(std::sync::Weak::<Dead>::new() as std::sync::Weak<dyn ResonateServer>)
 }
 
 static KAFKA: WorkerPlugin = WorkerPlugin::new(
@@ -95,16 +102,18 @@ struct SqliteConfig {
     path: String,
 }
 
-static SQLITE: ServerPlugin = ServerPlugin::new("sqlite", "resonate-server-dbms", |settings| {
-    let _config: SqliteConfig = settings.extract()?;
-    Ok(Box::new(|| {
-        Box::pin(async { Err(StartupError::new("sqlite", "not a real engine")) })
-    }))
-});
+static SQLITE: ServerPlugin =
+    ServerPlugin::new("sqlite", "resonate-server-dbms", |settings, _deps| {
+        let _config: SqliteConfig = settings.extract()?;
+        Ok(Box::pin(async {
+            Err(StartupError::new("sqlite", "not a real engine"))
+        }))
+    });
 
-static HTTP: GatewayPlugin = GatewayPlugin::new("http", "resonate-gateway-http", |_settings| {
-    unreachable!("not built in this test")
-});
+static HTTP: GatewayPlugin =
+    GatewayPlugin::new("http", "resonate-gateway-http", |_settings, _deps| {
+        unreachable!("not built in this test")
+    });
 
 // ─── The set of plugins a binary carries ─────────────────────────────────────
 
@@ -221,7 +230,7 @@ fn a_plugin_turns_itself_off() {
     // opinion about what it is called or what it defaults to.
     let loaded = loader().load();
     assert!(
-        (KAFKA.configure)(&loaded.worker("kafka"))
+        (KAFKA.configure)(&loaded.worker("kafka"), no_server())
             .unwrap()
             .is_none(),
         "off by its own default"
@@ -231,7 +240,7 @@ fn a_plugin_turns_itself_off() {
         .set("transports.kafka.enabled", "true")
         .unwrap()
         .load();
-    assert!((KAFKA.configure)(&loaded.worker("kafka"))
+    assert!((KAFKA.configure)(&loaded.worker("kafka"), no_server())
         .unwrap()
         .is_some());
 }
@@ -263,7 +272,7 @@ fn a_plugin_validates_its_own_settings_and_says_where_they_came_from() {
         .unwrap()
         .load();
 
-    let Err(err) = (KAFKA.configure)(&loaded.worker("kafka")) else {
+    let Err(err) = (KAFKA.configure)(&loaded.worker("kafka"), no_server()) else {
         panic!("zero concurrency is the plugin's own rule");
     };
     assert_eq!(err.key, "transports.kafka.concurrency");
@@ -292,10 +301,9 @@ fn the_typed_config_never_leaves_the_plugins_crate() {
         .unwrap()
         .load();
 
-    let factory = (KAFKA.configure)(&loaded.worker("kafka")).unwrap().unwrap();
-    let worker: Arc<dyn ResonateWorker> = factory(WorkerDependencies::new(
-        std::sync::Weak::<Dead>::new() as std::sync::Weak<dyn ResonateServer>,
-    ));
+    let worker: Arc<dyn ResonateWorker> = (KAFKA.configure)(&loaded.worker("kafka"), no_server())
+        .unwrap()
+        .unwrap();
     // Nothing about KafkaConfig is reachable from here, which is the point.
     let _ = worker;
 }

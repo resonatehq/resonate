@@ -44,15 +44,11 @@ impl WorkerDependencies {
     }
 }
 
-/// Build the worker. Sync and infallible: everything that can fail belongs in
-/// `configure`, and everything that starts background work belongs in the
-/// worker's own `init`.
-///
-/// By value, so the handle can be moved into the worker rather than cloned out
-/// of a borrow.
-pub type WorkerFactory = Box<dyn FnOnce(WorkerDependencies) -> Arc<dyn ResonateWorker> + Send>;
-
 /// A plugin that consumes what a server emits.
+// The `configure` signature below is long, and naming it would only move it
+// somewhere a reader has to go and look. It is the one thing a plugin author
+// has to understand, so it is written where they will read it.
+#[allow(clippy::type_complexity)]
 #[non_exhaustive]
 pub struct WorkerPlugin {
     /// The name this plugin is known by: its configuration key
@@ -63,22 +59,32 @@ pub struct WorkerPlugin {
     pub krate: &'static str,
     /// The address schemes this worker claims.
     pub schemes: &'static [&'static str],
-    /// Extract and validate. Runs before anything is constructed, so a bad
-    /// setting is a startup error rather than a message that later goes quietly
-    /// nowhere. The typed `Config` is captured by the returned closure and never
-    /// named outside the plugin's own crate.
+    /// Read this plugin's settings and build it.
     ///
-    /// `None` means this plugin's own configuration turned it off: it is not
-    /// registered, and the router reports its schemes as undeliverable.
-    pub configure: fn(&Settings<'_>) -> Result<Option<WorkerFactory>, ConfigError>,
+    /// Nothing is deferred: a worker's one dependency exists by the time this
+    /// runs. Whatever starts background work belongs in the worker's own `init`,
+    /// not here, so this stays cheap and side-effect-free.
+    ///
+    /// The typed `Config` never leaves the plugin's crate — what comes back is a
+    /// [`ResonateWorker`] and nothing else. `None` means this plugin's own
+    /// configuration turned it off: it is not registered, and the router reports
+    /// its schemes as undeliverable.
+    pub configure: fn(
+        &Settings<'_>,
+        WorkerDependencies,
+    ) -> Result<Option<Arc<dyn ResonateWorker>>, ConfigError>,
 }
 
 impl WorkerPlugin {
+    #[allow(clippy::type_complexity)]
     pub const fn new(
         id: &'static str,
         krate: &'static str,
         schemes: &'static [&'static str],
-        configure: fn(&Settings<'_>) -> Result<Option<WorkerFactory>, ConfigError>,
+        configure: fn(
+            &Settings<'_>,
+            WorkerDependencies,
+        ) -> Result<Option<Arc<dyn ResonateWorker>>, ConfigError>,
     ) -> Self {
         Self {
             id,
@@ -116,16 +122,15 @@ impl ServerDependencies {
     }
 }
 
-/// Build the server, once the router and its workers exist.
-pub type ServerFactory = Box<dyn FnOnce(ServerDependencies) -> Arc<dyn ResonateServer> + Send>;
-
-/// Acquire what the server needs — a connection pool, a schema, a session.
-/// Async and fallible, and run before anything else, so a database that will not
-/// answer is a startup failure rather than a half-built process.
-pub type ServerConnect = Box<
-    dyn FnOnce() -> Pin<Box<dyn Future<Output = Result<ServerFactory, StartupError>> + Send>>
-        + Send,
->;
+/// A server under construction: connecting, and whatever it does with what it
+/// connected to.
+///
+/// The one place a future appears in this crate. A server is the only kind that
+/// does I/O to come into existence — a pool, a schema, a session — and it is
+/// fallible in a way that is not the operator's config being wrong, which is why
+/// it carries a [`StartupError`] rather than a [`ConfigError`].
+pub type ServerFuture =
+    Pin<Box<dyn Future<Output = Result<Arc<dyn ResonateServer>, StartupError>> + Send>>;
 
 /// A plugin that answers Resonate protocol requests.
 ///
@@ -134,24 +139,32 @@ pub type ServerConnect = Box<
 /// to somewhere else, a model in memory — is its own business and stays inside
 /// its own crate.
 ///
-/// Three phases where the others have two, because connecting is asynchronous
-/// and fallible while the rest of the wiring is neither. And no `Option`: a
-/// binary has one server, chosen by name, so switching it off is not a thing to
-/// express.
+/// The only kind that is asynchronous to build, and the only one with no
+/// `Option`: a binary has one server, chosen by name, so switching it off is not
+/// a thing to express.
+// The `configure` signature below is long, and naming it would only move it
+// somewhere a reader has to go and look. It is the one thing a plugin author
+// has to understand, so it is written where they will read it.
+#[allow(clippy::type_complexity)]
 #[non_exhaustive]
 pub struct ServerPlugin {
     /// Its configuration key is `servers.<id>`, and `servers.active` is how one
     /// is chosen.
     pub id: &'static str,
     pub krate: &'static str,
-    pub configure: fn(&Settings<'_>) -> Result<ServerConnect, ConfigError>,
+    /// Read the settings, then connect.
+    ///
+    /// Two steps rather than one, and the split is the two ways this can fail:
+    /// settings are read synchronously, so a bad one is reported before a socket
+    /// is opened, and the future that follows owns what it read.
+    pub configure: fn(&Settings<'_>, ServerDependencies) -> Result<ServerFuture, ConfigError>,
 }
 
 impl ServerPlugin {
     pub const fn new(
         id: &'static str,
         krate: &'static str,
-        configure: fn(&Settings<'_>) -> Result<ServerConnect, ConfigError>,
+        configure: fn(&Settings<'_>, ServerDependencies) -> Result<ServerFuture, ConfigError>,
     ) -> Self {
         Self {
             id,
@@ -178,25 +191,35 @@ impl GatewayDependencies {
     }
 }
 
-/// Build the gateway. Binding a port belongs in its `init`, not here — a gateway
-/// is the last thing to start.
-pub type GatewayFactory = Box<dyn FnOnce(GatewayDependencies) -> Arc<dyn ResonateGateway> + Send>;
-
 /// A plugin that accepts requests from outside and puts them to the server.
+// The `configure` signature below is long, and naming it would only move it
+// somewhere a reader has to go and look. It is the one thing a plugin author
+// has to understand, so it is written where they will read it.
+#[allow(clippy::type_complexity)]
 #[non_exhaustive]
 pub struct GatewayPlugin {
     /// Its configuration key is `gateways.<id>`.
     pub id: &'static str,
     pub krate: &'static str,
+    /// Read this plugin's settings and build it. Binding a port belongs in the
+    /// gateway's own `init`, not here — a gateway is the last thing to start.
+    ///
     /// `None` means this plugin's own configuration turned it off.
-    pub configure: fn(&Settings<'_>) -> Result<Option<GatewayFactory>, ConfigError>,
+    pub configure: fn(
+        &Settings<'_>,
+        GatewayDependencies,
+    ) -> Result<Option<Arc<dyn ResonateGateway>>, ConfigError>,
 }
 
 impl GatewayPlugin {
+    #[allow(clippy::type_complexity)]
     pub const fn new(
         id: &'static str,
         krate: &'static str,
-        configure: fn(&Settings<'_>) -> Result<Option<GatewayFactory>, ConfigError>,
+        configure: fn(
+            &Settings<'_>,
+            GatewayDependencies,
+        ) -> Result<Option<Arc<dyn ResonateGateway>>, ConfigError>,
     ) -> Self {
         Self {
             id,

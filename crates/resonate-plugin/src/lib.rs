@@ -21,7 +21,7 @@
 //!     "kafka",
 //!     env!("CARGO_PKG_NAME"),
 //!     &["kafka"],
-//!     |settings| {
+//!     |settings, deps| {
 //!         let config: Config = settings.extract()?;
 //!         if !config.enabled {
 //!             return Ok(None);
@@ -29,15 +29,13 @@
 //!         if config.brokers.is_empty() {
 //!             return Err(settings.reject("brokers", "at least one broker is required"));
 //!         }
-//!         Ok(Some(Box::new(move |deps: WorkerDependencies| {
-//!             Arc::new(KafkaTransport::new(deps.server, config)) as Arc<dyn ResonateWorker>
-//!         })))
+//!         Ok(Some(Arc::new(KafkaTransport::new(deps.server, config))))
 //!     },
 //! );
 //! ```
 //!
-//! Identity is data and the factory is behaviour, so reading a plugin never
-//! requires running it. Defaults are the `#[serde(default)]` on the plugin's own
+//! Identity is data and building is behaviour, so reading a plugin
+//! never requires running it. Defaults are the `#[serde(default)]` on the plugin's own
 //! `Config` — a section nobody has configured reads as an empty one — so nothing
 //! is declared twice and the loader does not need to know the registry. The
 //! typed `Config` is captured by the closure and never named outside the
@@ -54,17 +52,16 @@
 //! let router = Arc::new(Dispatcher::new());
 //!
 //! // 2. The server, handed that router.
-//! let connect = (chosen.configure)(&config.server(chosen.id))?;
-//! let build = connect().await?;
-//! let server = build(ServerDependencies::new(Arc::clone(&router) as _, debug));
+//! let deps = ServerDependencies::new(Arc::clone(&router) as _, debug);
+//! let server = (chosen.configure)(&config.server(chosen.id), deps)?.await?;
 //!
 //! // 3. The workers, each downgrading the server that now exists.
 //! let mut workers = HashMap::new();
 //! for plugin in registry.workers() {
-//!     let Some(build) = (plugin.configure)(&config.worker(plugin.id))? else {
+//!     let deps = WorkerDependencies::new(Arc::downgrade(&server));
+//!     let Some(worker) = (plugin.configure)(&config.worker(plugin.id), deps)? else {
 //!         continue; // turned itself off
 //!     };
-//!     let worker = build(WorkerDependencies::new(Arc::downgrade(&server)));
 //!     for scheme in plugin.schemes {
 //!         workers.insert(scheme.to_string(), Arc::clone(&worker));
 //!     }
@@ -114,8 +111,8 @@ pub mod registry;
 pub use config::{Configuration, Loader, Settings};
 pub use error::{ConfigError, RegistryError, StartupError};
 pub use plugin::{
-    GatewayDependencies, GatewayFactory, GatewayPlugin, ServerConnect, ServerDependencies,
-    ServerFactory, ServerPlugin, WorkerDependencies, WorkerFactory, WorkerPlugin,
+    GatewayDependencies, GatewayPlugin, ServerDependencies, ServerFuture, ServerPlugin,
+    WorkerDependencies, WorkerPlugin,
 };
 pub use registry::Registry;
 
