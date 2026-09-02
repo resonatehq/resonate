@@ -519,14 +519,11 @@ async fn the_oracle_answers_the_console() {
 async fn every_backend_gives_the_same_answer() {
     let sqlite = sqlite();
     let oracle = oracle();
-    #[allow(unused_mut)] // only postgres and mysql push onto it
     let mut engines: Vec<(&str, &dyn Engine)> = vec![("sqlite", &sqlite), ("oracle", &oracle)];
 
     // Postgres and MySQL join when a database is named, as in the
     // differential. `debug.reset` first: these are shared databases.
-    #[cfg(feature = "postgres")]
     let pg;
-    #[cfg(feature = "postgres")]
     if let Ok(url) = std::env::var("TEST_POSTGRES_URL") {
         pg = resonate_server_postgres::PostgresEngine::connect(&url, 4, 30_000, 10, true)
             .await
@@ -536,9 +533,7 @@ async fn every_backend_gives_the_same_answer() {
         engines.push(("postgres", &pg));
     }
 
-    #[cfg(feature = "mysql")]
     let my;
-    #[cfg(feature = "mysql")]
     if let Ok(url) = std::env::var("TEST_MYSQL_URL") {
         my = resonate_server_mysql::MysqlEngine::connect(&url, 4, 30_000, 10, true)
             .await
@@ -551,7 +546,6 @@ async fn every_backend_gives_the_same_answer() {
     same_answers(&engines).await;
 }
 
-#[allow(dead_code)] // only the optional backends need clearing
 async fn reset(engine: &dyn Engine) {
     let _ = call(engine, "debug.reset", json!({}), T0).await;
 }

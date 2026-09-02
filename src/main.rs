@@ -24,19 +24,6 @@
 mod serve;
 
 use clap::{Parser, Subcommand};
-// A server with no storage plugin cannot serve, and `Registry::check` would
-// report it — at startup, after the binary was built and shipped. This is the
-// same mistake caught where it was made.
-#[cfg(not(any(
-    feature = "sqlite",
-    feature = "postgres",
-    feature = "mysql",
-    feature = "scylladb"
-)))]
-compile_error!(
-    "at least one storage engine must be enabled: --features sqlite, postgres, mysql or scylladb"
-);
-
 use resonate_base::Registry;
 
 #[derive(Parser)]
@@ -79,27 +66,11 @@ enum Commands {
 /// set changes: a dependency in Cargo.toml, and a line here. Server, worker,
 /// gateway — the order they are built in.
 fn registry() -> Registry {
-    #[allow(unused_mut)]
-    let mut registry = Registry::new();
-
-    #[cfg(feature = "sqlite")]
-    {
-        registry = registry.server(&resonate_server_sqlite::PLUGIN);
-    }
-    #[cfg(feature = "postgres")]
-    {
-        registry = registry.server(&resonate_server_postgres::PLUGIN);
-    }
-    #[cfg(feature = "mysql")]
-    {
-        registry = registry.server(&resonate_server_mysql::PLUGIN);
-    }
-    #[cfg(feature = "scylladb")]
-    {
-        registry = registry.server(&resonate_server_scylladb::PLUGIN);
-    }
-
-    registry
+    Registry::new()
+        .server(&resonate_server_sqlite::PLUGIN)
+        .server(&resonate_server_postgres::PLUGIN)
+        .server(&resonate_server_mysql::PLUGIN)
+        .server(&resonate_server_scylladb::PLUGIN)
         .worker(&resonate_transport_http_push::PLUGIN)
         .worker(&resonate_transport_http_poll::PLUGIN)
         .worker(&resonate_transport_gcps::PLUGIN)

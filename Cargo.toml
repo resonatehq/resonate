@@ -47,22 +47,21 @@ path = "src/main.rs"
 [[test]]
 name = "differential"
 path = "diff/differential.rs"
-# It compares the engines against each other, so it needs all of them; with any
-# turned off cargo skips the target rather than failing to build it.
-required-features = ["sqlite", "postgres", "mysql"]
+# It compares the engines against each other. They are all compiled in, so
+# there is nothing to require.
 
 [features]
-# One optional dependency per engine now, rather than features forwarded into
-# a crate that held all three. This is the same mechanism a binary assembled
-# outside this repository uses: name the plugins you want.
-default = ["sqlite", "postgres", "mysql", "scylladb"]
-sqlite = ["dep:resonate-server-sqlite"]
-postgres = ["dep:resonate-server-postgres"]
-mysql = ["dep:resonate-server-mysql"]
-scylladb = ["dep:resonate-server-scylladb"]
+# No feature per plugin. Choosing plugins is what a *binary* does, by naming
+# them — a dependency here and a line in `registry()` — and this binary is the
+# one that carries all of them. A feature would be a second way to say the same
+# thing, and the two drifted: a `--features postgres` build still had a default
+# of `server_sqlite` and could not start.
+#
+# See "Build a server with the plugins you want" in the README for the shape a
+# smaller build takes: ten lines of `main`, and only what it names is compiled.
 concurrency-stress = [
-    "resonate-server-sqlite?/concurrency-stress",
-    "resonate-server-mysql?/concurrency-stress",
+    "resonate-server-sqlite/concurrency-stress",
+    "resonate-server-mysql/concurrency-stress",
 ]
 
 [dependencies]
@@ -70,10 +69,10 @@ concurrency-stress = [
 # makes this *this* server is the registry in `main.rs`.
 resonate-base = { path = "crates/resonate-base" }
 resonate-plugin = { path = "crates/resonate-plugin" }
-resonate-server-sqlite = { path = "crates/resonate-server-sqlite", optional = true }
-resonate-server-postgres = { path = "crates/resonate-server-postgres", optional = true }
-resonate-server-mysql = { path = "crates/resonate-server-mysql", optional = true }
-resonate-server-scylladb = { path = "crates/resonate-server-scylladb", optional = true }
+resonate-server-sqlite = { path = "crates/resonate-server-sqlite" }
+resonate-server-postgres = { path = "crates/resonate-server-postgres" }
+resonate-server-mysql = { path = "crates/resonate-server-mysql" }
+resonate-server-scylladb = { path = "crates/resonate-server-scylladb" }
 resonate-transport-http-push = { path = "crates/resonate-transport-http-push" }
 resonate-transport-http-poll = { path = "crates/resonate-transport-http-poll" }
 resonate-transport-gcps = { path = "crates/resonate-transport-gcps" }
