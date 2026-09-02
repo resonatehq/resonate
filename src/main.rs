@@ -335,8 +335,11 @@ async fn run_server(config: Config) -> Result<(), String> {
 
         transports = Some(Transports { poll_registry });
 
-        let router: Arc<dyn ResonateRouter> =
-            Arc::new(transport::TransportDispatcher::new(workers));
+        let dispatcher = transport::TransportDispatcher::new();
+        dispatcher
+            .install(workers)
+            .expect("the router is built here and nowhere else");
+        let router: Arc<dyn ResonateRouter> = Arc::new(dispatcher);
         // The timer's callbacks point back at the server too, so it is built
         // from the same weak handle and in the same expression. Nothing runs
         // until `start_timer` below.

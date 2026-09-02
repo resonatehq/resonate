@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
 
@@ -17,12 +17,49 @@ use resonate_core::{scheme_of, Cause, ResonateRouter, ResonateWorker, Unavailabl
 /// Registering a new scheme is therefore the whole cost of adding a worker —
 /// nothing here, and nothing in `core`, has to change.
 pub struct TransportDispatcher {
-    workers: HashMap<String, Arc<dyn ResonateWorker>>,
+    /// Written once, at startup, and read on every message after.
+    ///
+    /// The router is the only participant that starts incomplete, and that is
+    /// what breaks the cycle: a worker needs the server, the server is built
+    /// from the router, so something has to exist before what it holds. Making
+    /// it the router costs one `OnceLock` in a type no plugin ever sees — the
+    /// alternatives were a handle to a server that did not exist yet, or
+    /// interior mutability inside every server plugin.
+    workers: OnceLock<HashMap<String, Arc<dyn ResonateWorker>>>,
+}
+
+impl Default for TransportDispatcher {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TransportDispatcher {
-    pub fn new(workers: HashMap<String, Arc<dyn ResonateWorker>>) -> Self {
-        Self { workers }
+    /// A router with nothing to route to yet. Built first, so the server has
+    /// something to be handed.
+    pub fn new() -> Self {
+        Self {
+            workers: OnceLock::new(),
+        }
+    }
+
+    /// Hand it the workers. Complete from here, and never changed again.
+    ///
+    /// A second call is refused rather than ignored: the losing set would be
+    /// silently unreachable, which is a wiring bug worth hearing about.
+    pub fn install(
+        &self,
+        workers: HashMap<String, Arc<dyn ResonateWorker>>,
+    ) -> Result<(), &'static str> {
+        self.workers
+            .set(workers)
+            .map_err(|_| "the router already has its workers")
+    }
+
+    /// What it can route to. Empty until `install`, so an address that arrives
+    /// before startup finishes is reported undeliverable rather than panicking.
+    fn workers(&self) -> Option<&HashMap<String, Arc<dyn ResonateWorker>>> {
+        self.workers.get()
     }
 }
 
@@ -30,7 +67,7 @@ impl TransportDispatcher {
     async fn route_inner(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
         let scheme = scheme_of(address)
             .ok_or_else(|| Unavailable::unroutable(format!("address is not a URI: {address}")))?;
-        let worker = self.workers.get(&scheme).ok_or_else(|| {
+        let worker = self.workers().and_then(|w| w.get(&scheme)).ok_or_else(|| {
             Unavailable::unroutable(format!("no worker registered for scheme '{scheme}'"))
         })?;
         worker.process(address, msg).await
@@ -47,7 +84,7 @@ impl ResonateRouter for TransportDispatcher {
     /// worker may be registered under several schemes; each gets its own
     /// `init`, which is the behaviour that was here before this moved.
     async fn init(&self, debug: bool) -> Result<(), Unavailable> {
-        for (scheme, worker) in &self.workers {
+        for (scheme, worker) in self.workers().into_iter().flatten() {
             worker.init(debug).await.map_err(|e| {
                 Unavailable::new(format!("transport '{scheme}' failed to start: {e}"))
             })?;
@@ -61,7 +98,7 @@ impl ResonateRouter for TransportDispatcher {
     /// down, and one transport refusing to drain is no reason to leave the
     /// others running.
     async fn stop(&self) -> Result<(), Unavailable> {
-        for (scheme, worker) in &self.workers {
+        for (scheme, worker) in self.workers().into_iter().flatten() {
             if let Err(e) = worker.stop().await {
                 tracing::warn!(scheme = %scheme, error = %e, "transport did not stop cleanly");
             }
@@ -162,11 +199,15 @@ mod tests {
     fn router_with(scheme: &str, stub: Arc<RecordingWorker>) -> TransportDispatcher {
         let mut workers: HashMap<String, Arc<dyn ResonateWorker>> = HashMap::new();
         workers.insert(scheme.to_string(), stub);
-        TransportDispatcher::new(workers)
+        let router = TransportDispatcher::new();
+        router.install(workers).unwrap();
+        router
     }
 
     fn empty_router() -> TransportDispatcher {
-        TransportDispatcher::new(HashMap::new())
+        let router = TransportDispatcher::new();
+        router.install(HashMap::new()).unwrap();
+        router
     }
 
     #[tokio::test]
@@ -237,7 +278,9 @@ mod tests {
         }
         let mut workers: HashMap<String, Arc<dyn ResonateWorker>> = HashMap::new();
         workers.insert("poll".to_string(), Arc::new(FailingWorker));
-        let err = TransportDispatcher::new(workers)
+        let router = TransportDispatcher::new();
+        router.install(workers).unwrap();
+        let err = router
             .route("poll://any@g", &execute_msg())
             .await
             .expect_err("worker failed");
@@ -268,5 +311,26 @@ mod tests {
         // Including the malformed one: rejecting it is the worker's job, not
         // the router's.
         assert_eq!(calls[2].0, "poll://malformed");
+    }
+
+    #[tokio::test]
+    async fn a_router_with_nothing_installed_reports_undeliverable() {
+        // The window between the router being built and its workers arriving.
+        // Nothing routes then — no gateway is listening — but it must report
+        // rather than panic if anything does.
+        let err = TransportDispatcher::new()
+            .route("http://example.com/", &execute_msg())
+            .await
+            .expect_err("no workers yet");
+        assert_eq!(err.cause, Cause::Unroutable);
+    }
+
+    #[tokio::test]
+    async fn workers_are_installed_once() {
+        let router = TransportDispatcher::new();
+        router.install(HashMap::new()).unwrap();
+        router
+            .install(HashMap::new())
+            .expect_err("the losing set would be silently unreachable");
     }
 }
