@@ -46,25 +46,49 @@
 //!
 //! # Startup order
 //!
-//! The three kinds have to be built in one order, and it is the reason a worker
-//! holds its server weakly:
+//! The three kinds are built in one order, and it is the whole of what a plugin
+//! may assume about when it is called:
 //!
-//! ```text
-//! 1. the router, empty
-//! 2. the server        — handed the router
-//! 3. the workers       — handed a Weak to the server, which now exists
-//! 4. install the workers into the router
-//! 5. the gateways      — handed a strong Arc to the server; they bind last
+//! ```ignore
+//! // 1. The router, empty.
+//! let router = Arc::new(Dispatcher::new());
+//!
+//! // 2. The server, handed that router.
+//! let connect = (chosen.configure)(&config.server(chosen.id))?;
+//! let build = connect().await?;
+//! let server = build(&ServerCtx::new(Arc::clone(&router) as _, debug));
+//!
+//! // 3. The workers, each downgrading the server that now exists.
+//! let mut workers = HashMap::new();
+//! for plugin in registry.workers() {
+//!     let Some(build) = (plugin.configure)(&config.worker(plugin.id))? else {
+//!         continue; // turned itself off
+//!     };
+//!     let worker = build(&WorkerCtx::new(Arc::downgrade(&server), lease_timeout));
+//!     for scheme in plugin.schemes {
+//!         workers.insert(scheme.to_string(), Arc::clone(&worker));
+//!     }
+//! }
+//!
+//! // 4. Install them. The router is complete from here and never changes again.
+//! router.install(workers);
+//!
+//! // 5. The gateways, holding the server strongly. They bind last, because
+//! //    accepting a request the rest of the process cannot serve is worse than
+//! //    not accepting it.
 //! ```
 //!
-//! Step 4 is what closes it. The router is the only thing that starts
-//! incomplete, so nothing needs a handle to a value that does not exist yet, and
-//! no plugin is constructed before what it is handed. The `Weak` at step 3 is
-//! not about ordering — the server is right there — it is that the server holds
-//! the router and the router holds the workers, so a strong handle back would be
-//! a cycle nothing in could ever be dropped from.
+//! Step 4 is what closes the cycle — server holds router, router holds workers,
+//! workers hold server — and the router is the only participant that starts
+//! incomplete. So nothing is ever handed a value that does not exist yet, and no
+//! plugin is constructed before the thing it is given.
 //!
-//! Nothing can route between steps 2 and 4: no gateway is listening and no
+//! The `Weak` at step 3 is not about ordering; the server is right there. It is
+//! that a strong handle back would close that cycle in `Arc`s, and nothing in it
+//! would ever be dropped. Upgrade per message: a failed upgrade means the server
+//! is gone and there is no work worth doing.
+//!
+//! Nothing can route between steps 2 and 4 — no gateway is listening and no
 //! background loop has started.
 //!
 //! # Assembling a binary
