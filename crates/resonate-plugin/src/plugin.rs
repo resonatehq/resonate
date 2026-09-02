@@ -17,34 +17,19 @@ use crate::error::{ConfigError, StartupError};
 
 // ─── Worker ──────────────────────────────────────────────────────────────────
 
-/// What a worker is handed.
+/// Build the worker, given the server it reports back to.
 ///
-/// The server handle is [`Weak`] deliberately: a router holds its workers and a
-/// server holds its router, so a strong handle back would close a reference
-/// cycle and nothing in it would ever be dropped. Upgrade per message; a failed
-/// upgrade means the server is gone and there is no work worth doing.
-#[non_exhaustive]
-pub struct WorkerCtx {
-    pub server: Weak<dyn ResonateServer>,
-    /// `tasks.lease_timeout` — what an in-process worker requests when it
-    /// acquires, unless it has an opinion of its own. Server-owned, so it
-    /// cannot come out of the plugin's own settings.
-    pub task_lease_timeout: i64,
-}
-
-impl WorkerCtx {
-    pub fn new(server: Weak<dyn ResonateServer>, task_lease_timeout: i64) -> Self {
-        Self {
-            server,
-            task_lease_timeout,
-        }
-    }
-}
-
-/// Build the worker. Sync and infallible: everything that can fail belongs in
-/// `configure`, and everything that starts background work belongs in the
-/// worker's own `init`.
-pub type WorkerFactory = Box<dyn FnOnce(&WorkerCtx) -> Arc<dyn ResonateWorker> + Send>;
+/// Sync and infallible: everything that can fail belongs in `configure`, and
+/// everything that starts background work belongs in the worker's own `init`.
+/// The handle is the only thing a worker cannot get from its own settings —
+/// everything else it needs it declares, with its own defaults.
+///
+/// [`Weak`] deliberately: a router holds its workers and a server holds its
+/// router, so a strong handle back would close a reference cycle and nothing in
+/// it would ever be dropped. Upgrade per message; a failed upgrade means the
+/// server is gone and there is no work worth doing.
+pub type WorkerFactory =
+    Box<dyn FnOnce(Weak<dyn ResonateServer>) -> Arc<dyn ResonateWorker> + Send>;
 
 /// A plugin that consumes what a server emits.
 pub struct WorkerPlugin {
@@ -84,30 +69,28 @@ impl WorkerPlugin {
 
 // ─── Server ──────────────────────────────────────────────────────────────────
 
-/// What a server is handed: the router it delivers through, and a handle to
-/// itself, which its workers already hold.
+/// What a server is handed: the two things it cannot read out of its own
+/// settings.
+///
+/// The router exists before the server and is still empty — its workers are
+/// installed once the server they hold a handle to exists. A server that needs a
+/// handle to *itself* (an engine-backed one arms its timer with one) makes it
+/// inside its own crate, where the concrete type is known.
+///
+/// `debug` is process-wide rather than any plugin's setting, and a server is the
+/// only kind with nowhere else to receive it: a worker and a gateway are handed
+/// it by their own `init`.
 #[non_exhaustive]
 pub struct ServerCtx {
     pub router: Arc<dyn ResonateRouter>,
-    /// The place this server is about to fill. Store it; the handle is not yet
-    /// fulfilled while the factory runs.
-    pub this: Weak<dyn ResonateServer>,
-    /// The process-wide debug flag: the clock belongs to the caller, so nothing
-    /// may start work that runs on wall time.
+    /// The clock belongs to the caller, so nothing may start work that runs on
+    /// wall time.
     pub debug: bool,
 }
 
 impl ServerCtx {
-    pub fn new(
-        router: Arc<dyn ResonateRouter>,
-        this: Weak<dyn ResonateServer>,
-        debug: bool,
-    ) -> Self {
-        Self {
-            router,
-            this,
-            debug,
-        }
+    pub fn new(router: Arc<dyn ResonateRouter>, debug: bool) -> Self {
+        Self { router, debug }
     }
 }
 
@@ -157,23 +140,14 @@ impl ServerPlugin {
 
 // ─── Gateway ─────────────────────────────────────────────────────────────────
 
-/// What a gateway is handed. Strong, unlike a worker: a gateway is not in the
-/// reference cycle, and it keeps its server alive for exactly as long as it can
-/// still accept a request.
-#[non_exhaustive]
-pub struct GatewayCtx {
-    pub server: Arc<dyn ResonateServer>,
-}
-
-impl GatewayCtx {
-    pub fn new(server: Arc<dyn ResonateServer>) -> Self {
-        Self { server }
-    }
-}
-
-/// Build the gateway. Binding a port belongs in its `init`, not here — a
-/// gateway is the last thing to start.
-pub type GatewayFactory = Box<dyn FnOnce(GatewayCtx) -> Arc<dyn ResonateGateway> + Send>;
+/// Build the gateway, given the server it puts requests to.
+///
+/// Strong, unlike a worker: a gateway is not in the reference cycle, and it
+/// keeps its server alive for exactly as long as it can still accept a request.
+/// Binding a port belongs in its `init`, not here — a gateway is the last thing
+/// to start.
+pub type GatewayFactory =
+    Box<dyn FnOnce(Arc<dyn ResonateServer>) -> Arc<dyn ResonateGateway> + Send>;
 
 /// A plugin that accepts requests from outside and puts them to the server.
 pub struct GatewayPlugin {

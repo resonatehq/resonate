@@ -29,8 +29,8 @@
 //!         if config.brokers.is_empty() {
 //!             return Err(settings.reject("brokers", "at least one broker is required"));
 //!         }
-//!         Ok(Some(Box::new(move |ctx: &WorkerCtx| {
-//!             Arc::new(KafkaTransport::new(ctx.server.clone(), config)) as Arc<dyn ResonateWorker>
+//!         Ok(Some(Box::new(move |server| {
+//!             Arc::new(KafkaTransport::new(server, config)) as Arc<dyn ResonateWorker>
 //!         })))
 //!     },
 //! );
@@ -64,7 +64,7 @@
 //!     let Some(build) = (plugin.configure)(&config.worker(plugin.id))? else {
 //!         continue; // turned itself off
 //!     };
-//!     let worker = build(&WorkerCtx::new(Arc::downgrade(&server), lease_timeout));
+//!     let worker = build(Arc::downgrade(&server));
 //!     for scheme in plugin.schemes {
 //!         workers.insert(scheme.to_string(), Arc::clone(&worker));
 //!     }
@@ -114,8 +114,8 @@ pub mod registry;
 pub use config::{Configuration, Loader, Settings};
 pub use error::{ConfigError, RegistryError, StartupError};
 pub use plugin::{
-    GatewayCtx, GatewayFactory, GatewayPlugin, ServerConnect, ServerCtx, ServerFactory,
-    ServerPlugin, WorkerCtx, WorkerFactory, WorkerPlugin,
+    GatewayFactory, GatewayPlugin, ServerConnect, ServerCtx, ServerFactory, ServerPlugin,
+    WorkerFactory, WorkerPlugin,
 };
 pub use registry::Registry;
 
