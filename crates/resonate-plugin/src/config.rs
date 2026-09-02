@@ -16,6 +16,7 @@ use figment::{
 };
 
 use crate::error::ConfigError;
+use crate::manifest::Kind;
 use crate::registry::Registry;
 
 /// The framework-owned key under every plugin's section.
@@ -38,13 +39,31 @@ impl Loader {
     /// contributes nothing and cannot be configured by accident.
     pub fn new(registry: &Registry) -> Self {
         let mut figment = Figment::new();
-        for plugin in registry.workers() {
-            let key = plugin.manifest.config_key();
-            figment = figment.merge(Serialized::default(&key, (plugin.defaults)()));
-            figment = figment.merge(Serialized::default(
-                &format!("{key}.{ENABLED}"),
-                plugin.manifest.default_enabled,
-            ));
+        let defaults = registry
+            .servers()
+            .iter()
+            .map(|p| (Kind::Server, p.manifest, (p.defaults)()))
+            .chain(
+                registry
+                    .workers()
+                    .iter()
+                    .map(|p| (Kind::Worker, p.manifest, (p.defaults)())),
+            )
+            .chain(
+                registry
+                    .gateways()
+                    .iter()
+                    .map(|p| (Kind::Gateway, p.manifest, (p.defaults)())),
+            );
+        for (kind, manifest, value) in defaults {
+            let key = manifest.config_key(kind);
+            figment = figment.merge(Serialized::default(&key, value));
+            if !kind.is_selected() {
+                figment = figment.merge(Serialized::default(
+                    &format!("{key}.{ENABLED}"),
+                    manifest.default_enabled,
+                ));
+            }
         }
         Self { figment }
     }
@@ -109,11 +128,19 @@ pub struct Loaded {
 
 impl Loaded {
     /// One plugin's slice of the configuration.
-    pub fn settings(&self, id: &str) -> Settings<'_> {
+    pub fn settings(&self, kind: Kind, id: &str) -> Settings<'_> {
         Settings {
             figment: &self.figment,
-            key: format!("{}.{}", crate::SECTION, id),
+            key: format!("{}.{}", kind.section(), id),
         }
+    }
+
+    /// Which server this configuration points at, or the fallback when it says
+    /// nothing.
+    pub fn active_server(&self, fallback: &str) -> String {
+        self.figment
+            .extract_inner::<String>(&format!("{}.active", Kind::Server.section()))
+            .unwrap_or_else(|_| fallback.to_string())
     }
 
     /// Extract the server's own configuration — everything that is not a

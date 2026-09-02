@@ -1,9 +1,16 @@
-//! The Resonate worker plugin surface.
+//! The Resonate plugin surface.
 //!
-//! What a worker plugin announces, how it is configured, and how a binary
-//! assembles one. This is the crate every plugin pins, so it is deliberately
-//! small: a manifest, a plugin, a registry, and the configuration loader. No
+//! What a plugin announces, how it is configured, and how a binary assembles
+//! one. This is the crate every plugin pins, so it is deliberately small:
+//! manifests, three plugin shapes, a registry, and the configuration loader. No
 //! transport, no storage, no runtime.
+//!
+//! A plugin is one of three things, and the kind decides how a binary composes
+//! it: a [`ServerPlugin`] answers protocol requests and is *selected*, one per
+//! binary; a [`WorkerPlugin`] consumes what the server emits and is
+//! *registered*, keyed by the address schemes it claims; a [`GatewayPlugin`]
+//! accepts requests from outside and is registered too, switched on or off
+//! independently.
 //!
 //! # Writing one
 //!
@@ -41,25 +48,29 @@
 //! ```ignore
 //! fn main() -> ExitCode {
 //!     resonate::run(Registry::new()
+//!         .server(&resonate_server_dbms::SQLITE)
+//!         .gateway(&resonate_gateway_http::PLUGIN)
 //!         .worker(&resonate_worker_kafka::PLUGIN))
 //! }
 //! ```
 
 pub mod config;
 pub mod error;
+pub mod handle;
 pub mod manifest;
 pub mod plugin;
 pub mod registry;
 
-/// The configuration section every worker plugin lives under.
-pub const SECTION: &str = "transports";
-
 pub use config::{Loaded, Loader, Settings, ENABLED};
-pub use error::{ConfigError, RegistryError};
-pub use manifest::Manifest;
-pub use plugin::{WorkerCtx, WorkerFactory, WorkerPlugin};
+pub use error::{ConfigError, RegistryError, StartupError};
+pub use handle::ServerHandle;
+pub use manifest::{Kind, Manifest};
+pub use plugin::{
+    GatewayCtx, GatewayFactory, GatewayPlugin, ServerConnect, ServerCtx, ServerFactory,
+    ServerPlugin, WorkerCtx, WorkerFactory, WorkerPlugin,
+};
 pub use registry::Registry;
 
 // The port traits a plugin implements, re-exported so a plugin crate names one
 // dependency rather than two.
-pub use resonate_core::{ResonateServer, ResonateWorker};
+pub use resonate_core::{ResonateGateway, ResonateRouter, ResonateServer, ResonateWorker};

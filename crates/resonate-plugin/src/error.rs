@@ -1,6 +1,8 @@
 //! What a plugin reports when it cannot be configured, and what a *set* of
 //! plugins reports when it does not hang together.
 
+use crate::manifest::Kind;
+
 /// A plugin's settings were missing, malformed, or invalid.
 ///
 /// Carries where the value came from, not just what was wrong with it: the same
@@ -50,6 +52,31 @@ impl std::fmt::Display for ConfigError {
 
 impl std::error::Error for ConfigError {}
 
+/// A plugin was configured correctly and still could not start: a database that
+/// will not answer, a port already bound, a credential rejected.
+#[derive(Debug, Clone)]
+pub struct StartupError {
+    pub plugin: String,
+    pub message: String,
+}
+
+impl StartupError {
+    pub fn new(plugin: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            plugin: plugin.into(),
+            message: message.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for StartupError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "'{}': {}", self.plugin, self.message)
+    }
+}
+
+impl std::error::Error for StartupError {}
+
 /// Something is wrong with the *set* of plugins a binary was assembled from,
 /// rather than with any one of them.
 ///
@@ -57,8 +84,9 @@ impl std::error::Error for ConfigError {}
 /// constructed — so a build can be checked before it is compiled.
 #[derive(Debug, Clone)]
 pub enum RegistryError {
-    /// Two plugins answer to one id.
+    /// Two plugins of one kind answer to one id.
     DuplicateId {
+        kind: Kind,
         id: String,
         krates: (String, String),
     },
@@ -72,14 +100,24 @@ pub enum RegistryError {
     /// A worker registered without claiming anything, so nothing could ever
     /// route to it.
     NoSchemes { id: String, krate: String },
+    /// A binary assembled with no server is not a server.
+    NoServer,
+    /// Configuration selected a server this binary does not carry. The
+    /// distinction that matters: not compiled in, rather than misconfigured.
+    NotCompiledIn {
+        requested: String,
+        available: Vec<String>,
+    },
 }
 
 impl std::fmt::Display for RegistryError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RegistryError::DuplicateId { id, krates: (a, b) } => {
-                write!(f, "two plugins answer to '{id}': {a} and {b}")
-            }
+            RegistryError::DuplicateId {
+                kind,
+                id,
+                krates: (a, b),
+            } => write!(f, "two {kind} plugins answer to '{id}': {a} and {b}"),
             RegistryError::DuplicateScheme {
                 scheme,
                 krates: (a, b),
@@ -90,6 +128,21 @@ impl std::fmt::Display for RegistryError {
             RegistryError::NoSchemes { id, krate } => write!(
                 f,
                 "worker '{id}' ({krate}) claims no address scheme, so nothing could route to it"
+            ),
+            RegistryError::NoServer => {
+                write!(f, "this binary was assembled without a server")
+            }
+            RegistryError::NotCompiledIn {
+                requested,
+                available,
+            } => write!(
+                f,
+                "server '{requested}' is not compiled into this binary; it carries: {}",
+                if available.is_empty() {
+                    "none".to_string()
+                } else {
+                    available.join(", ")
+                }
             ),
         }
     }
