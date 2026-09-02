@@ -197,6 +197,52 @@ Or, you can run it as an executable using the following command:
 ./target/release/resonate serve
 ```
 
+### Build a server with the plugins you want
+
+A Resonate server is a list of plugins and a `run`. Everything that varies —
+which storage backend answers requests, which transports deliver, which edges
+listen — is a plugin, and which ones a binary carries is decided by the binary,
+not by us. Cargo is the plugin manager: name what you want as a dependency,
+name it again in the registry, and only that is resolved, downloaded and
+compiled.
+
+`Cargo.toml`:
+
+```toml
+[dependencies]
+resonate-base = "0.9"
+resonate-server-postgres = "0.9"
+acme-worker-kafka = "1.2"          # anyone can publish one
+resonate-gateway-http = "0.9"
+tokio = { version = "1", features = ["full"] }
+```
+
+`src/main.rs`:
+
+```rust
+use resonate_base::Options;
+use resonate_plugin::Registry;
+
+#[tokio::main]
+async fn main() -> std::process::ExitCode {
+    resonate_base::main(
+        Registry::new()
+            .server(&resonate_server_postgres::PLUGIN)
+            .worker(&acme_worker_kafka::PLUGIN)
+            .gateway(&resonate_gateway_http::PLUGIN),
+        Options::default().default_server("server_postgres"),
+    )
+    .await
+}
+```
+
+That is the whole binary. It reads the same `resonate.toml`, the same
+`RESONATE_*` variables and the same `--set key=value` overrides as the one this
+repository ships; each plugin reads its own section, at `servers.<id>`,
+`workers.<id>` or `gateways.<id>`, where `<id>` is its crate name with the
+`resonate-` prefix dropped and dashes turned into underscores — so
+`acme-worker-kafka` configures itself under `[workers.acme_worker_kafka]`.
+
 ## Outbound authentication for HTTP push
 
 When the Resonate Server delivers execute messages to protected Cloud Functions or Cloud Run services, it can attach an outbound authentication header. Configure this under `[workers.transport_http_push.auth]`.

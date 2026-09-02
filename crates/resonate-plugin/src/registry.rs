@@ -11,10 +11,14 @@ use crate::plugin::{ServerPlugin, WorkerPlugin, GatewayPlugin};
 /// What a binary is assembled from.
 ///
 /// ```ignore
-/// resonate::run(Registry::new()
-///     .server(&resonate_server_dbms::SQLITE)
-///     .worker(&resonate_worker_kafka::PLUGIN)
-///     .gateway(&resonate_gateway_http::PLUGIN))
+/// resonate_base::main(
+///     Registry::new()
+///         .server(&resonate_server_postgres::PLUGIN)
+///         .worker(&acme_worker_kafka::PLUGIN)
+///         .gateway(&resonate_gateway_http::PLUGIN),
+///     Options::default().default_server("server_postgres"),
+/// )
+/// .await
 /// ```
 ///
 /// Explicit registration, not link-time collection. `inventory` and `linkme`

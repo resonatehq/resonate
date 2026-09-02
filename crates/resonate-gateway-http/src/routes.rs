@@ -52,12 +52,6 @@ lazy_static! {
 /// crate fronts the in-process engine, the reference model or a client for a
 /// remote server without knowing which.
 ///
-/// The poll registry is the one thing here that is not the gateway's own. It
-/// is a [`ResonateWorker`](resonate_core::ResonateWorker) — the far end of a
-/// `poll://` address — and it needs an HTTP endpoint to hand its connections
-/// out through. So the transport that owns those connections is handed in, and
-/// this serves them; it does not manage them, and stopping them is the
-/// transport's job, not this crate's.
 #[derive(Clone)]
 pub struct AppState {
     pub server: Arc<dyn ResonateServer>,
@@ -80,7 +74,7 @@ impl axum::extract::FromRef<AppState> for ApiState {
     }
 }
 
-/// API routes: RPC endpoint, health, readiness.
+/// API routes: the RPC endpoint, the readiness probe, and the legacy paths.
 pub fn api_routes() -> Router<AppState> {
     Router::new()
         .route("/", post(handle_api))

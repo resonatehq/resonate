@@ -55,18 +55,13 @@
 //!
 //! ```ignore
 //! // 1. The router, empty.
-//! let router = Arc::new(Dispatcher::new());
+//! let router = Arc::new(Router::new());
 //!
 //! // 2. The server, handed that router. Nothing is connected yet.
 //! let deps = ServerDependencies::new(Arc::clone(&router) as _);
 //! let server = (chosen.configure)(&config.server(&chosen.id()), deps)?;
 //!
 //! // 3. The workers, each downgrading the server that now exists.
-//! //    Two collections, because they answer different questions: `workers` is
-//! //    what was built, `routes` is how to reach it. One worker can claim
-//! //    several schemes, so it appears once in the first and several times in
-//! //    the second.
-//! let mut workers = Vec::new();
 //! let mut routes = HashMap::new();
 //! for plugin in registry.workers() {
 //!     let deps = WorkerDependencies::new(Arc::downgrade(&server));
@@ -76,7 +71,6 @@
 //!     for scheme in plugin.schemes {
 //!         routes.insert(scheme.to_string(), Arc::clone(&worker));
 //!     }
-//!     workers.push(worker);
 //! }
 //!
 //! // 4. Install them. The router is complete from here and never changes again.
@@ -86,9 +80,8 @@
 //! let gateways = /* (plugin.configure)(&config.gateway(&plugin.id()), deps)? */;
 //!
 //! // 6. Start, in the order things were built.
-//! router.init(debug).await?;
+//! router.init(debug).await?;   // and every worker it holds
 //! server.init(debug).await?;
-//! for worker in &workers   { worker.init(debug).await?; }
 //! for gateway in &gateways { gateway.init(debug).await?; }
 //! ```
 //!
@@ -99,10 +92,10 @@
 //! process cannot serve is worse than not accepting it, so the gateways are
 //! last.
 //!
-//! Each thing is started by whoever built it, which is this loop. A router does
-//! not drive its workers' lifecycle just because it holds them — and the routing
-//! table is the wrong thing to iterate for it, because a worker claiming two
-//! schemes is in there twice and would be started twice.
+//! The workers are started by the router, because it is the only thing that
+//! knows a worker's scheme — which is what a startup failure has to name. It
+//! iterates its own table, and one worker claiming two schemes gets one `init`
+//! per scheme, which is what a worker registered twice has always got.
 //!
 //! Step 4 is what closes the cycle — server holds router, router holds workers,
 //! workers hold server — and the router is the only participant that starts
@@ -116,10 +109,11 @@
 //!
 //! Shutdown is not the mirror image, and the exception is load-bearing: a
 //! gateway's graceful drain can be waiting on a long-lived response that only a
-//! worker's `stop` releases, so stopping the gateway first would deadlock. The
-//! workers stop, then the server, then the router, and the gateway last — which
-//! also means a client gets a 503 rather than a closed socket while in-flight
-//! work drains.
+//! worker's `stop` releases, so stopping the gateways first would deadlock. The
+//! server stops first — its timer is the only thing that can still hand it work
+//! of its own — then the workers, through the router that holds them, and the
+//! gateways last. Which also means a client gets a 503 rather than a closed
+//! socket while in-flight work drains.
 //!
 //! # Assembling a binary
 //!
@@ -128,11 +122,16 @@
 //! in [`Registry`], and only those are resolved, downloaded or compiled.
 //!
 //! ```ignore
-//! fn main() -> ExitCode {
-//!     resonate::run(Registry::new()
-//!         .server(&resonate_server_dbms::SQLITE)
-//!         .worker(&resonate_worker_kafka::PLUGIN)
-//!         .gateway(&resonate_gateway_http::PLUGIN))
+//! #[tokio::main]
+//! async fn main() -> ExitCode {
+//!     resonate_base::main(
+//!         Registry::new()
+//!             .server(&resonate_server_postgres::PLUGIN)
+//!             .worker(&acme_worker_kafka::PLUGIN)
+//!             .gateway(&resonate_gateway_http::PLUGIN),
+//!         Options::default().default_server("server_postgres"),
+//!     )
+//!     .await
 //! }
 //! ```
 
