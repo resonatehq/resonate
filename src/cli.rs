@@ -147,10 +147,10 @@ pub struct CommonArgs {
 
     /// SSE keepalive interval in seconds (0 = disabled) [default: 30]
     #[arg(
-        long = "transports-http-poll-keepalive-interval-secs",
+        long = "transports-http-poll-keepalive-interval",
         value_name = "SECS"
     )]
-    pub transports_http_poll_keepalive_interval_secs: Option<u64>,
+    pub transports_http_poll_keepalive_interval: Option<u64>,
 
     // --- HTTP Push Auth ---
     /// Outbound auth mode for HTTP push deliveries: none, bearer, gcp [default: none]
@@ -328,7 +328,7 @@ impl CommonArgs {
         if let Some(v) = self.transports_http_poll_buffer_size {
             config.transports.http_poll.buffer_size = v;
         }
-        if let Some(v) = self.transports_http_poll_keepalive_interval_secs {
+        if let Some(v) = self.transports_http_poll_keepalive_interval {
             config.transports.http_poll.keepalive_interval_secs = v;
         }
 
