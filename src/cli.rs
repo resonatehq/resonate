@@ -145,7 +145,7 @@ pub struct CommonArgs {
     #[arg(long = "transports-http-poll-buffer-size", value_name = "N")]
     pub transports_http_poll_buffer_size: Option<usize>,
 
-    /// SSE keepalive interval in milliseconds (0 = disabled) [default: 30_000]
+    /// SSE keepalive interval in milliseconds (0 = disabled) [default: 0]
     #[arg(long = "transports-http-poll-keepalive-interval", value_name = "MS")]
     pub transports_http_poll_keepalive_interval: Option<u64>,
 
