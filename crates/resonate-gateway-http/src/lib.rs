@@ -22,12 +22,11 @@ use axum::response::IntoResponse;
 use axum::Json;
 use resonate_core::types::ResponseEnvelope;
 use resonate_core::{ResonateGateway, ResonateServer, Unavailable};
-use resonate_transport_http_poll::PollRegistry;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
 
-pub use routes::{AppState, PollState};
+pub use routes::AppState;
 
 /// Where to listen, and how to behave once we do.
 ///
@@ -118,7 +117,6 @@ pub struct HttpGateway {
     /// handle: nothing points back at a gateway, so there is no cycle to break.
     server: Arc<dyn ResonateServer>,
     /// The poll transport, held until `init` builds the application around it.
-    poll_registry: Arc<PollRegistry>,
     /// The application, built by `init` — which is also the only place a
     /// socket is bound.
     app: Mutex<Option<axum::Router>>,
@@ -133,15 +131,10 @@ impl HttpGateway {
     /// `poll_registry` is the poll transport, which needs an endpoint to hand
     /// its connections out through — see [`routes::AppState`] for why it
     /// arrives here rather than being something this crate owns.
-    pub fn new(
-        server: Arc<dyn ResonateServer>,
-        poll_registry: Arc<PollRegistry>,
-        config: Config,
-    ) -> Self {
+    pub fn new(server: Arc<dyn ResonateServer>, config: Config) -> Self {
         Self {
             config,
             server,
-            poll_registry,
             extra: Mutex::new(None),
             app: Mutex::new(None),
             shutdown: Mutex::new(None),
@@ -181,7 +174,6 @@ fn build_app(
 ) -> axum::Router {
     let abort_on_panic = config.abort_on_panic;
     let mut app = routes::api_routes()
-        .merge(routes::poll_routes())
         .merge(extra.unwrap_or_default())
         .layer(tower_http::catch_panic::CatchPanicLayer::custom(
             move |err: Box<dyn std::any::Any + Send + 'static>| {
@@ -275,7 +267,6 @@ impl ResonateGateway for HttpGateway {
                 routes::AppState {
                     server: Arc::clone(&self.server),
                     auth,
-                    poll_registry: Arc::clone(&self.poll_registry),
                 },
                 &self.config,
                 extra,

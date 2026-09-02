@@ -264,15 +264,6 @@ async fn a_disabled_console_serves_nothing() {
 fn merged() -> Router {
     let oracle = Arc::new(SharedOracle::with_preload_limit(10));
     let server: Arc<dyn ResonateServer> = oracle.clone();
-    let weak: std::sync::Weak<dyn ResonateServer> = Arc::downgrade(&oracle) as _;
-    let poll_registry = Arc::new(resonate_transport_http_poll::PollRegistry::new(
-        weak,
-        resonate_transport_http_poll::Config {
-            enabled: true,
-            max_connections: 4,
-            buffer_size: 4,
-        },
-    ));
     let console = resonate_gateway_web::routes::<resonate_gateway_http::AppState>(
         &resonate_gateway_web::Config::default(),
         ConsoleState {
@@ -286,13 +277,8 @@ fn merged() -> Router {
     // routers claim the same method on the same path — `POST /` and `GET /`
     // are the pair that has to stay apart.
     resonate_gateway_http::routes::api_routes()
-        .merge(resonate_gateway_http::routes::poll_routes())
         .merge(console)
-        .with_state(resonate_gateway_http::AppState {
-            server,
-            auth: None,
-            poll_registry,
-        })
+        .with_state(resonate_gateway_http::AppState { server, auth: None })
 }
 
 #[tokio::test]

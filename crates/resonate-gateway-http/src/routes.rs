@@ -10,22 +10,18 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, State},
+    extract::State,
     http::StatusCode,
-    response::{
-        sse::{Event, Sse},
-        IntoResponse, Response,
-    },
+    response::IntoResponse,
     routing::{any, get, post},
     Json, Router,
 };
 use lazy_static::lazy_static;
 use prometheus::{register_counter_vec, register_histogram_vec, CounterVec, HistogramVec};
 
-use resonate_auth::{auth_check, auth_check_token, AuthConfig};
+use resonate_auth::{auth_check, AuthConfig};
 use resonate_core::types::{self, RequestEnvelope, ResponseEnvelope};
 use resonate_core::{ui, ResonateServer};
-use resonate_transport_http_poll::PollRegistry;
 
 lazy_static! {
     /// Requests by kind and status. Registered into prometheus' default
@@ -66,7 +62,6 @@ lazy_static! {
 pub struct AppState {
     pub server: Arc<dyn ResonateServer>,
     pub auth: Option<Arc<AuthConfig>>,
-    pub poll_registry: Arc<PollRegistry>,
 }
 
 // Sub-state for API handlers — the server, and whether to authenticate.
@@ -81,22 +76,6 @@ impl axum::extract::FromRef<AppState> for ApiState {
         ApiState {
             server: state.server.clone(),
             auth: state.auth.clone(),
-        }
-    }
-}
-
-// Sub-state for poll handler — authentication and the connection registry.
-#[derive(Clone)]
-pub struct PollState {
-    pub auth: Option<Arc<AuthConfig>>,
-    pub poll_registry: Arc<PollRegistry>,
-}
-
-impl axum::extract::FromRef<AppState> for PollState {
-    fn from_ref(state: &AppState) -> Self {
-        PollState {
-            auth: state.auth.clone(),
-            poll_registry: state.poll_registry.clone(),
         }
     }
 }
@@ -125,11 +104,6 @@ async fn handle_legacy() -> impl IntoResponse {
             "error": "This endpoint is no longer supported. Please update to the latest SDK."
         })),
     )
-}
-
-/// Poll transport routes: SSE endpoint for workers.
-pub fn poll_routes() -> Router<AppState> {
-    Router::new().route("/poll/:group/:id", get(handle_poll))
 }
 
 /// The one probe: this process is running and serving.
@@ -258,81 +232,4 @@ async fn handle_api(
         .with_label_values(&[&kind])
         .observe(start.elapsed().as_secs_f64());
     into_response(response)
-}
-
-async fn handle_poll(
-    State(poll_state): State<PollState>,
-    headers: axum::http::HeaderMap,
-    Path((group, id)): Path<(String, String)>,
-) -> Response {
-    // Authenticate when auth is configured.
-    if let Some(auth) = &poll_state.auth {
-        let token = headers
-            .get(axum::http::header::AUTHORIZATION)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.strip_prefix("Bearer "));
-
-        if auth_check_token(auth, token).is_err() {
-            tracing::warn!(group = %group, id = %id, "Poll connection rejected: unauthorized");
-            return (StatusCode::UNAUTHORIZED, "Unauthorized").into_response();
-        }
-    }
-
-    tracing::info!(group = %group, id = %id, "Poll SSE connection requested");
-    let registry = &poll_state.poll_registry;
-
-    let rx = registry.register(&group, &id).await;
-
-    match rx {
-        Some((conn_id, mut rx)) => {
-            tracing::info!(
-                group = %group,
-                id = %id,
-                conn_id = conn_id,
-                "Poll SSE connection established"
-            );
-            // The stream ends when the channel closes, and nothing else. A
-            // client disconnecting drops this response; the transport stopping
-            // clears its registry, which drops the only sender. There is no
-            // shutdown signal to keep in step with, because the thing that owns
-            // the connection is the thing that ends it.
-            let stream = async_stream::stream! {
-                let _guard = PollGuard {
-                    registry: poll_state.poll_registry.clone(),
-                    group: group.clone(),
-                    conn_id,
-                };
-                while let Some(msg) = rx.recv().await {
-                    yield Ok::<_, std::convert::Infallible>(Event::default().data(msg));
-                }
-            };
-
-            Sse::new(stream).into_response()
-        }
-        None => {
-            tracing::warn!(group = %group, id = %id, "Poll connection rejected: at capacity");
-            (
-                StatusCode::SERVICE_UNAVAILABLE,
-                "Poll registration at capacity",
-            )
-                .into_response()
-        }
-    }
-}
-
-struct PollGuard {
-    registry: Arc<PollRegistry>,
-    group: String,
-    conn_id: u64,
-}
-
-impl Drop for PollGuard {
-    fn drop(&mut self) {
-        let registry = self.registry.clone();
-        let group = self.group.clone();
-        let conn_id = self.conn_id;
-        tokio::spawn(async move {
-            registry.deregister(&group, conn_id).await;
-        });
-    }
 }

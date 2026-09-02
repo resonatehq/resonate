@@ -7,10 +7,13 @@ description = "Resonate transport: deliver messages to a worker that holds an op
 
 [dependencies]
 resonate-plugin = { path = "../resonate-plugin" }
+resonate-auth = { path = "../resonate-auth" }
+axum = { version = "0.7", features = ["json"] }
+async-stream = "0.3"
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-tokio = { version = "1", features = ["rt", "sync", "macros"] }
+tokio = { version = "1", features = ["rt", "sync", "macros", "net"] }
 tracing = "0.1"
 fastrand = "2"
 url = { workspace = true }

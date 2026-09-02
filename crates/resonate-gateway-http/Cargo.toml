@@ -12,13 +12,11 @@ path = "src/lib.rs"
 [dependencies]
 resonate-auth = { path = "../resonate-auth" }
 resonate-core = { path = "../resonate-core" }
-resonate-transport-http-poll = { path = "../resonate-transport-http-poll" }
 async-trait = { workspace = true }
 serde = { workspace = true }
 axum = { version = "0.7", features = ["json"] }
 tower-http = { version = "0.6", features = ["trace", "catch-panic", "cors"] }
 tokio = { version = "1", features = ["rt", "sync", "macros", "signal", "net"] }
-async-stream = "0.3"
 serde_json = { workspace = true }
 prometheus = "0.13"
 lazy_static = "1"

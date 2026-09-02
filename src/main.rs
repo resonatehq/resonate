@@ -227,10 +227,8 @@ async fn run_server(config: Config) -> Result<(), String> {
 
     // 3. The workers, each downgrading the server that now exists.
     let server_handle: std::sync::Weak<dyn ResonateServer> = Arc::downgrade(&server);
-    let poll_registry = Arc::new(PollRegistry::new(
-        server_handle.clone(),
-        config.transports.http_poll.clone(),
-    ));
+    let poll_registry =
+        PollRegistry::new(server_handle.clone(), config.transports.http_poll.clone());
 
     // Scheme -> worker. A disabled transport is simply not registered, and
     // the router reports its addresses as undeliverable.
@@ -349,7 +347,6 @@ async fn run_server(config: Config) -> Result<(), String> {
 
     let mut gateway_impl = HttpGateway::new(
         Arc::clone(&server) as Arc<dyn ResonateServer>,
-        poll_registry,
         GatewayConfig {
             bind: bind.clone(),
             port,
