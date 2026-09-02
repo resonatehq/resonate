@@ -8,12 +8,13 @@
 //! does is the server's.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::{
-        sse::{Event, Sse},
+        sse::{Event, KeepAlive, Sse},
         IntoResponse, Response,
     },
     routing::{any, get, post},
@@ -319,6 +320,7 @@ async fn handle_poll(
             // clears its registry, which drops the only sender. There is no
             // shutdown signal to keep in step with, because the thing that owns
             // the connection is the thing that ends it.
+            let keepalive_ms = registry.keepalive_interval_ms;
             let stream = async_stream::stream! {
                 let _guard = PollGuard {
                     registry: poll_state.poll_registry.clone(),
@@ -330,7 +332,15 @@ async fn handle_poll(
                 }
             };
 
-            Sse::new(stream).into_response()
+            let mut sse = Sse::new(stream);
+            if keepalive_ms > 0 {
+                sse = sse.keep_alive(
+                    KeepAlive::new()
+                        .interval(Duration::from_millis(keepalive_ms))
+                        .text("ping"),
+                );
+            }
+            sse.into_response()
         }
         None => {
             tracing::warn!(group = %group, id = %id, "Poll connection rejected: at capacity");
