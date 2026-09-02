@@ -29,6 +29,12 @@ pub struct Config {
     /// Per-connection message buffer [default: 100]
     #[serde(default = "default_buffer_size")]
     pub buffer_size: usize,
+
+    /// SSE keepalive interval in seconds. A comment line is sent to every
+    /// connected client this often to prevent proxies and load balancers from
+    /// closing the connection. Set to 0 to disable. [default: 30]
+    #[serde(default = "default_keepalive_interval_secs")]
+    pub keepalive_interval_secs: u64,
 }
 
 fn default_enabled() -> bool {
@@ -40,6 +46,9 @@ fn default_max_connections() -> usize {
 fn default_buffer_size() -> usize {
     100
 }
+fn default_keepalive_interval_secs() -> u64 {
+    30
+}
 
 impl Default for Config {
     fn default() -> Self {
@@ -47,6 +56,7 @@ impl Default for Config {
             enabled: default_enabled(),
             max_connections: default_max_connections(),
             buffer_size: default_buffer_size(),
+            keepalive_interval_secs: default_keepalive_interval_secs(),
         }
     }
 }
@@ -111,6 +121,7 @@ pub struct PollRegistry {
     next_conn_id: AtomicU64,
     pub max_connections: usize,
     pub buffer_size: usize,
+    pub keepalive_interval_secs: u64,
     /// Held so a delivery failure can be reported back to the server (e.g.
     /// releasing the task instead of dropping it). Not used yet.
     ///
@@ -127,6 +138,7 @@ impl PollRegistry {
             next_conn_id: AtomicU64::new(1),
             max_connections: config.max_connections,
             buffer_size: config.buffer_size,
+            keepalive_interval_secs: config.keepalive_interval_secs,
             server,
         }
     }
@@ -290,5 +302,33 @@ impl ResonateWorker for PollRegistry {
                 "no poll connection accepted delivery for {address}"
             )))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Config;
+
+    #[test]
+    fn keepalive_default_is_30_seconds() {
+        assert_eq!(Config::default().keepalive_interval_secs, 30);
+    }
+
+    #[test]
+    fn keepalive_can_be_overridden() {
+        let config = Config {
+            keepalive_interval_secs: 42,
+            ..Default::default()
+        };
+        assert_eq!(config.keepalive_interval_secs, 42);
+    }
+
+    #[test]
+    fn keepalive_zero_is_allowed() {
+        let config = Config {
+            keepalive_interval_secs: 0,
+            ..Default::default()
+        };
+        assert_eq!(config.keepalive_interval_secs, 0);
     }
 }
