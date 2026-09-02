@@ -102,9 +102,9 @@ impl Configuration {
         self.at("servers", id)
     }
 
-    /// `transports.<id>`.
+    /// `workers.<id>`.
     pub fn worker(&self, id: &str) -> Settings<'_> {
-        self.at("transports", id)
+        self.at("workers", id)
     }
 
     /// `gateways.<id>`.
@@ -140,7 +140,7 @@ pub struct Settings<'a> {
 }
 
 impl Settings<'_> {
-    /// Where this plugin's settings live — `transports.kafka`. Worth naming in
+    /// Where this plugin's settings live — `workers.kafka`. Worth naming in
     /// an error: it is what the operator has to go and edit.
     pub fn key(&self) -> &str {
         &self.key

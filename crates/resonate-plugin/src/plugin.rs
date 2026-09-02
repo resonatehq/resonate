@@ -124,7 +124,7 @@ impl WorkerDependencies {
 #[non_exhaustive]
 pub struct WorkerPlugin {
     /// The name this plugin is known by: its configuration key
-    /// (`transports.<id>`), its `--set` path, its log field.
+    /// (`workers.<id>`), its `--set` path, its log field.
     pub id: &'static str,
     /// `env!("CARGO_PKG_NAME")`. What a collision has to name, because the
     /// person who can fix one is the person assembling the binary.

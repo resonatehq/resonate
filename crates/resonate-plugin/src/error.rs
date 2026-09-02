@@ -8,7 +8,7 @@
 /// `--set`, and only one of those is worth telling someone to go and fix.
 #[derive(Debug, Clone)]
 pub struct ConfigError {
-    /// The setting, as a config-file path — `transports.kafka.brokers`.
+    /// The setting, as a config-file path — `workers.kafka.brokers`.
     pub key: String,
     /// What is wrong with it, in the plugin's own words.
     pub message: String,

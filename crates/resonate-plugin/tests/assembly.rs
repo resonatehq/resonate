@@ -262,7 +262,7 @@ fn a_plugin_turns_itself_off() {
     );
 
     let loaded = loader()
-        .set("transports.kafka.enabled", "true")
+        .set("workers.kafka.enabled", "true")
         .unwrap()
         .load();
     assert!((KAFKA.configure)(&loaded.worker("kafka"), no_server())
@@ -273,9 +273,9 @@ fn a_plugin_turns_itself_off() {
 #[test]
 fn set_carries_types_not_just_strings() {
     let loaded = loader()
-        .set("transports.kafka.concurrency", "8")
+        .set("workers.kafka.concurrency", "8")
         .unwrap()
-        .set("transports.kafka.brokers", r#"["a:9092", "b:9092"]"#)
+        .set("workers.kafka.brokers", r#"["a:9092", "b:9092"]"#)
         .unwrap()
         // Unquoted, so it is meant as a string.
         .set("level", "debug")
@@ -291,16 +291,16 @@ fn set_carries_types_not_just_strings() {
 #[test]
 fn a_plugin_validates_its_own_settings_and_says_where_they_came_from() {
     let loaded = loader()
-        .set("transports.kafka.enabled", "true")
+        .set("workers.kafka.enabled", "true")
         .unwrap()
-        .set("transports.kafka.concurrency", "0")
+        .set("workers.kafka.concurrency", "0")
         .unwrap()
         .load();
 
     let Err(err) = (KAFKA.configure)(&loaded.worker("kafka"), no_server()) else {
         panic!("zero concurrency is the plugin's own rule");
     };
-    assert_eq!(err.key, "transports.kafka.concurrency");
+    assert_eq!(err.key, "workers.kafka.concurrency");
     assert!(err.message.contains("at least 1"), "{}", err.message);
     // Provenance survives: the same bad number from a file and from a flag are
     // different problems to go and fix.
@@ -320,9 +320,9 @@ fn a_server_is_selected_by_name() {
 fn the_typed_config_never_leaves_the_plugins_crate() {
     // The factory closure owns it; what comes back out is a port trait object.
     let loaded = loader()
-        .set("transports.kafka.enabled", "true")
+        .set("workers.kafka.enabled", "true")
         .unwrap()
-        .set("transports.kafka.brokers", r#"["a:9092"]"#)
+        .set("workers.kafka.brokers", r#"["a:9092"]"#)
         .unwrap()
         .load();
 
