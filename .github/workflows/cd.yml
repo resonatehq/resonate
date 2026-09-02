@@ -10,8 +10,7 @@
 #   3. publish-github-image — Multi-platform Docker images → GHCR
 #   4. publish-github-artifacts — Cross-platform binary artifacts
 #   5. update-homebrew — Opens PR to update resonatehq/homebrew-tap formula
-#   6. publish-npm — Publishes npm/ as resonate-cli
-#   7. verify-artifacts — Post-publication verification
+#   6. verify-artifacts — Post-publication verification
 #
 # See .github/CD_PIPELINE.md for full documentation.
 
@@ -497,119 +496,6 @@ jobs:
           echo "**Formula:** Formula/resonate.rb" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "View: https://github.com/resonatehq/homebrew-tap/blob/main/Formula/resonate.rb" >> $GITHUB_STEP_SUMMARY
-
-  # ═══════════════════════════════════════════════════════════════════════════
-  # PHASE 3.6: NPM PACKAGE PUBLISHING
-  # ═══════════════════════════════════════════════════════════════════════════
-  # Publishes npm/ as resonate-cli, so that `npx resonate-cli@latest dev` works
-  # for anyone with Node installed. The package carries no implementation: its
-  # postinstall downloads the tarball produced by publish-github-artifacts,
-  # which is why this job waits on that one.
-  #
-  # Requires: NPM_TOKEN secret (automation token for the resonatehq npm org).
-  # Without it the job reports that it skipped rather than failing the release.
-
-  publish-npm:
-    name: Publish npm Package
-    needs: [check-version, publish-github-artifacts]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write # npm provenance
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
-        with:
-          ref: ${{ needs.check-version.outputs.tag }}
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          registry-url: https://registry.npmjs.org
-
-      - name: Check npm credentials
-        id: creds
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          if [ -z "${NPM_TOKEN}" ]; then
-            echo "has_token=false" >> $GITHUB_OUTPUT
-            echo "⚠️ NPM_TOKEN is not set — skipping npm publish" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "has_token=true" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Set package version
-        env:
-          VERSION: ${{ needs.check-version.outputs.version_bare }}
-        run: |
-          cd npm
-
-          # check-version has already confirmed this matches the release tag,
-          # and the tag is what postinstall.js downloads from — so the package
-          # version is not free to drift from the binary version.
-          npm version "${VERSION}" --no-git-tag-version --allow-same-version
-
-          cp ../LICENSE .
-
-      - name: Smoke test against the published release
-        env:
-          VERSION: ${{ needs.check-version.outputs.version_bare }}
-        run: |
-          cd npm
-
-          # The wrapper is only correct if the asset names, the tag, and the
-          # checksums line up with what the release actually contains. Prove it
-          # here rather than in the first user's terminal.
-          node postinstall.js
-
-          ACTUAL=$(./bin/resonate.js --version)
-          EXPECTED="resonate ${VERSION}"
-
-          if [ "${ACTUAL}" != "${EXPECTED}" ]; then
-            echo "❌ Version mismatch!"
-            echo "  Expected: ${EXPECTED}"
-            echo "  Actual:   ${ACTUAL}"
-            exit 1
-          fi
-
-          echo "✓ ${ACTUAL} downloaded and executed via the npm wrapper"
-
-          # The downloaded binary must not end up inside the published tarball.
-          rm -f bin/resonate
-
-      - name: Check whether the version is already published
-        id: published
-        if: steps.creds.outputs.has_token == 'true'
-        env:
-          VERSION: ${{ needs.check-version.outputs.version_bare }}
-        run: |
-          if npm view "resonate-cli@${VERSION}" version >/dev/null 2>&1; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-            echo "resonate-cli@${VERSION} is already on npm — nothing to do"
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Publish to npm
-        if: steps.creds.outputs.has_token == 'true' && steps.published.outputs.exists == 'false'
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          cd npm
-          npm publish --provenance --access public
-
-      - name: Display summary
-        env:
-          VERSION: ${{ needs.check-version.outputs.version_bare }}
-        run: |
-          echo "## npm Package ✓" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Package:** resonate-cli@${VERSION}" >> $GITHUB_STEP_SUMMARY
-          echo "**Install:** \`npx resonate-cli@${VERSION} dev\`" >> $GITHUB_STEP_SUMMARY
-          echo "**View:** https://www.npmjs.com/package/resonate-cli" >> $GITHUB_STEP_SUMMARY
 
   # ═══════════════════════════════════════════════════════════════════════════
   # PHASE 4: POST-PUBLICATION VERIFICATION (DISABLED)

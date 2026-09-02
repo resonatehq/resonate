@@ -1,5 +1,0 @@
-# Fetched at install time by postinstall.js.
-bin/resonate
-
-# Copied from the repository root by prepublishOnly.
-LICENSE

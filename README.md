@@ -62,9 +62,6 @@ advance, no scheduler to configure.
 brew install resonatehq/tap/resonate
 ```
 
-Or, with Node on the machine, skip the install: every `resonate` command below
-also runs as `npx resonate-cli@latest`.
-
 **2. Install an SDK**
 
 ```shell
@@ -254,21 +251,6 @@ INFO resonate: Server listening bind=0.0.0.0 port=8001
 ```
 
 HTTP on `8001`, metrics on `9090`. These are the defaults every SDK assumes, and both are configurable.
-
-### npm
-
-```shell
-npx resonate-cli@latest dev
-```
-
-[`resonate-cli`](./npm) carries no implementation. It downloads the release
-binary for your platform — the same artifact Homebrew installs, checked against
-the `.sha256` published beside it — and hands your arguments to it. For a
-JavaScript project that wants Resonate on hand:
-
-```shell
-npm install --save-dev resonate-cli
-```
 
 ### Docker
 
