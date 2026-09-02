@@ -355,7 +355,7 @@ async fn connecting_is_init_not_configure() {
     let loaded = loader().load();
     let server = (SQLITE.configure)(
         &loaded.server("sqlite"),
-        ServerDependencies::new(Arc::new(NoRoute) as Arc<dyn ResonateRouter>, false),
+        ServerDependencies::new(Arc::new(NoRoute) as Arc<dyn ResonateRouter>),
     )
     .expect("its settings are fine");
 

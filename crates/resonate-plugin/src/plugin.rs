@@ -1,5 +1,11 @@
 //! The three kinds of plugin, and what each is handed when it is built.
 //!
+//! Each plugin is handed exactly one thing: what it talks to. A server is handed
+//! its router, a worker and a gateway are handed the server. Everything else
+//! either comes out of the plugin's own settings, or is handed to it by its
+//! `init` — the process-wide debug flag included, which is why it appears in no
+//! dependency struct.
+//!
 //! Each is a `static` with no `impl` block — less ceremony than a trait for
 //! someone writing their first plugin, and `const`-constructible, so a plugin's
 //! identity is data in the binary rather than something built at startup. (A
@@ -21,28 +27,20 @@ use crate::error::ConfigError;
 
 // ─── Server ──────────────────────────────────────────────────────────────────
 
-/// What the composition root gives a server: the two things it needs and cannot
-/// read out of its own settings.
+/// What the composition root gives a server: the router it delivers through.
 ///
 /// The router exists before the server and is still empty — its workers are
 /// installed once the server they hold a handle to exists. A server that needs a
 /// handle to *itself* (an engine-backed one arms its timer with one) makes it
 /// inside its own crate, where the concrete type is known.
-///
-/// `debug` is process-wide rather than any plugin's setting, and a server is the
-/// only kind with nowhere else to receive it: a worker and a gateway are handed
-/// it by their own `init`.
 #[non_exhaustive]
 pub struct ServerDependencies {
     pub router: Arc<dyn ResonateRouter>,
-    /// The clock belongs to the caller, so nothing may start work that runs on
-    /// wall time.
-    pub debug: bool,
 }
 
 impl ServerDependencies {
-    pub fn new(router: Arc<dyn ResonateRouter>, debug: bool) -> Self {
-        Self { router, debug }
+    pub fn new(router: Arc<dyn ResonateRouter>) -> Self {
+        Self { router }
     }
 }
 

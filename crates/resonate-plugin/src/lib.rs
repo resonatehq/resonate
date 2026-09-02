@@ -49,8 +49,9 @@
 //!
 //! # Startup order
 //!
-//! Construction is sync and cheap; `init` is where anything that can fail or
-//! block happens. Every port has the same pair, so the sequence is: build
+//! Construction is sync and cheap, and hands each plugin the one thing it talks
+//! to; `init` is where anything that can fail or block happens, and where the
+//! debug flag arrives. Every port has the same pair, so the sequence is: build
 //! everything, then start it, in that order.
 //!
 //! ```ignore
@@ -58,7 +59,7 @@
 //! let router = Arc::new(Dispatcher::new());
 //!
 //! // 2. The server, handed that router. Nothing is connected yet.
-//! let deps = ServerDependencies::new(Arc::clone(&router) as _, debug);
+//! let deps = ServerDependencies::new(Arc::clone(&router) as _);
 //! let server = (chosen.configure)(&config.server(chosen.id), deps)?;
 //!
 //! // 3. The workers, each downgrading the server that now exists.
