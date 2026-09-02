@@ -69,6 +69,7 @@ resonate-auth = { path = "crates/resonate-auth" }
 resonate-core = { path = "crates/resonate-core" }
 resonate-gateway-http = { path = "crates/resonate-gateway-http" }
 resonate-gateway-web = { path = "crates/resonate-gateway-web" }
+resonate-plugin = { path = "crates/resonate-plugin" }
 resonate-sql = { path = "crates/resonate-sql" }
 resonate-server-sqlite = { path = "crates/resonate-server-sqlite", optional = true }
 resonate-server-postgres = { path = "crates/resonate-server-postgres", optional = true }

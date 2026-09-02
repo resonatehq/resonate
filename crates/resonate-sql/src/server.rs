@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::engine::{Engine, Input, Outgoing, Output, Scheduled, Timeout};
 use async_trait::async_trait;
@@ -32,7 +32,13 @@ pub struct Server {
     sweep_interval: u64,
     /// Durable state and every transition over it. The server validates,
     /// hands over, and shapes what comes back.
-    pub engine: Arc<dyn Engine>,
+    ///
+    /// Absent until `init` has connected. Opening a database is I/O that can
+    /// fail, which belongs in `init` for the same reason it does in every other
+    /// port — so `configure` stays sync, cheap and side-effect-free.
+    engine: OnceLock<Arc<dyn Engine>>,
+    /// How to get one. Taken by `init`, and gone after.
+    connect: Mutex<Option<Connect>>,
     /// Where a transition's messages go.
     ///
     /// A server without one could not deliver anything it produced, so it is
@@ -68,6 +74,16 @@ pub struct Server {
     this: std::sync::Weak<Server>,
 }
 
+/// Open the durable state. Run by `init`, given the process-wide debug flag —
+/// which the engine needs too, since it is what gates the `debug.*` operations.
+pub type Connect = Box<
+    dyn FnOnce(
+            bool,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<Arc<dyn Engine>, Unavailable>> + Send>,
+        > + Send,
+>;
+
 /// What a server needs that its engine does not carry. Plain values: the
 /// plugin read the configuration, this is what came out.
 #[derive(Debug, Clone)]
@@ -88,11 +104,7 @@ impl Server {
     /// `Arc` rather than `Self`, because the timer's callbacks point back here
     /// and so the handle has to exist before the value does. That cycle is this
     /// crate's own business; the composition root sees a `ResonateServer`.
-    pub fn new(
-        engine: Arc<dyn Engine>,
-        router: Arc<dyn ResonateRouter>,
-        options: Options,
-    ) -> Arc<Self> {
+    pub fn new(connect: Connect, router: Arc<dyn ResonateRouter>, options: Options) -> Arc<Self> {
         Arc::new_cyclic(|weak| Self {
             timer: crate::deadlines::build(
                 options.wheel_capacity,
@@ -101,7 +113,8 @@ impl Server {
             ),
             server_url: options.server_url,
             sweep_interval: options.sweep_interval,
-            engine,
+            engine: OnceLock::new(),
+            connect: Mutex::new(Some(connect)),
             router,
             debug: AtomicBool::new(false),
             sweep: Mutex::new(None),
@@ -113,6 +126,17 @@ impl Server {
     /// Whether the clock belongs to the caller. Set by `init`.
     pub fn debug(&self) -> bool {
         self.debug.load(Ordering::Relaxed)
+    }
+
+    /// The engine, once `init` has opened it.
+    ///
+    /// Nothing reaches a server before it is started — a gateway binds last —
+    /// so this is unreachable in a running process. It is an error rather than
+    /// a panic because a wiring mistake should be reported, not abort.
+    pub fn engine(&self) -> Result<&Arc<dyn Engine>, Unavailable> {
+        self.engine
+            .get()
+            .ok_or_else(|| Unavailable::new("server is not started"))
     }
 
     /// Hand the timer the deadlines a transition just armed.
@@ -150,7 +174,10 @@ impl Server {
     pub async fn fire(&self, timeouts: Vec<Timeout>) {
         let now = util::system_time_ms();
         for timeout in timeouts {
-            let out = self.engine.process(Input::Internal(timeout), now).await;
+            let Ok(engine) = self.engine() else {
+                return;
+            };
+            let out = engine.process(Input::Internal(timeout), now).await;
             self.deliver(out.messages).await;
             self.arm(out.timeouts);
         }
@@ -235,6 +262,20 @@ impl ResonateServer for Server {
     /// instead, sweeping as part of moving.
     async fn init(&self, debug: bool) -> Result<(), Unavailable> {
         self.debug.store(debug, Ordering::Relaxed);
+        // Registration is on first use, so without this a counter that has not
+        // been incremented is absent from /metrics rather than zero — and those
+        // mean different things to whoever is reading the dashboard.
+        crate::metrics::declare();
+
+        let connect = self
+            .connect
+            .lock()
+            .expect("connect mutex")
+            .take()
+            .ok_or_else(|| Unavailable::new("server was already started"))?;
+        let engine = connect(debug).await?;
+        let _ = self.engine.set(engine);
+
         if debug {
             tracing::warn!(
                 "Debug mode — no timer and no sweep. Time advances only through \
@@ -286,7 +327,7 @@ impl ResonateServer for Server {
             messages,
             timeouts,
         } = self
-            .engine
+            .engine()?
             .process(Input::External(req), util::resolve_time(debug_time))
             .await;
         // Deliver after the transition has committed, never before: the engine

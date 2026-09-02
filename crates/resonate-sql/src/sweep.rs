@@ -39,8 +39,11 @@ pub async fn run(
         let Some(state) = server.upgrade() else {
             return;
         };
+        let Ok(engine) = state.engine() else {
+            return;
+        };
         let now = util::system_time_ms();
-        match state.engine.tick(now).await {
+        match engine.tick(now).await {
             // The engine reports what happened; recording it is the caller's
             // job, the same way the router counts deliveries and the workers
             // do not. The messages the sweep emitted go out here — a

@@ -24,13 +24,7 @@ compile_error!(
 use resonate_core::{ResonateGateway, ResonateRouter, ResonateServer, ResonateWorker};
 use resonate_gateway_http::{Config as GatewayConfig, HttpGateway};
 use resonate_gateway_web as console;
-#[cfg(feature = "mysql")]
-use resonate_server_mysql::MysqlEngine;
-#[cfg(feature = "postgres")]
-use resonate_server_postgres::PostgresEngine;
-#[cfg(feature = "sqlite")]
-use resonate_server_sqlite::SqliteEngine;
-use resonate_sql::engine::Engine;
+use resonate_plugin::{Registry, ServerDependencies};
 use resonate_transport_http_poll::PollRegistry;
 use std::collections::HashMap;
 
@@ -126,7 +120,44 @@ async fn main() -> std::process::ExitCode {
     std::process::ExitCode::SUCCESS
 }
 
+/// Everything this binary carries.
+///
+/// The one place plugins are named, and the only thing that changes when the
+/// set changes: a dependency in Cargo.toml, and a line here.
+fn registry() -> Registry {
+    #[allow(unused_mut)]
+    let mut registry = Registry::new();
+    #[cfg(feature = "sqlite")]
+    {
+        registry = registry.server(&resonate_server_sqlite::PLUGIN);
+    }
+    #[cfg(feature = "postgres")]
+    {
+        registry = registry.server(&resonate_server_postgres::PLUGIN);
+    }
+    #[cfg(feature = "mysql")]
+    {
+        registry = registry.server(&resonate_server_mysql::PLUGIN);
+    }
+    registry
+}
+
+/// What `servers.active` falls back to.
+const DEFAULT_SERVER: &str = "server_sqlite";
+
 async fn run_server(config: Config) -> Result<(), String> {
+    let registry = registry();
+    registry.check().map_err(|errors| {
+        errors
+            .iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .join("; ")
+    })?;
+    let plugin_config = resonate_plugin::Loader::new()
+        .file("resonate.toml")
+        .env("RESONATE_")
+        .load();
     // Initialize tracing
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&config.level));
@@ -148,13 +179,6 @@ async fn run_server(config: Config) -> Result<(), String> {
     }
 
     // Validate storage config
-    if config.storage.storage_type == "postgres" && config.storage.postgres.url.is_none() {
-        return Err("storage.type=postgres requires RESONATE_STORAGE__POSTGRES__URL".into());
-    }
-    if config.storage.storage_type == "mysql" && config.storage.mysql.url.is_none() {
-        return Err("MySQL storage selected but no URL configured. Set --storage-mysql-url or RESONATE_STORAGE__MYSQL__URL".to_string());
-    }
-
     // Validate poll config (buffer_size=0 panics in tokio::mpsc::channel)
     if config.transports.http_poll.buffer_size == 0 {
         return Err("http_poll.buffer_size must be at least 1".into());
@@ -163,80 +187,12 @@ async fn run_server(config: Config) -> Result<(), String> {
         return Err("http_poll.max_connections must be at least 1".into());
     }
 
-    // Backend selection. Each is a complete engine, not a storage handle
-    // behind a shared one.
-    let engine: Arc<dyn Engine> = match config.storage.storage_type.as_str() {
-        #[cfg(feature = "postgres")]
-        "postgres" => {
-            let url = config.storage.postgres.url.as_ref().unwrap();
-            let pool_size = config.storage.postgres.pool_size;
-            tracing::info!("Using PostgreSQL backend");
-            tracing::info!(pool_size = pool_size, "PostgreSQL pool configured");
-            let pg = PostgresEngine::connect(
-                url,
-                pool_size,
-                config.tasks.retry_timeout,
-                config.storage.postgres.preload_limit,
-                config.debug,
-            )
-            .await
-            .map_err(|e| format!("Failed to connect to Postgres: {e}"))?;
-            pg.init(config.storage.postgres.migrate)
-                .await
-                .map_err(|e| format!("Failed to initialize Postgres schema: {e}"))?;
-            tracing::info!("PostgreSQL initialized");
-            Arc::new(pg)
-        }
-        #[cfg(feature = "mysql")]
-        "mysql" => {
-            let url = config.storage.mysql.url.as_deref().unwrap();
-            let pool_size = config.storage.mysql.pool_size;
-            let mysql = MysqlEngine::connect(
-                url,
-                pool_size,
-                config.tasks.retry_timeout,
-                config.storage.mysql.preload_limit,
-                config.debug,
-            )
-            .await
-            .map_err(|e| format!("MySQL connection failed: {e}"))?;
-            mysql
-                .init(config.storage.mysql.migrate)
-                .await
-                .map_err(|e| format!("MySQL init failed: {e}"))?;
-            Arc::new(mysql)
-        }
-        #[cfg(feature = "sqlite")]
-        _ => {
-            let path = &config.storage.sqlite.path;
-            tracing::info!(path = %path, "Using SQLite backend");
-            let sqlite = SqliteEngine::open(
-                path,
-                config.tasks.retry_timeout,
-                config.storage.sqlite.preload_limit,
-                config.storage.sqlite.migrate,
-                config.debug,
-            )
-            .map_err(|e| format!("Failed to open SQLite database: {e}"))?;
-            tracing::info!("SQLite initialized");
-            Arc::new(sqlite)
-        }
-        // Without SQLite there is no catch-all engine, so an unrecognised or
-        // uncompiled backend has to be refused rather than fallen back on.
-        #[cfg(not(feature = "sqlite"))]
-        other => {
-            return Err(format!(
-                "storage backend '{other}' is not compiled into this build"
-            ))
-        }
-    };
-
     let port = config.server.port;
     let bind = config.server.bind.clone();
     let poll_max_connections = config.transports.http_poll.max_connections;
     let poll_buffer_size = config.transports.http_poll.buffer_size;
     let shutdown_timeout = std::time::Duration::from_millis(config.server.shutdown_timeout);
-    let is_sqlite = config.storage.storage_type == "sqlite";
+    let is_sqlite = plugin_config.active_server(DEFAULT_SERVER) == "server_sqlite";
     let config_debug = config.debug;
 
     // Build transports
@@ -252,23 +208,21 @@ async fn run_server(config: Config) -> Result<(), String> {
     // incomplete, so nothing is ever handed a value that does not exist yet.
     //
     // 1. The router, empty.
-    let dispatcher = Arc::new(router::Router::new());
-    let router: Arc<dyn ResonateRouter> = dispatcher.clone();
+    let router = Arc::new(router::Router::new());
 
-    // 2. The server, handed that router. Nothing is connected or started yet.
-    let state = resonate_sql::server::Server::new(
-        engine,
-        router,
-        resonate_sql::server::Options {
-            server_url: config.server.url.clone().unwrap_or_default(),
-            wheel_capacity: config.timeouts.wheel_capacity,
-            wheel_refresh: config.timeouts.wheel_refresh,
-            sweep_interval: config.timeouts.poll_interval,
-        },
-    );
+    // 2. The server this binary was pointed at. Nothing is connected yet —
+    //    opening the database is `init`'s, like every other port's resource.
+    let chosen = registry
+        .select_server(&plugin_config.active_server(DEFAULT_SERVER))
+        .map_err(|e| e.to_string())?;
+    let server = (chosen.configure)(
+        &plugin_config.server(&chosen.id()),
+        ServerDependencies::new(router.clone() as Arc<dyn ResonateRouter>),
+    )
+    .map_err(|e| e.to_string())?;
 
     // 3. The workers, each downgrading the server that now exists.
-    let server_handle: std::sync::Weak<dyn ResonateServer> = Arc::downgrade(&state) as _;
+    let server_handle: std::sync::Weak<dyn ResonateServer> = Arc::downgrade(&server);
     let poll_registry = Arc::new(PollRegistry::new(
         server_handle.clone(),
         config.transports.http_poll.clone(),
@@ -322,7 +276,7 @@ async fn run_server(config: Config) -> Result<(), String> {
     }
 
     // 4. Install them. The router is complete from here and never changes again.
-    dispatcher
+    router
         .install(workers)
         .expect("the router is built here and nowhere else");
 
@@ -333,8 +287,8 @@ async fn run_server(config: Config) -> Result<(), String> {
     // 6. Start, in the order things were built. The server's timer and sweep
     //    are its own now: `init` seeds one and spawns the other.
     let debug = config_debug;
-    dispatcher.init(debug).await.map_err(|e| e.to_string())?;
-    state.init(debug).await.map_err(|e| e.to_string())?;
+    router.init(debug).await.map_err(|e| e.to_string())?;
+    server.init(debug).await.map_err(|e| e.to_string())?;
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
     let mut handles = Vec::new();
@@ -376,7 +330,7 @@ async fn run_server(config: Config) -> Result<(), String> {
     // read: the console applies the same policy as the worker endpoint, so it
     // cannot be a way around it.
     let console_config = config.console.clone();
-    let console_server = Arc::clone(&state) as Arc<dyn ResonateServer>;
+    let console_server = Arc::clone(&server) as Arc<dyn ResonateServer>;
     let console_enabled = console_config.enabled;
     let build_console = move |auth| {
         console::routes(
@@ -390,7 +344,7 @@ async fn run_server(config: Config) -> Result<(), String> {
     };
 
     let mut gateway_impl = HttpGateway::new(
-        Arc::clone(&state) as Arc<dyn ResonateServer>,
+        Arc::clone(&server) as Arc<dyn ResonateServer>,
         poll_registry,
         GatewayConfig {
             bind: bind.clone(),
@@ -401,7 +355,7 @@ async fn run_server(config: Config) -> Result<(), String> {
             // `init`, and a bad path fails startup there.
             auth: config.auth.clone(),
             // SQLite lives in this process, so a panic mid-transaction can
-            // leave state the next request would read.
+            // leave server the next request would read.
             abort_on_panic: is_sqlite,
         },
     );
@@ -427,7 +381,7 @@ async fn run_server(config: Config) -> Result<(), String> {
         // loops below drain.
         // The server first: its timer is the only thing that can still hand the
         // engine work of its own, and `stop` drains its sweep behind it.
-        let _ = state.stop().await;
+        let _ = server.stop().await;
         for handle in handles {
             let _ = handle.await;
         }
@@ -435,7 +389,7 @@ async fn run_server(config: Config) -> Result<(), String> {
         // feed them have stopped, so this drains what is already in flight
         // rather than racing new deliveries. It is also what ends the poll
         // transport's SSE streams, by dropping the senders they read from.
-        let _ = dispatcher.stop().await;
+        let _ = router.stop().await;
         // The gateway last, not first. Refusing connections while in-flight
         // work is still draining would give clients a closed socket where a
         // 503 would do — and stopping it first would deadlock, because its

@@ -91,7 +91,10 @@ pub fn build(capacity: usize, wheel_refresh: u64, server: Weak<Server>) -> Deadl
             let Some(server) = server.upgrade() else {
                 return Vec::new();
             };
-            match server.engine.upcoming(room).await {
+            let Ok(engine) = server.engine() else {
+                return Vec::new();
+            };
+            match engine.upcoming(room).await {
                 Ok(rows) => rows.into_iter().map(scheduled_to_entry).collect(),
                 Err(e) => {
                     tracing::warn!(error = %e, "Timer backfill failed; the sweep still covers it");

@@ -4314,3 +4314,128 @@ impl SqliteEngine {
         }
     }
 }
+
+// ─── The plugin ──────────────────────────────────────────────────────────────
+
+use resonate_plugin::{ConfigError, ResonateServer, ServerDependencies, ServerPlugin, Settings};
+use serde::{Deserialize, Serialize};
+
+/// This server, as a plugin. The one thing a binary names to run on SQLite.
+pub static PLUGIN: ServerPlugin = ServerPlugin::new(env!("CARGO_PKG_NAME"), configure);
+
+/// Everything under `[servers.server_sqlite]`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Config {
+    /// Path to the database file. `:memory:` for an ephemeral one.
+    #[serde(default = "default_path")]
+    pub path: String,
+
+    /// How many branch siblings a task response may carry.
+    #[serde(default = "default_preload_limit")]
+    pub preload_limit: u32,
+
+    /// Apply pending migrations to an existing database.
+    ///
+    /// An empty database is always created. Beyond that, a schema behind the
+    /// binary is a deployment decision, not a startup default: without this the
+    /// server refuses to start and names what is pending, rather than running
+    /// DDL nobody asked for on a restart.
+    #[serde(default)]
+    pub migrate: bool,
+
+    /// How long a pending task waits before it is redispatched (ms).
+    #[serde(default = "default_retry_timeout")]
+    pub retry_timeout: i64,
+
+    /// The externally reachable URL, stamped into every emitted message so a
+    /// worker knows where to call back.
+    #[serde(default)]
+    pub server_url: String,
+
+    /// How many deadlines the in-memory timer holds. Bigger buys a longer
+    /// horizon, not correctness — the sweep covers whatever falls outside.
+    #[serde(default = "default_wheel_capacity")]
+    pub wheel_capacity: usize,
+
+    /// How often the timer re-reads the durable deadlines (ms), and the longest
+    /// it will sleep. This is the staleness bound for a deadline another
+    /// instance armed.
+    #[serde(default = "default_wheel_refresh")]
+    pub wheel_refresh: u64,
+
+    /// The backstop scan interval (ms). The last resort, not the mechanism: the
+    /// timer fires a deadline when it comes due and refreshes more often than
+    /// this runs.
+    #[serde(default = "default_sweep_interval")]
+    pub sweep_interval: u64,
+}
+
+fn default_preload_limit() -> u32 {
+    10
+}
+fn default_retry_timeout() -> i64 {
+    30_000
+}
+fn default_wheel_capacity() -> usize {
+    8192
+}
+fn default_wheel_refresh() -> u64 {
+    30_000
+}
+fn default_sweep_interval() -> u64 {
+    60_000
+}
+fn default_path() -> String {
+    "resonate.db".to_string()
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            path: default_path(),
+            preload_limit: default_preload_limit(),
+            migrate: false,
+            retry_timeout: default_retry_timeout(),
+            server_url: String::new(),
+            wheel_capacity: default_wheel_capacity(),
+            wheel_refresh: default_wheel_refresh(),
+            sweep_interval: default_sweep_interval(),
+        }
+    }
+}
+
+/// Read `[servers.server_sqlite]` and build the server. Nothing is opened here — the
+/// database is `init`'s, like every other port's resource.
+fn configure(
+    settings: &Settings<'_>,
+    deps: ServerDependencies,
+) -> Result<std::sync::Arc<dyn ResonateServer>, ConfigError> {
+    let config: Config = settings.extract()?;
+
+    let options = resonate_sql::server::Options {
+        server_url: config.server_url.clone(),
+        wheel_capacity: config.wheel_capacity,
+        wheel_refresh: config.wheel_refresh,
+        sweep_interval: config.sweep_interval,
+    };
+    let open = config.clone();
+    Ok(resonate_sql::server::Server::new(
+        Box::new(move |debug| {
+            Box::pin(async move {
+                let engine = SqliteEngine::open(
+                    &open.path,
+                    open.retry_timeout,
+                    open.preload_limit,
+                    open.migrate,
+                    debug,
+                )
+                .map_err(|e| {
+                    resonate_plugin::Unavailable::new(format!("cannot open {}: {e}", open.path))
+                })?;
+                Ok(std::sync::Arc::new(engine) as std::sync::Arc<dyn resonate_sql::engine::Engine>)
+            })
+        }),
+        deps.router,
+        options,
+    ))
+}
