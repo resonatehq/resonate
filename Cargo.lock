@@ -2802,6 +2802,7 @@ version = "0.9.8"
 dependencies = [
  "async-trait",
  "figment",
+ "prometheus",
  "resonate-core",
  "serde",
  "tokio",
@@ -2861,11 +2862,15 @@ name = "resonate-sql"
 version = "0.9.8"
 dependencies = [
  "async-trait",
+ "lazy_static",
  "resonate-core",
+ "resonate-plugin",
+ "resonate-timer-wheel",
  "rusqlite",
  "serde",
  "serde_json",
  "sqlx",
+ "tokio",
  "tracing",
  "validator",
 ]

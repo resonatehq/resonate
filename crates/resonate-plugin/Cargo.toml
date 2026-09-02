@@ -8,6 +8,9 @@ description = "The Resonate plugin surface: what a plugin announces, how it is c
 [dependencies]
 resonate-core = { path = "../resonate-core" }
 serde = { workspace = true }
+# Re-exported: every plugin emits metrics through this one, so there is exactly
+# one prometheus in the graph and one default registry.
+prometheus = "0.13"
 # An implementation detail, deliberately: no figment type appears in this
 # crate's public API, so a figment major can land without moving every plugin.
 figment = { version = "0.10", features = ["toml", "env"] }

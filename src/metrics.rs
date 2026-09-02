@@ -1,7 +1,14 @@
+//! What the router counts, and the handler that serves everything.
+//!
+//! Only one counter lives here now: the rest belong to the code that
+//! increments them and moved with it. `gather` reads prometheus' process-wide
+//! default registry, so a plugin declaring its own counters appears here with
+//! nothing central listing it.
+
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use lazy_static::lazy_static;
-use prometheus::{register_counter, register_counter_vec, Counter, CounterVec};
+use prometheus::{register_counter_vec, CounterVec};
 
 /// Serve Prometheus metrics in text exposition format.
 pub async fn metrics_handler() -> Response {
@@ -22,25 +29,13 @@ pub async fn metrics_handler() -> Response {
 }
 
 lazy_static! {
-    // `resonate_request_total` and `resonate_request_duration_seconds` are
-    // declared by `resonate-gateway-http`, which is the only thing that records
-    // them. They still appear below: `register_*!` writes into prometheus'
-    // global default registry, and `gather` reads the same one.
-    pub static ref MESSAGES_TOTAL: CounterVec = register_counter_vec!(
-        "resonate_messages_total",
-        "Total number of messages delivered by kind",
-        &["kind"]
-    )
-    .unwrap();
+    /// Hand-offs to a worker, by outcome. Recorded in the router because it is
+    /// the one place that sees every message — and "never reached a worker" is
+    /// an outcome only visible from there.
     pub static ref DELIVERIES_TOTAL: CounterVec = register_counter_vec!(
         "resonate_deliveries_total",
         "Total number of message deliveries by status",
         &["status"]
-    )
-    .unwrap();
-    pub static ref SCHEDULE_PROMISES_TOTAL: Counter = register_counter!(
-        "resonate_schedule_promises_total",
-        "Total number of promises created by schedules"
     )
     .unwrap();
 }

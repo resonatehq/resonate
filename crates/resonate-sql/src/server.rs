@@ -1,6 +1,7 @@
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
-use crate::config::Config;
+use crate::engine::{Engine, Input, Outgoing, Output, Scheduled, Timeout};
 use async_trait::async_trait;
 use resonate_core::router::ResonateRouter;
 use resonate_core::types::{
@@ -10,14 +11,25 @@ use resonate_core::types::{
 use resonate_core::types::{RequestEnvelope, ResponseEnvelope};
 use resonate_core::util;
 use resonate_core::{ResonateServer, Unavailable};
-use resonate_sql::engine::{Engine, Input, Outgoing, Output, Scheduled, Timeout};
 
 use crate::deadlines::DeadlineTimer;
 use crate::metrics;
 
-/// The running server — owns configuration, the engine, the router and the timer.
+/// What every server in this family is: an engine, a router to deliver through,
+/// a timer for the near future, and a sweep behind both.
+///
+/// Shared by `resonate-server-sqlite`, `-postgres` and `-mysql`, each of which
+/// builds one over its own engine. Not a contract anyone outside implements —
+/// a server that wants none of this brings its own.
+///
+/// Takes arguments, not configuration. Reading `[servers.<id>]` is the
+/// plugin's, at its edge; by the time anything gets here it is values.
 pub struct Server {
-    pub config: Config,
+    /// The externally reachable URL, stamped into every message so a worker
+    /// knows where to call back.
+    server_url: String,
+    /// How often the sweep runs, in milliseconds.
+    sweep_interval: u64,
     /// Durable state and every transition over it. The server validates,
     /// hands over, and shapes what comes back.
     pub engine: Arc<dyn Engine>,
@@ -31,63 +43,76 @@ pub struct Server {
     /// worker outliving its server is a real condition at shutdown, whereas a
     /// server without a router was only ever an artifact of the wiring order.
     router: Arc<dyn ResonateRouter>,
-    /// The process-wide debug flag.
+    /// The process-wide debug flag, which arrives at `init` because that is
+    /// where every port receives it.
     ///
-    /// One flag, set at startup, rather than a mode a request can enter. It
-    /// says the clock belongs to the caller: `head.debug_time` is honoured,
+    /// One flag, set once at startup, rather than a mode a request can enter.
+    /// It says the clock belongs to the caller: `head.debug_time` is honoured,
     /// the `debug.*` operations are answered, and nothing in this process runs
     /// on wall time — no sweep, no timer. A server that could be put into that
     /// state by a request had to be asked, at every step, whether it was in it;
     /// a server that is told once at startup does not.
-    pub debug: bool,
+    debug: AtomicBool,
     /// The near future, in memory.
     ///
     /// Every deadline a transition arms is merged here, and the timer asks the
     /// engine for the one it names the moment it comes due. A cache, not a
     /// record: what it holds is a bounded prefix of what one process has heard
-    /// about, and the sweep in `processing_timeouts` is what covers the rest.
+    /// about, and the sweep is what covers the rest.
     timer: DeadlineTimer,
+    /// The sweep, once `init` has started it, and the switch that ends it.
+    sweep: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    shutdown: tokio::sync::watch::Sender<bool>,
+    /// A handle to itself, for the two background tasks that call back in.
+    /// Weak, or the server would keep itself alive forever.
+    this: std::sync::Weak<Server>,
+}
+
+/// What a server needs that its engine does not carry. Plain values: the
+/// plugin read the configuration, this is what came out.
+#[derive(Debug, Clone)]
+pub struct Options {
+    /// Stamped into every emitted message.
+    pub server_url: String,
+    /// How many deadlines the in-memory timer holds.
+    pub wheel_capacity: usize,
+    /// How often it re-reads the durable deadlines, and the longest it sleeps.
+    pub wheel_refresh: u64,
+    /// The backstop scan interval.
+    pub sweep_interval: u64,
 }
 
 impl Server {
+    /// Build one. Nothing is connected, seeded or spawned — that is `init`.
+    ///
+    /// `Arc` rather than `Self`, because the timer's callbacks point back here
+    /// and so the handle has to exist before the value does. That cycle is this
+    /// crate's own business; the composition root sees a `ResonateServer`.
     pub fn new(
-        config: Config,
         engine: Arc<dyn Engine>,
         router: Arc<dyn ResonateRouter>,
-        timer: DeadlineTimer,
-    ) -> Self {
-        Self {
-            debug: config.debug,
+        options: Options,
+    ) -> Arc<Self> {
+        Arc::new_cyclic(|weak| Self {
+            timer: crate::deadlines::build(
+                options.wheel_capacity,
+                options.wheel_refresh,
+                weak.clone(),
+            ),
+            server_url: options.server_url,
+            sweep_interval: options.sweep_interval,
             engine,
-            config,
             router,
-            timer,
-        }
+            debug: AtomicBool::new(false),
+            sweep: Mutex::new(None),
+            shutdown: tokio::sync::watch::channel(false).0,
+            this: weak.clone(),
+        })
     }
 
-    /// The router, for driving the workers' lifecycle at startup and shutdown.
-    pub fn router(&self) -> &Arc<dyn ResonateRouter> {
-        &self.router
-    }
-
-    /// Start the timer and wait for it to be seeded.
-    ///
-    /// Separate from construction because seeding reads the database, and
-    /// because the timer's own callbacks point back here: nothing can run until
-    /// the server is behind an `Arc`.
-    pub async fn start_timer(&self) {
-        // Under the debug flag nothing runs on wall time. The timer is the
-        // clock, so it is the first thing that must not start.
-        if self.debug {
-            tracing::info!("Debug mode — the timer is not started");
-            return;
-        }
-        self.timer.init().await;
-    }
-
-    /// Stop the timer task.
-    pub async fn stop_timer(&self) {
-        self.timer.stop().await;
+    /// Whether the clock belongs to the caller. Set by `init`.
+    pub fn debug(&self) -> bool {
+        self.debug.load(Ordering::Relaxed)
     }
 
     /// Hand the timer the deadlines a transition just armed.
@@ -99,7 +124,7 @@ impl Server {
     pub fn arm(&self, timeouts: Vec<Scheduled>) {
         // Under the debug flag there is no timer to arm — it was never
         // started, because the clock belongs to the caller.
-        if timeouts.is_empty() || self.debug {
+        if timeouts.is_empty() || self.debug() {
             return;
         }
         self.timer.merge(
@@ -147,7 +172,7 @@ impl Server {
         if messages.is_empty() {
             return;
         }
-        let server_url = self.config.server.url.clone().unwrap_or_default();
+        let server_url = self.server_url.clone();
         for msg in messages {
             let (address, payload) = match msg {
                 Outgoing::Execute {
@@ -199,11 +224,59 @@ impl Server {
 
 #[async_trait]
 impl ResonateServer for Server {
+    /// Seed the timer, start the sweep, and remember the clock.
+    ///
+    /// Seeding reads the database, which is why it is here and not in `new`: a
+    /// deadline already due fires immediately rather than waiting for the first
+    /// scan. `init` returns only once that read has landed.
+    ///
+    /// Under debug neither runs. The clock belongs to the caller, so the timer
+    /// — which *is* the clock — must not start, and `debug.tick` moves time
+    /// instead, sweeping as part of moving.
+    async fn init(&self, debug: bool) -> Result<(), Unavailable> {
+        self.debug.store(debug, Ordering::Relaxed);
+        if debug {
+            tracing::warn!(
+                "Debug mode — no timer and no sweep. Time advances only through \
+                 debug.tick, and debug.* operations are answered."
+            );
+            return Ok(());
+        }
+
+        self.timer.init().await;
+        let handle = tokio::spawn(crate::sweep::run(
+            self.this.clone(),
+            self.sweep_interval,
+            self.shutdown.subscribe(),
+        ));
+        *self.sweep.lock().expect("sweep mutex") = Some(handle);
+        tracing::info!(
+            sweep_interval_ms = self.sweep_interval,
+            "Timer and sweep started"
+        );
+        Ok(())
+    }
+
+    /// Stop the timer first, then drain the sweep.
+    ///
+    /// The timer is the only thing that can still hand the engine work of its
+    /// own, so stopping it means nothing new arrives while the sweep finishes
+    /// whatever it is in the middle of.
+    async fn stop(&self) -> Result<(), Unavailable> {
+        self.timer.stop().await;
+        let _ = self.shutdown.send(true);
+        let handle = self.sweep.lock().expect("sweep mutex").take();
+        if let Some(handle) = handle {
+            let _ = handle.await;
+        }
+        Ok(())
+    }
+
     async fn process(&self, req: &RequestEnvelope) -> Result<ResponseEnvelope, Unavailable> {
         // Debug-time overrides are gated by config, so a caller cannot move the
         // server's clock. The gate lives here rather than at the HTTP edge so
         // that every caller of the port is subject to it.
-        let debug_time = if self.config.debug {
+        let debug_time = if self.debug() {
             req.head.debug_time
         } else {
             None

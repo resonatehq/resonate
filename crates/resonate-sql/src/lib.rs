@@ -19,8 +19,12 @@
 //! reaching in for the engine trait is precisely the mistake the name is
 //! shaped to prevent.
 
+pub mod deadlines;
 pub mod engine;
+pub mod metrics;
 pub mod migrate;
+pub mod server;
+pub mod sweep;
 
 use resonate_core::types::{PromiseRecord, ResponseEnvelope, TaskState};
 use resonate_core::ui::UiError;

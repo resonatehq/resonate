@@ -167,3 +167,27 @@ pub use resonate_core::{ResonateServer, ResonateWorker, ResonateGateway, Resonat
 // and the error it reports. Without these a plugin crate would still have to
 // name resonate-core, and the pair would have to version together anyway.
 pub use resonate_core::{types, Unavailable};
+
+/// Metrics, for any plugin that wants them.
+///
+/// Re-exported rather than depended on directly, and that is the whole point:
+/// `register_*!` writes into prometheus' process-wide default registry and the
+/// `/metrics` gateway reads the same one, so two semver-major versions of
+/// prometheus in the graph would mean two registries and half the counters
+/// silently missing — no error, no log line, just absent series. Going through
+/// this re-export means there is one version by construction.
+///
+/// A plugin declares whatever it wants; nothing central lists them. Prefix the
+/// name with the plugin id so two plugins cannot collide, and touch each
+/// counter in `init` if it should be present at zero rather than appearing on
+/// first use.
+///
+/// ```ignore
+/// lazy_static! {
+///     static ref LWT_RETRIES: Counter = resonate_plugin::prometheus::register_counter!(
+///         "resonate_scylladb_lwt_retries_total",
+///         "Conditional writes retried after a failed compare-and-set"
+///     ).unwrap();
+/// }
+/// ```
+pub use prometheus;

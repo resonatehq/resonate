@@ -17,11 +17,15 @@ sqlite = ["dep:rusqlite"]
 
 [dependencies]
 resonate-core = { path = "../resonate-core" }
+resonate-plugin = { path = "../resonate-plugin" }
+resonate-timer-wheel = { path = "../resonate-timer-wheel" }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 validator = { workspace = true }
 tracing = "0.1"
+lazy_static = "1"
+tokio = { version = "1", features = ["rt", "sync", "macros", "time"] }
 rusqlite = { version = "0.31", features = ["bundled"], optional = true }
 # Not optional: `migrate` carries the `Migrator` type, which the SQLite path
 # also uses even though it executes through rusqlite.

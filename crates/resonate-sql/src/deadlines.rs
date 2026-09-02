@@ -16,12 +16,11 @@
 
 use std::sync::{Arc, Weak};
 
+use crate::engine::{Scheduled, Timeout};
 use resonate_core::util;
-use resonate_sql::engine::{Scheduled, Timeout};
 use resonate_timer_wheel::timer::{BoxFuture, Clock, OnBackfill, OnFire, TimerConfig};
 use resonate_timer_wheel::{Comparator, Timer};
 
-use crate::config::TimeoutsConfig;
 use crate::server::Server;
 
 /// The timer as this server instantiates it.
@@ -57,15 +56,15 @@ pub fn clock() -> Clock {
 /// pointing back at it would otherwise be a cycle that never drops. A failed
 /// upgrade means the server is gone, and a deadline with no server to fire it
 /// against is nothing to do.
-pub fn build(config: &TimeoutsConfig, server: Weak<Server>) -> DeadlineTimer {
-    let refresh = std::time::Duration::from_millis(config.wheel_refresh);
+pub fn build(capacity: usize, wheel_refresh: u64, server: Weak<Server>) -> DeadlineTimer {
+    let refresh = std::time::Duration::from_millis(wheel_refresh);
     let cfg = TimerConfig {
-        capacity: config.wheel_capacity,
+        capacity,
         // Half full is when to look for more. Paired with `backfill_interval`
         // it is a floor on how often the world is re-read, not a promise to
         // fill the wheel: a deployment with fewer deadlines than capacity sits
         // permanently below the mark and refills on the interval alone.
-        low_watermark: config.wheel_capacity / 2,
+        low_watermark: capacity / 2,
         backfill_interval: refresh,
         // The same interval as the backstop. This bounds how long a deadline
         // another instance armed can stay invisible here.
