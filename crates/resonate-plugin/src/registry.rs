@@ -72,10 +72,10 @@ impl Registry {
         self.servers
             .iter()
             .copied()
-            .find(|p| p.id == id)
+            .find(|p| p.id() == id)
             .ok_or_else(|| RegistryError::NotCompiledIn {
                 requested: id.to_string(),
-                available: self.servers.iter().map(|p| p.id.to_string()).collect(),
+                available: self.servers.iter().map(|p| p.id()).collect(),
             })
     }
 
@@ -88,16 +88,16 @@ impl Registry {
         let ids = self
             .servers
             .iter()
-            .map(|p| ("server", p.id, p.krate))
-            .chain(self.workers.iter().map(|p| ("worker", p.id, p.krate)))
-            .chain(self.gateways.iter().map(|p| ("gateway", p.id, p.krate)))
+            .map(|p| ("server", p.id(), p.krate))
+            .chain(self.workers.iter().map(|p| ("worker", p.id(), p.krate)))
+            .chain(self.gateways.iter().map(|p| ("gateway", p.id(), p.krate)))
             .collect::<Vec<_>>();
         for (i, (kind, id, krate)) in ids.iter().enumerate() {
             for (other_kind, other_id, other_krate) in &ids[i + 1..] {
                 if kind == other_kind && id == other_id {
                     errors.push(RegistryError::DuplicateId {
                         kind,
-                        id: (*id).to_string(),
+                        id: id.clone(),
                         krates: ((*krate).to_string(), (*other_krate).to_string()),
                     });
                 }
@@ -111,7 +111,7 @@ impl Registry {
         for p in &self.workers {
             if p.schemes.is_empty() {
                 errors.push(RegistryError::NoSchemes {
-                    id: p.id.to_string(),
+                    id: p.id(),
                     krate: p.krate.to_string(),
                 });
             }

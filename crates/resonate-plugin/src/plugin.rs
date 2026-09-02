@@ -25,6 +25,22 @@ use resonate_core::{ResonateGateway, ResonateRouter, ResonateServer, ResonateWor
 use crate::config::Settings;
 use crate::error::ConfigError;
 
+/// A plugin's identity, from its crate name: `resonate-transport-http-poll`
+/// becomes `transport_http_poll`.
+///
+/// Derived rather than declared, because two fields that have to agree
+/// eventually will not. The `resonate-` prefix goes because every crate here
+/// carries it and it would say nothing; what is left is the role and the
+/// thing — which is the crate name doing its job, so the key repeats it rather
+/// than inventing a second vocabulary. A crate outside this naming keeps its
+/// whole name: `acme-kafka` is `acme_kafka`.
+pub fn id_from_crate(krate: &str) -> String {
+    krate
+        .strip_prefix("resonate-")
+        .unwrap_or(krate)
+        .replace('-', "_")
+}
+
 // ─── Server ──────────────────────────────────────────────────────────────────
 
 /// What the composition root gives a server: the router it delivers through.
@@ -58,9 +74,6 @@ impl ServerDependencies {
 #[allow(clippy::type_complexity)]
 #[non_exhaustive]
 pub struct ServerPlugin {
-    /// Its configuration key is `servers.<id>`, and `servers.active` is how one
-    /// is chosen.
-    pub id: &'static str,
     pub krate: &'static str,
     /// Read this plugin's settings and build it.
     ///
@@ -76,20 +89,21 @@ pub struct ServerPlugin {
 }
 
 impl ServerPlugin {
+    /// Where this plugin's settings live, and what it is called everywhere
+    /// else. See [`id_from_crate`].
+    pub fn id(&self) -> String {
+        id_from_crate(self.krate)
+    }
+
     #[allow(clippy::type_complexity)]
     pub const fn new(
-        id: &'static str,
         krate: &'static str,
         configure: fn(
             &Settings<'_>,
             ServerDependencies,
         ) -> Result<Arc<dyn ResonateServer>, ConfigError>,
     ) -> Self {
-        Self {
-            id,
-            krate,
-            configure,
-        }
+        Self { krate, configure }
     }
 }
 
@@ -123,11 +137,9 @@ impl WorkerDependencies {
 #[allow(clippy::type_complexity)]
 #[non_exhaustive]
 pub struct WorkerPlugin {
-    /// The name this plugin is known by: its configuration key
-    /// (`workers.<id>`), its `--set` path, its log field.
-    pub id: &'static str,
-    /// `env!("CARGO_PKG_NAME")`. What a collision has to name, because the
-    /// person who can fix one is the person assembling the binary.
+    /// `env!("CARGO_PKG_NAME")`. Both this plugin's identity and what a
+    /// collision has to name, because the person who can fix one is the person
+    /// assembling the binary.
     pub krate: &'static str,
     /// The address schemes this worker claims.
     pub schemes: &'static [&'static str],
@@ -148,9 +160,14 @@ pub struct WorkerPlugin {
 }
 
 impl WorkerPlugin {
+    /// Where this plugin's settings live, and what it is called everywhere
+    /// else. See [`id_from_crate`].
+    pub fn id(&self) -> String {
+        id_from_crate(self.krate)
+    }
+
     #[allow(clippy::type_complexity)]
     pub const fn new(
-        id: &'static str,
         krate: &'static str,
         schemes: &'static [&'static str],
         configure: fn(
@@ -159,7 +176,6 @@ impl WorkerPlugin {
         ) -> Result<Option<Arc<dyn ResonateWorker>>, ConfigError>,
     ) -> Self {
         Self {
-            id,
             krate,
             schemes,
             configure,
@@ -191,8 +207,6 @@ impl GatewayDependencies {
 #[allow(clippy::type_complexity)]
 #[non_exhaustive]
 pub struct GatewayPlugin {
-    /// Its configuration key is `gateways.<id>`.
-    pub id: &'static str,
     pub krate: &'static str,
     /// Read this plugin's settings and build it. Binding a port belongs in the
     /// gateway's own `init`, not here — a gateway is the last thing to start.
@@ -205,20 +219,21 @@ pub struct GatewayPlugin {
 }
 
 impl GatewayPlugin {
+    /// Where this plugin's settings live, and what it is called everywhere
+    /// else. See [`id_from_crate`].
+    pub fn id(&self) -> String {
+        id_from_crate(self.krate)
+    }
+
     #[allow(clippy::type_complexity)]
     pub const fn new(
-        id: &'static str,
         krate: &'static str,
         configure: fn(
             &Settings<'_>,
             GatewayDependencies,
         ) -> Result<Option<Arc<dyn ResonateGateway>>, ConfigError>,
     ) -> Self {
-        Self {
-            id,
-            krate,
-            configure,
-        }
+        Self { krate, configure }
     }
 }
 
@@ -227,7 +242,6 @@ macro_rules! debug_by_id {
         impl std::fmt::Debug for $t {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 f.debug_struct(stringify!($t))
-                    .field("id", &self.id)
                     .field("krate", &self.krate)
                     .finish_non_exhaustive()
             }

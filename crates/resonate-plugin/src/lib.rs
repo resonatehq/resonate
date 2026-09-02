@@ -21,9 +21,8 @@
 //!
 //! ```ignore
 //! pub static PLUGIN: WorkerPlugin = WorkerPlugin::new(
-//!     "kafka",
 //!     env!("CARGO_PKG_NAME"),
-//!     &["kafka"],
+//!     &["kafka"],   // resonate-worker-kafka  →  [workers.worker_kafka]
 //!     |settings, deps| {
 //!         let config: Config = settings.extract()?;
 //!         if !config.enabled {
@@ -60,7 +59,7 @@
 //!
 //! // 2. The server, handed that router. Nothing is connected yet.
 //! let deps = ServerDependencies::new(Arc::clone(&router) as _);
-//! let server = (chosen.configure)(&config.server(chosen.id), deps)?;
+//! let server = (chosen.configure)(&config.server(&chosen.id()), deps)?;
 //!
 //! // 3. The workers, each downgrading the server that now exists.
 //! //    Two collections, because they answer different questions: `workers` is
@@ -71,7 +70,7 @@
 //! let mut routes = HashMap::new();
 //! for plugin in registry.workers() {
 //!     let deps = WorkerDependencies::new(Arc::downgrade(&server));
-//!     let Some(worker) = (plugin.configure)(&config.worker(plugin.id), deps)? else {
+//!     let Some(worker) = (plugin.configure)(&config.worker(&plugin.id()), deps)? else {
 //!         continue; // turned itself off
 //!     };
 //!     for scheme in plugin.schemes {
@@ -84,7 +83,7 @@
 //! router.install(routes);
 //!
 //! // 5. The gateways, holding the server strongly. Nothing is bound yet.
-//! let gateways = /* (plugin.configure)(&config.gateway(plugin.id), deps)? */;
+//! let gateways = /* (plugin.configure)(&config.gateway(&plugin.id()), deps)? */;
 //!
 //! // 6. Start, in the order things were built.
 //! router.init(debug).await?;
@@ -147,6 +146,8 @@ pub use registry::Registry;
 // Server, worker, gateway: the order a binary builds them in, and the order
 // everything in this crate is written in. Skipped, because rustfmt would sort
 // these alphabetically and put the gateway first.
+pub use plugin::id_from_crate;
+
 #[rustfmt::skip]
 pub use plugin::{
     ServerDependencies, ServerPlugin,

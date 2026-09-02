@@ -10,9 +10,9 @@ pub const SCHEMES: &[&str] = &["http", "https"];
 /// This transport, as a plugin. The one thing a binary names to get `http://`
 /// and `https://` addresses delivered.
 pub static PLUGIN: resonate_plugin::WorkerPlugin =
-    resonate_plugin::WorkerPlugin::new("push", env!("CARGO_PKG_NAME"), SCHEMES, configure);
+    resonate_plugin::WorkerPlugin::new(env!("CARGO_PKG_NAME"), SCHEMES, configure);
 
-/// Read `[workers.push]`, and build the transport unless it is turned off.
+/// Read `[workers.transport_http_push]`, and build the transport unless it is turned off.
 fn configure(
     settings: &resonate_plugin::Settings<'_>,
     deps: resonate_plugin::WorkerDependencies,
@@ -765,29 +765,34 @@ mod tests {
     #[test]
     fn a_section_nobody_wrote_gets_this_crate_s_defaults() {
         let config = settings(&[]);
-        let worker = (PLUGIN.configure)(&config.worker(PLUGIN.id), no_server()).unwrap();
+        let worker = (PLUGIN.configure)(&config.worker(&PLUGIN.id()), no_server()).unwrap();
         assert!(worker.is_some(), "push is on unless turned off");
         assert_eq!(PLUGIN.schemes, &["http", "https"]);
-        assert_eq!(config.worker(PLUGIN.id).key(), "workers.push");
+        assert_eq!(
+            config.worker(&PLUGIN.id()).key(),
+            "workers.transport_http_push"
+        );
     }
 
     #[test]
     fn turning_it_off_is_its_own_setting() {
-        let config = settings(&[("workers.push.enabled", "false")]);
-        assert!((PLUGIN.configure)(&config.worker(PLUGIN.id), no_server())
-            .unwrap()
-            .is_none());
+        let config = settings(&[("workers.transport_http_push.enabled", "false")]);
+        assert!(
+            (PLUGIN.configure)(&config.worker(&PLUGIN.id()), no_server())
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
     fn zero_concurrency_is_refused_at_startup() {
         // It used to be checked in the server's own config::validate, which
         // meant the rule lived nowhere near the semaphore it is about.
-        let config = settings(&[("workers.push.concurrency", "0")]);
-        let Err(err) = (PLUGIN.configure)(&config.worker(PLUGIN.id), no_server()) else {
+        let config = settings(&[("workers.transport_http_push.concurrency", "0")]);
+        let Err(err) = (PLUGIN.configure)(&config.worker(&PLUGIN.id()), no_server()) else {
             panic!("every message would queue and never leave");
         };
-        assert_eq!(err.key, "workers.push.concurrency");
+        assert_eq!(err.key, "workers.transport_http_push.concurrency");
         assert!(err.source.is_some(), "and says where the value came from");
     }
 }

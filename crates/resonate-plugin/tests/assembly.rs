@@ -20,13 +20,12 @@ struct SqliteConfig {
     path: String,
 }
 
-static SQLITE: ServerPlugin =
-    ServerPlugin::new("sqlite", "resonate-server-dbms", |settings, _deps| {
-        let _config: SqliteConfig = settings.extract()?;
-        // Nothing is opened here. A real engine connects in `init`, like every
-        // other port, and reports failure from there.
-        Ok(Arc::new(Unstarted) as Arc<dyn ResonateServer>)
-    });
+static SQLITE: ServerPlugin = ServerPlugin::new("resonate-server-sqlite", |settings, _deps| {
+    let _config: SqliteConfig = settings.extract()?;
+    // Nothing is opened here. A real engine connects in `init`, like every
+    // other port, and reports failure from there.
+    Ok(Arc::new(Unstarted) as Arc<dyn ResonateServer>)
+});
 
 /// A server that has been built and not started. Standing in for one whose
 /// `init` would open a pool.
@@ -115,30 +114,21 @@ fn no_server() -> WorkerDependencies {
     WorkerDependencies::new(std::sync::Weak::<Dead>::new() as std::sync::Weak<dyn ResonateServer>)
 }
 
-static KAFKA: WorkerPlugin = WorkerPlugin::new(
-    "kafka",
-    "resonate-worker-kafka",
-    &["kafka"],
-    kafka_configure,
-);
+static KAFKA: WorkerPlugin =
+    WorkerPlugin::new("resonate-worker-kafka", &["kafka"], kafka_configure);
 
 /// A second plugin claiming the same scheme, for the collision check.
-static KAFKA_RIVAL: WorkerPlugin = WorkerPlugin::new(
-    "kafkaesque",
-    "other-kafka-crate",
-    &["kafka"],
-    kafka_configure,
-);
+static KAFKA_RIVAL: WorkerPlugin =
+    WorkerPlugin::new("other-kafka-crate", &["kafka"], kafka_configure);
 
 /// A worker that claims nothing, so nothing could ever route to it.
-static MUTE: WorkerPlugin = WorkerPlugin::new("mute", "resonate-worker-mute", &[], kafka_configure);
+static MUTE: WorkerPlugin = WorkerPlugin::new("resonate-worker-mute", &[], kafka_configure);
 
 // ─── A gateway ───────────────────────────────────────────────────────────────
 
-static HTTP: GatewayPlugin =
-    GatewayPlugin::new("http", "resonate-gateway-http", |_settings, _deps| {
-        unreachable!("not built in this test")
-    });
+static HTTP: GatewayPlugin = GatewayPlugin::new("resonate-gateway-http", |_settings, _deps| {
+    unreachable!("not built in this test")
+});
 
 // ─── The set of plugins a binary carries ─────────────────────────────────────
 
@@ -210,7 +200,7 @@ fn a_whole_binary_checks_out() {
 #[test]
 fn selecting_a_server_the_binary_does_not_carry_names_what_it_does() {
     let registry = Registry::new().server(&SQLITE);
-    let Err(err) = registry.select_server("scylladb") else {
+    let Err(err) = registry.select_server("server_scylladb") else {
         panic!("scylladb was never registered");
     };
     let rendered = err.to_string();
@@ -220,9 +210,12 @@ fn selecting_a_server_the_binary_does_not_carry_names_what_it_does() {
         rendered.contains("not compiled into this binary"),
         "{rendered}"
     );
-    assert!(rendered.contains("scylladb"), "{rendered}");
-    assert!(rendered.contains("sqlite"), "{rendered}");
-    assert_eq!(registry.select_server("sqlite").unwrap().id, "sqlite");
+    assert!(rendered.contains("server_scylladb"), "{rendered}");
+    assert!(rendered.contains("server_sqlite"), "{rendered}");
+    assert_eq!(
+        registry.select_server("server_sqlite").unwrap().id(),
+        "server_sqlite"
+    );
 }
 
 // ─── Configuration ───────────────────────────────────────────────────────────
@@ -244,7 +237,7 @@ fn a_plugin_nobody_configured_gets_its_own_defaults() {
     // serde's own defaults on KafkaConfig fill it in. One source of truth for a
     // default, rather than a struct and a snapshot of the same struct.
     let loaded = loader().load();
-    let config: KafkaConfig = loaded.worker("kafka").extract().unwrap();
+    let config: KafkaConfig = loaded.worker(&KAFKA.id()).extract().unwrap();
     assert_eq!(config, KafkaConfig::default());
     assert_eq!(loaded.extract::<CoreConfig>().unwrap().level, "info");
 }
@@ -255,17 +248,17 @@ fn a_plugin_turns_itself_off() {
     // opinion about what it is called or what it defaults to.
     let loaded = loader().load();
     assert!(
-        (KAFKA.configure)(&loaded.worker("kafka"), no_server())
+        (KAFKA.configure)(&loaded.worker(&KAFKA.id()), no_server())
             .unwrap()
             .is_none(),
         "off by its own default"
     );
 
     let loaded = loader()
-        .set("workers.kafka.enabled", "true")
+        .set("workers.worker_kafka.enabled", "true")
         .unwrap()
         .load();
-    assert!((KAFKA.configure)(&loaded.worker("kafka"), no_server())
+    assert!((KAFKA.configure)(&loaded.worker(&KAFKA.id()), no_server())
         .unwrap()
         .is_some());
 }
@@ -273,16 +266,16 @@ fn a_plugin_turns_itself_off() {
 #[test]
 fn set_carries_types_not_just_strings() {
     let loaded = loader()
-        .set("workers.kafka.concurrency", "8")
+        .set("workers.worker_kafka.concurrency", "8")
         .unwrap()
-        .set("workers.kafka.brokers", r#"["a:9092", "b:9092"]"#)
+        .set("workers.worker_kafka.brokers", r#"["a:9092", "b:9092"]"#)
         .unwrap()
         // Unquoted, so it is meant as a string.
         .set("level", "debug")
         .unwrap()
         .load();
 
-    let config: KafkaConfig = loaded.worker("kafka").extract().unwrap();
+    let config: KafkaConfig = loaded.worker(&KAFKA.id()).extract().unwrap();
     assert_eq!(config.concurrency, 8);
     assert_eq!(config.brokers, vec!["a:9092", "b:9092"]);
     assert_eq!(loaded.extract::<CoreConfig>().unwrap().level, "debug");
@@ -291,16 +284,16 @@ fn set_carries_types_not_just_strings() {
 #[test]
 fn a_plugin_validates_its_own_settings_and_says_where_they_came_from() {
     let loaded = loader()
-        .set("workers.kafka.enabled", "true")
+        .set("workers.worker_kafka.enabled", "true")
         .unwrap()
-        .set("workers.kafka.concurrency", "0")
+        .set("workers.worker_kafka.concurrency", "0")
         .unwrap()
         .load();
 
-    let Err(err) = (KAFKA.configure)(&loaded.worker("kafka"), no_server()) else {
+    let Err(err) = (KAFKA.configure)(&loaded.worker(&KAFKA.id()), no_server()) else {
         panic!("zero concurrency is the plugin's own rule");
     };
-    assert_eq!(err.key, "workers.kafka.concurrency");
+    assert_eq!(err.key, "workers.worker_kafka.concurrency");
     assert!(err.message.contains("at least 1"), "{}", err.message);
     // Provenance survives: the same bad number from a file and from a flag are
     // different problems to go and fix.
@@ -310,25 +303,29 @@ fn a_plugin_validates_its_own_settings_and_says_where_they_came_from() {
 #[test]
 fn a_server_is_selected_by_name() {
     let loaded = loader().load();
-    assert_eq!(loaded.active_server("sqlite"), "sqlite");
+    assert_eq!(loaded.active_server("server_sqlite"), "server_sqlite");
 
-    let loaded = loader().set("servers.active", "scylladb").unwrap().load();
-    assert_eq!(loaded.active_server("sqlite"), "scylladb");
+    let loaded = loader()
+        .set("servers.active", "server_scylladb")
+        .unwrap()
+        .load();
+    assert_eq!(loaded.active_server("server_sqlite"), "server_scylladb");
 }
 
 #[test]
 fn the_typed_config_never_leaves_the_plugins_crate() {
     // The factory closure owns it; what comes back out is a port trait object.
     let loaded = loader()
-        .set("workers.kafka.enabled", "true")
+        .set("workers.worker_kafka.enabled", "true")
         .unwrap()
-        .set("workers.kafka.brokers", r#"["a:9092"]"#)
+        .set("workers.worker_kafka.brokers", r#"["a:9092"]"#)
         .unwrap()
         .load();
 
-    let worker: Arc<dyn ResonateWorker> = (KAFKA.configure)(&loaded.worker("kafka"), no_server())
-        .unwrap()
-        .unwrap();
+    let worker: Arc<dyn ResonateWorker> =
+        (KAFKA.configure)(&loaded.worker(&KAFKA.id()), no_server())
+            .unwrap()
+            .unwrap();
     // Nothing about KafkaConfig is reachable from here, which is the point.
     let _ = worker;
 }
@@ -354,7 +351,7 @@ async fn connecting_is_init_not_configure() {
     // one place. Configuring this server succeeds; starting it does not.
     let loaded = loader().load();
     let server = (SQLITE.configure)(
-        &loaded.server("sqlite"),
+        &loaded.server(&SQLITE.id()),
         ServerDependencies::new(Arc::new(NoRoute) as Arc<dyn ResonateRouter>),
     )
     .expect("its settings are fine");
@@ -378,4 +375,20 @@ impl ResonateRouter for NoRoute {
     ) -> Result<(), resonate_core::Unavailable> {
         unreachable!("nothing is routed in this test")
     }
+}
+
+#[test]
+fn the_id_is_the_crate_name() {
+    // One field, not two that have to agree. The `resonate-` prefix goes
+    // because every crate here carries it; the role stays, because the crate
+    // name saying what the thing does is the point.
+    assert_eq!(SQLITE.id(), "server_sqlite");
+    assert_eq!(KAFKA.id(), "worker_kafka");
+    assert_eq!(HTTP.id(), "gateway_http");
+    // A crate outside the naming keeps its whole name.
+    assert_eq!(KAFKA_RIVAL.id(), "other_kafka_crate");
+    assert_eq!(
+        resonate_plugin::id_from_crate("resonate-transport-http-poll"),
+        "transport_http_poll"
+    );
 }

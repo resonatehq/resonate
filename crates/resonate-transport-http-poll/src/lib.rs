@@ -18,9 +18,9 @@ pub const SCHEME: &str = "poll";
 /// This transport, as a plugin. The one thing a binary names to get `poll://`
 /// addresses delivered.
 pub static PLUGIN: resonate_plugin::WorkerPlugin =
-    resonate_plugin::WorkerPlugin::new("poll", env!("CARGO_PKG_NAME"), &[SCHEME], configure);
+    resonate_plugin::WorkerPlugin::new(env!("CARGO_PKG_NAME"), &[SCHEME], configure);
 
-/// Read `[workers.poll]`, and build the registry unless it is turned off.
+/// Read `[workers.transport_http_poll]`, and build the registry unless it is turned off.
 fn configure(
     settings: &resonate_plugin::Settings<'_>,
     deps: resonate_plugin::WorkerDependencies,
@@ -354,37 +354,42 @@ mod tests {
     #[test]
     fn a_section_nobody_wrote_gets_this_crate_s_defaults() {
         let config = settings(&[]);
-        let worker = (PLUGIN.configure)(&config.worker(PLUGIN.id), no_server()).unwrap();
+        let worker = (PLUGIN.configure)(&config.worker(&PLUGIN.id()), no_server()).unwrap();
         assert!(worker.is_some(), "poll is on unless turned off");
         assert_eq!(PLUGIN.schemes, &["poll"]);
-        assert_eq!(config.worker(PLUGIN.id).key(), "workers.poll");
+        assert_eq!(
+            config.worker(&PLUGIN.id()).key(),
+            "workers.transport_http_poll"
+        );
     }
 
     #[test]
     fn turning_it_off_is_its_own_setting() {
-        let config = settings(&[("workers.poll.enabled", "false")]);
-        assert!((PLUGIN.configure)(&config.worker(PLUGIN.id), no_server())
-            .unwrap()
-            .is_none());
+        let config = settings(&[("workers.transport_http_poll.enabled", "false")]);
+        assert!(
+            (PLUGIN.configure)(&config.worker(&PLUGIN.id()), no_server())
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
     fn a_zero_sized_buffer_is_refused_at_startup() {
         // tokio::sync::mpsc::channel panics on a zero capacity, so this used to
         // be a check in the server's main, three crates away from the channel.
-        let config = settings(&[("workers.poll.buffer_size", "0")]);
-        let Err(err) = (PLUGIN.configure)(&config.worker(PLUGIN.id), no_server()) else {
+        let config = settings(&[("workers.transport_http_poll.buffer_size", "0")]);
+        let Err(err) = (PLUGIN.configure)(&config.worker(&PLUGIN.id()), no_server()) else {
             panic!("channel construction would panic");
         };
-        assert_eq!(err.key, "workers.poll.buffer_size");
+        assert_eq!(err.key, "workers.transport_http_poll.buffer_size");
     }
 
     #[test]
     fn a_zero_connection_limit_is_refused_at_startup() {
-        let config = settings(&[("workers.poll.max_connections", "0")]);
-        let Err(err) = (PLUGIN.configure)(&config.worker(PLUGIN.id), no_server()) else {
+        let config = settings(&[("workers.transport_http_poll.max_connections", "0")]);
+        let Err(err) = (PLUGIN.configure)(&config.worker(&PLUGIN.id()), no_server()) else {
             panic!("it would hold the scheme and accept nothing");
         };
-        assert_eq!(err.key, "workers.poll.max_connections");
+        assert_eq!(err.key, "workers.transport_http_poll.max_connections");
     }
 }
