@@ -1346,14 +1346,6 @@ mod tests {
         r.validate().map_err(|e| format!("{e:?}"))
     }
 
-    fn promise_tags(extra: &[(&str, &str)]) -> std::collections::HashMap<String, String> {
-        let mut tags = std::collections::HashMap::new();
-        for (k, v) in extra {
-            tags.insert(k.to_string(), v.to_string());
-        }
-        tags
-    }
-
     #[test]
     fn promise_origin_with_colon_is_rejected() {
         let err = promise(json!({
