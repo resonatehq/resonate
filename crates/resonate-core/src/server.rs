@@ -38,6 +38,32 @@ use super::Unavailable;
 /// it knows.
 #[async_trait]
 pub trait ResonateServer: Send + Sync {
+    /// Acquire resources and start background work.
+    ///
+    /// Called once, before anything can reach `process`, and the counterpart of
+    /// [`ResonateWorker::init`](super::ResonateWorker::init) and
+    /// [`ResonateGateway::init`](super::ResonateGateway::init) — every port has
+    /// the same shape, because every one of them may have to open a connection
+    /// to come into service and every one of them can fail doing it. A pool, a
+    /// schema, a session, a seeded timer: all of it belongs here rather than in
+    /// construction, so that failing to start is a startup error and not a
+    /// request answered wrongly later.
+    ///
+    /// `debug` is the process-wide debug flag. Under it the clock belongs to the
+    /// caller, so an implementation must not start work that runs on wall time.
+    async fn init(&self, debug: bool) -> Result<(), Unavailable> {
+        let _ = debug;
+        Ok(())
+    }
+
+    /// Stop background work and release resources.
+    ///
+    /// Called once, after every gateway and worker has stopped. Implementations
+    /// should be safe to call when `init` was never called.
+    async fn stop(&self) -> Result<(), Unavailable> {
+        Ok(())
+    }
+
     /// Apply one request and return its response.
     ///
     /// A non-2xx outcome is still a completed exchange: it comes back as `Ok`

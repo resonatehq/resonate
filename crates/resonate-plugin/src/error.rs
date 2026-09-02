@@ -50,31 +50,6 @@ impl std::fmt::Display for ConfigError {
 
 impl std::error::Error for ConfigError {}
 
-/// A plugin was configured correctly and still could not start: a database that
-/// will not answer, a port already bound, a credential rejected.
-#[derive(Debug, Clone)]
-pub struct StartupError {
-    pub plugin: String,
-    pub message: String,
-}
-
-impl StartupError {
-    pub fn new(plugin: impl Into<String>, message: impl Into<String>) -> Self {
-        Self {
-            plugin: plugin.into(),
-            message: message.into(),
-        }
-    }
-}
-
-impl std::fmt::Display for StartupError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "'{}': {}", self.plugin, self.message)
-    }
-}
-
-impl std::error::Error for StartupError {}
-
 /// Something is wrong with the *set* of plugins a binary was assembled from,
 /// rather than with any one of them.
 ///

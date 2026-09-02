@@ -14,3 +14,4 @@ figment = { version = "0.10", features = ["toml", "env"] }
 
 [dev-dependencies]
 async-trait = { workspace = true }
+tokio = { version = "1", features = ["rt", "macros"] }

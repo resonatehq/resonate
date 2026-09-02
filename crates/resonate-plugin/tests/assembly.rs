@@ -5,9 +5,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 #[rustfmt::skip]
 use resonate_plugin::{
-    ServerPlugin, WorkerDependencies, WorkerPlugin, GatewayPlugin,
-    ResonateServer, ResonateWorker,
-    ConfigError, StartupError, RegistryError,
+    ServerDependencies, ServerPlugin, WorkerDependencies, WorkerPlugin, GatewayPlugin,
+    ResonateServer, ResonateWorker, ResonateRouter,
+    ConfigError, RegistryError,
     Loader, Registry, Settings,
 };
 use serde::{Deserialize, Serialize};
@@ -23,10 +23,28 @@ struct SqliteConfig {
 static SQLITE: ServerPlugin =
     ServerPlugin::new("sqlite", "resonate-server-dbms", |settings, _deps| {
         let _config: SqliteConfig = settings.extract()?;
-        Ok(Box::pin(async {
-            Err(StartupError::new("sqlite", "not a real engine"))
-        }))
+        // Nothing is opened here. A real engine connects in `init`, like every
+        // other port, and reports failure from there.
+        Ok(Arc::new(Unstarted) as Arc<dyn ResonateServer>)
     });
+
+/// A server that has been built and not started. Standing in for one whose
+/// `init` would open a pool.
+struct Unstarted;
+
+#[async_trait]
+impl ResonateServer for Unstarted {
+    async fn init(&self, _debug: bool) -> Result<(), resonate_core::Unavailable> {
+        Err(resonate_core::Unavailable::new("not a real engine"))
+    }
+
+    async fn process(
+        &self,
+        _req: &resonate_core::types::RequestEnvelope,
+    ) -> Result<resonate_core::types::ResponseEnvelope, resonate_core::Unavailable> {
+        unreachable!("never started")
+    }
+}
 
 // ─── A worker, written the way a third party would write one ────────────────
 
@@ -326,5 +344,38 @@ impl ResonateServer for Dead {
         _req: &resonate_core::types::RequestEnvelope,
     ) -> Result<resonate_core::types::ResponseEnvelope, resonate_core::Unavailable> {
         unreachable!("never constructed")
+    }
+}
+
+#[tokio::test]
+async fn connecting_is_init_not_configure() {
+    // A plugin that opens something does it in `init`, whichever kind it is, so
+    // construction stays sync and cheap and a failure to start is reported from
+    // one place. Configuring this server succeeds; starting it does not.
+    let loaded = loader().load();
+    let server = (SQLITE.configure)(
+        &loaded.server("sqlite"),
+        ServerDependencies::new(Arc::new(NoRoute) as Arc<dyn ResonateRouter>, false),
+    )
+    .expect("its settings are fine");
+
+    let err = server
+        .init(false)
+        .await
+        .expect_err("the engine it would open is not there");
+    assert!(err.message.contains("not a real engine"), "{}", err.message);
+}
+
+/// A router that never delivers. The server under test never emits anything.
+struct NoRoute;
+
+#[async_trait]
+impl ResonateRouter for NoRoute {
+    async fn route(
+        &self,
+        _address: &str,
+        _msg: &resonate_core::types::Message,
+    ) -> Result<(), resonate_core::Unavailable> {
+        unreachable!("nothing is routed in this test")
     }
 }

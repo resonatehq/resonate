@@ -12,14 +12,12 @@
 //! dependency added beside it, and no plugin can have written a struct literal
 //! or an exhaustive destructure that a new field would break.
 
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::{Arc, Weak};
 
 use resonate_core::{ResonateGateway, ResonateRouter, ResonateServer, ResonateWorker};
 
 use crate::config::Settings;
-use crate::error::{ConfigError, StartupError};
+use crate::error::ConfigError;
 
 // ─── Server ──────────────────────────────────────────────────────────────────
 
@@ -48,16 +46,6 @@ impl ServerDependencies {
     }
 }
 
-/// A server under construction: connecting, and whatever it does with what it
-/// connected to.
-///
-/// The one place a future appears in this crate. A server is the only kind that
-/// does I/O to come into existence — a pool, a schema, a session — and it is
-/// fallible in a way that is not the operator's config being wrong, which is why
-/// it carries a [`StartupError`] rather than a [`ConfigError`].
-pub type ServerFuture =
-    Pin<Box<dyn Future<Output = Result<Arc<dyn ResonateServer>, StartupError>> + Send>>;
-
 /// A plugin that answers Resonate protocol requests.
 ///
 /// The unit of pluggability, not the storage underneath it: whatever internal
@@ -65,9 +53,7 @@ pub type ServerFuture =
 /// to somewhere else, a model in memory — is its own business and stays inside
 /// its own crate.
 ///
-/// The only kind that is asynchronous to build, and the only one with no
-/// `Option`: a binary has one server, chosen by name, so switching it off is not
-/// a thing to express.
+/// Selected rather than switched on: a binary has exactly one.
 // The `configure` signature below is long, and naming it would only move it
 // somewhere a reader has to go and look. It is the one thing a plugin author
 // has to understand, so it is written where they will read it.
@@ -78,19 +64,28 @@ pub struct ServerPlugin {
     /// is chosen.
     pub id: &'static str,
     pub krate: &'static str,
-    /// Read the settings, then connect.
+    /// Read this plugin's settings and build it.
     ///
-    /// Two steps rather than one, and the split is the two ways this can fail:
-    /// settings are read synchronously, so a bad one is reported before a socket
-    /// is opened, and the future that follows owns what it read.
-    pub configure: fn(&Settings<'_>, ServerDependencies) -> Result<ServerFuture, ConfigError>,
+    /// Sync, like every other kind: connecting is `init`'s, so a plugin that
+    /// needs a pool, a schema or a session opens it there and fails there. This
+    /// stays cheap, side-effect-free, and the only place a bad setting is
+    /// reported.
+    ///
+    /// No `Option`, unlike the other two: a binary has one server, chosen by
+    /// name, so switching it off is not a thing to express.
+    pub configure:
+        fn(&Settings<'_>, ServerDependencies) -> Result<Arc<dyn ResonateServer>, ConfigError>,
 }
 
 impl ServerPlugin {
+    #[allow(clippy::type_complexity)]
     pub const fn new(
         id: &'static str,
         krate: &'static str,
-        configure: fn(&Settings<'_>, ServerDependencies) -> Result<ServerFuture, ConfigError>,
+        configure: fn(
+            &Settings<'_>,
+            ServerDependencies,
+        ) -> Result<Arc<dyn ResonateServer>, ConfigError>,
     ) -> Self {
         Self {
             id,

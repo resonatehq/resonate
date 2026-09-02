@@ -37,8 +37,10 @@
 //! );
 //! ```
 //!
-//! Identity is data and building is behaviour, so reading a plugin
-//! never requires running it. Defaults are the `#[serde(default)]` on the plugin's own
+//! Identity is data and building is behaviour, so reading a plugin never
+//! requires running it. `configure` is sync and side-effect-free — a pool, a
+//! schema, a session, a bound port all belong in the thing's own `init`, which
+//! every port has and which the composition root awaits. Defaults are the `#[serde(default)]` on the plugin's own
 //! `Config` — a section nobody has configured reads as an empty one — so nothing
 //! is declared twice and the loader does not need to know the registry. The
 //! typed `Config` is captured by the closure and never named outside the
@@ -47,16 +49,17 @@
 //!
 //! # Startup order
 //!
-//! The three kinds are built in one order, and it is the whole of what a plugin
-//! may assume about when it is called:
+//! Construction is sync and cheap; `init` is where anything that can fail or
+//! block happens. Every port has the same pair, so the sequence is: build
+//! everything, then start it, in that order.
 //!
 //! ```ignore
 //! // 1. The router, empty.
 //! let router = Arc::new(Dispatcher::new());
 //!
-//! // 2. The server, handed that router.
+//! // 2. The server, handed that router. Nothing is connected yet.
 //! let deps = ServerDependencies::new(Arc::clone(&router) as _, debug);
-//! let server = (chosen.configure)(&config.server(chosen.id), deps)?.await?;
+//! let server = (chosen.configure)(&config.server(chosen.id), deps)?;
 //!
 //! // 3. The workers, each downgrading the server that now exists.
 //! let mut workers = HashMap::new();
@@ -73,9 +76,16 @@
 //! // 4. Install them. The router is complete from here and never changes again.
 //! router.install(workers);
 //!
-//! // 5. The gateways, holding the server strongly. They bind last, because
+//! // 5. The gateways, holding the server strongly. Nothing is bound yet.
+//! let gateways = /* (plugin.configure)(&config.gateway(plugin.id), deps)? */;
+//!
+//! // 6. Start. The server first, because a worker that upgrades its handle
+//! //    must find something that can answer. The gateways last, because
 //! //    accepting a request the rest of the process cannot serve is worse than
 //! //    not accepting it.
+//! server.init(debug).await?;
+//! router.init(debug).await?;   // each worker's init
+//! for gateway in &gateways { gateway.init(debug).await?; }
 //! ```
 //!
 //! Step 4 is what closes the cycle — server holds router, router holds workers,
@@ -88,8 +98,9 @@
 //! would ever be dropped. Upgrade per message: a failed upgrade means the server
 //! is gone and there is no work worth doing.
 //!
-//! Nothing can route between steps 2 and 4 — no gateway is listening and no
-//! background loop has started.
+//! Shutdown runs backwards, with one exception: the gateways stop first, then
+//! the workers, then the server — but a gateway's drain can be waiting on a
+//! stream only a worker can release, so in practice the gateway is stopped last.
 //!
 //! # Assembling a binary
 //!
@@ -118,13 +129,13 @@ pub use registry::Registry;
 // these alphabetically and put the gateway first.
 #[rustfmt::skip]
 pub use plugin::{
-    ServerDependencies, ServerFuture, ServerPlugin,
+    ServerDependencies, ServerPlugin,
     WorkerDependencies, WorkerPlugin,
     GatewayDependencies, GatewayPlugin,
 };
 
 pub use config::{Configuration, Loader, Settings};
-pub use error::{ConfigError, RegistryError, StartupError};
+pub use error::{ConfigError, RegistryError};
 
 // The port traits a plugin implements, re-exported so a plugin crate names one
 // dependency rather than two.
