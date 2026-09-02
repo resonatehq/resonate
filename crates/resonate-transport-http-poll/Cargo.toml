@@ -18,4 +18,4 @@ fastrand = "2"
 url = { workspace = true }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["rt", "macros"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "io-util", "time"] }

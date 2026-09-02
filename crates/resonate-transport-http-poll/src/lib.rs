@@ -164,6 +164,9 @@ struct Serving {
 pub struct PollRegistry {
     config: Config,
     serving: std::sync::Mutex<Option<Serving>>,
+    /// Where `init` actually bound. Worth keeping because `bind` may name port
+    /// 0, and then the configured address is not the one anything can reach.
+    bound: std::sync::Mutex<Option<std::net::SocketAddr>>,
     /// A handle to itself, for the listener it serves from.
     this: Weak<PollRegistry>,
     /// group -> [connection]
@@ -193,8 +196,24 @@ impl PollRegistry {
             buffer_size: config.buffer_size,
             config,
             serving: std::sync::Mutex::new(None),
+            bound: std::sync::Mutex::new(None),
             server,
         })
+    }
+
+    /// Where the listener is, once `init` has bound it.
+    pub fn local_addr(&self) -> Option<std::net::SocketAddr> {
+        *self.bound.lock().expect("poll bound mutex")
+    }
+
+    /// How many connections are open, across every group.
+    pub async fn connection_count(&self) -> usize {
+        self.connections
+            .lock()
+            .await
+            .values()
+            .map(|v| v.len())
+            .sum()
     }
 
     /// Register a new connection. Returns its id and the receiving end of the
@@ -338,6 +357,9 @@ impl ResonateWorker for PollRegistry {
         let listener = tokio::net::TcpListener::bind(&self.config.bind)
             .await
             .map_err(|e| Unavailable::new(format!("poll cannot bind {}: {e}", self.config.bind)))?;
+        if let Ok(addr) = listener.local_addr() {
+            *self.bound.lock().expect("poll bound mutex") = Some(addr);
+        }
         let (tx, rx) = tokio::sync::oneshot::channel();
         let this = self
             .this
@@ -349,27 +371,40 @@ impl ResonateWorker for PollRegistry {
         Ok(())
     }
 
-    /// Drop every connection, which is what ends the SSE streams.
+    /// Drop every connection, then close the listener — in that order.
     ///
     /// Each registered connection owns the sending half of its stream's
     /// channel. Clearing the map drops them all, the handler's `recv` returns
     /// `None`, and the stream finishes on its own — so the transport tears down
-    /// its own connections and nothing outside it needs a say. That is also
-    /// what lets the HTTP gateway stop *after* this: by the time it drains,
-    /// there are no long-lived responses left for it to wait on.
+    /// its own connections and nothing outside it needs a say.
+    ///
+    /// The order is not a preference. Doing it the other way round deadlocks,
+    /// and `a_connected_worker_does_not_wedge_stop` is what says so.
     async fn stop(&self) -> Result<(), Unavailable> {
+        // The connections first, and the order is the whole of it. axum's
+        // graceful shutdown stops accepting and then waits for every in-flight
+        // response; an SSE response is in flight until its stream ends, and
+        // these streams end when their sender drops, and this registry is the
+        // only thing holding one. Awaiting the listener before clearing the map
+        // would be waiting on a stream only the line below can finish.
+        let n = {
+            let mut conns = self.connections.lock().await;
+            let n: usize = conns.values().map(|v| v.len()).sum();
+            conns.clear();
+            n
+        };
+        if n > 0 {
+            tracing::info!(connections = n, "Poll connections closed");
+        }
+
+        // Then the listener, whose drain is now finite.
+        //
         // Taken out of the guard before the await: a std MutexGuard is not
         // Send, and holding one across one would make this future un-spawnable.
         let serving = self.serving.lock().expect("poll serving mutex").take();
         if let Some(serving) = serving {
             let _ = serving.shutdown.send(());
             let _ = serving.task.await;
-        }
-        let mut conns = self.connections.lock().await;
-        let n: usize = conns.values().map(|v| v.len()).sum();
-        conns.clear();
-        if n > 0 {
-            tracing::info!(connections = n, "Poll connections closed");
         }
         Ok(())
     }
@@ -547,6 +582,57 @@ mod tests {
             panic!("channel construction would panic");
         };
         assert_eq!(err.key, "workers.transport_http_poll.buffer_size");
+    }
+
+    /// The bug this pins: `stop` used to await the listener before clearing the
+    /// map, and axum's graceful shutdown waits for every in-flight response. An
+    /// SSE response is in flight until its stream ends, and the stream ends
+    /// when this registry drops its sender — so the await was waiting on
+    /// something only the line after it could cause.
+    ///
+    /// A real connection over a real socket, because that is the only way the
+    /// listener has a connection task to wait on.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_connected_worker_does_not_wedge_stop() {
+        let poll = PollRegistry::new(
+            std::sync::Weak::<NoopServer>::new() as Weak<dyn ResonateServer>,
+            Config {
+                bind: "127.0.0.1:0".to_string(),
+                ..Config::default()
+            },
+        );
+        poll.init(false).await.expect("binds an ephemeral port");
+        let addr = poll.local_addr().expect("bound in init");
+
+        // Hold an SSE connection open, the way a worker does. The socket stays
+        // in scope: dropping it would end the stream for the wrong reason.
+        let mut worker = tokio::net::TcpStream::connect(addr).await.expect("connect");
+        tokio::io::AsyncWriteExt::write_all(
+            &mut worker,
+            b"GET /poll/default/w1 HTTP/1.1\r\nHost: x\r\n\r\n",
+        )
+        .await
+        .expect("request");
+
+        // Wait for the registry to take it, so the test is not racing the
+        // handler into asserting on an empty map.
+        for _ in 0..300 {
+            if poll.connection_count().await > 0 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert_eq!(
+            poll.connection_count().await,
+            1,
+            "the connection registered"
+        );
+
+        tokio::time::timeout(std::time::Duration::from_secs(5), poll.stop())
+            .await
+            .expect("stop must not wait on a stream only it can end")
+            .expect("stops cleanly");
+        assert_eq!(poll.connection_count().await, 0);
     }
 
     #[test]

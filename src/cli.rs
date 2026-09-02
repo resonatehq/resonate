@@ -206,20 +206,48 @@ pub struct CommonArgs {
 struct Overrides(Vec<(String, String)>);
 
 impl Overrides {
-    /// Set `key` when the flag was given, and do nothing when it was not.
+    /// Set a scalar key — a number or a bool — when the flag was given.
     ///
-    /// The value is written as TOML: `Display` is right for a number or a bool,
-    /// and a string is quoted by the loader when it does not parse as anything
-    /// else.
+    /// The value is written as TOML, and `Display` is already TOML for both.
     fn maybe<T: std::fmt::Display>(&mut self, key: &str, value: Option<T>) {
         if let Some(v) = value {
             self.0.push((key.to_string(), v.to_string()));
         }
     }
 
+    /// Set a string key, quoted, when the flag was given.
+    ///
+    /// Quoted here rather than left to the loader's "did it parse as TOML?"
+    /// rule, because for a string flag that rule is wrong: a GCP project id of
+    /// `123456789` or a bearer token of `12345` parses as an integer and then
+    /// fails to deserialize into a `String`, naming a key the operator did
+    /// write with a type error they did not cause.
+    fn maybe_str(&mut self, key: &str, value: Option<impl Into<String>>) {
+        if let Some(v) = value {
+            self.0.push((key.to_string(), toml_string(&v.into())));
+        }
+    }
+
+    /// Set a key to a value that is already TOML.
     fn set(&mut self, key: &str, value: impl Into<String>) {
         self.0.push((key.to_string(), value.into()));
     }
+
+    /// Set a string key to a value that is already known.
+    fn set_str(&mut self, key: &str, value: &str) {
+        self.0.push((key.to_string(), toml_string(value)));
+    }
+}
+
+/// A TOML basic string, so nothing about the value can be read as syntax.
+fn toml_string(value: &str) -> String {
+    let escaped = value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t");
+    format!("\"{escaped}\"")
 }
 
 /// The auth policy is enforced by each edge that admits a request, so a flag
@@ -241,7 +269,7 @@ impl CommonArgs {
     fn overrides(self, servers: &[String]) -> Vec<(String, String)> {
         let mut o = Overrides::default();
 
-        o.maybe("level", self.level);
+        o.maybe_str("level", self.level);
         if self.debug {
             o.set("debug", "true");
         }
@@ -254,11 +282,11 @@ impl CommonArgs {
             } else {
                 format!("server_{v}")
             };
-            o.set("servers.active", id);
+            o.set_str("servers.active", &id);
         }
-        o.maybe("servers.server_postgres.url", self.postgres_url.clone());
+        o.maybe_str("servers.server_postgres.url", self.postgres_url.clone());
         o.maybe("servers.server_postgres.pool_size", self.postgres_pool_size);
-        o.maybe("servers.server_mysql.url", self.mysql_url.clone());
+        o.maybe_str("servers.server_mysql.url", self.mysql_url.clone());
         o.maybe("servers.server_mysql.pool_size", self.mysql_pool_size);
 
         // The URL a worker is told to call back on, and the one the gateway
@@ -276,7 +304,7 @@ impl CommonArgs {
             }
         });
         for id in servers {
-            o.maybe(&format!("servers.{id}.server_url"), url.clone());
+            o.maybe_str(&format!("servers.{id}.server_url"), url.clone());
             o.maybe(
                 &format!("servers.{id}.retry_timeout"),
                 self.tasks_retry_timeout,
@@ -300,19 +328,19 @@ impl CommonArgs {
             "workers.transport_http_push.request_timeout",
             self.transports_http_push_request_timeout,
         );
-        o.maybe(
+        o.maybe_str(
             "workers.transport_http_push.auth.mode",
             self.transports_http_push_auth_mode,
         );
-        o.maybe(
+        o.maybe_str(
             "workers.transport_http_push.auth.token",
             self.transports_http_push_auth_token,
         );
-        o.maybe(
+        o.maybe_str(
             "workers.transport_http_push.auth.audience",
             self.transports_http_push_auth_audience,
         );
-        o.maybe(
+        o.maybe_str(
             "workers.transport_http_push.auth.header",
             self.transports_http_push_auth_header,
         );
@@ -321,7 +349,7 @@ impl CommonArgs {
             "workers.transport_http_poll.enabled",
             self.transports_http_poll_enabled,
         );
-        o.maybe(
+        o.maybe_str(
             "workers.transport_http_poll.bind",
             self.transports_http_poll_bind,
         );
@@ -338,7 +366,7 @@ impl CommonArgs {
             "workers.transport_gcps.enabled",
             self.transports_gcps_enabled,
         );
-        o.maybe(
+        o.maybe_str(
             "workers.transport_gcps.project",
             self.transports_gcps_project,
         );
@@ -361,14 +389,14 @@ impl CommonArgs {
         );
 
         // --- gateways ---
-        o.maybe("gateways.gateway_http.bind", self.bind);
+        o.maybe_str("gateways.gateway_http.bind", self.bind);
         o.maybe("gateways.gateway_http.port", self.port);
-        o.maybe("gateways.gateway_http.url", url);
+        o.maybe_str("gateways.gateway_http.url", url);
         if !self.cors_allow_origins.is_empty() {
             let list = self
                 .cors_allow_origins
                 .iter()
-                .map(|s| format!("{s:?}"))
+                .map(|s| toml_string(s))
                 .collect::<Vec<_>>()
                 .join(", ");
             o.set(
@@ -377,23 +405,30 @@ impl CommonArgs {
             );
         }
         o.maybe("gateways.gateway_web.enabled", self.console_enabled);
-        o.maybe("gateways.gateway_web.bind", self.console_bind);
+        o.maybe_str("gateways.gateway_web.bind", self.console_bind);
         o.maybe(
             "gateways.gateway_metrics.enabled",
             self.observability_metrics_enabled,
         );
-        o.maybe(
+        o.maybe_str(
             "gateways.gateway_metrics.bind",
             self.observability_metrics_bind,
         );
 
         // Auth is one policy, applied by every edge that admits a request.
-        if let Some(key) = self.auth_publickey {
-            for edge in AUTHENTICATED {
-                o.set(&format!("{edge}.auth.publickey"), key.clone());
-                o.maybe(&format!("{edge}.auth.iss"), self.auth_iss.clone());
-                o.maybe(&format!("{edge}.auth.aud"), self.auth_aud.clone());
-            }
+        //
+        // `--auth-iss` and `--auth-aud` narrow a policy rather than turning one
+        // on, so they only mean anything alongside a key — but they are written
+        // whether or not this invocation supplied one, because the key may have
+        // come from the file or the environment. Writing only the claims used
+        // to drop them silently in exactly that case.
+        for edge in AUTHENTICATED {
+            o.maybe_str(
+                &format!("{edge}.auth.publickey"),
+                self.auth_publickey.clone(),
+            );
+            o.maybe_str(&format!("{edge}.auth.iss"), self.auth_iss.clone());
+            o.maybe_str(&format!("{edge}.auth.aud"), self.auth_aud.clone());
         }
 
         // Whatever the named flags do not cover.

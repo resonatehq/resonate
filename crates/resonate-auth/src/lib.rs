@@ -49,6 +49,12 @@ pub struct Config {
     /// Public key for JWT verification.
     /// Set to "none" to accept unsigned tokens (debug/testing).
     /// Set to a file path to verify signatures against a PEM key.
+    ///
+    /// Defaulted, like every other field in every plugin's config, so that
+    /// naming an `auth` section without it is this crate's error to report
+    /// rather than serde's. An absent key is not a usable policy — `load`
+    /// says so, naming the setting an operator has to add.
+    #[serde(default)]
     pub publickey: String,
 
     /// Expected issuer (`iss` claim).
@@ -67,6 +73,17 @@ impl Config {
     /// path should stop the process, not surface later as a request that cannot
     /// be authenticated.
     pub fn load(&self) -> Result<AuthConfig, String> {
+        if self.publickey.is_empty() {
+            // Reachable by writing `iss` and forgetting `publickey`. Auth is on
+            // — a section exists — and there is nothing to verify against, so
+            // this is a startup failure rather than a policy that admits
+            // everything.
+            return Err(
+                "publickey is required when an auth section is present: a path to a PEM \
+                 file, or \"none\" to accept unsigned tokens"
+                    .to_string(),
+            );
+        }
         let key = if self.publickey == "none" {
             tracing::warn!("Auth enabled — unsigned mode (no signature verification)");
             None

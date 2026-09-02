@@ -51,7 +51,9 @@ pub struct Options {
     /// `--set key=value`, highest precedence. The key space is the config's, so
     /// this covers every plugin that exists or ever will.
     pub overrides: Vec<(String, String)>,
-    /// What `servers.active` falls back to.
+    /// What `servers.active` falls back to when a binary carries more than one
+    /// server. A binary carrying exactly one needs none: that one is the
+    /// fallback, whatever this says.
     pub default_server: String,
 }
 
@@ -193,11 +195,14 @@ fn load(options: &Options) -> Result<Configuration, String> {
 /// A built server: everything constructed, nothing started.
 ///
 /// Held together so `start` and `stop` are the only two orders anyone has to
-/// get right, and both are written down once.
+/// get right, and both are written down once. Each kind is kept as
+/// `(id, thing)`: the id is what an operator needs when one of them will not
+/// start, and it is the only thing that can name which of three gateways
+/// failed to bind.
 pub struct Running {
-    router: Arc<Router>,
     server: Arc<dyn ResonateServer>,
-    gateways: Vec<Arc<dyn ResonateGateway>>,
+    workers: Vec<(String, Arc<dyn ResonateWorker>)>,
+    gateways: Vec<(String, Arc<dyn ResonateGateway>)>,
 }
 
 impl Running {
@@ -213,6 +218,10 @@ impl Running {
 /// Not a cycle. The router is the only participant that starts incomplete —
 /// step 3 is what closes the loop — so nothing is ever handed a value that does
 /// not exist yet, and every `configure` is cheap and side-effect free.
+///
+/// Note this order is about who has to *exist* before whom, which is not the
+/// order [`Running::start`] uses — that one is about who has to *work* before
+/// whom. See there.
 pub fn build(
     registry: &Registry,
     config: &Configuration,
@@ -223,7 +232,17 @@ pub fn build(
 
     // 2. The server this binary was pointed at. Nothing is connected yet —
     //    opening the database is `init`'s, like every other port's resource.
-    let active = config.active_server(&options.default_server);
+    //
+    //    A binary carrying one server needs no `servers.active` and no default
+    //    to fall back to: there is nothing to choose between. Asking the
+    //    registry rather than trusting the const is what keeps a build with
+    //    only postgres in it from failing to start because the const still
+    //    says sqlite.
+    let fallback = match registry.servers() {
+        [only] => only.id(),
+        _ => options.default_server.clone(),
+    };
+    let active = config.active_server(&fallback);
     let chosen = registry.select_server(&active).map_err(|e| e.to_string())?;
     let server = (chosen.configure)(
         &config.server(&chosen.id()),
@@ -234,10 +253,13 @@ pub fn build(
 
     // 3. The workers, each downgrading the server that now exists.
     //
-    //    One map, not two: the router is handed how to reach a worker, and
-    //    `init` is driven from the plugin loop below rather than from the
-    //    routing table — a worker claiming two schemes is in the table twice
-    //    and would otherwise be started twice.
+    //    Two collections, because they answer different questions: `workers` is
+    //    what was built, one entry per plugin, and `routes` is how to reach it.
+    //    A worker claiming two schemes is in `routes` twice — which is right,
+    //    two schemes reach it — and would be started twice if its lifecycle
+    //    were driven from there. `a_worker_with_two_schemes_starts_once` says
+    //    so.
+    let mut workers: Vec<(String, Arc<dyn ResonateWorker>)> = Vec::new();
     let mut routes: HashMap<String, Arc<dyn ResonateWorker>> = HashMap::new();
     for plugin in registry.workers() {
         let deps = WorkerDependencies::new(Arc::downgrade(&server));
@@ -251,6 +273,7 @@ pub fn build(
             routes.insert((*scheme).to_string(), Arc::clone(&worker));
         }
         tracing::info!(worker = %plugin.id(), schemes = ?plugin.schemes, "Worker plugin registered");
+        workers.push((plugin.id(), worker));
     }
 
     // 4. Install them. The router is complete from here and never changes again.
@@ -259,7 +282,7 @@ pub fn build(
         .map_err(|e| format!("the router is built here and nowhere else: {e}"))?;
 
     // 5. The gateways, holding the server strongly. Nothing is bound yet.
-    let mut gateways: Vec<Arc<dyn ResonateGateway>> = Vec::new();
+    let mut gateways: Vec<(String, Arc<dyn ResonateGateway>)> = Vec::new();
     for plugin in registry.gateways() {
         let deps = GatewayDependencies::new(Arc::clone(&server));
         let Some(gateway) =
@@ -268,44 +291,61 @@ pub fn build(
             tracing::info!(gateway = %plugin.id(), "Gateway plugin disabled");
             continue;
         };
-        gateways.push(gateway);
         tracing::info!(gateway = %plugin.id(), "Gateway plugin registered");
+        gateways.push((plugin.id(), gateway));
     }
 
     Ok(Running {
-        router,
         server,
+        workers,
         gateways,
     })
 }
 
 impl Running {
-    /// Start, in the order things were built.
+    /// Start: workers, then the server, then the gateways.
     ///
-    /// One rule, no special case to remember — and it is also the order that
-    /// works: a worker that upgrades its handle finds a server that can already
-    /// answer, and a gateway binds only once everything behind it can serve
-    /// what it accepts. Accepting a request the rest of the process cannot
-    /// serve is worse than not accepting it, so the gateways are last.
+    /// Not build order, and the difference is the point. Build order is who has
+    /// to *exist* before whom; this is who has to *work* before whom, and the
+    /// two do not agree about the server:
+    ///
+    /// - The workers go first because the server's `init` arms its timer and
+    ///   spawns its sweep, and both of those route. A message reaching a worker
+    ///   that has not started is a delivery lost to a race nobody can see.
+    /// - The gateways go last because accepting a request the rest of the
+    ///   process cannot yet serve is worse than not accepting it.
+    ///
+    /// A failure part-way through stops what already started, so a caller never
+    /// holds a half-started `Running`.
     pub async fn start(&self, debug: bool) -> Result<(), String> {
-        self.router
-            .init(debug)
-            .await
-            .map_err(|e| format!("a worker failed to start: {e}"))?;
-        self.server
-            .init(debug)
-            .await
-            .map_err(|e| format!("the server failed to start: {e}"))?;
-        for gateway in &self.gateways {
-            gateway
-                .init(debug)
-                .await
-                .map_err(|e| format!("a gateway failed to start: {e}"))?;
+        if let Err(e) = self.start_inner(debug).await {
+            self.stop(std::time::Duration::from_secs(5)).await;
+            return Err(e);
         }
         Ok(())
     }
 
-    /// Stop, which is not the mirror image of `start`.
+    async fn start_inner(&self, debug: bool) -> Result<(), String> {
+        for (id, worker) in &self.workers {
+            worker
+                .init(debug)
+                .await
+                .map_err(|e| format!("worker '{id}' failed to start: {e}"))?;
+        }
+        self.server
+            .init(debug)
+            .await
+            .map_err(|e| format!("the server failed to start: {e}"))?;
+        for (id, gateway) in &self.gateways {
+            gateway
+                .init(debug)
+                .await
+                .map_err(|e| format!("gateway '{id}' failed to start: {e}"))?;
+        }
+        Ok(())
+    }
+
+    /// Stop, which is not the reverse of `start` either.
     ///
     /// The exception is load-bearing. A gateway's graceful drain can be waiting
     /// on a long-lived response — an SSE stream — that only a worker's `stop`
@@ -313,24 +353,27 @@ impl Running {
     /// client gets a 503 rather than a closed socket while in-flight work
     /// drains.
     ///
+    /// The server goes first because its timer is the only thing that can still
+    /// hand it work of its own; then the workers; then the gateways.
+    ///
     /// Nothing here is fatal: the process is on its way down, and one plugin
-    /// refusing to drain is no reason to leave the others running.
+    /// refusing to drain is no reason to leave the others running. That is also
+    /// why this is not the mirror of `start` in its error handling — there is
+    /// nobody left to report to.
     pub async fn stop(&self, timeout: std::time::Duration) {
         tracing::info!("Shutting down, draining background tasks...");
         let drain = async {
-            // The server first: its timer is the only thing that can still hand
-            // it work of its own, and `stop` drains what it spawned behind it.
             if let Err(e) = self.server.stop().await {
                 tracing::warn!(error = %e, "server did not stop cleanly");
             }
-            // Then the workers, through the router that holds them. What feeds
-            // them has stopped, so this drains what is already in flight rather
-            // than racing new deliveries.
-            let _ = self.router.stop().await;
-            // The gateways last. See above.
-            for gateway in &self.gateways {
+            for (id, worker) in &self.workers {
+                if let Err(e) = worker.stop().await {
+                    tracing::warn!(worker = %id, error = %e, "worker did not stop cleanly");
+                }
+            }
+            for (id, gateway) in &self.gateways {
                 if let Err(e) = gateway.stop().await {
-                    tracing::warn!(error = %e, "gateway did not stop cleanly");
+                    tracing::warn!(gateway = %id, error = %e, "gateway did not stop cleanly");
                 }
             }
         };

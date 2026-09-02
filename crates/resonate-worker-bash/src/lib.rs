@@ -71,7 +71,7 @@ impl Default for Config {
 }
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, OnceLock, Weak};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -195,7 +195,13 @@ pub struct BashExecTransport {
     lease_timeout: i64,
     local: Arc<LocalBackend>,
     docker: Arc<DockerBackend>,
-    tensorlake: Arc<TensorlakeBackend>,
+    /// Built by `init`, not by `configure`.
+    ///
+    /// `reqwest::Client::new` initializes a TLS backend and reads the system
+    /// resolver configuration — filesystem I/O, and documented to panic when
+    /// either fails. `configure` is sync and side-effect-free by contract, so
+    /// it cannot be the place that happens; `init` can report it.
+    tensorlake: OnceLock<Arc<TensorlakeBackend>>,
     /// The process-wide debug flag, taken in `init`.
     ///
     /// This is the one worker with work on a clock — the lease heartbeat — and
@@ -213,7 +219,7 @@ impl BashExecTransport {
             lease_timeout,
             local: Arc::new(LocalBackend),
             docker: Arc::new(DockerBackend),
-            tensorlake: Arc::new(TensorlakeBackend::from_env()),
+            tensorlake: OnceLock::new(),
             debug: AtomicBool::new(false),
         }
     }
@@ -232,7 +238,16 @@ impl BashExecTransport {
         {
             Ok(BackendChoice::Local) => (self.local.clone(), None),
             Ok(BackendChoice::Docker { image }) => (self.docker.clone(), Some(image)),
-            Ok(BackendChoice::Tensorlake { image }) => (self.tensorlake.clone(), Some(image)),
+            Ok(BackendChoice::Tensorlake { image }) => {
+                // Set by `init`; absent only if something called this without
+                // starting the worker.
+                let Some(tensorlake) = self.tensorlake.get() else {
+                    return Err(Unavailable::new(
+                        "bash-exec: the tensorlake backend is not started",
+                    ));
+                };
+                (tensorlake.clone() as Arc<dyn ExecBackend>, Some(image))
+            }
             Err(e) => {
                 return Err(Unavailable::new(format!(
                     "bash-exec: cannot parse address {address}: {e}"
@@ -267,6 +282,9 @@ impl ResonateWorker for BashExecTransport {
     /// Remember the debug flag, for the lease heartbeat in `run_task`.
     async fn init(&self, debug: bool) -> Result<(), Unavailable> {
         self.debug.store(debug, Ordering::SeqCst);
+        let tensorlake = TensorlakeBackend::from_env()
+            .map_err(|e| Unavailable::new(format!("bash worker: {e}")))?;
+        let _ = self.tensorlake.set(Arc::new(tensorlake));
         Ok(())
     }
 
@@ -618,11 +636,16 @@ pub struct TensorlakeBackend {
 }
 
 impl TensorlakeBackend {
-    pub fn from_env() -> Self {
-        Self {
+    /// Fallible, and called from `init` rather than `configure`: building a
+    /// client loads root certificates and the system resolver config, both of
+    /// which can fail on a host that is missing them.
+    pub fn from_env() -> Result<Self, String> {
+        Ok(Self {
             api_key: std::env::var("TENSORLAKE_API_KEY").ok(),
-            client: reqwest::Client::new(),
-        }
+            client: reqwest::Client::builder()
+                .build()
+                .map_err(|e| format!("could not build an HTTP client: {e}"))?,
+        })
     }
 }
 
