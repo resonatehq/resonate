@@ -706,6 +706,7 @@ async fn run_blob_server(config: Config) -> Result<(), String> {
             url: config.server.url.clone(),
             cors_allow_origins: config.server.cors.allow_origins.clone(),
             auth: config.auth.clone(),
+            workos: config.workos.clone(),
             // Unlike SQLite, the store is not an in-process transaction a
             // poisoned handler could leave half-written: every write is one
             // conditional PUT that lands whole or not at all.
