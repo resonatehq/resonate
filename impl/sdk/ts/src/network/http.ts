@@ -4,6 +4,7 @@ import type { Logger } from "../logger.js";
 import { getEnv } from "../platform.js";
 import * as util from "../util.js";
 import type { Network } from "./network.js";
+import { resolveTokenProvider, type TokenProvider } from "./token.js";
 import { isMessage, isResponse, type Message, type Request, type Response } from "./types.js";
 
 // =============================================================================
@@ -42,6 +43,7 @@ export interface HttpNetworkConfig {
   timeout?: number;
   headers?: { [key: string]: string };
   token?: string;
+  tokenProvider?: TokenProvider;
   logger?: Logger;
   adapter?: HttpAdapter;
 }
@@ -50,7 +52,7 @@ export class HttpNetwork implements Network {
   private url: string;
   private timeout: number;
   private headers: { [key: string]: string };
-  private token?: string;
+  private tokenProvider: TokenProvider;
   private adapter?: HttpAdapter;
   private logger?: Logger;
 
@@ -59,6 +61,7 @@ export class HttpNetwork implements Network {
     timeout = undefined,
     headers = {},
     token = undefined,
+    tokenProvider = undefined,
     logger = undefined,
     adapter = undefined,
   }: HttpNetworkConfig) {
@@ -72,14 +75,10 @@ export class HttpNetwork implements Network {
     this.logger = logger;
     this.adapter = adapter;
 
-    // Priority: programmatic token > env var
-    const resolvedToken = token ?? getEnv("RESONATE_TOKEN");
-
     this.headers = { "Content-Type": "application/json", ...headers };
-    if (resolvedToken) {
-      this.headers.Authorization = `Bearer ${resolvedToken}`;
-      this.token = resolvedToken;
-    }
+
+    // Resolve tokenProvider: explicit > legacy token string > env var > noop
+    this.tokenProvider = resolveTokenProvider(tokenProvider, token ?? getEnv("RESONATE_TOKEN"));
   }
 
   get unicast(): string {
@@ -132,8 +131,27 @@ export class HttpNetwork implements Network {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
-    if (this.token) {
-      req = { ...req, head: { ...req.head, auth: this.token } };
+    // Refresh token on every request so long-lived processes never send stale tokens.
+    let token: string | undefined;
+    try {
+      token = await this.tokenProvider.getToken();
+    } catch (e) {
+      const cause = e instanceof Error ? e.message : String(e);
+      this.logger?.warn(
+        {
+          component: "network",
+          kind: req.kind,
+          corr_id: req.head.corrId,
+          error_type: "auth_error",
+          error: cause,
+        },
+        "platform failure",
+      );
+      throw new ResonateTimeoutException(cause);
+    }
+    if (token) {
+      this.headers.Authorization = `Bearer ${token}`;
+      req = { ...req, head: { ...req.head, auth: token } };
     }
 
     let httpResponse: globalThis.Response;
@@ -260,6 +278,7 @@ export class PollMessageSource implements HttpAdapter {
 
   private pollUrl: string;
   private headers: { [key: string]: string };
+  private tokenProvider: TokenProvider;
   private eventSource: EventSource;
   private callbacks: Array<(msg: Message) => void> = [];
   private logger?: Logger;
@@ -272,10 +291,12 @@ export class PollMessageSource implements HttpAdapter {
   constructor({
     url,
     token = undefined,
+    tokenProvider = undefined,
     logger = undefined,
   }: {
     url: string;
     token?: string;
+    tokenProvider?: TokenProvider;
     logger?: Logger;
   }) {
     this.pollUrl = url;
@@ -292,10 +313,12 @@ export class PollMessageSource implements HttpAdapter {
     this.anycast = `poll://any@${group}/${pid}`;
 
     this.headers = {};
-    if (token) {
-      this.headers.Authorization = `Bearer ${token}`;
-    }
 
+    // Resolve tokenProvider: explicit > legacy token string > noop
+    this.tokenProvider = resolveTokenProvider(tokenProvider, token);
+
+    // connect() resolves the token lazily in the fetch callback so the
+    // EventSource is assigned synchronously in the constructor.
     this.eventSource = this.connect();
   }
 
@@ -305,14 +328,23 @@ export class PollMessageSource implements HttpAdapter {
 
   private connect() {
     this.eventSource = new EventSource(this.pollUrl, {
-      fetch: (url, init) =>
-        fetch(url, {
+      fetch: async (url, init) => {
+        // Resolve the token on every connection attempt so long-lived SSE
+        // connections are always authenticated with a fresh token.
+        const token = await this.tokenProvider.getToken();
+        if (token) {
+          this.headers.Authorization = `Bearer ${token}`;
+        } else {
+          delete this.headers.Authorization;
+        }
+        return fetch(url, {
           ...init,
           headers: {
             ...init.headers,
             ...this.headers,
           },
-        }),
+        });
+      },
     });
 
     this.eventSource.addEventListener("open", () => {

@@ -9,6 +9,7 @@ import { ConsoleLogger, type Logger, type LogLevel } from "./logger.js";
 import { HttpNetwork, PollMessageSource } from "./network/http.js";
 import { LocalNetwork } from "./network/local.js";
 import type { Network } from "./network/network.js";
+import type { TokenProvider } from "./network/token.js";
 import {
   isConflict,
   isSuccess,
@@ -87,6 +88,9 @@ export class Resonate {
    * @param options.ttl - Time-to-live (in seconds) for claimed tasks. Defaults to `1 * util.MIN`.
    * @param options.token - Bearer token for authentication. Passed through to HttpNetwork
    *   which falls back to `RESONATE_TOKEN` env var.
+   * @param options.tokenProvider - Token provider for dynamic auth token refresh.
+   *   Takes precedence over `token`. When provided, `getToken()` is called on every
+   *   request. Defaults to a static provider wrapping `token` or `RESONATE_TOKEN`.
    * @param options.timeout - Network request timeout. Passed through to HttpNetwork
    *   which falls back to `RESONATE_TIMEOUT` env var (default: 10s).
    * @param options.verbose - Enables verbose logging (shorthand for `logLevel: "debug"`). Defaults to `false`.
@@ -101,6 +105,7 @@ export class Resonate {
     pid = undefined,
     ttl = 1 * util.MIN,
     token = undefined,
+    tokenProvider = undefined,
     timeout = undefined,
     verbose = false,
     logLevel = undefined,
@@ -113,6 +118,7 @@ export class Resonate {
     pid?: string;
     ttl?: number;
     token?: string;
+    tokenProvider?: TokenProvider;
     timeout?: number;
     verbose?: boolean;
     logLevel?: LogLevel;
@@ -148,11 +154,13 @@ export class Resonate {
       const adapter = new PollMessageSource({
         url: `${resolvedUrl}/poll/${encodeURIComponent(group)}/${encodeURIComponent(this.pid)}`,
         token,
+        tokenProvider,
         logger: this.logger,
       });
       this.network = new HttpNetwork({
         url: resolvedUrl,
         token,
+        tokenProvider,
         timeout,
         headers: {},
         adapter,

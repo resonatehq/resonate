@@ -10,6 +10,11 @@ export { ConsoleLogger, type Logger, type LogLevel } from "./logger.js";
 export { type HttpAdapter, HttpNetwork, PollMessageSource } from "./network/http.js";
 export { LocalNetwork } from "./network/local.js";
 export type { Network, Recv, Send } from "./network/network.js";
+export {
+  NoopTokenProvider,
+  StaticTokenProvider,
+  type TokenProvider,
+} from "./network/token.js";
 export * from "./network/types.js";
 export { OptionsBuilder } from "./options.js";
 export { Registry } from "./registry.js";

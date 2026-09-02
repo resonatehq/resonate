@@ -8,6 +8,7 @@ import { ConsoleLogger, type Logger, type LogLevel } from "../logger.js";
 import { HttpNetwork, PollMessageSource } from "../network/http.js";
 import { LocalNetwork } from "../network/local.js";
 import type { Network } from "../network/network.js";
+import type { TokenProvider } from "../network/token.js";
 import {
   isConflict,
   isSuccess,
@@ -85,6 +86,7 @@ export class Resonate {
     pid = undefined,
     ttl = 1 * util.MIN,
     token = undefined,
+    tokenProvider = undefined,
     timeout = undefined,
     verbose = false,
     logLevel = undefined,
@@ -97,6 +99,7 @@ export class Resonate {
     pid?: string;
     ttl?: number;
     token?: string;
+    tokenProvider?: TokenProvider;
     timeout?: number;
     verbose?: boolean;
     logLevel?: LogLevel;
@@ -124,11 +127,13 @@ export class Resonate {
       const adapter = new PollMessageSource({
         url: `${resolvedUrl}/poll/${encodeURIComponent(group)}/${encodeURIComponent(this.pid)}`,
         token,
+        tokenProvider,
         logger: this.logger,
       });
       this.network = new HttpNetwork({
         url: resolvedUrl,
         token,
+        tokenProvider,
         timeout,
         headers: {},
         adapter,
