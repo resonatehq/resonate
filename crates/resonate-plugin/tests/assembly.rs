@@ -9,7 +9,23 @@ use resonate_plugin::{
 };
 use serde::{Deserialize, Serialize};
 
-// ─── A plugin, written the way a third party would write one ─────────────────
+// ─── A server ────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct SqliteConfig {
+    #[serde(default)]
+    path: String,
+}
+
+static SQLITE: ServerPlugin =
+    ServerPlugin::new("sqlite", "resonate-server-dbms", |settings, _deps| {
+        let _config: SqliteConfig = settings.extract()?;
+        Ok(Box::pin(async {
+            Err(StartupError::new("sqlite", "not a real engine"))
+        }))
+    });
+
+// ─── A worker, written the way a third party would write one ────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 struct KafkaConfig {
@@ -96,19 +112,7 @@ static KAFKA_RIVAL: WorkerPlugin = WorkerPlugin::new(
 /// A worker that claims nothing, so nothing could ever route to it.
 static MUTE: WorkerPlugin = WorkerPlugin::new("mute", "resonate-worker-mute", &[], kafka_configure);
 
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct SqliteConfig {
-    #[serde(default)]
-    path: String,
-}
-
-static SQLITE: ServerPlugin =
-    ServerPlugin::new("sqlite", "resonate-server-dbms", |settings, _deps| {
-        let _config: SqliteConfig = settings.extract()?;
-        Ok(Box::pin(async {
-            Err(StartupError::new("sqlite", "not a real engine"))
-        }))
-    });
+// ─── A gateway ───────────────────────────────────────────────────────────────
 
 static HTTP: GatewayPlugin =
     GatewayPlugin::new("http", "resonate-gateway-http", |_settings, _deps| {

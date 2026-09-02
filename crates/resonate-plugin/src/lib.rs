@@ -6,11 +6,14 @@
 //! transport, no storage, no runtime.
 //!
 //! A plugin is one of three things, and the kind decides how a binary composes
-//! it: a [`ServerPlugin`] answers protocol requests and is *selected*, one per
-//! binary; a [`WorkerPlugin`] consumes what the server emits and is
-//! *registered*, keyed by the address schemes it claims; a [`GatewayPlugin`]
+//! it. A [`ServerPlugin`] answers protocol requests and is *selected*, one per
+//! binary. A [`WorkerPlugin`] consumes what the server emits and is
+//! *registered*, keyed by the address schemes it claims. A [`GatewayPlugin`]
 //! accepts requests from outside and is registered too, switched on or off
 //! independently.
+//!
+//! Server, worker, gateway — the order they are built in, and the order
+//! everything in this crate is written in.
 //!
 //! # Writing one
 //!
@@ -108,14 +111,25 @@ pub mod error;
 pub mod plugin;
 pub mod registry;
 
+pub use registry::Registry;
+
+// Server, worker, gateway: the order a binary builds them in, and the order
+// everything in this crate is written in. The blank lines are load-bearing —
+// rustfmt sorts a contiguous run of `use` statements, and would put these back
+// into alphabetical order without them.
+pub use plugin::{ServerDependencies, ServerFuture, ServerPlugin};
+
+pub use plugin::{WorkerDependencies, WorkerPlugin};
+
+pub use plugin::{GatewayDependencies, GatewayPlugin};
+
 pub use config::{Configuration, Loader, Settings};
 pub use error::{ConfigError, RegistryError, StartupError};
-pub use plugin::{
-    GatewayDependencies, GatewayPlugin, ServerDependencies, ServerFuture, ServerPlugin,
-    WorkerDependencies, WorkerPlugin,
-};
-pub use registry::Registry;
 
 // The port traits a plugin implements, re-exported so a plugin crate names one
 // dependency rather than two.
-pub use resonate_core::{ResonateGateway, ResonateRouter, ResonateServer, ResonateWorker};
+pub use resonate_core::{ResonateRouter, ResonateServer};
+
+pub use resonate_core::ResonateWorker;
+
+pub use resonate_core::ResonateGateway;

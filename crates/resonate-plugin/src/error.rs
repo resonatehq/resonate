@@ -88,6 +88,14 @@ pub enum RegistryError {
         id: String,
         krates: (String, String),
     },
+    /// A binary assembled with no server is not a server.
+    NoServer,
+    /// Configuration selected a server this binary does not carry. The
+    /// distinction that matters: not compiled in, rather than misconfigured.
+    NotCompiledIn {
+        requested: String,
+        available: Vec<String>,
+    },
     /// Two workers claim one address scheme. Never resolved by registration
     /// order: whichever won would be a coin flip nobody could read off the
     /// config.
@@ -98,14 +106,6 @@ pub enum RegistryError {
     /// A worker registered without claiming anything, so nothing could ever
     /// route to it.
     NoSchemes { id: String, krate: String },
-    /// A binary assembled with no server is not a server.
-    NoServer,
-    /// Configuration selected a server this binary does not carry. The
-    /// distinction that matters: not compiled in, rather than misconfigured.
-    NotCompiledIn {
-        requested: String,
-        available: Vec<String>,
-    },
 }
 
 impl std::fmt::Display for RegistryError {
@@ -116,17 +116,6 @@ impl std::fmt::Display for RegistryError {
                 id,
                 krates: (a, b),
             } => write!(f, "two {kind} plugins answer to '{id}': {a} and {b}"),
-            RegistryError::DuplicateScheme {
-                scheme,
-                krates: (a, b),
-            } => write!(
-                f,
-                "'{scheme}://' is claimed by both {a} and {b} — a binary can carry only one"
-            ),
-            RegistryError::NoSchemes { id, krate } => write!(
-                f,
-                "worker '{id}' ({krate}) claims no address scheme, so nothing could route to it"
-            ),
             RegistryError::NoServer => {
                 write!(f, "this binary was assembled without a server")
             }
@@ -141,6 +130,17 @@ impl std::fmt::Display for RegistryError {
                 } else {
                     available.join(", ")
                 }
+            ),
+            RegistryError::DuplicateScheme {
+                scheme,
+                krates: (a, b),
+            } => write!(
+                f,
+                "'{scheme}://' is claimed by both {a} and {b} — a binary can carry only one"
+            ),
+            RegistryError::NoSchemes { id, krate } => write!(
+                f,
+                "worker '{id}' ({krate}) claims no address scheme, so nothing could route to it"
             ),
         }
     }
