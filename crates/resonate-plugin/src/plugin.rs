@@ -5,6 +5,12 @@
 //! identity is data in the binary rather than something built at startup. (A
 //! trait could not carry `const ID` through `dyn`, so it would be three methods
 //! and an impl block where these are four fields.)
+//!
+//! Everything here is `#[non_exhaustive]`, so `new` is the only way to build one
+//! and reading a field is the only way to use one. That is what lets any of
+//! these grow later: a plugin reads `deps.server` and is unaffected by a
+//! dependency added beside it, and no plugin can have written a struct literal
+//! or an exhaustive destructure that a new field would break.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -47,6 +53,7 @@ impl WorkerDependencies {
 pub type WorkerFactory = Box<dyn FnOnce(WorkerDependencies) -> Arc<dyn ResonateWorker> + Send>;
 
 /// A plugin that consumes what a server emits.
+#[non_exhaustive]
 pub struct WorkerPlugin {
     /// The name this plugin is known by: its configuration key
     /// (`transports.<id>`), its `--set` path, its log field.
@@ -131,6 +138,7 @@ pub type ServerConnect = Box<
 /// and fallible while the rest of the wiring is neither. And no `Option`: a
 /// binary has one server, chosen by name, so switching it off is not a thing to
 /// express.
+#[non_exhaustive]
 pub struct ServerPlugin {
     /// Its configuration key is `servers.<id>`, and `servers.active` is how one
     /// is chosen.
@@ -175,6 +183,7 @@ impl GatewayDependencies {
 pub type GatewayFactory = Box<dyn FnOnce(GatewayDependencies) -> Arc<dyn ResonateGateway> + Send>;
 
 /// A plugin that accepts requests from outside and puts them to the server.
+#[non_exhaustive]
 pub struct GatewayPlugin {
     /// Its configuration key is `gateways.<id>`.
     pub id: &'static str,
