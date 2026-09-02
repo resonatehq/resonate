@@ -44,6 +44,29 @@
 //! plugin's own crate: the framework holds a [`ResonateWorker`] and nothing
 //! else.
 //!
+//! # Startup order
+//!
+//! The three kinds have to be built in one order, and it is the reason a worker
+//! holds its server weakly:
+//!
+//! ```text
+//! 1. the router, empty
+//! 2. the server        — handed the router
+//! 3. the workers       — handed a Weak to the server, which now exists
+//! 4. install the workers into the router
+//! 5. the gateways      — handed a strong Arc to the server; they bind last
+//! ```
+//!
+//! Step 4 is what closes it. The router is the only thing that starts
+//! incomplete, so nothing needs a handle to a value that does not exist yet, and
+//! no plugin is constructed before what it is handed. The `Weak` at step 3 is
+//! not about ordering — the server is right there — it is that the server holds
+//! the router and the router holds the workers, so a strong handle back would be
+//! a cycle nothing in could ever be dropped from.
+//!
+//! Nothing can route between steps 2 and 4: no gateway is listening and no
+//! background loop has started.
+//!
 //! # Assembling a binary
 //!
 //! The composition root is the *user's* crate, not the server's. Cargo is the
@@ -61,13 +84,11 @@
 
 pub mod config;
 pub mod error;
-pub mod handle;
 pub mod plugin;
 pub mod registry;
 
 pub use config::{Loaded, Loader, Settings};
 pub use error::{ConfigError, RegistryError, StartupError};
-pub use handle::ServerHandle;
 pub use plugin::{
     GatewayCtx, GatewayFactory, GatewayPlugin, ServerConnect, ServerCtx, ServerFactory,
     ServerPlugin, WorkerCtx, WorkerFactory, WorkerPlugin,

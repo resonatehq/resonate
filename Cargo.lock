@@ -2785,8 +2785,6 @@ dependencies = [
  "figment",
  "resonate-core",
  "serde",
- "serde_json",
- "tokio",
 ]
 
 [[package]]
