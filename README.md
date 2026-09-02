@@ -140,9 +140,15 @@ Every durable execution, live: status, function, when it was created, when it se
 
 ## Architecture
 
-![Resonate architecture](./assets/architecture.svg)
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./assets/architecture-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="./assets/architecture-light.svg">
+    <img alt="Resonate architecture" src="./assets/architecture-light.svg">
+  </picture>
+</div>
 
-One binary in the middle. Your database underneath, your workers wherever they live, and a plugin for every system you need to reach.
+Resonate sits in the middle of the stack you already run — your language, your compute, your storage, your transport — and a plugin for everything it does not reach yet.
 
 ### Build only what you need
 
