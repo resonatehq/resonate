@@ -161,3 +161,8 @@ pub use error::{ConfigError, RegistryError};
 // dependency rather than two.
 #[rustfmt::skip]
 pub use resonate_core::{ResonateServer, ResonateWorker, ResonateGateway, ResonateRouter};
+
+// And what implementing one of them requires: the wire types a plugin handles,
+// and the error it reports. Without these a plugin crate would still have to
+// name resonate-core, and the pair would have to version together anyway.
+pub use resonate_core::{types, Unavailable};

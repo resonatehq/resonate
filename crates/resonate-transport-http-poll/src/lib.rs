@@ -15,6 +15,34 @@
 /// The address scheme this transport serves.
 pub const SCHEME: &str = "poll";
 
+/// This transport, as a plugin. The one thing a binary names to get `poll://`
+/// addresses delivered.
+pub static PLUGIN: resonate_plugin::WorkerPlugin =
+    resonate_plugin::WorkerPlugin::new("poll", env!("CARGO_PKG_NAME"), &[SCHEME], configure);
+
+/// Read `[workers.poll]`, and build the registry unless it is turned off.
+fn configure(
+    settings: &resonate_plugin::Settings<'_>,
+    deps: resonate_plugin::WorkerDependencies,
+) -> Result<Option<std::sync::Arc<dyn ResonateWorker>>, resonate_plugin::ConfigError> {
+    let config: Config = settings.extract()?;
+    if !config.enabled {
+        return Ok(None);
+    }
+    // `tokio::sync::mpsc::channel` panics on a zero capacity, and a connection
+    // limit of zero would accept nothing while still holding the scheme.
+    if config.buffer_size == 0 {
+        return Err(settings.reject("buffer_size", "must be at least 1 (got 0)"));
+    }
+    if config.max_connections == 0 {
+        return Err(settings.reject("max_connections", "must be at least 1 (got 0)"));
+    }
+    Ok(Some(std::sync::Arc::new(PollRegistry::new(
+        deps.server,
+        config,
+    ))))
+}
+
 /// Everything under `[transports.http_poll]`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Config {
@@ -56,8 +84,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 use tokio::sync::{mpsc, Mutex};
 
-use resonate_core::types::Message;
-use resonate_core::{ResonateServer, ResonateWorker, Unavailable};
+use resonate_plugin::types::Message;
+use resonate_plugin::{ResonateServer, ResonateWorker, Unavailable};
 
 /// A `poll://` destination: `poll://<cast>@<group>[/<id>]`.
 #[derive(Debug, Clone)]
@@ -290,5 +318,73 @@ impl ResonateWorker for PollRegistry {
                 "no poll connection accepted delivery for {address}"
             )))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct NoopServer;
+
+    #[async_trait::async_trait]
+    impl ResonateServer for NoopServer {
+        async fn process(
+            &self,
+            _req: &resonate_plugin::types::RequestEnvelope,
+        ) -> Result<resonate_plugin::types::ResponseEnvelope, Unavailable> {
+            unreachable!("never called")
+        }
+    }
+
+    fn no_server() -> resonate_plugin::WorkerDependencies {
+        resonate_plugin::WorkerDependencies::new(
+            std::sync::Weak::<NoopServer>::new() as std::sync::Weak<dyn ResonateServer>
+        )
+    }
+
+    fn settings(pairs: &[(&str, &str)]) -> resonate_plugin::Configuration {
+        let mut loader = resonate_plugin::Loader::new();
+        for (k, v) in pairs {
+            loader = loader.set(k, v).unwrap();
+        }
+        loader.load()
+    }
+
+    #[test]
+    fn a_section_nobody_wrote_gets_this_crate_s_defaults() {
+        let config = settings(&[]);
+        let worker = (PLUGIN.configure)(&config.worker(PLUGIN.id), no_server()).unwrap();
+        assert!(worker.is_some(), "poll is on unless turned off");
+        assert_eq!(PLUGIN.schemes, &["poll"]);
+        assert_eq!(config.worker(PLUGIN.id).key(), "workers.poll");
+    }
+
+    #[test]
+    fn turning_it_off_is_its_own_setting() {
+        let config = settings(&[("workers.poll.enabled", "false")]);
+        assert!((PLUGIN.configure)(&config.worker(PLUGIN.id), no_server())
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn a_zero_sized_buffer_is_refused_at_startup() {
+        // tokio::sync::mpsc::channel panics on a zero capacity, so this used to
+        // be a check in the server's main, three crates away from the channel.
+        let config = settings(&[("workers.poll.buffer_size", "0")]);
+        let Err(err) = (PLUGIN.configure)(&config.worker(PLUGIN.id), no_server()) else {
+            panic!("channel construction would panic");
+        };
+        assert_eq!(err.key, "workers.poll.buffer_size");
+    }
+
+    #[test]
+    fn a_zero_connection_limit_is_refused_at_startup() {
+        let config = settings(&[("workers.poll.max_connections", "0")]);
+        let Err(err) = (PLUGIN.configure)(&config.worker(PLUGIN.id), no_server()) else {
+            panic!("it would hold the scheme and accept nothing");
+        };
+        assert_eq!(err.key, "workers.poll.max_connections");
     }
 }

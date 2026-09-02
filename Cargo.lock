@@ -2834,7 +2834,7 @@ version = "0.9.8"
 dependencies = [
  "async-trait",
  "fastrand",
- "resonate-core",
+ "resonate-plugin",
  "serde",
  "serde_json",
  "tokio",
@@ -2850,7 +2850,7 @@ dependencies = [
  "axum",
  "google-cloud-auth",
  "reqwest 0.12.28",
- "resonate-core",
+ "resonate-plugin",
  "serde",
  "serde_json",
  "tokio",

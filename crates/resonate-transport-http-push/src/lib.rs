@@ -7,6 +7,32 @@
 /// The address schemes this transport serves.
 pub const SCHEMES: &[&str] = &["http", "https"];
 
+/// This transport, as a plugin. The one thing a binary names to get `http://`
+/// and `https://` addresses delivered.
+pub static PLUGIN: resonate_plugin::WorkerPlugin =
+    resonate_plugin::WorkerPlugin::new("push", env!("CARGO_PKG_NAME"), SCHEMES, configure);
+
+/// Read `[workers.push]`, and build the transport unless it is turned off.
+fn configure(
+    settings: &resonate_plugin::Settings<'_>,
+    deps: resonate_plugin::WorkerDependencies,
+) -> Result<Option<std::sync::Arc<dyn ResonateWorker>>, resonate_plugin::ConfigError> {
+    let config: Config = settings.extract()?;
+    if !config.enabled {
+        return Ok(None);
+    }
+    // Zero permits sizes the delivery semaphore to nothing, so the dispatcher
+    // could never acquire a slot: every message would queue and then block the
+    // loop that feeds it, forever. Refused here rather than hung on later.
+    if config.concurrency == 0 {
+        return Err(settings.reject("concurrency", "must be at least 1 (got 0)"));
+    }
+    Ok(Some(std::sync::Arc::new(HttpPushTransport::new(
+        deps.server,
+        config,
+    ))))
+}
+
 /// Everything under `[transports.http_push]`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -128,8 +154,8 @@ use tokio::sync::{mpsc, Semaphore};
 
 use async_trait::async_trait;
 
-use resonate_core::types::Message;
-use resonate_core::{ResonateServer, ResonateWorker, Unavailable};
+use resonate_plugin::types::Message;
+use resonate_plugin::{ResonateServer, ResonateWorker, Unavailable};
 
 /// An `http://` or `https://` destination. The whole address is the URL, so
 /// parsing is the identity — the type exists to keep the delivery queue typed.
@@ -508,17 +534,17 @@ mod tests {
     struct NoopServer;
 
     #[async_trait]
-    impl resonate_core::ResonateServer for NoopServer {
+    impl resonate_plugin::ResonateServer for NoopServer {
         async fn process(
             &self,
-            _req: &resonate_core::types::RequestEnvelope,
-        ) -> Result<resonate_core::types::ResponseEnvelope, Unavailable> {
+            _req: &resonate_plugin::types::RequestEnvelope,
+        ) -> Result<resonate_plugin::types::ResponseEnvelope, Unavailable> {
             Err(Unavailable::new("NoopServer answers nothing"))
         }
     }
 
     async fn make_transport(auth: Auth) -> HttpPushTransport {
-        let server: Arc<dyn resonate_core::ResonateServer> = Arc::new(NoopServer);
+        let server: Arc<dyn resonate_plugin::ResonateServer> = Arc::new(NoopServer);
         let t = HttpPushTransport::new(
             Arc::downgrade(&server),
             Config {
@@ -718,5 +744,50 @@ mod tests {
             !headers.contains_key("authorization"),
             "expected no Authorization header on token failure"
         );
+    }
+
+    // ─── The plugin ──────────────────────────────────────────────────────────
+
+    fn no_server() -> resonate_plugin::WorkerDependencies {
+        resonate_plugin::WorkerDependencies::new(
+            std::sync::Weak::<NoopServer>::new() as std::sync::Weak<dyn ResonateServer>
+        )
+    }
+
+    fn settings(pairs: &[(&str, &str)]) -> resonate_plugin::Configuration {
+        let mut loader = resonate_plugin::Loader::new();
+        for (k, v) in pairs {
+            loader = loader.set(k, v).unwrap();
+        }
+        loader.load()
+    }
+
+    #[test]
+    fn a_section_nobody_wrote_gets_this_crate_s_defaults() {
+        let config = settings(&[]);
+        let worker = (PLUGIN.configure)(&config.worker(PLUGIN.id), no_server()).unwrap();
+        assert!(worker.is_some(), "push is on unless turned off");
+        assert_eq!(PLUGIN.schemes, &["http", "https"]);
+        assert_eq!(config.worker(PLUGIN.id).key(), "workers.push");
+    }
+
+    #[test]
+    fn turning_it_off_is_its_own_setting() {
+        let config = settings(&[("workers.push.enabled", "false")]);
+        assert!((PLUGIN.configure)(&config.worker(PLUGIN.id), no_server())
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn zero_concurrency_is_refused_at_startup() {
+        // It used to be checked in the server's own config::validate, which
+        // meant the rule lived nowhere near the semaphore it is about.
+        let config = settings(&[("workers.push.concurrency", "0")]);
+        let Err(err) = (PLUGIN.configure)(&config.worker(PLUGIN.id), no_server()) else {
+            panic!("every message would queue and never leave");
+        };
+        assert_eq!(err.key, "workers.push.concurrency");
+        assert!(err.source.is_some(), "and says where the value came from");
     }
 }

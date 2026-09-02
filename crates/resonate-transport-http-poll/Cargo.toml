@@ -6,7 +6,7 @@ license.workspace = true
 description = "Resonate transport: deliver messages to a worker that holds an open SSE connection, for workers that cannot be dialled."
 
 [dependencies]
-resonate-core = { path = "../resonate-core" }
+resonate-plugin = { path = "../resonate-plugin" }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -14,3 +14,6 @@ tokio = { version = "1", features = ["rt", "sync", "macros"] }
 tracing = "0.1"
 fastrand = "2"
 url = { workspace = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros"] }
