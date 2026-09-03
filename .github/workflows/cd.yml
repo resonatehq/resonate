@@ -8,9 +8,10 @@
 #   1. check-version — Validates Cargo.toml matches release tag
 #   2. publish-dockerhub — Multi-platform Docker images → DockerHub
 #   3. publish-github-image — Multi-platform Docker images → GHCR
-#   4. publish-github-artifacts — Cross-platform binary artifacts
-#   5. update-homebrew — Opens PR to update resonatehq/homebrew-tap formula
-#   6. verify-artifacts — Post-publication verification
+#   4. publish-gcr-image — Multi-platform Docker images → GCR (Artifact Registry)
+#   5. publish-github-artifacts — Cross-platform binary artifacts
+#   6. update-homebrew — Opens PR to update resonatehq/homebrew-tap formula
+#   7. verify-artifacts — Post-publication verification
 #
 # See .github/CD_PIPELINE.md for full documentation.
 
@@ -104,13 +105,8 @@ jobs:
           echo "**GitHub Tag:** ${{ steps.version.outputs.tag_version }}" >> $GITHUB_STEP_SUMMARY
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # PHASE 2: DOCKER IMAGE PUBLISHING (DISABLED)
+  # PHASE 2: DOCKER IMAGE PUBLISHING
   # ═══════════════════════════════════════════════════════════════════════════
-  # NOTE: Publishing to DockerHub is commented out.
-  # To enable:
-  #   1. Set secrets: DOCKER_USERNAME, DOCKER_PASSWORD
-  #   2. Remove: if: false
-  #   3. Test with workflow_dispatch
 
   publish-dockerhub:
     name: Publish DockerHub Image
@@ -161,13 +157,8 @@ jobs:
           cache-to: type=gha,mode=max
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # PHASE 2.5: GITHUB CONTAINER REGISTRY PUBLISHING (DISABLED)
+  # PHASE 2.5: GITHUB CONTAINER REGISTRY PUBLISHING
   # ═══════════════════════════════════════════════════════════════════════════
-  # NOTE: Publishing to GHCR is commented out.
-  # To enable:
-  #   1. No secrets needed (uses GITHUB_TOKEN)
-  #   2. Remove: if: false
-  #   3. Test with workflow_dispatch
 
   publish-github-image:
     name: Publish GitHub Container Image
@@ -220,13 +211,89 @@ jobs:
           cache-to: type=gha,mode=max
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # PHASE 3: BINARY ARTIFACT PUBLISHING (DISABLED)
+  # PHASE 2.7: GOOGLE ARTIFACT REGISTRY PUBLISHING
   # ═══════════════════════════════════════════════════════════════════════════
-  # NOTE: Publishing binary artifacts is commented out.
-  # To enable:
-  #   1. No secrets needed (uses GITHUB_TOKEN)
-  #   2. Remove: if: false
-  #   3. Test with workflow_dispatch
+
+  publish-gcr-image:
+    name: Publish GCR Image
+    needs: [check-version]
+
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.check-version.outputs.tag }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: us-west1-docker.pkg.dev/resonate-cloud/resonate/resonate
+          tags: |
+            type=raw,value=${{ needs.check-version.outputs.tag }}
+            type=raw,value=latest
+
+      # Build first (no auth needed — base images are public Docker Hub).
+      # This does the full Rust compilation and caches the result.
+      # The access token is NOT fetched here, so it can't expire mid-build.
+      - name: Build Docker image (cache only)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: false
+          sbom: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Fetch a fresh GCP access token RIGHT before pushing, so it still
+      # has its full 1h lifetime when buildx reaches the registry.
+      - name: Authenticate to Google Cloud
+        id: gcp-auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+          token_format: access_token
+
+      - name: Log in to Google Artifact Registry
+        uses: docker/login-action@v4
+        with:
+          registry: us-west1-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.gcp-auth.outputs.access_token }}
+
+      # Rebuild from cache (hit — seconds) and push with the fresh token.
+      - name: Push Docker image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: true
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # PHASE 3: BINARY ARTIFACT PUBLISHING
+  # ═══════════════════════════════════════════════════════════════════════════
   #
   # Builds for:
   #   - Linux x86_64 (ubuntu-latest)
@@ -325,11 +392,10 @@ jobs:
           echo "✓ Uploaded ${TARBALL} and checksum to release ${TAG}"
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # PHASE 3.5: HOMEBREW FORMULA UPDATE (DISABLED)
+  # PHASE 3.5: HOMEBREW FORMULA UPDATE
   # ═══════════════════════════════════════════════════════════════════════════
   # Updates resonatehq/homebrew-tap with new version and sha256 checksums
   # Opens a pull request for review
-  # Requires: HOMEBREW_TAP_TOKEN secret (personal access token with repo scope)
 
   update-homebrew:
     name: Update Homebrew Formula
@@ -498,13 +564,8 @@ jobs:
           echo "View: https://github.com/resonatehq/homebrew-tap/blob/main/Formula/resonate.rb" >> $GITHUB_STEP_SUMMARY
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # PHASE 4: POST-PUBLICATION VERIFICATION (DISABLED)
+  # PHASE 4: POST-PUBLICATION VERIFICATION
   # ═══════════════════════════════════════════════════════════════════════════
-  # NOTE: Artifact verification is commented out.
-  # To enable:
-  #   1. No secrets needed (uses GITHUB_TOKEN)
-  #   2. Remove: if: false
-  #   3. Ensure publish jobs are enabled (depends on them)
   #
   # Validates:
   #   - All expected artifacts exist
@@ -519,6 +580,7 @@ jobs:
         check-version,
         publish-dockerhub,
         publish-github-image,
+        publish-gcr-image,
         publish-github-artifacts,
       ]
 

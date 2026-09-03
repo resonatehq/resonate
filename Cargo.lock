@@ -2908,7 +2908,7 @@ dependencies = [
 
 [[package]]
 name = "resonate"
-version = "0.9.8"
+version = "0.10.1"
 dependencies = [
  "base64 0.22.1",
  "clap",
@@ -2938,7 +2938,7 @@ dependencies = [
 
 [[package]]
 name = "resonate-auth"
-version = "0.9.8"
+version = "0.10.1"
 dependencies = [
  "jsonwebtoken 9.3.1",
  "reqwest 0.12.28",
@@ -2952,7 +2952,7 @@ dependencies = [
 
 [[package]]
 name = "resonate-base"
-version = "0.9.8"
+version = "0.10.1"
 dependencies = [
  "async-trait",
  "lazy_static",
@@ -2967,7 +2967,7 @@ dependencies = [
 
 [[package]]
 name = "resonate-cli"
-version = "0.9.8"
+version = "0.10.1"
 dependencies = [
  "base64 0.22.1",
  "clap",
@@ -2980,7 +2980,7 @@ dependencies = [
 
 [[package]]
 name = "resonate-core"
-version = "0.9.8"
+version = "0.10.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -2995,7 +2995,7 @@ dependencies = [
 
 [[package]]
 name = "resonate-gateway-http"
-version = "0.9.8"
+version = "0.10.1"
 dependencies = [
  "async-trait",
  "lazy_static",
@@ -3012,7 +3012,7 @@ dependencies = [
 
 [[package]]
 name = "resonate-gateway-metrics"
-version = "0.9.8"
+version = "0.10.1"
 dependencies = [
  "async-trait",
  "http-body-util",
@@ -3026,7 +3026,7 @@ dependencies = [
 
 [[package]]
 name = "resonate-gateway-web"
-version = "0.9.8"
+version = "0.10.1"
 dependencies = [
  "async-trait",
  "http-body-util",
@@ -3046,7 +3046,7 @@ dependencies = [
 
 [[package]]
 name = "resonate-oracle"
-version = "0.9.8"
+version = "0.10.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -3061,7 +3061,7 @@ dependencies = [
 
 [[package]]
 name = "resonate-plugin"
-version = "0.9.8"
+version = "0.10.1"
 dependencies = [
  "async-trait",
  "axum",
@@ -3075,7 +3075,7 @@ dependencies = [
 
 [[package]]
 name = "resonate-server-blob"
-version = "0.9.8"
+version = "0.10.1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3095,7 +3095,7 @@ dependencies = [
 
 [[package]]
 name = "resonate-server-mysql"
-version = "0.9.8"
+version = "0.10.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -3112,7 +3112,7 @@ dependencies = [
 
 [[package]]
 name = "resonate-server-postgres"
-version = "0.9.8"
+version = "0.10.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -3129,7 +3129,7 @@ dependencies = [
 
 [[package]]
 name = "resonate-server-scylladb"
-version = "0.9.8"
+version = "0.10.1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3152,7 +3152,7 @@ dependencies = [
 
 [[package]]
 name = "resonate-server-sqlite"
-version = "0.9.8"
+version = "0.10.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -3170,7 +3170,7 @@ dependencies = [
 
 [[package]]
 name = "resonate-sql"
-version = "0.9.8"
+version = "0.10.1"
 dependencies = [
  "async-trait",
  "lazy_static",
@@ -3188,7 +3188,7 @@ dependencies = [
 
 [[package]]
 name = "resonate-timer-wheel"
-version = "0.9.8"
+version = "0.10.1"
 dependencies = [
  "tokio",
  "verus_builtin",
@@ -3198,7 +3198,7 @@ dependencies = [
 
 [[package]]
 name = "resonate-transport-gcps"
-version = "0.9.8"
+version = "0.10.1"
 dependencies = [
  "async-trait",
  "google-cloud-pubsub",
@@ -3212,7 +3212,7 @@ dependencies = [
 
 [[package]]
 name = "resonate-transport-http-poll"
-version = "0.9.8"
+version = "0.10.1"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -3228,7 +3228,7 @@ dependencies = [
 
 [[package]]
 name = "resonate-transport-http-push"
-version = "0.9.8"
+version = "0.10.1"
 dependencies = [
  "async-trait",
  "google-cloud-auth",
@@ -3242,7 +3242,7 @@ dependencies = [
 
 [[package]]
 name = "resonate-worker-bash"
-version = "0.9.8"
+version = "0.10.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",

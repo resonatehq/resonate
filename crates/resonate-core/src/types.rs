@@ -351,9 +351,9 @@ fn validate_promise_create_data(
         }
     }
     if let Some(prefix) = data.tags.get("resonate:prefix") {
-        if prefix.contains('.') {
-            return Err(validator::ValidationError::new("dot_in_prefix")
-                .with_message("resonate:prefix must not contain '.'".into()));
+        if prefix.contains(':') {
+            return Err(validator::ValidationError::new("colon_in_prefix")
+                .with_message("resonate:prefix must not contain ':'".into()));
         }
     }
     if let Some(delay_str) = data.tags.get("resonate:delay") {
@@ -775,6 +775,18 @@ fn validate_schedule_create_data(
     if data.id.contains(':') {
         return Err(validator::ValidationError::new("colon_in_schedule_id")
             .with_message("Schedule ID must not contain ':'".into()));
+    }
+    if let Some(origin) = data.promise_tags.get("resonate:origin") {
+        if origin.contains(':') {
+            return Err(validator::ValidationError::new("colon_in_origin")
+                .with_message("resonate:origin must not contain ':'".into()));
+        }
+    }
+    if let Some(prefix) = data.promise_tags.get("resonate:prefix") {
+        if prefix.contains(':') {
+            return Err(validator::ValidationError::new("colon_in_prefix")
+                .with_message("resonate:prefix must not contain ':'".into()));
+        }
     }
     if !data.promise_tags.contains_key("resonate:target") {
         return Err(validator::ValidationError::new("missing_target")
@@ -1320,6 +1332,101 @@ mod tests {
                 "data": { "task": { "id": "t1", "version": 3 } }
             })
         );
+    }
+
+    // --- Colon validation ---
+
+    fn promise(data: Value) -> Result<(), String> {
+        let r: PromiseCreateData = serde_json::from_value(data).expect("shape");
+        r.validate().map_err(|e| format!("{e:?}"))
+    }
+
+    fn schedule(data: Value) -> Result<(), String> {
+        let r: ScheduleCreateData = serde_json::from_value(data).expect("shape");
+        r.validate().map_err(|e| format!("{e:?}"))
+    }
+
+    #[test]
+    fn promise_origin_with_colon_is_rejected() {
+        let err = promise(json!({
+            "id": "myapp",
+            "timeoutAt": 1000,
+            "tags": { "resonate:origin": "bad:origin" }
+        }))
+        .expect_err("colon in resonate:origin must be rejected");
+        assert!(err.contains("colon_in_origin"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn promise_prefix_with_colon_is_rejected() {
+        let err = promise(json!({
+            "id": "myapp",
+            "timeoutAt": 1000,
+            "tags": { "resonate:prefix": "bad:prefix" }
+        }))
+        .expect_err("colon in resonate:prefix must be rejected");
+        assert!(err.contains("colon_in_prefix"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn promise_origin_and_prefix_without_colon_are_accepted() {
+        assert!(promise(json!({
+            "id": "myapp",
+            "timeoutAt": 1000,
+            "tags": {
+                "resonate:origin": "myapp",
+                "resonate:prefix": "myapp"
+            }
+        }))
+        .is_ok());
+    }
+
+    #[test]
+    fn schedule_origin_with_colon_in_promise_tags_is_rejected() {
+        let err = schedule(json!({
+            "id": "mysched",
+            "cron": "* * * * *",
+            "promiseId": "mysched",
+            "promiseTimeout": 1000,
+            "promiseTags": {
+                "resonate:target": "poll://any",
+                "resonate:origin": "bad:origin"
+            }
+        }))
+        .expect_err("colon in resonate:origin must be rejected");
+        assert!(err.contains("colon_in_origin"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn schedule_prefix_with_colon_in_promise_tags_is_rejected() {
+        let err = schedule(json!({
+            "id": "mysched",
+            "cron": "* * * * *",
+            "promiseId": "mysched",
+            "promiseTimeout": 1000,
+            "promiseTags": {
+                "resonate:target": "poll://any",
+                "resonate:prefix": "bad:prefix"
+            }
+        }))
+        .expect_err("colon in resonate:prefix must be rejected");
+        assert!(err.contains("colon_in_prefix"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn schedule_origin_and_prefix_without_colon_are_accepted() {
+        assert!(schedule(json!({
+            "id": "mysched",
+            "cron": "* * * * *",
+            "promiseId": "mysched",
+            "promiseTimeout": 1000,
+            "promiseTags": {
+                "resonate:target": "poll://any",
+                "resonate:origin": "mysched",
+                "resonate:prefix": "mysched"
+            }
+        }))
+        .is_ok());
     }
 
     #[test]

@@ -37,6 +37,18 @@ jobs:
       - name: Test
         run: cargo test --workspace --all-features
 
+      # The blob crate's oracle is a deliberate copy of the dbms oracle, and
+      # the extraction decision (plan.md, Phase 8) is read off this diff. It
+      # is printed, never failed on: the drift must be visible, not forbidden.
+      - name: Oracle drift ledger
+        run: |
+          if diff -u crates/resonate-server-dbms/src/oracle.rs \
+                     crates/resonate-server-blob/src/oracle.rs; then
+            echo "oracle copies are identical"
+          else
+            echo "oracle copies differ — expected while the cuts are structural; see plan.md"
+          fi
+
   differential:
     name: Differential (${{ matrix.backend }})
     runs-on: ubuntu-latest
@@ -129,7 +141,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [sqlite, postgres, mysql]
+        backend: [sqlite, postgres, mysql, blob]
 
     services:
       postgres:
@@ -200,16 +212,30 @@ jobs:
               export RESONATE_SERVERS__ACTIVE=server_mysql
               export RESONATE_SERVERS__SERVER_MYSQL__URL=mysql://resonate:resonate@localhost:3306/resonate
               ;;
+            blob)
+              # No bucket configured: the blob backend runs against its
+              # in-process, in-memory object store, which has real
+              # conditional-write semantics — the concurrency is still real.
+              export RESONATE_SERVERS__ACTIVE=server_blob
+              ;;
             *)
               export RESONATE_SERVERS__ACTIVE=server_sqlite
               export RESONATE_SERVERS__SERVER_SQLITE__PATH=/tmp/conccheck.db
               ;;
           esac
           RESONATE_DEBUG=true RESONATE_GATEWAYS__GATEWAY_HTTP__BIND=0.0.0.0:8021 ./target/release/resonate serve &
+          ready=false
           for _ in $(seq 1 40); do
-            curl -sf -o /dev/null -X POST http://127.0.0.1:8021/ -d '{}' && break
+            if curl -sf -o /dev/null http://127.0.0.1:8021/ready; then
+              ready=true
+              break
+            fi
             sleep 1
           done
+          if [ "$ready" != true ]; then
+            echo "server did not become ready"
+            exit 1
+          fi
 
       # The producer exits non-zero on a history with no successes or no
       # overlap, so a server that refuses everything, or a run that failed to
