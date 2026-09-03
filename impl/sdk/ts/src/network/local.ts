@@ -132,6 +132,16 @@ export type Change =
 
 const PENDING_RETRY_TTL = 30000;
 
+function isExternalPromise(promise: Pick<Promise, "tags">): boolean {
+  const { tags } = promise;
+  return (
+    tags["resonate:scope"] === "global" ||
+    tags["resonate:external"] === "true" ||
+    tags["resonate:target"] !== undefined ||
+    tags["resonate:timer"] === "true"
+  );
+}
+
 // =============================================================================
 // SERVER
 // =============================================================================
@@ -536,6 +546,13 @@ export class Server {
     }
 
     const changes: Change[] = [];
+
+    if (!isExternalPromise(promise)) {
+      return {
+        response: this.response("promise.register_listener", 422, "Awaited promise is not awaitable"),
+        changes: [],
+      };
+    }
 
     // Project for the logically-pending check and for the response — the
     // listener is registered only when the promise is logically pending,

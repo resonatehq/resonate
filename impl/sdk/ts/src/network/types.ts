@@ -417,6 +417,7 @@ export type PromiseRegisterListenerRes =
   | { kind: "promise.register_listener"; head: ResponseHead<401>; data: string }
   | { kind: "promise.register_listener"; head: ResponseHead<403>; data: string }
   | { kind: "promise.register_listener"; head: ResponseHead<404>; data: string }
+  | { kind: "promise.register_listener"; head: ResponseHead<422>; data: string }
   | { kind: "promise.register_listener"; head: ResponseHead<429>; data: string }
   | { kind: "promise.register_listener"; head: ResponseHead<500>; data: string }
   | { kind: "promise.register_listener"; head: ResponseHead<501>; data: string };

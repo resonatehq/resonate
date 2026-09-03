@@ -53,6 +53,15 @@ describe("Resonate usage tests", () => {
     expect(await res(resonate.rpc(rid(), "f", resonate.options({ version: 1 })))).toBe(1);
   });
 
+  test("returns an already-settled promise from get without registering a listener", async () => {
+    resonate = newResonate();
+    await resonate.promises.create("settled-get", Number.MAX_SAFE_INTEGER);
+    await resonate.promises.resolve("settled-get", { data: codec.encode("value").data });
+
+    const handle = await resonate.get("settled-get");
+    expect(await handle.result()).toBe("value");
+  });
+
   test("try versions", async () => {
     resonate = newResonate();
 

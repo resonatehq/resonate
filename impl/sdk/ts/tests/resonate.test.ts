@@ -1,7 +1,8 @@
 import { setTimeout } from "node:timers/promises";
 import { Codec } from "../src/codec.js";
 import type { Context, InnerContext } from "../src/context.js";
-import type { Value } from "../src/network/types.js";
+import type { Network } from "../src/network/network.js";
+import type { Message, PromiseRecord, Request, Value } from "../src/network/types.js";
 import { Resonate } from "../src/resonate.js";
 import { Constant, Exponential, Linear, Never, type RetryPolicy } from "../src/retries.js";
 import * as util from "../src/util.js";
@@ -682,6 +683,62 @@ describe("Resonate usage tests", () => {
 
     const handle = await resonate.get("foo");
     expect(await handle.result()).toBe("foo");
+    await resonate.stop();
+  });
+
+  test("surfaces permanent listener errors instead of retrying forever", async () => {
+    const requests: Request[] = [];
+    const pending: PromiseRecord = {
+      id: "workflow:0",
+      state: "pending",
+      param: { data: "", headers: {} },
+      value: { data: "", headers: {} },
+      tags: { "resonate:scope": "local" },
+      timeoutAt: Date.now() + 60_000,
+      createdAt: Date.now(),
+    };
+    const network: Network = {
+      unicast: "mock://uni@default/worker",
+      anycast: "mock://any@default",
+      match: (target) => target,
+      init: async () => {},
+      stop: async () => {},
+      recv: (_callback: (msg: Message) => void) => {},
+      send: async (req) => {
+        requests.push(req);
+        if (req.kind === "promise.get") {
+          return {
+            kind: req.kind,
+            head: { corrId: req.head.corrId, status: 200, version: util.VERSION },
+            data: { promise: pending },
+          } as any;
+        }
+        if (req.kind === "promise.register_listener") {
+          return {
+            kind: req.kind,
+            head: { corrId: req.head.corrId, status: 422, version: util.VERSION },
+            data: "Awaited promise is not awaitable",
+          } as any;
+        }
+        throw new Error(`unexpected request: ${req.kind}`);
+      },
+    };
+    const resonate = new Resonate({ network });
+
+    const handle = await resonate.get("workflow:0");
+    const result = handle.result();
+    const outcome = await Promise.race([
+      result.then(
+        () => "resolved",
+        (error) => ({ kind: "rejected", error }),
+      ),
+      new Promise<"timed-out">((resolve) => globalThis.setTimeout(() => resolve("timed-out"), 100)),
+    ]);
+
+    expect(outcome).not.toBe("timed-out");
+    expect(outcome).toMatchObject({ kind: "rejected", error: { serverError: { code: 422 } } });
+    expect(requests.filter((req) => req.kind === "promise.register_listener")).toHaveLength(1);
+
     await resonate.stop();
   });
 
