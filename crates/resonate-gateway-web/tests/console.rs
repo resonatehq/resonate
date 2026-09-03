@@ -6,13 +6,15 @@
 
 use std::sync::Arc;
 
-use axum::body::Body;
-use axum::http::{Request, StatusCode};
-use axum::Router;
+// axum comes from `resonate-plugin`, so a build has one of it — see that
+// crate's re-export for why.
 use http_body_util::BodyExt;
 use resonate_core::ResonateServer;
 use resonate_gateway_web::{ConsoleState, MOUNT, RPC_PATH};
-use resonate_server_dbms::oracle::SharedOracle;
+use resonate_oracle::SharedOracle;
+use resonate_plugin::axum::body::Body;
+use resonate_plugin::axum::http::{Request, StatusCode};
+use resonate_plugin::axum::Router;
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -248,52 +250,36 @@ async fn a_disabled_console_serves_nothing() {
     let routes = resonate_gateway_web::routes::<()>(
         &resonate_gateway_web::Config {
             enabled: false,
-            redirect_root: true,
+            ..Default::default()
         },
         ConsoleState { server, auth: None },
     );
     assert!(routes.is_none(), "nothing to merge when it is off");
 }
 
-// --- composition ------------------------------------------------------------
+// --- composition ----------------------------------------------------------
 //
-// The console is merged into the gateway's own router and served on its port,
-// so the two have to fit: no path collides, and the boundary between the two
-// endpoints is real rather than a comment.
+// The console is served on the gateway's listener, so the two have to fit: no
+// path collides, and the boundary between the two endpoints is real rather than
+// a comment.
 
+/// The merge the HTTP gateway performs in `init`.
 fn merged() -> Router {
-    let oracle = Arc::new(SharedOracle::with_preload_limit(10));
-    let server: Arc<dyn ResonateServer> = oracle.clone();
-    let weak: std::sync::Weak<dyn ResonateServer> = Arc::downgrade(&oracle) as _;
-    let poll_registry = Arc::new(resonate_transport_http_poll::PollRegistry::new(
-        weak,
-        resonate_transport_http_poll::Config {
-            enabled: true,
-            max_connections: 4,
-            buffer_size: 4,
-            keepalive_interval_ms: 0,
-        },
-    ));
-    let console = resonate_gateway_web::routes::<resonate_gateway_http::AppState>(
+    let server: Arc<dyn ResonateServer> = Arc::new(SharedOracle::with_preload_limit(10));
+    let console = resonate_gateway_web::routes::<()>(
         &resonate_gateway_web::Config::default(),
         ConsoleState {
-            server: server.clone(),
+            server: Arc::clone(&server),
             auth: None,
         },
     )
     .expect("enabled");
 
-    // This is the merge the composition root performs. It panics if the two
-    // routers claim the same method on the same path — `POST /` and `GET /`
-    // are the pair that has to stay apart.
+    // Panics if the two claim the same method on the same path — `POST /` and
+    // `GET /` are the pair that has to stay apart.
     resonate_gateway_http::routes::api_routes()
-        .merge(resonate_gateway_http::routes::poll_routes())
+        .with_state(resonate_gateway_http::AppState { server, auth: None })
         .merge(console)
-        .with_state(resonate_gateway_http::AppState {
-            server,
-            auth: None,
-            poll_registry,
-        })
 }
 
 #[tokio::test]
@@ -314,8 +300,8 @@ async fn the_console_and_the_protocol_share_one_port() {
     assert_eq!(status, StatusCode::OK);
     assert!(html.contains("Resonate Console"));
 
-    // And health still answers.
-    let (status, _, _) = get(&app, "/health").await;
+    // And the probe still answers.
+    let (status, _, _) = get(&app, "/ready").await;
     assert_eq!(status, StatusCode::OK);
 }
 
@@ -342,8 +328,8 @@ async fn the_worker_endpoint_refuses_the_console_namespace() {
 
         // The same request, on the console's route, is *answered* — with a
         // page, or with this namespace's own structured refusal. An empty
-        // server has no execution called `absent`, and `not_found` is an
-        // answer to the question, not a refusal to hear it.
+        // server has no execution called `absent`, and `not_found` is an answer
+        // to the question, not a refusal to hear it.
         let (status, body) = post(&app, RPC_PATH, envelope(kind, ui_probe(kind))).await;
         assert!(
             status.is_success() || body["data"]["error"] == "not_found",

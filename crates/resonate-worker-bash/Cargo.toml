@@ -6,7 +6,7 @@ license.workspace = true
 description = "Resonate worker: runs a task's script locally, in Docker, or in a Tensorlake sandbox."
 
 [dependencies]
-resonate-core = { path = "../resonate-core" }
+resonate-plugin = { path = "../resonate-plugin" }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

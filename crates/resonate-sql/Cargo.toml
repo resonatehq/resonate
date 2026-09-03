@@ -1,0 +1,32 @@
+[package]
+name = "resonate-sql"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Shared internals for Resonate's SQL server plugins: the engine contract they implement, the error they report, and the migration runner."
+
+# Not a plugin, and deliberately not named like one: a `resonate-server-*` crate
+# is a server plugin and depends on no other plugin. This is the SQL family's
+# own library, and a server that is not SQL — ScyllaDB, say — has no business
+# depending on it. That dependency is exactly what went wrong before.
+
+[features]
+# Only for the rusqlite error conversion and the rusqlite migration path, which
+# the SQLite engine needs and the others must not compile.
+sqlite = ["dep:rusqlite"]
+
+[dependencies]
+resonate-core = { path = "../resonate-core" }
+resonate-plugin = { path = "../resonate-plugin" }
+resonate-timer-wheel = { path = "../resonate-timer-wheel" }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+validator = { workspace = true }
+tracing = "0.1"
+lazy_static = "1"
+tokio = { version = "1", features = ["rt", "sync", "macros", "time"] }
+rusqlite = { version = "0.31", features = ["bundled"], optional = true }
+# Not optional: `migrate` carries the `Migrator` type, which the SQLite path
+# also uses even though it executes through rusqlite.
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "macros", "migrate"] }

@@ -15,9 +15,11 @@
 //! origin actors; [`scan`] reads the whole store; and [`server`] wires all of
 //! it behind the `ResonateServer` port.
 //!
-//! This crate depends on `resonate-core` and third-party crates only. It is a
-//! complete server — its own message delivery, its own timers, its own
-//! snapshot — not a storage engine behind one.
+//! It is a complete server — its own message delivery, its own timers, its own
+//! snapshot — not a storage engine behind one. Everything above depends on
+//! `resonate-core` and third-party crates only; [`plugin`] is the one module
+//! that knows it is being assembled into a binary, and is where the config
+//! section and the deferred `init` live.
 
 pub mod applier;
 pub mod cache;
@@ -25,6 +27,7 @@ pub mod codec;
 pub mod kernel;
 pub mod metrics;
 pub mod oracle;
+pub mod plugin;
 pub mod scan;
 pub mod schedules;
 pub mod sender;
@@ -32,3 +35,5 @@ pub mod server;
 pub mod store;
 pub mod timer_queue;
 pub mod timerd;
+
+pub use plugin::{Config, PLUGIN};

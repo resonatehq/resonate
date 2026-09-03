@@ -38,6 +38,7 @@ pub struct WorkOsConfig {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// The server's own WorkOS secret key.
     #[serde(default)]

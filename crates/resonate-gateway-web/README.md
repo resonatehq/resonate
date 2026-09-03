@@ -10,10 +10,15 @@ GET  /console/<anything>   → an embedded asset, or the shell (SPA fallback)
 POST /console/rpc          → one envelope in, one envelope out
 ```
 
-It is **not** a gateway in the `ResonateGateway` sense — it binds no socket and
-has no lifecycle. It hands back axum routes, and `resonate-gateway-http` merges
-them into the router it already serves. One port, one process, one origin: the
-console is served by the server it reads, so there is no CORS to configure.
+It is a `GatewayPlugin` — an edge, requests arrive from outside — but not one
+that listens. It registers its routes and `resonate-gateway-http` serves them,
+so the console is on the same port and the same origin as the protocol it
+reads. One port, one process, one origin: no CORS to configure, no second
+address to publish, and a browser that reaches the server reaches the console.
+
+It hands its routes over through `deps.routes`, the same handle every plugin
+gets — the poll transport registers its SSE endpoint the same way. The
+composition root does not know that one of them is a console.
 
 ## The boundary
 
@@ -27,7 +32,8 @@ them apart means an SDK cannot come to depend on a request that exists to draw a
 table, and the read model can change without touching the protocol workers speak.
 
 Three requests, all read-only, defined in `resonate-core/src/ui.rs` and
-implemented by every backend (SQLite, Postgres, MySQL, and the reference oracle):
+implemented by the SQL backends (SQLite, Postgres, MySQL) and the reference
+oracle:
 
 | Kind | Backs | Answered in |
 | --- | --- | --- |
@@ -102,10 +108,18 @@ operator supplies a token.
 ## Configuration
 
 ```toml
-[console]
-enabled = true        # RESONATE_CONSOLE__ENABLED
-redirect_root = true  # RESONATE_CONSOLE__REDIRECT_ROOT — GET / → /console/
+[gateways.gateway_web]
+enabled = true        # RESONATE_GATEWAYS__GATEWAY_WEB__ENABLED
+redirect_root = true  # RESONATE_GATEWAYS__GATEWAY_WEB__REDIRECT_ROOT — GET / → /console/
 ```
+
+The section is named for the crate: `resonate-gateway-web` → `gateway_web`,
+which is how every plugin's key is derived.
+
+There is no `bind` and no `auth` here. The console does not own a socket, so it
+does not own the address it is reachable at or the policy that admits a request
+to it — both belong to `[gateways.gateway_http]`, and the console is handed the
+loaded policy when its routes are built.
 
 The mount point is not configurable: SvelteKit bakes `base` in at build time, so
 `/console` is a constant on both sides.

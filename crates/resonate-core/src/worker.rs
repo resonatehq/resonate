@@ -13,7 +13,7 @@ use super::Unavailable;
 ///
 /// Most implementations are *proxies* for a worker running elsewhere: HTTP
 /// push, poll/SSE, and Pub/Sub each hand the message off and return. One,
-/// bash exec, is a real worker that runs in process. `send` therefore means
+/// bash exec, is a real worker that runs in process. `process` therefore means
 /// **accepted for delivery**, not **executed**; a worker that happens to run
 /// to completion synchronously is a special case, not the contract.
 ///
@@ -40,7 +40,7 @@ use super::Unavailable;
 pub trait ResonateWorker: Send + Sync {
     /// Acquire resources and start background work.
     ///
-    /// Called once before any `send`. Connection pools, delivery queues and
+    /// Called once before any `process`. Connection pools, delivery queues and
     /// their dispatcher tasks are set up here rather than in `new`, so that
     /// failure is reported at startup instead of surfacing later as a message
     /// that quietly went nowhere.
@@ -57,16 +57,21 @@ pub trait ResonateWorker: Send + Sync {
 
     /// Stop background work and release resources.
     ///
-    /// Called once, after which `send` may fail. Implementations should drain
+    /// Called once, after which `process` may fail. Implementations should drain
     /// what they can and be safe to call when `init` was never called.
     async fn stop(&self) -> Result<(), Unavailable> {
         Ok(())
     }
 
-    /// Deliver one message to the worker at `address`.
+    /// Process one message: deliver it to the worker at `address`.
+    ///
+    /// The dual of [`ResonateServer::process`](super::ResonateServer::process),
+    /// and named for it. A server processes a request and returns a response; a
+    /// worker processes a message and returns nothing, because there is nothing
+    /// to return — see the note above on what acceptance means here.
     ///
     /// The router guarantees only that `address` carries this worker's
     /// registered scheme; everything past the scheme is this worker's to
     /// parse and to reject.
-    async fn send(&self, address: &str, msg: &Message) -> Result<(), Unavailable>;
+    async fn process(&self, address: &str, msg: &Message) -> Result<(), Unavailable>;
 }

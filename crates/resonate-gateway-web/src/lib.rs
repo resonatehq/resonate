@@ -1,15 +1,16 @@
 //! The web console: a built single-page app, embedded, and the route that
 //! answers its requests.
 //!
-//! # What this crate is, and is not
+//! # What this crate is
 //!
-//! It is not a [`ResonateGateway`](resonate_core::ResonateGateway). It binds
-//! no socket and owns no lifecycle — it hands back a set of axum routes, and
-//! the HTTP gateway merges them into the router it already serves. One port,
-//! one process, one origin: the console is served by the server it reads, so
-//! there is no CORS to configure and no second listener to operate.
+//! A [`ResonateGateway`](resonate_core::ResonateGateway), but not one with a
+//! listener of its own. It contributes routes, and the HTTP gateway that owns
+//! the socket serves them: that gateway owns the address, the auth that admits
+//! a request, and the panic guard over the handlers. Turning this plugin off
+//! leaves the API where it was and `/console` a 404 — there is no second port
+//! to notice.
 //!
-//! What it does own is the boundary. The console's `ui.*` requests are
+//! What it also owns is the boundary. The console's `ui.*` requests are
 //! answered **here and nowhere else**: the worker route refuses the whole
 //! namespace (see `resonate_gateway_http::routes`), so the read model the
 //! console needs cannot be reached through the API workers use, and can change
@@ -50,6 +51,10 @@
 
 use std::sync::Arc;
 
+// axum comes from `resonate-plugin`, so a build has one of it — see that
+// crate's re-export for why.
+use resonate_plugin::axum;
+
 use axum::{
     body::Bytes,
     extract::{Path, State},
@@ -80,12 +85,16 @@ struct Assets;
 /// Plain data, like every gateway's `Config`, so it deserializes straight out
 /// of a config file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// Serve the console. On by default: it is compiled in either way, and a
     /// binary that carries a console nobody can reach is a surprise.
     #[serde(default = "yes")]
     pub enabled: bool,
 
+    // No `bind`, no `auth` and no `abort_on_panic`. The console serves routes,
+    // not a socket: the gateway that owns the listener owns the address, the
+    // policy that admits a request, and the panic guard over the handlers.
     /// Answer `GET /` with a redirect to the console.
     ///
     /// The API's root is `POST /`, so a `GET` there is a person with a
@@ -116,14 +125,15 @@ pub struct ConsoleState {
     pub auth: Option<AuthMode>,
 }
 
-/// The console's routes, ready to merge into any router.
+/// The console's routes, with its state already applied.
 ///
-/// Generic in the host router's state because the console carries its own:
-/// `with_state` closes over [`ConsoleState`] here, so what comes back needs
-/// nothing from whoever merges it.
+/// Its one caller in production is this crate's own [`ResonateGateway::init`];
+/// the tests are the others. It stays generic in the host router's state, and
+/// public, because that costs nothing and is what makes the routes testable
+/// without a socket.
 ///
-/// Returns `None` when the console is disabled, so a caller merges an option
-/// rather than deciding what an empty router means.
+/// Returns `None` when the console is disabled, so a caller gets an option
+/// rather than having to decide what an empty router means.
 pub fn routes<S>(config: &Config, state: ConsoleState) -> Option<Router<S>>
 where
     S: Clone + Send + Sync + 'static,
@@ -132,7 +142,7 @@ where
         tracing::info!("Web console disabled");
         return None;
     }
-    let mut router = Router::new()
+    let mut router = axum::Router::new()
         .route(RPC_PATH, post(handle_rpc))
         .route(MOUNT, get(handle_index))
         .route("/console/", get(handle_index))
@@ -258,8 +268,8 @@ async fn handle_rpc(
     let kind = req.kind.clone();
     let corr_id = req.head.corr_id.clone();
 
-    if let Some(mode) = &state.auth {
-        if let Err(rejection) = mode.check_envelope(&req).await {
+    if let Some(auth) = &state.auth {
+        if let Err(rejection) = auth.check_envelope(&req).await {
             tracing::warn!(kind = %kind, corr_id = %corr_id, "Console request rejected by auth");
             return render(*rejection);
         }
@@ -285,6 +295,53 @@ fn render(resp: ResponseEnvelope) -> (StatusCode, Json<ResponseEnvelope>) {
 pub fn ui_kinds() -> &'static [&'static str] {
     ui::KINDS
 }
+
+// ─── The plugin ───────────────────────────────────────────────────────────────
+
+/// The console, as a plugin.
+///
+/// A [`GatewayPlugin`](resonate_plugin::GatewayPlugin) because it is an edge —
+/// requests arrive from outside — but not one that listens. It registers its
+/// routes and the HTTP gateway serves them, so the console is on the same port
+/// and the same origin as the protocol it reads. One port, one process, one
+/// origin: no CORS to configure, no second address to publish, and a browser
+/// that reaches the server reaches the console.
+pub static PLUGIN: resonate_plugin::GatewayPlugin =
+    resonate_plugin::GatewayPlugin::new(env!("CARGO_PKG_NAME"), configure);
+
+/// Read `[gateways.gateway_web]`, and register the console unless it is off.
+fn configure(
+    settings: &resonate_plugin::Settings<'_>,
+    deps: resonate_plugin::GatewayDependencies,
+) -> Result<Option<Arc<dyn resonate_plugin::ResonateGateway>>, resonate_plugin::ConfigError> {
+    let config: Config = settings.extract()?;
+    if !config.enabled {
+        tracing::info!("Web console disabled");
+        return Ok(None);
+    }
+
+    let server = Arc::clone(&deps.server);
+    deps.routes.add(PLUGIN.id(), move |auth| {
+        // `expect`: `enabled` was checked three lines up, and nothing can have
+        // changed it — the config is owned by this closure.
+        routes(&config, ConsoleState { server, auth }).expect("the console is enabled")
+    });
+
+    // `Some`, though there is nothing to start. The composition root reads
+    // `None` as "this plugin turned itself off" and says so in the log, which
+    // would be a lie about a console that is serving. What comes back is the
+    // console as a thing that exists, with the trait's own do-nothing `init`
+    // and `stop`: it has no socket and no task, so there is nothing to drive.
+    Ok(Some(Arc::new(Console)))
+}
+
+/// The console, as something the composition root can hold.
+///
+/// No `init` and no `stop` — the defaults do nothing, which is the whole
+/// truth about a plugin whose routes are served by another plugin's listener.
+struct Console;
+
+impl resonate_plugin::ResonateGateway for Console {}
 
 #[cfg(test)]
 mod tests {

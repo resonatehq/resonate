@@ -6,7 +6,7 @@ license.workspace = true
 description = "Resonate transport: deliver messages to a worker over HTTP(S), with optional outbound auth."
 
 [dependencies]
-resonate-core = { path = "../resonate-core" }
+resonate-plugin = { path = "../resonate-plugin" }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -16,5 +16,4 @@ reqwest = { version = "0.12", features = ["json"] }
 google-cloud-auth = { version = "1.9.0", features = ["idtoken"] }
 
 [dev-dependencies]
-axum = { version = "0.7", features = ["json"] }
 tokio = { version = "1", features = ["full"] }

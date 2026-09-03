@@ -26,7 +26,7 @@
 use std::collections::{HashMap, HashSet};
 
 use resonate_core::types::{RequestEnvelope, RequestHead, TaskState, SUPPORTED_VERSIONS};
-use resonate_server_dbms::oracle::Oracle;
+use resonate_oracle::Oracle;
 use serde_json::{json, Value};
 
 const T0: i64 = 1_000_000_000;

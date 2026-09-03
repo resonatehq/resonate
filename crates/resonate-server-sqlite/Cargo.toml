@@ -1,0 +1,27 @@
+[package]
+name = "resonate-server-sqlite"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Resonate server: durable state in SQLite, in this process."
+
+[features]
+# Extra interleaving assertions in the transaction paths, for stress runs.
+concurrency-stress = []
+
+[dependencies]
+resonate-sql = { path = "../resonate-sql", features = ["sqlite"] }
+resonate-core = { path = "../resonate-core" }
+resonate-plugin = { path = "../resonate-plugin" }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+validator = { workspace = true }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros"] }
+tracing = "0.1"
+rusqlite = { version = "0.31", features = ["bundled"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "macros", "migrate"] }
+
+[dev-dependencies]
+base64 = "0.22"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

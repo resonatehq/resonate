@@ -1,5 +1,10 @@
 //! This backend's own metrics, in prometheus' global default registry.
 //!
+//! Through `resonate_plugin::prometheus`, not a `prometheus` of its own: the
+//! default registry is a static inside that crate, so two versions in one build
+//! would be two registries and half the metrics would be missing from
+//! `/metrics` with nothing logged.
+//!
 //! The names carry a `blob` segment because the binary's `metrics.rs` already
 //! registers `resonate_messages_total` and `resonate_schedule_promises_total`
 //! there; two registrations of one name in one process is an `Err` that a
@@ -8,7 +13,7 @@
 //! and the binary's `Server::deliver` are different code on different paths.
 
 use lazy_static::lazy_static;
-use prometheus::{
+use resonate_plugin::prometheus::{
     register_counter, register_counter_vec, register_int_gauge, Counter, CounterVec, IntGauge,
 };
 

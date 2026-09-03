@@ -1,14 +1,41 @@
 //! Resonate transport: HTTP(S) push.
 //!
 //! Delivers a message by POSTing it to the worker's URL. A transport rather
-//! than a plugin: it knows nothing about what the message means, only how to
+//! than a router: it knows nothing about what the message means, only how to
 //! put it on the wire.
 
 /// The address schemes this transport serves.
 pub const SCHEMES: &[&str] = &["http", "https"];
 
-/// Everything under `[transports.http_push]`.
+/// This transport, as a plugin. The one thing a binary names to get `http://`
+/// and `https://` addresses delivered.
+pub static PLUGIN: resonate_plugin::WorkerPlugin =
+    resonate_plugin::WorkerPlugin::new(env!("CARGO_PKG_NAME"), SCHEMES, configure);
+
+/// Read `[workers.transport_http_push]`, and build the transport unless it is turned off.
+fn configure(
+    settings: &resonate_plugin::Settings<'_>,
+    deps: resonate_plugin::WorkerDependencies,
+) -> Result<Option<std::sync::Arc<dyn ResonateWorker>>, resonate_plugin::ConfigError> {
+    let config: Config = settings.extract()?;
+    if !config.enabled {
+        return Ok(None);
+    }
+    // Zero permits sizes the delivery semaphore to nothing, so the dispatcher
+    // could never acquire a slot: every message would queue and then block the
+    // loop that feeds it, forever. Refused here rather than hung on later.
+    if config.concurrency == 0 {
+        return Err(settings.reject("concurrency", "must be at least 1 (got 0)"));
+    }
+    Ok(Some(std::sync::Arc::new(HttpPushTransport::new(
+        deps.server,
+        config,
+    ))))
+}
+
+/// Everything under `[workers.transport_http_push]`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// Enable the http:// and https:// address schemes [default: true]
     #[serde(default = "default_enabled")]
@@ -86,22 +113,25 @@ impl Default for AuthConfig {
 ///
 /// Example config:
 /// ```toml
-/// [transports.http_push.auth]
+/// [workers.transport_http_push.auth]
 /// mode = "gcp"
 /// # audience = "https://my-function.example.com"  # optional; defaults to delivery URL
 /// ```
 ///
 /// Equivalent env vars (double-underscore nesting):
-///   RESONATE_TRANSPORTS__HTTP_PUSH__AUTH__MODE=gcp
-///   RESONATE_TRANSPORTS__HTTP_PUSH__AUTH__AUDIENCE=https://...
+///   RESONATE_WORKERS__TRANSPORT_HTTP_PUSH__AUTH__MODE=gcp
+///   RESONATE_WORKERS__TRANSPORT_HTTP_PUSH__AUTH__AUDIENCE=https://...
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AuthConfig {
     /// Auth mode. Default: `none`.
     #[serde(default)]
     pub mode: AuthMode,
 
     /// Static bearer token. Used only when `mode = "bearer"`.
-    /// Falls back to the `RESONATE_TRANSPORTS__HTTP_PUSH__AUTH__TOKEN` env var.
+    /// Set in the file, or as
+    /// `RESONATE_WORKERS__TRANSPORT_HTTP_PUSH__AUTH__TOKEN` — the same key by
+    /// the environment's spelling, not a separate fallback this crate reads.
     #[serde(default)]
     pub token: Option<String>,
 
@@ -128,8 +158,8 @@ use tokio::sync::{mpsc, Semaphore};
 
 use async_trait::async_trait;
 
-use resonate_core::types::Message;
-use resonate_core::{ResonateServer, ResonateWorker, Unavailable};
+use resonate_plugin::types::Message;
+use resonate_plugin::{ResonateServer, ResonateWorker, Unavailable};
 
 /// An `http://` or `https://` destination. The whole address is the URL, so
 /// parsing is the identity — the type exists to keep the delivery queue typed.
@@ -358,7 +388,7 @@ impl ResonateWorker for HttpPushTransport {
 
     /// The address is the URL verbatim; the router has already guaranteed the
     /// scheme is `http` or `https`.
-    async fn send(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
+    async fn process(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
         let payload = serde_json::to_value(msg)
             .map_err(|e| Unavailable::new(format!("cannot serialize message: {e}")))?;
         HttpPushTransport::send(
@@ -435,7 +465,11 @@ async fn deliver(client: Client, auth: Arc<Auth>, job: DeliveryJob) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{extract::State, routing::post, Router};
+    // axum comes from `resonate-plugin`, so a build has one of it — see that
+    // crate's re-export for why. Only the tests here serve HTTP; what this
+    // worker does is dial it.
+    use resonate_plugin::axum;
+    use resonate_plugin::axum::{extract::State, routing::post};
     use std::sync::Arc;
     use tokio::net::TcpListener;
     use tokio::sync::mpsc;
@@ -484,7 +518,7 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let tx = Arc::new(tx);
 
-        let app = Router::new()
+        let app = axum::Router::new()
             .route("/", post(capture_handler))
             .with_state(tx);
 
@@ -508,17 +542,17 @@ mod tests {
     struct NoopServer;
 
     #[async_trait]
-    impl resonate_core::ResonateServer for NoopServer {
+    impl resonate_plugin::ResonateServer for NoopServer {
         async fn process(
             &self,
-            _req: &resonate_core::types::RequestEnvelope,
-        ) -> Result<resonate_core::types::ResponseEnvelope, Unavailable> {
+            _req: &resonate_plugin::types::RequestEnvelope,
+        ) -> Result<resonate_plugin::types::ResponseEnvelope, Unavailable> {
             Err(Unavailable::new("NoopServer answers nothing"))
         }
     }
 
     async fn make_transport(auth: Auth) -> HttpPushTransport {
-        let server: Arc<dyn resonate_core::ResonateServer> = Arc::new(NoopServer);
+        let server: Arc<dyn resonate_plugin::ResonateServer> = Arc::new(NoopServer);
         let t = HttpPushTransport::new(
             Arc::downgrade(&server),
             Config {
@@ -718,5 +752,56 @@ mod tests {
             !headers.contains_key("authorization"),
             "expected no Authorization header on token failure"
         );
+    }
+
+    // ─── The plugin ──────────────────────────────────────────────────────────
+
+    fn no_server() -> resonate_plugin::WorkerDependencies {
+        resonate_plugin::WorkerDependencies::new(
+            std::sync::Weak::<NoopServer>::new() as std::sync::Weak<dyn ResonateServer>,
+            resonate_plugin::Routes::new(),
+        )
+    }
+
+    fn settings(pairs: &[(&str, &str)]) -> resonate_plugin::Configuration {
+        let mut loader = resonate_plugin::Loader::new();
+        for (k, v) in pairs {
+            loader = loader.set(k, v).unwrap();
+        }
+        loader.load()
+    }
+
+    #[test]
+    fn a_section_nobody_wrote_gets_this_crate_s_defaults() {
+        let config = settings(&[]);
+        let worker = (PLUGIN.configure)(&config.worker(&PLUGIN.id()), no_server()).unwrap();
+        assert!(worker.is_some(), "push is on unless turned off");
+        assert_eq!(PLUGIN.schemes, &["http", "https"]);
+        assert_eq!(
+            config.worker(&PLUGIN.id()).key(),
+            "workers.transport_http_push"
+        );
+    }
+
+    #[test]
+    fn turning_it_off_is_its_own_setting() {
+        let config = settings(&[("workers.transport_http_push.enabled", "false")]);
+        assert!(
+            (PLUGIN.configure)(&config.worker(&PLUGIN.id()), no_server())
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn zero_concurrency_is_refused_at_startup() {
+        // It used to be checked in the server's own config::validate, which
+        // meant the rule lived nowhere near the semaphore it is about.
+        let config = settings(&[("workers.transport_http_push.concurrency", "0")]);
+        let Err(err) = (PLUGIN.configure)(&config.worker(&PLUGIN.id()), no_server()) else {
+            panic!("every message would queue and never leave");
+        };
+        assert_eq!(err.key, "workers.transport_http_push.concurrency");
+        assert!(err.source.is_some(), "and says where the value came from");
     }
 }

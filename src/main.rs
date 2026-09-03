@@ -1,54 +1,30 @@
-mod cli;
-mod config;
-mod deadlines;
-mod mcp;
-mod metrics;
-mod processing;
-mod server;
-mod transport;
+//! The Resonate server, as this repository ships it.
+//!
+//! Everything that makes it *this* server is in [`registry`]: a list of plugins,
+//! one line each. Everything else — reading the configuration, building in
+//! order, starting, stopping — is `resonate-base`, which names no plugin at all.
+//!
+//! Which is what makes a custom build small. A binary that carries a different
+//! set of plugins is this file with a different list, and nothing else:
+//!
+//! ```ignore
+//! #[tokio::main]
+//! async fn main() -> std::process::ExitCode {
+//!     resonate_base::main(
+//!         Registry::new()
+//!             .server(&resonate_server_postgres::PLUGIN)
+//!             .worker(&acme_worker_kafka::PLUGIN)
+//!             .gateway(&resonate_gateway_http::PLUGIN),
+//!         Options::default().default_server("server_postgres"),
+//!     )
+//!     .await
+//! }
+//! ```
 
-use std::sync::Arc;
+mod serve;
 
-use axum::{routing::get, Router};
 use clap::{Parser, Subcommand};
-use config::Config;
-// A server with no storage engine cannot serve, and the alternative is a
-// `match` whose only arm returns an error — which compiles, but reports itself
-// as an unreachable statement and an unused binding rather than as the
-// configuration mistake it is. The library has no such requirement: with every
-// engine off it still carries the oracle.
-#[cfg(not(any(
-    feature = "sqlite",
-    feature = "postgres",
-    feature = "mysql",
-    feature = "blob"
-)))]
-compile_error!(
-    "at least one storage engine must be enabled: --features sqlite, postgres, mysql, or blob"
-);
-
-use resonate_core::{ResonateGateway, ResonateRouter, ResonateServer, ResonateWorker};
-use resonate_gateway_http::{Config as GatewayConfig, HttpGateway};
-use resonate_gateway_web as console;
-#[cfg(feature = "mysql")]
-use resonate_server_dbms::engine_mysql::MysqlEngine;
-use resonate_server_dbms::engine_port::ResonateEngine;
-#[cfg(feature = "postgres")]
-use resonate_server_dbms::engine_postgres::PostgresEngine;
-#[cfg(feature = "sqlite")]
-use resonate_server_dbms::engine_sqlite::SqliteEngine;
-use resonate_transport_http_poll::PollRegistry;
-use server::Server;
-use std::collections::HashMap;
-
-/// The transports, handed back out of the wiring closure.
-///
-/// The server owns the router and the router owns the workers, so their
-/// lifecycle is driven through the router. What is still needed out here is the
-/// poll registry, which the HTTP gateway serves directly.
-struct Transports {
-    poll_registry: Arc<PollRegistry>,
-}
+use resonate_base::Registry;
 
 #[derive(Parser)]
 #[command(
@@ -64,704 +40,92 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Start the Resonate server
-    Serve(Box<cli::ServeArgs>),
+    Serve(Box<serve::ServeArgs>),
     /// Start the Resonate server with in-memory storage (ephemeral, for development)
-    Dev(Box<cli::DevArgs>),
+    Dev(Box<serve::DevArgs>),
     /// Promise operations
     #[command(alias = "promise")]
-    Promises(cli::PromiseArgs),
+    Promises(resonate_cli::PromiseArgs),
     /// Task operations
     #[command(alias = "task")]
-    Tasks(cli::TaskArgs),
+    Tasks(resonate_cli::TaskArgs),
     /// Schedule operations
     #[command(alias = "schedule")]
-    Schedules(cli::ScheduleArgs),
+    Schedules(resonate_cli::ScheduleArgs),
     /// Invoke a function via a durable promise
-    Invoke(cli::InvokeArgs),
+    Invoke(resonate_cli::InvokeArgs),
     /// Display the call-graph tree rooted at a promise ID
-    Tree(cli::TreeArgs),
+    Tree(resonate_cli::TreeArgs),
     /// Start the Resonate MCP server (stdio transport)
-    Mcp(Box<cli::McpArgs>),
+    Mcp(Box<resonate_cli::McpArgs>),
 }
+
+/// Everything this binary carries.
+///
+/// The one place plugins are named, and the only thing that changes when the
+/// set changes: a dependency in Cargo.toml, and a line here. Server, worker,
+/// gateway — the order they are built in.
+fn registry() -> Registry {
+    Registry::new()
+        .server(&resonate_server_sqlite::PLUGIN)
+        .server(&resonate_server_postgres::PLUGIN)
+        .server(&resonate_server_mysql::PLUGIN)
+        .server(&resonate_server_scylladb::PLUGIN)
+        .server(&resonate_server_blob::PLUGIN)
+        .worker(&resonate_transport_http_push::PLUGIN)
+        .worker(&resonate_transport_http_poll::PLUGIN)
+        .worker(&resonate_transport_gcps::PLUGIN)
+        .worker(&resonate_worker_bash::PLUGIN)
+        .gateway(&resonate_gateway_http::PLUGIN)
+        .gateway(&resonate_gateway_web::PLUGIN)
+        .gateway(&resonate_gateway_metrics::PLUGIN)
+}
+
+/// What `servers.active` falls back to.
+const DEFAULT_SERVER: &str = "server_sqlite";
 
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
     let cli = Cli::parse();
     match cli.command {
         Commands::Promises(args) => {
-            cli::run_promises(args).await;
+            resonate_cli::run_promises(args).await;
         }
         Commands::Tasks(args) => {
-            cli::run_tasks(args).await;
+            resonate_cli::run_tasks(args).await;
         }
         Commands::Schedules(args) => {
-            cli::run_schedules(args).await;
+            resonate_cli::run_schedules(args).await;
         }
         Commands::Invoke(args) => {
-            cli::run_invoke(args).await;
+            resonate_cli::run_invoke(args).await;
         }
         Commands::Tree(args) => {
-            cli::run_tree(args).await;
+            resonate_cli::run_tree(args).await;
         }
         Commands::Mcp(args) => {
-            cli::run_mcp(args).await;
+            resonate_cli::run_mcp(args).await;
         }
         Commands::Serve(args) => {
-            let config = match Config::load() {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!("Fatal: {e}");
-                    return std::process::ExitCode::FAILURE;
-                }
-            };
-            let config = args.apply(config);
-            if let Err(e) = run_server(config).await {
-                // Tracing may not be initialized if the error occurred
-                // before tracing setup, so also write to stderr.
-                tracing::error!("{e}");
-                eprintln!("Fatal: {e}");
-                return std::process::ExitCode::FAILURE;
-            }
+            let registry = registry();
+            let options = args
+                .options(&server_ids(&registry))
+                .default_server(DEFAULT_SERVER);
+            return resonate_base::main(registry, options).await;
         }
         Commands::Dev(args) => {
-            let config = match Config::load() {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!("Fatal: {e}");
-                    return std::process::ExitCode::FAILURE;
-                }
-            };
-            let config = args.apply(config);
-            if let Err(e) = run_server(config).await {
-                tracing::error!("{e}");
-                eprintln!("Fatal: {e}");
-                return std::process::ExitCode::FAILURE;
-            }
+            let registry = registry();
+            let options = args
+                .options(&server_ids(&registry))
+                .default_server(DEFAULT_SERVER);
+            return resonate_base::main(registry, options).await;
         }
     }
     std::process::ExitCode::SUCCESS
 }
 
-async fn run_server(config: Config) -> Result<(), String> {
-    // Initialize tracing
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&config.level));
-
-    tracing_subscriber::fmt().with_env_filter(env_filter).init();
-
-    tracing::info!(port = config.server.port, "Resonate Server starting");
-    tracing::info!(
-        timeout_poll_interval_ms = config.timeouts.poll_interval,
-        task_retry_timeout_ms = config.tasks.retry_timeout,
-        task_lease_timeout_ms = config.tasks.lease_timeout,
-        "Operational config"
-    );
-    if config.debug {
-        tracing::info!(
-            "Debug mode enabled — the clock belongs to the caller: debug.* is \
-             answered, head.debug_time is honoured, and nothing runs on wall time"
-        );
-    }
-
-    // Validate storage config
-    if config.storage.storage_type == "postgres" && config.storage.postgres.url.is_none() {
-        return Err("storage.type=postgres requires RESONATE_STORAGE__POSTGRES__URL".into());
-    }
-    if config.storage.storage_type == "mysql" && config.storage.mysql.url.is_none() {
-        return Err("MySQL storage selected but no URL configured. Set --storage-mysql-url or RESONATE_STORAGE__MYSQL__URL".to_string());
-    }
-
-    // Validate poll config (buffer_size=0 panics in tokio::mpsc::channel)
-    if config.transports.http_poll.buffer_size == 0 {
-        return Err("http_poll.buffer_size must be at least 1".into());
-    }
-    if config.transports.http_poll.max_connections == 0 {
-        return Err("http_poll.max_connections must be at least 1".into());
-    }
-
-    // The blob backend is not an engine behind `Server` — it is a complete
-    // `ResonateServer` of its own, so it takes its own wiring path and never
-    // reaches the `Arc::new_cyclic` knot below.
-    if config.storage.storage_type == "blob" {
-        #[cfg(feature = "blob")]
-        return run_blob_server(config).await;
-        #[cfg(not(feature = "blob"))]
-        return Err("storage backend 'blob' is not compiled into this build".into());
-    }
-
-    // Backend selection. Each is a complete engine, not a storage handle
-    // behind a shared one.
-    let engine: Arc<dyn ResonateEngine> = match config.storage.storage_type.as_str() {
-        #[cfg(feature = "postgres")]
-        "postgres" => {
-            let url = config.storage.postgres.url.as_ref().unwrap();
-            let pool_size = config.storage.postgres.pool_size;
-            tracing::info!("Using PostgreSQL backend");
-            tracing::info!(pool_size = pool_size, "PostgreSQL pool configured");
-            let pg = PostgresEngine::connect(
-                url,
-                pool_size,
-                config.tasks.retry_timeout,
-                config.storage.postgres.preload_limit,
-                config.debug,
-            )
-            .await
-            .map_err(|e| format!("Failed to connect to Postgres: {e}"))?;
-            pg.init(config.storage.postgres.migrate)
-                .await
-                .map_err(|e| format!("Failed to initialize Postgres schema: {e}"))?;
-            tracing::info!("PostgreSQL initialized");
-            Arc::new(pg)
-        }
-        #[cfg(feature = "mysql")]
-        "mysql" => {
-            let url = config.storage.mysql.url.as_deref().unwrap();
-            let pool_size = config.storage.mysql.pool_size;
-            let mysql = MysqlEngine::connect(
-                url,
-                pool_size,
-                config.tasks.retry_timeout,
-                config.storage.mysql.preload_limit,
-                config.debug,
-            )
-            .await
-            .map_err(|e| format!("MySQL connection failed: {e}"))?;
-            mysql
-                .init(config.storage.mysql.migrate)
-                .await
-                .map_err(|e| format!("MySQL init failed: {e}"))?;
-            Arc::new(mysql)
-        }
-        #[cfg(feature = "sqlite")]
-        _ => {
-            let path = &config.storage.sqlite.path;
-            tracing::info!(path = %path, "Using SQLite backend");
-            let sqlite = SqliteEngine::open(
-                path,
-                config.tasks.retry_timeout,
-                config.storage.sqlite.preload_limit,
-                config.storage.sqlite.migrate,
-                config.debug,
-            )
-            .map_err(|e| format!("Failed to open SQLite database: {e}"))?;
-            tracing::info!("SQLite initialized");
-            Arc::new(sqlite)
-        }
-        // Without SQLite there is no catch-all engine, so an unrecognised or
-        // uncompiled backend has to be refused rather than fallen back on.
-        #[cfg(not(feature = "sqlite"))]
-        other => {
-            return Err(format!(
-                "storage backend '{other}' is not compiled into this build"
-            ))
-        }
-    };
-
-    let port = config.server.port;
-    let bind = config.server.bind.clone();
-    let poll_max_connections = config.transports.http_poll.max_connections;
-    let poll_buffer_size = config.transports.http_poll.buffer_size;
-    let shutdown_timeout = std::time::Duration::from_millis(config.server.shutdown_timeout);
-    let is_sqlite = config.storage.storage_type == "sqlite";
-    let config_debug = config.debug;
-
-    // Build transports
-    tracing::info!(
-        http_push_connect_timeout_ms = config.transports.http_push.connect_timeout,
-        http_push_request_timeout_ms = config.transports.http_push.request_timeout,
-        http_poll_max_connections = poll_max_connections,
-        http_poll_buffer_size = poll_buffer_size,
-        "Transport config"
-    );
-
-    // What the closure below builds but the server does not own: the poll
-    // registry, which the HTTP layer also needs, and the workers by scheme,
-    // which have to be started and later stopped.
-    let mut transports: Option<Transports> = None;
-
-    // The ring is closed here, in one expression: the server holds the router,
-    // the router holds the workers, and every worker holds the server.
-    //
-    // Weak, because that last link points back up the ownership chain — this
-    // owns the server, and a strong handle would mean nothing in the ring,
-    // server or storage or background task, was ever dropped. An in-process
-    // worker calls the server directly through it; a remote worker uses it to
-    // report a delivery failure rather than dropping the message.
-    //
-    // `new_cyclic` hands out that weak handle before the server exists, which
-    // is what lets the router be a constructor argument instead of something
-    // set afterwards. No worker upgrades it during construction — they only
-    // store it — so it is still dangling here and live by the time anything
-    // routes.
-    let state = Arc::new_cyclic(|weak: &std::sync::Weak<Server>| {
-        let server_handle: std::sync::Weak<dyn ResonateServer> = weak.clone();
-
-        let poll_registry = Arc::new(PollRegistry::new(
-            server_handle.clone(),
-            config.transports.http_poll.clone(),
-        ));
-
-        let workers = build_workers(server_handle, &config, &poll_registry);
-
-        transports = Some(Transports { poll_registry });
-
-        let router: Arc<dyn ResonateRouter> =
-            Arc::new(transport::TransportDispatcher::new(workers));
-        // The timer's callbacks point back at the server too, so it is built
-        // from the same weak handle and in the same expression. Nothing runs
-        // until `start_timer` below.
-        let timer = deadlines::build(&config.timeouts, weak.clone());
-        Server::new(config, engine, router, timer)
-    });
-
-    let Transports { poll_registry } = transports.expect("the closure above always sets it");
-
-    // Start every worker before anything can route to one. A worker that
-    // cannot start is a startup failure, not a message that quietly goes
-    // nowhere later. Nothing has routed yet: the listener is not up and the
-    // background loops are not spawned.
-    let debug = config_debug;
-    state
-        .router()
-        .init(debug)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    // Seed the timer from the durable deadlines before anything can arm one.
-    // `start_timer` returns only once that first read has landed, so a deadline
-    // that is already due fires immediately rather than waiting for a sweep.
-    state.start_timer().await;
-    if !debug {
-        tracing::info!(
-            wheel_capacity = state.config.timeouts.wheel_capacity,
-            wheel_refresh_ms = state.config.timeouts.wheel_refresh,
-            sweep_interval_ms = state.config.timeouts.poll_interval,
-            "Timer started"
-        );
-    }
-
-    // Spawn background loops
-    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
-    let mut handles = Vec::new();
-
-    // Not under the debug flag: the sweep runs on wall time, and under debug
-    // the clock is the caller's. `debug.tick` is how time moves instead, and it
-    // sweeps as part of moving.
-    if debug {
-        tracing::warn!(
-            "Debug mode — no timeout sweep and no timer. Time advances only \
-             through debug.tick, and debug.* operations are answered."
-        );
-    } else {
-        let timeout_state = Arc::clone(&state);
-        let timeout_shutdown = shutdown_rx.clone();
-        handles.push(tokio::spawn(async move {
-            processing::processing_timeouts::timeout_processing_loop(
-                timeout_state,
-                timeout_shutdown,
-            )
-            .await;
-        }));
-    }
-
-    let metrics_port = state.config.observability.metrics_port;
-    if metrics_port > 0 {
-        let metrics_shutdown = shutdown_rx.clone();
-        handles.push(tokio::spawn(async move {
-            let metrics_app = Router::new().route("/metrics", get(metrics::metrics_handler));
-            match tokio::net::TcpListener::bind(format!("0.0.0.0:{}", metrics_port)).await {
-                Ok(listener) => {
-                    tracing::info!(port = metrics_port, "Metrics server listening");
-                    let _ = axum::serve(listener, metrics_app)
-                        .with_graceful_shutdown(async move {
-                            let mut rx = metrics_shutdown;
-                            let _ = rx.wait_for(|v| *v).await;
-                        })
-                        .await;
-                }
-                Err(e) => {
-                    tracing::error!(port = metrics_port, error = %e, "Failed to bind metrics port");
-                }
-            }
-        }));
-    }
-
-    // The gateway is built here and listens below. `new` binds nothing, so
-    // construction order does not matter; `init` is what opens the socket, and
-    // that has to come after the workers and the timer — accepting a request
-    // the rest of the process cannot yet serve is worse than not accepting it.
-    if !state.config.server.cors.allow_origins.is_empty() {
-        tracing::info!(origins = ?state.config.server.cors.allow_origins, "CORS enabled");
-    }
-    // The console is routes, not a gateway: it binds nothing and has no
-    // lifecycle of its own, so it is merged into the listener that already
-    // exists rather than opening a second one. One port, one origin — which is
-    // also why it needs no CORS.
-    // Built during the gateway's `init`, which is when the auth key has been
-    // read: the console applies the same policy as the worker endpoint, so it
-    // cannot be a way around it.
-    let console_config = state.config.console.clone();
-    let console_server = Arc::clone(&state) as Arc<dyn ResonateServer>;
-    let console_enabled = console_config.enabled;
-    let build_console = move |auth| {
-        console::routes(
-            &console_config,
-            console::ConsoleState {
-                server: console_server,
-                auth,
-            },
-        )
-        .unwrap_or_default()
-    };
-
-    let mut gateway_impl = HttpGateway::new(
-        Arc::clone(&state) as Arc<dyn ResonateServer>,
-        poll_registry,
-        GatewayConfig {
-            bind: bind.clone(),
-            port,
-            url: state.config.server.url.clone(),
-            cors_allow_origins: state.config.server.cors.allow_origins.clone(),
-            // Carried through, not interpreted: the gateway reads the key in
-            // `init`, and a bad path fails startup there.
-            auth: state.config.auth.clone(),
-            workos: state.config.workos.clone(),
-            // SQLite lives in this process, so a panic mid-transaction can
-            // leave state the next request would read.
-            abort_on_panic: is_sqlite,
-        },
-    );
-    if console_enabled {
-        gateway_impl = gateway_impl.with_routes(build_console);
-    }
-    let gateway: Arc<dyn ResonateGateway> = Arc::new(gateway_impl);
-    gateway
-        .init(debug)
-        .await
-        .map_err(|e| format!("HTTP gateway failed to start: {e}"))?;
-
-    shutdown_signal().await;
-
-    // Shutdown, in the reverse of the order things became able to do work —
-    // with one exception, at the end.
-    tracing::info!("Shutting down, draining background tasks...");
-    let _ = shutdown_tx.send(true);
-
-    let drain = async {
-        // The timer first: it is the only thing that can still hand the engine
-        // work of its own, and stopping it means nothing new arrives while the
-        // loops below drain.
-        state.stop_timer().await;
-        for handle in handles {
-            let _ = handle.await;
-        }
-        // Then the workers, through the router that holds them: the loops that
-        // feed them have stopped, so this drains what is already in flight
-        // rather than racing new deliveries. It is also what ends the poll
-        // transport's SSE streams, by dropping the senders they read from.
-        let _ = state.router().stop().await;
-        // The gateway last, not first. Refusing connections while in-flight
-        // work is still draining would give clients a closed socket where a
-        // 503 would do — and stopping it first would deadlock, because its
-        // graceful shutdown waits on the very SSE streams only the step above
-        // can release.
-        if let Err(e) = gateway.stop().await {
-            tracing::warn!(error = %e, "HTTP gateway did not stop cleanly");
-        }
-    };
-
-    if tokio::time::timeout(shutdown_timeout, drain).await.is_err() {
-        tracing::warn!("Background tasks did not finish within shutdown timeout, forcing exit");
-    }
-
-    tracing::info!("Resonate Server stopped");
-    Ok(())
-}
-
-/// Scheme -> worker, over a handle to whichever server implementation is
-/// active.
-///
-/// Shared by the SQL path (inside `Arc::new_cyclic`, where the handle is the
-/// not-yet-live `Weak<Server>`) and the blob path (after construction, where
-/// it is a downgraded `Arc` of the blob server), so both build exactly the same
-/// transports. A disabled transport is simply not registered, and the router
-/// reports its addresses as undeliverable.
-fn build_workers(
-    server_handle: std::sync::Weak<dyn ResonateServer>,
-    config: &Config,
-    poll_registry: &Arc<PollRegistry>,
-) -> HashMap<String, Arc<dyn ResonateWorker>> {
-    let mut workers: HashMap<String, Arc<dyn ResonateWorker>> = HashMap::new();
-
-    if config.transports.http_push.enabled {
-        let worker: Arc<dyn ResonateWorker> =
-            Arc::new(resonate_transport_http_push::HttpPushTransport::new(
-                server_handle.clone(),
-                config.transports.http_push.clone(),
-            ));
-        for scheme in resonate_transport_http_push::SCHEMES {
-            workers.insert((*scheme).to_string(), Arc::clone(&worker));
-        }
-    } else {
-        tracing::info!("HTTP push transport disabled");
-    }
-
-    if config.transports.http_poll.enabled {
-        workers.insert(
-            resonate_transport_http_poll::SCHEME.to_string(),
-            poll_registry.clone(),
-        );
-    } else {
-        tracing::info!("HTTP poll transport disabled");
-    }
-
-    if config.transports.gcps.enabled {
-        workers.insert(
-            resonate_transport_gcps::SCHEME.to_string(),
-            Arc::new(resonate_transport_gcps::GcpsPubSubTransport::new(
-                server_handle.clone(),
-                config.transports.gcps.clone(),
-            )),
-        );
-    }
-
-    if config.transports.bash_exec.enabled {
-        workers.insert(
-            resonate_worker_bash::SCHEME.to_string(),
-            Arc::new(resonate_worker_bash::BashExecTransport::new(
-                server_handle.clone(),
-                config.transports.bash_exec.clone(),
-                config.tasks.lease_timeout,
-            )),
-        );
-    }
-
-    workers
-}
-
-/// Serve over the blob backend.
-///
-/// A parallel to the tail of `run_server` rather than a branch inside it. The
-/// SQL path closes its ownership ring with `Arc::new_cyclic` because its
-/// `Server::new` also takes the timer wheel, whose callbacks point back at the
-/// server; the blob path has no such back-edge, so it is a straight line: the
-/// dispatcher is built empty, the server around it, and the workers are
-/// registered one statement later. The two paths share the workers
-/// (`build_workers`) and the gateway, and differ in which background loop
-/// runs: the blob backend owns its own firing loop (`timerd`) and routes
-/// messages as they are decided, so neither the timer wheel nor the timeout
-/// sweep exists on this path.
-#[cfg(feature = "blob")]
-async fn run_blob_server(config: Config) -> Result<(), String> {
-    use resonate_server_blob::applier::{ApplierCfg, KeySpace};
-    use resonate_server_blob::kernel::state::KernelCfg;
-    use resonate_server_blob::server::{Server as BlobServer, ServerCfg as BlobServerCfg};
-    use resonate_server_blob::store::{ObjectStoreAdapter, Store};
-
-    let blob_cfg = config.storage.blob.clone();
-    let store: Arc<dyn Store> = match &blob_cfg.bucket {
-        Some(bucket) => {
-            tracing::info!(
-                bucket = %bucket,
-                prefix = %blob_cfg.prefix,
-                timer_shards = blob_cfg.timer_shards,
-                "Using blob backend"
-            );
-            tracing::warn!(
-                "The blob backend requires real conditional writes (If-Match / \
-                 If-None-Match). S3, R2, GCS and Azure qualify; MinIO, B2 and \
-                 Spaces do not, and lose writes silently."
-            );
-            let mut builder =
-                object_store::aws::AmazonS3Builder::from_env().with_bucket_name(bucket);
-            if let Some(region) = &blob_cfg.region {
-                builder = builder.with_region(region);
-            }
-            if let Some(endpoint) = &blob_cfg.endpoint {
-                builder = builder.with_endpoint(endpoint);
-            }
-            if blob_cfg.allow_http {
-                builder = builder.with_allow_http(true);
-            }
-            let s3 = builder
-                .build()
-                .map_err(|e| format!("Failed to configure S3 store: {e}"))?;
-            Arc::new(ObjectStoreAdapter::new(s3))
-        }
-        None => {
-            tracing::warn!(
-                "storage.blob.bucket is not set — using an in-process, in-memory \
-                 object store. Nothing survives this process."
-            );
-            Arc::new(ObjectStoreAdapter::in_memory())
-        }
-    };
-
-    // The dispatcher is constructed empty and filled exactly once, a few
-    // statements down: the server takes the router as an ordinary constructor
-    // argument, and the workers take a handle to the server — so the router
-    // comes first, the server around it, and the workers before anything
-    // listens. No late binding, no cyclic construction.
-    let dispatcher = Arc::new(transport::TransportDispatcher::deferred());
-    let router: Arc<dyn ResonateRouter> = Arc::clone(&dispatcher) as Arc<dyn ResonateRouter>;
-    let blob = BlobServer::build(
-        store,
-        Arc::clone(&router),
-        BlobServerCfg {
-            keys: KeySpace::new(blob_cfg.prefix.clone(), blob_cfg.timer_shards),
-            applier: ApplierCfg {
-                max_cas_retries: blob_cfg.max_cas_retries,
-                kernel: KernelCfg {
-                    retry_timeout: config.tasks.retry_timeout,
-                    preload_limit: blob_cfg.preload_limit,
-                    // Overridden at build with ServerCfg.server_url below.
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-            timerd: Default::default(),
-            cache_capacity: blob_cfg.cache_capacity,
-            debug: config.debug,
-            search: blob_cfg.search_enabled,
-            server_url: config.server.url.clone().unwrap_or_default(),
-        },
-    );
-
-    tracing::info!(
-        http_push_connect_timeout_ms = config.transports.http_push.connect_timeout,
-        http_push_request_timeout_ms = config.transports.http_push.request_timeout,
-        http_poll_max_connections = config.transports.http_poll.max_connections,
-        http_poll_buffer_size = config.transports.http_poll.buffer_size,
-        "Transport config"
-    );
-
-    // Every worker holds a weak handle to the server, exactly as on the SQL
-    // path — this owns the server, so nothing in the graph keeps it alive.
-    let server_handle: std::sync::Weak<dyn ResonateServer> = {
-        let weak: std::sync::Weak<BlobServer> = Arc::downgrade(&blob);
-        weak
-    };
-    let poll_registry = Arc::new(PollRegistry::new(
-        server_handle.clone(),
-        config.transports.http_poll.clone(),
-    ));
-    let workers = build_workers(server_handle, &config, &poll_registry);
-    assert!(
-        dispatcher.register_workers(workers),
-        "the dispatcher is filled exactly once"
-    );
-
-    let debug = config.debug;
-    router.init(debug).await.map_err(|e| e.to_string())?;
-
-    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
-    let mut handles = Vec::new();
-
-    // One loop, not two: the timer loop fires armed deadlines from memory,
-    // listing the store only to seed itself at startup, and messages leave
-    // as they are decided rather than being drained by a second loop. Under
-    // the debug flag the loop is simply never spawned — the clock is the
-    // caller's.
-    if debug {
-        tracing::warn!(
-            "Debug mode — no timer loop, and messages are held for debug.snap. \
-             Time advances only through debug.tick, and debug.* operations \
-             are answered."
-        );
-    } else {
-        handles.push(Arc::clone(blob.timerd()).spawn(shutdown_rx.clone()));
-    }
-
-    let metrics_port = config.observability.metrics_port;
-    if metrics_port > 0 {
-        let metrics_shutdown = shutdown_rx.clone();
-        handles.push(tokio::spawn(async move {
-            let metrics_app = Router::new().route("/metrics", get(metrics::metrics_handler));
-            match tokio::net::TcpListener::bind(format!("0.0.0.0:{}", metrics_port)).await {
-                Ok(listener) => {
-                    tracing::info!(port = metrics_port, "Metrics server listening");
-                    let _ = axum::serve(listener, metrics_app)
-                        .with_graceful_shutdown(async move {
-                            let mut rx = metrics_shutdown;
-                            let _ = rx.wait_for(|v| *v).await;
-                        })
-                        .await;
-                }
-                Err(e) => {
-                    tracing::error!(port = metrics_port, error = %e, "Failed to bind metrics port");
-                }
-            }
-        }));
-    }
-
-    if !config.server.cors.allow_origins.is_empty() {
-        tracing::info!(origins = ?config.server.cors.allow_origins, "CORS enabled");
-    }
-    let gateway: Arc<dyn ResonateGateway> = Arc::new(HttpGateway::new(
-        Arc::clone(&blob) as Arc<dyn ResonateServer>,
-        poll_registry,
-        GatewayConfig {
-            bind: config.server.bind.clone(),
-            port: config.server.port,
-            url: config.server.url.clone(),
-            cors_allow_origins: config.server.cors.allow_origins.clone(),
-            auth: config.auth.clone(),
-            workos: config.workos.clone(),
-            // Unlike SQLite, the store is not an in-process transaction a
-            // poisoned handler could leave half-written: every write is one
-            // conditional PUT that lands whole or not at all.
-            abort_on_panic: false,
-        },
-    ));
-    gateway
-        .init(debug)
-        .await
-        .map_err(|e| format!("HTTP gateway failed to start: {e}"))?;
-
-    shutdown_signal().await;
-
-    tracing::info!("Shutting down, draining background tasks...");
-    let _ = shutdown_tx.send(true);
-
-    let shutdown_timeout = std::time::Duration::from_millis(config.server.shutdown_timeout);
-    let drain = async {
-        for handle in handles {
-            let _ = handle.await;
-        }
-        let _ = router.stop().await;
-        if let Err(e) = gateway.stop().await {
-            tracing::warn!(error = %e, "HTTP gateway did not stop cleanly");
-        }
-    };
-    if tokio::time::timeout(shutdown_timeout, drain).await.is_err() {
-        tracing::warn!("Background tasks did not finish within shutdown timeout, forcing exit");
-    }
-
-    tracing::info!("Resonate Server stopped");
-    Ok(())
-}
-
-/// Wait for SIGINT or SIGTERM to initiate graceful shutdown.
-async fn shutdown_signal() {
-    let ctrl_c = async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("Failed to install Ctrl+C handler");
-    };
-
-    #[cfg(unix)]
-    let terminate = async {
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("Failed to install SIGTERM handler")
-            .recv()
-            .await;
-    };
-
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
-
-    tokio::select! {
-        _ = ctrl_c => tracing::info!("Received SIGINT, initiating graceful shutdown..."),
-        _ = terminate => tracing::info!("Received SIGTERM, initiating graceful shutdown..."),
-    }
+/// The server plugins this binary carries, for the flags that are about *the*
+/// server rather than about one of them by name.
+fn server_ids(registry: &Registry) -> Vec<String> {
+    registry.servers().iter().map(|p| p.id()).collect()
 }

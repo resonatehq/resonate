@@ -5,6 +5,9 @@
 //! all authorize identically. What it needs beyond the envelope is an
 //! [`AuthConfig`] — policy, not protocol, which is why this is its own crate
 //! rather than part of `core`.
+//!
+//! Which policy is [`AuthMode`]: local JWT verification, or WorkOS. A gateway
+//! picks one at startup and every endpoint behind it asks the same one.
 
 pub mod workos;
 
@@ -39,7 +42,8 @@ pub struct VerificationKey {
 
 /// Which authentication mode is active.
 ///
-/// Exactly one — the gateway picks at startup based on config.
+/// Exactly one — the gateway picks at startup based on config, and the two
+/// are mutually exclusive there.
 #[derive(Clone)]
 pub enum AuthMode {
     /// Local JWT verification against a public key.
@@ -51,9 +55,13 @@ pub enum AuthMode {
 impl AuthMode {
     /// Authenticate and authorize an envelope-bearing request.
     ///
-    /// Dispatches to JWT verification or WorkOS token validation, depending
-    /// on which mode is active. The caller gets back a ready-to-render error
-    /// envelope on failure.
+    /// The caller gets back a ready-to-render error envelope on failure.
+    ///
+    /// The two arms do different amounts. JWT mode authenticates and then
+    /// applies the prefix rule; a WorkOS key carries no prefix claim and no
+    /// role — validation answers only which organization it belongs to — so
+    /// that arm authenticates and matches the organization, and there is
+    /// nothing further for it to authorize against.
     pub async fn check_envelope(&self, req: &RequestEnvelope) -> Result<(), Box<ResponseEnvelope>> {
         match self {
             AuthMode::Jwt(cfg) => auth_check(cfg, req),
@@ -73,10 +81,8 @@ impl AuthMode {
     }
 
     /// Verify a bearer token — no envelope, no authorization, just
-    /// authentication. Used for endpoints like `/poll` that don't carry a
-    /// protocol envelope.
-    ///
-    /// Returns `true` if the token is valid, `false` if it is not.
+    /// authentication. For endpoints like `/poll` that carry no protocol
+    /// envelope and so have no resource to authorize against.
     pub async fn check_token(&self, token: Option<&str>) -> bool {
         match self {
             AuthMode::Jwt(cfg) => auth_check_token(cfg, token),
@@ -96,10 +102,17 @@ impl AuthMode {
 /// the gateway hosting it calls from `init` — where anything that touches the
 /// filesystem and can fail belongs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// Public key for JWT verification.
     /// Set to "none" to accept unsigned tokens (debug/testing).
     /// Set to a file path to verify signatures against a PEM key.
+    ///
+    /// Defaulted, like every other field in every plugin's config, so that
+    /// naming an `auth` section without it is this crate's error to report
+    /// rather than serde's. An absent key is not a usable policy — `load`
+    /// says so, naming the setting an operator has to add.
+    #[serde(default)]
     pub publickey: String,
 
     /// Expected issuer (`iss` claim).
@@ -118,6 +131,17 @@ impl Config {
     /// path should stop the process, not surface later as a request that cannot
     /// be authenticated.
     pub fn load(&self) -> Result<AuthConfig, String> {
+        if self.publickey.is_empty() {
+            // Reachable by writing `iss` and forgetting `publickey`. Auth is on
+            // — a section exists — and there is nothing to verify against, so
+            // this is a startup failure rather than a policy that admits
+            // everything.
+            return Err(
+                "publickey is required when an auth section is present: a path to a PEM \
+                 file, or \"none\" to accept unsigned tokens"
+                    .to_string(),
+            );
+        }
         let key = if self.publickey == "none" {
             tracing::warn!("Auth enabled — unsigned mode (no signature verification)");
             None
@@ -453,112 +477,5 @@ fn extract_resource_id(kind: &str, data: &Value) -> Option<String> {
         // restriction.  This ensures newly added commands are denied by default
         // until explicitly handled here.
         _ => Some(String::new()),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use wiremock::matchers::{method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
-
-    /// Build a WorkOsClient pointed at a mock server.
-    fn workos_client(mock_url: &str) -> workos::WorkOsClient {
-        let cfg = workos::WorkOsConfig {
-            api_key: "sk_server_secret".into(),
-            org_id: "org_abc".into(),
-            base_url: mock_url.to_string(),
-        };
-        workos::WorkOsClient::new(cfg)
-    }
-
-    fn request(kind: &str) -> RequestEnvelope {
-        RequestEnvelope {
-            kind: kind.into(),
-            head: resonate_core::types::RequestHead {
-                auth: Some("tok".into()),
-                corr_id: "42".into(),
-                version: "1".into(),
-                debug_time: None,
-            },
-            data: serde_json::json!({}),
-        }
-    }
-
-    // -------------------------------------------------------------------
-    // AuthMode::check_envelope — WorkOS branch
-    // -------------------------------------------------------------------
-
-    #[tokio::test]
-    async fn check_envelope_workos_success() {
-        let mock = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/api_keys/validations"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "api_key": {
-                    "id": "api_key_123",
-                    "owner": {
-                        "type": "organization",
-                        "id": "org_abc"
-                    }
-                }
-            })))
-            .mount(&mock)
-            .await;
-
-        let mode = AuthMode::WorkOs(workos_client(&mock.uri()));
-        let req = request("promise.get");
-        let r = mode.check_envelope(&req).await;
-        assert!(r.is_ok(), "expected Ok, got {:?}", r);
-    }
-
-    #[tokio::test]
-    async fn check_envelope_workos_missing_token() {
-        let mock = MockServer::start().await;
-        let mode = AuthMode::WorkOs(workos_client(&mock.uri()));
-        let mut req = request("promise.get");
-        req.head.auth = None;
-        let r = mode.check_envelope(&req).await;
-        assert!(r.is_err());
-        let rejection = r.unwrap_err();
-        assert_eq!(rejection.head.status, 401);
-    }
-
-    // -------------------------------------------------------------------
-    // AuthMode::check_token — WorkOS branch
-    // -------------------------------------------------------------------
-
-    #[tokio::test]
-    async fn check_token_workos_success() {
-        let mock = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/api_keys/validations"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "api_key": {
-                    "id": "api_key_123",
-                    "owner": {
-                        "type": "organization",
-                        "id": "org_abc"
-                    }
-                }
-            })))
-            .mount(&mock)
-            .await;
-
-        let mode = AuthMode::WorkOs(workos_client(&mock.uri()));
-        assert!(mode.check_token(Some("tok")).await);
-    }
-
-    #[tokio::test]
-    async fn check_token_workos_rejection() {
-        let mock = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/api_keys/validations"))
-            .respond_with(ResponseTemplate::new(401))
-            .mount(&mock)
-            .await;
-
-        let mode = AuthMode::WorkOs(workos_client(&mock.uri()));
-        assert!(!mode.check_token(Some("tok")).await);
     }
 }

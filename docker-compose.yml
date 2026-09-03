@@ -3,14 +3,14 @@ services:
     build: .
     profiles: [sqlite]
     ports:
-      - "8001:8001"
-      - "9090:9090"
+      - "8001:8001"   # the protocol, the poll endpoint and the console
+      - "9090:9090"   # prometheus
     environment:
-      - RESONATE_SERVER__PORT=8001
-      - RESONATE_OBSERVABILITY__METRICS_PORT=9090
+      - RESONATE_GATEWAYS__GATEWAY_HTTP__BIND=0.0.0.0:8001
+      - RESONATE_GATEWAYS__GATEWAY_METRICS__BIND=0.0.0.0:9090
       - RESONATE_LEVEL=info
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8001/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8001/ready || exit 1"]
       interval: 5s
       retries: 10
       start_period: 30s
@@ -22,20 +22,20 @@ services:
     build: .
     profiles: [postgres]
     ports:
-      - "8001:8001"
-      - "9090:9090"
+      - "8001:8001"   # the protocol, the poll endpoint and the console
+      - "9090:9090"   # prometheus
     environment:
-      - RESONATE_SERVER__PORT=8001
-      - RESONATE_OBSERVABILITY__METRICS_PORT=9090
+      - RESONATE_GATEWAYS__GATEWAY_HTTP__BIND=0.0.0.0:8001
+      - RESONATE_GATEWAYS__GATEWAY_METRICS__BIND=0.0.0.0:9090
       - RESONATE_LEVEL=info
-      - RESONATE_STORAGE__TYPE=postgres
-      - RESONATE_STORAGE__POSTGRES__URL=postgres://resonate:resonate@postgres:5432/resonate
-      - RESONATE_STORAGE__POSTGRES__POOL_SIZE=20
+      - RESONATE_SERVERS__ACTIVE=server_postgres
+      - RESONATE_SERVERS__SERVER_POSTGRES__URL=postgres://resonate:resonate@postgres:5432/resonate
+      - RESONATE_SERVERS__SERVER_POSTGRES__POOL_SIZE=20
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8001/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8001/ready || exit 1"]
       interval: 5s
       retries: 10
       start_period: 30s
@@ -47,20 +47,20 @@ services:
     build: .
     profiles: [mysql]
     ports:
-      - "8001:8001"
-      - "9090:9090"
+      - "8001:8001"   # the protocol, the poll endpoint and the console
+      - "9090:9090"   # prometheus
     environment:
-      - RESONATE_SERVER__PORT=8001
-      - RESONATE_OBSERVABILITY__METRICS_PORT=9090
+      - RESONATE_GATEWAYS__GATEWAY_HTTP__BIND=0.0.0.0:8001
+      - RESONATE_GATEWAYS__GATEWAY_METRICS__BIND=0.0.0.0:9090
       - RESONATE_LEVEL=info
-      - RESONATE_STORAGE__TYPE=mysql
-      - RESONATE_STORAGE__MYSQL__URL=mysql://resonate:resonate@mysql:3306/resonate
-      - RESONATE_STORAGE__MYSQL__POOL_SIZE=20
+      - RESONATE_SERVERS__ACTIVE=server_mysql
+      - RESONATE_SERVERS__SERVER_MYSQL__URL=mysql://resonate:resonate@mysql:3306/resonate
+      - RESONATE_SERVERS__SERVER_MYSQL__POOL_SIZE=20
     depends_on:
       mysql:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8001/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8001/ready || exit 1"]
       interval: 5s
       retries: 10
       start_period: 30s
@@ -72,17 +72,17 @@ services:
     build: .
     profiles: [sqlite-auth]
     ports:
-      - "8001:8001"
-      - "9090:9090"
+      - "8001:8001"   # the protocol, the poll endpoint and the console
+      - "9090:9090"   # prometheus
     environment:
-      - RESONATE_SERVER__PORT=8001
-      - RESONATE_OBSERVABILITY__METRICS_PORT=9090
+      - RESONATE_GATEWAYS__GATEWAY_HTTP__BIND=0.0.0.0:8001
+      - RESONATE_GATEWAYS__GATEWAY_METRICS__BIND=0.0.0.0:9090
       - RESONATE_LEVEL=info
-      - RESONATE_AUTH__PUBLICKEY=/etc/resonate/auth/public.pem
+      - RESONATE_GATEWAYS__GATEWAY_HTTP__AUTH__PUBLICKEY=/etc/resonate/auth/public.pem
     volumes:
       - ./config/auth/dev/public.pem:/etc/resonate/auth/public.pem:ro
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8001/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8001/ready || exit 1"]
       interval: 5s
       retries: 10
       start_period: 30s
@@ -94,23 +94,23 @@ services:
     build: .
     profiles: [mysql-auth]
     ports:
-      - "8001:8001"
-      - "9090:9090"
+      - "8001:8001"   # the protocol, the poll endpoint and the console
+      - "9090:9090"   # prometheus
     environment:
-      - RESONATE_SERVER__PORT=8001
-      - RESONATE_OBSERVABILITY__METRICS_PORT=9090
+      - RESONATE_GATEWAYS__GATEWAY_HTTP__BIND=0.0.0.0:8001
+      - RESONATE_GATEWAYS__GATEWAY_METRICS__BIND=0.0.0.0:9090
       - RESONATE_LEVEL=info
-      - RESONATE_AUTH__PUBLICKEY=/etc/resonate/auth/public.pem
-      - RESONATE_STORAGE__TYPE=mysql
-      - RESONATE_STORAGE__MYSQL__URL=mysql://resonate:resonate@mysql:3306/resonate
-      - RESONATE_STORAGE__MYSQL__POOL_SIZE=20
+      - RESONATE_GATEWAYS__GATEWAY_HTTP__AUTH__PUBLICKEY=/etc/resonate/auth/public.pem
+      - RESONATE_SERVERS__ACTIVE=server_mysql
+      - RESONATE_SERVERS__SERVER_MYSQL__URL=mysql://resonate:resonate@mysql:3306/resonate
+      - RESONATE_SERVERS__SERVER_MYSQL__POOL_SIZE=20
     volumes:
       - ./config/auth/dev/public.pem:/etc/resonate/auth/public.pem:ro
     depends_on:
       mysql:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8001/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8001/ready || exit 1"]
       interval: 5s
       retries: 10
       start_period: 30s
@@ -122,23 +122,23 @@ services:
     build: .
     profiles: [postgres-auth]
     ports:
-      - "8001:8001"
-      - "9090:9090"
+      - "8001:8001"   # the protocol, the poll endpoint and the console
+      - "9090:9090"   # prometheus
     environment:
-      - RESONATE_SERVER__PORT=8001
-      - RESONATE_OBSERVABILITY__METRICS_PORT=9090
+      - RESONATE_GATEWAYS__GATEWAY_HTTP__BIND=0.0.0.0:8001
+      - RESONATE_GATEWAYS__GATEWAY_METRICS__BIND=0.0.0.0:9090
       - RESONATE_LEVEL=info
-      - RESONATE_AUTH__PUBLICKEY=/etc/resonate/auth/public.pem
-      - RESONATE_STORAGE__TYPE=postgres
-      - RESONATE_STORAGE__POSTGRES__URL=postgres://resonate:resonate@postgres:5432/resonate
-      - RESONATE_STORAGE__POSTGRES__POOL_SIZE=20
+      - RESONATE_GATEWAYS__GATEWAY_HTTP__AUTH__PUBLICKEY=/etc/resonate/auth/public.pem
+      - RESONATE_SERVERS__ACTIVE=server_postgres
+      - RESONATE_SERVERS__SERVER_POSTGRES__URL=postgres://resonate:resonate@postgres:5432/resonate
+      - RESONATE_SERVERS__SERVER_POSTGRES__POOL_SIZE=20
     volumes:
       - ./config/auth/dev/public.pem:/etc/resonate/auth/public.pem:ro
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8001/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8001/ready || exit 1"]
       interval: 5s
       retries: 10
       start_period: 30s

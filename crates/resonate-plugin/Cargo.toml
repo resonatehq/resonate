@@ -1,0 +1,26 @@
+[package]
+name = "resonate-plugin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The Resonate plugin surface: what a plugin announces, how it is configured, and how a binary assembles one."
+
+[dependencies]
+resonate-core = { path = "../resonate-core" }
+# In the ABI because a registered route is handed the gateway's loaded auth
+# policy — one policy at one edge, rather than a setting per plugin.
+resonate-auth = { path = "../resonate-auth" }
+serde = { workspace = true }
+# Re-exported: a plugin that listens builds its own router, and two
+# semver-major axums in the graph would make those routers different types.
+axum = { version = "0.7", features = ["json"] }
+# Re-exported: every plugin emits metrics through this one, so there is exactly
+# one prometheus in the graph and one default registry.
+prometheus = "0.13"
+# An implementation detail, deliberately: no figment type appears in this
+# crate's public API, so a figment major can land without moving every plugin.
+figment = { version = "0.10", features = ["toml", "env"] }
+
+[dev-dependencies]
+async-trait = { workspace = true }
+tokio = { version = "1", features = ["rt", "macros"] }

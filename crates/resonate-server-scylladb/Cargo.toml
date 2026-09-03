@@ -1,0 +1,30 @@
+[package]
+name = "resonate-server-scylladb"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Resonate server: durable state in ScyllaDB — origin-partitioned promises, LWT transitions, bucketed timeout queues."
+
+# Depends on no other plugin, and on no other server's library. What it shares
+# with the SQL servers is a resemblance: the same shape of engine and the same
+# shape of shell, copied, so the eager mechanics here can diverge from the lazy
+# ones there without either asking the other.
+
+[dependencies]
+resonate-core = { path = "../resonate-core" }
+resonate-plugin = { path = "../resonate-plugin" }
+resonate-timer-wheel = { path = "../resonate-timer-wheel" }
+scylla = { version = "1.8", features = ["rustls-023"] }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+validator = { workspace = true }
+tokio = { version = "1", features = ["rt", "sync", "macros", "time"] }
+tracing = "0.1"
+lazy_static = "1"
+cron = "0.12"
+chrono = "0.4"
+uuid = { version = "1", features = ["v4"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+rustls-pemfile = "2"
+webpki-roots = "0.26"

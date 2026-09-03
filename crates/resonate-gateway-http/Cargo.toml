@@ -12,14 +12,16 @@ path = "src/lib.rs"
 [dependencies]
 resonate-auth = { path = "../resonate-auth" }
 resonate-core = { path = "../resonate-core" }
-resonate-transport-http-poll = { path = "../resonate-transport-http-poll" }
+resonate-plugin = { path = "../resonate-plugin" }
 async-trait = { workspace = true }
 serde = { workspace = true }
-axum = { version = "0.7", features = ["json"] }
 tower-http = { version = "0.6", features = ["trace", "catch-panic", "cors"] }
 tokio = { version = "1", features = ["rt", "sync", "macros", "signal", "net"] }
-async-stream = "0.3"
 serde_json = { workspace = true }
-prometheus = "0.13"
 lazy_static = "1"
 tracing = "0.1"
+
+[dev-dependencies]
+# The auth-priority test drives the API route the way a caller does.
+tower = { version = "0.5", features = ["util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

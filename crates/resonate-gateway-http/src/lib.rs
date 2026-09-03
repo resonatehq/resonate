@@ -13,6 +13,10 @@ pub mod routes;
 
 use std::sync::Arc;
 
+// axum comes from `resonate-plugin`, so a build has one of it — see that
+// crate's re-export for why.
+use resonate_plugin::axum;
+
 use async_trait::async_trait;
 use axum::http::{
     header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, ORIGIN},
@@ -22,12 +26,31 @@ use axum::response::IntoResponse;
 use axum::Json;
 use resonate_core::types::ResponseEnvelope;
 use resonate_core::{ResonateGateway, ResonateServer, Unavailable};
-use resonate_transport_http_poll::PollRegistry;
 use serde::{Deserialize, Serialize};
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
-pub use routes::{AppState, PollState};
+pub use routes::AppState;
+
+/// This gateway, as a plugin. The worker-facing HTTP edge.
+pub static PLUGIN: resonate_plugin::GatewayPlugin =
+    resonate_plugin::GatewayPlugin::new(env!("CARGO_PKG_NAME"), configure);
+
+/// Read `[gateways.gateway_http]`, and build the gateway unless it is off.
+fn configure(
+    settings: &resonate_plugin::Settings<'_>,
+    deps: resonate_plugin::GatewayDependencies,
+) -> Result<Option<Arc<dyn ResonateGateway>>, resonate_plugin::ConfigError> {
+    let config: Config = settings.extract()?;
+    if !config.enabled {
+        return Ok(None);
+    }
+    Ok(Some(Arc::new(HttpGateway::new(
+        deps.server,
+        deps.routes,
+        config,
+    ))))
+}
 
 /// Where to listen, and how to behave once we do.
 ///
@@ -35,19 +58,19 @@ pub use routes::{AppState, PollState};
 /// out of a config file. Nothing here is read from disk or opened; that is
 /// [`HttpGateway::init`]'s.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
-    /// Address to listen on [default: 0.0.0.0]
+    /// Serve at all.
+    #[serde(default = "yes")]
+    pub enabled: bool,
+
+    /// Where to listen [default: 0.0.0.0:8001].
+    ///
+    /// One string, like every other listening plugin's. It used to be a host
+    /// and a port in two fields, which made this the one edge configured
+    /// differently from the other three for no reason anybody could name.
     #[serde(default = "default_bind")]
     pub bind: String,
-
-    /// Port to listen on [default: 8001]
-    #[serde(default = "default_port")]
-    pub port: u16,
-
-    /// The URL clients reach this server on. Announced in execute messages,
-    /// so a worker knows where to call back.
-    #[serde(default)]
-    pub url: Option<String>,
 
     /// Origins to allow. Empty disables CORS; `*` is permissive.
     #[serde(default)]
@@ -60,9 +83,10 @@ pub struct Config {
     #[serde(default)]
     pub auth: Option<resonate_auth::Config>,
 
-    /// WorkOS authentication. Absent means WorkOS auth disabled.
+    /// WorkOS authentication. Absent means WorkOS auth is off.
     ///
-    /// If present, `auth` must be `None` — the two modes are mutually exclusive.
+    /// Mutually exclusive with `auth`: a gateway verifies tokens one way, and
+    /// naming both is a startup error rather than a silent precedence.
     #[serde(default)]
     pub workos: Option<resonate_auth::workos::Config>,
 
@@ -76,20 +100,19 @@ pub struct Config {
     pub abort_on_panic: bool,
 }
 
-fn default_bind() -> String {
-    "0.0.0.0".to_string()
+fn yes() -> bool {
+    true
 }
 
-fn default_port() -> u16 {
-    8001
+fn default_bind() -> String {
+    "0.0.0.0:8001".to_string()
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
+            enabled: true,
             bind: default_bind(),
-            port: default_port(),
-            url: None,
             cors_allow_origins: Vec::new(),
             auth: None,
             workos: None,
@@ -98,97 +121,65 @@ impl Default for Config {
     }
 }
 
-/// A router built once the gateway's auth policy is known. See
-/// [`HttpGateway::with_routes`].
-type ExtraRoutes =
-    Box<dyn FnOnce(Option<resonate_auth::AuthMode>) -> axum::Router<routes::AppState> + Send>;
+/// The listener, once `init` has bound it, and the switch that ends it.
+struct Serving {
+    task: JoinHandle<()>,
+    shutdown: oneshot::Sender<()>,
+}
 
 /// axum, hosting the Resonate protocol over HTTP.
 pub struct HttpGateway {
     config: Config,
-    /// Routes merged in beside the protocol's own — the web console, and
-    /// nothing else today.
-    ///
-    /// Handed in rather than reached for: this crate serves the protocol and
-    /// knows nothing about a console, and the console knows nothing about a
-    /// listener. What connects them is the composition root, which owns both.
-    ///
-    /// A builder, not a router, because of *when* auth exists. The key is read
-    /// in `init` — that is the whole reason `init` is fallible — so routes that
-    /// must authenticate the same way cannot be built before it. Handing over
-    /// the loaded policy is what keeps the merged routes from being a hole in
-    /// it.
-    extra: Mutex<Option<ExtraRoutes>>,
     /// Held so the server outlives every request it can still accept, and
     /// handed to the routes when `init` builds them. Strong, unlike a worker's
     /// handle: nothing points back at a gateway, so there is no cycle to break.
     server: Arc<dyn ResonateServer>,
-    /// The poll transport, held until `init` builds the application around it.
-    poll_registry: Arc<PollRegistry>,
-    /// The application, built by `init` — which is also the only place a
-    /// socket is bound.
-    app: Mutex<Option<axum::Router>>,
-    /// Set by `stop` to release the graceful-shutdown future.
-    shutdown: Mutex<Option<oneshot::Sender<()>>>,
-    task: Mutex<Option<JoinHandle<()>>>,
+    /// What every other plugin asked to have served here.
+    ///
+    /// This gateway owns the only listener, so it owns everyone's HTTP: the
+    /// poll transport's SSE endpoint, the console, and whatever a worker
+    /// registers for a callback. They are merged in `init` — see there for why
+    /// it cannot be earlier.
+    routes: Arc<resonate_plugin::Routes>,
+    serving: std::sync::Mutex<Option<Serving>>,
 }
 
 impl HttpGateway {
     /// Build the gateway. Nothing is bound and nothing runs until `init`.
-    ///
-    /// `poll_registry` is the poll transport, which needs an endpoint to hand
-    /// its connections out through — see [`routes::AppState`] for why it
-    /// arrives here rather than being something this crate owns.
     pub fn new(
         server: Arc<dyn ResonateServer>,
-        poll_registry: Arc<PollRegistry>,
+        routes: Arc<resonate_plugin::Routes>,
         config: Config,
     ) -> Self {
         Self {
             config,
             server,
-            poll_registry,
-            extra: Mutex::new(None),
-            app: Mutex::new(None),
-            shutdown: Mutex::new(None),
-            task: Mutex::new(None),
+            routes,
+            serving: std::sync::Mutex::new(None),
         }
-    }
-
-    /// Serve these routes alongside the protocol's, on the same port.
-    ///
-    /// Merged before the layers, so they get the same panic guard, the same
-    /// tracing and the same CORS as everything else. Paths must not collide
-    /// with the protocol's — axum refuses two handlers for one method on one
-    /// path, loudly, at startup.
-    ///
-    /// The closure is called during `init`, with the auth policy this gateway
-    /// just loaded — `None` when auth is disabled. Anything that answers
-    /// requests here has to be able to apply it.
-    pub fn with_routes(
-        self,
-        build: impl FnOnce(Option<resonate_auth::AuthMode>) -> axum::Router<routes::AppState>
-            + Send
-            + 'static,
-    ) -> Self {
-        *self
-            .extra
-            .try_lock()
-            .expect("nothing else holds the gateway during construction") = Some(Box::new(build));
-        self
     }
 }
 
 /// Routes, state and layers, in the order a request meets them.
+///
+/// `extra` is what every other plugin registered. Merged before the layers, so
+/// a registered route gets the same panic guard, the same tracing and the same
+/// CORS as the protocol's own — a route served here is served on the same terms
+/// as everything else, not through a hole beside them.
 fn build_app(
     state: routes::AppState,
     config: &Config,
-    extra: Option<axum::Router<routes::AppState>>,
+    extra: Vec<(String, axum::Router)>,
 ) -> axum::Router {
     let abort_on_panic = config.abort_on_panic;
-    let mut app = routes::api_routes()
-        .merge(routes::poll_routes())
-        .merge(extra.unwrap_or_default())
+    let mut merged = routes::api_routes().with_state(state);
+    for (plugin, router) in extra {
+        tracing::info!(plugin = %plugin, "Serving routes for plugin");
+        // Panics on a path collision, naming neither side — which is why the
+        // line above names the plugin whose routes are going in.
+        merged = merged.merge(router);
+    }
+    let mut app = merged
         .layer(tower_http::catch_panic::CatchPanicLayer::custom(
             move |err: Box<dyn std::any::Any + Send + 'static>| {
                 let message = if let Some(s) = err.downcast_ref::<&str>() {
@@ -218,8 +209,7 @@ fn build_app(
                 .on_failure(
                     tower_http::trace::DefaultOnFailure::new().level(tracing::Level::ERROR),
                 ),
-        )
-        .with_state(state);
+        );
     if let Some(layer) = cors_layer(&config.cors_allow_origins) {
         app = app.layer(layer);
     }
@@ -252,78 +242,71 @@ fn cors_layer(allow_origins: &[String]) -> Option<tower_http::cors::CorsLayer> {
     Some(layer)
 }
 
+/// Which policy this gateway will verify tokens against.
+///
+/// Separate from `init` because it is the whole of the decision and none of
+/// the I/O it triggers: a test can ask what a config means without a socket.
+/// Reading the key material still happens here, so a bad path is a startup
+/// failure like the rest.
+fn auth_mode(config: &Config) -> Result<Option<resonate_auth::AuthMode>, String> {
+    match (&config.auth, &config.workos) {
+        (Some(_), Some(_)) => {
+            Err("auth and workos cannot both be configured — choose exactly one mode".to_string())
+        }
+        (Some(cfg), None) => Ok(Some(resonate_auth::AuthMode::Jwt(Arc::new(cfg.load()?)))),
+        (None, Some(cfg)) => Ok(Some(resonate_auth::AuthMode::WorkOs(
+            resonate_auth::workos::WorkOsClient::new(cfg.load()?),
+        ))),
+        (None, None) => {
+            tracing::info!("Auth disabled — all requests accepted");
+            Ok(None)
+        }
+    }
+}
+
 #[async_trait]
 impl ResonateGateway for HttpGateway {
     async fn init(&self, _debug: bool) -> Result<(), Unavailable> {
-        {
-            let mut app = self.app.lock().await;
-            if app.is_some() {
-                return Ok(()); // already started
-            }
-            // Reading the key material is this crate's, not its caller's: it
-            // touches the disk and it can fail, which is what `init` is for. A
-            // bad key path stops the process here rather than surfacing later
-            // as a request nobody can authenticate.
-            let auth: Option<resonate_auth::AuthMode> =
-                match (&self.config.auth, &self.config.workos) {
-                    (Some(_), Some(_)) => {
-                        return Err(Unavailable::new(
-                            "auth and workos cannot both be configured — choose exactly one mode",
-                        ));
-                    }
-                    (Some(cfg), None) => {
-                        let ac = cfg.load().map_err(Unavailable::new)?;
-                        Some(resonate_auth::AuthMode::Jwt(Arc::new(ac)))
-                    }
-                    (None, Some(cfg)) => {
-                        let wc = cfg.load().map_err(Unavailable::new)?;
-                        let client = resonate_auth::workos::WorkOsClient::new(wc);
-                        Some(resonate_auth::AuthMode::WorkOs(client))
-                    }
-                    (None, None) => {
-                        tracing::info!("Auth disabled — all requests accepted");
-                        None
-                    }
-                };
-            let extra = self
-                .extra
-                .lock()
-                .await
-                .take()
-                .map(|build| build(auth.clone()));
-            *app = Some(build_app(
-                routes::AppState {
-                    server: Arc::clone(&self.server),
-                    auth,
-                    poll_registry: Arc::clone(&self.poll_registry),
-                },
-                &self.config,
-                extra,
-            ));
-        }
-        let app = self
-            .app
-            .lock()
-            .await
+        // Reading the key material is this crate's, not its caller's: it
+        // touches the disk and it can fail, which is what `init` is for. A bad
+        // key path stops the process here rather than surfacing later as a
+        // request nobody can authenticate.
+        let auth = auth_mode(&self.config).map_err(Unavailable::new)?;
+        // Every other plugin's routes, built now that the auth policy exists.
+        // This is why registration is a builder and not a router: a route that
+        // must authenticate the same way as the protocol cannot be built before
+        // the key has been read, and reading it is what `init` is for.
+        //
+        // It is also why this happens here rather than in `configure`: by the
+        // time any gateway starts, every plugin has been configured, so nothing
+        // can register after this drains the list.
+        let extra: Vec<(String, axum::Router)> = self
+            .routes
             .take()
-            .expect("the block above just set it");
+            .into_iter()
+            .map(|(plugin, build)| (plugin, build(auth.clone())))
+            .collect();
 
-        let addr = format!("{}:{}", self.config.bind, self.config.port);
-        let listener = tokio::net::TcpListener::bind(&addr)
-            .await
-            .map_err(|e| Unavailable::new(format!("failed to bind {addr}: {e}")))?;
-
-        let (tx, rx) = oneshot::channel();
-        *self.shutdown.lock().await = Some(tx);
-
-        tracing::info!(
-            bind = %self.config.bind,
-            port = self.config.port,
-            server_url = %self.config.url.clone().unwrap_or_default(),
-            "Server listening"
+        let app = build_app(
+            routes::AppState {
+                server: Arc::clone(&self.server),
+                auth,
+            },
+            &self.config,
+            extra,
         );
 
-        let handle = tokio::spawn(async move {
+        let listener = tokio::net::TcpListener::bind(&self.config.bind)
+            .await
+            .map_err(|e| {
+                Unavailable::new(format!(
+                    "http gateway cannot bind {}: {e}",
+                    self.config.bind
+                ))
+            })?;
+
+        let (tx, rx) = oneshot::channel();
+        let task = tokio::spawn(async move {
             let served = axum::serve(listener, app)
                 .with_graceful_shutdown(async move {
                     // An error means `stop` dropped the sender rather than
@@ -335,25 +318,113 @@ impl ResonateGateway for HttpGateway {
                 tracing::error!(error = %e, "HTTP gateway stopped with an error");
             }
         });
-        *self.task.lock().await = Some(handle);
+        *self.serving.lock().expect("http gateway serving mutex") =
+            Some(Serving { task, shutdown: tx });
+        tracing::info!(bind = %self.config.bind, "Server listening");
         Ok(())
     }
 
     /// Close the listener and wait for what is in flight.
     ///
-    /// Called last, after every worker has stopped — which is what makes the
-    /// wait finite. A poll transport's SSE streams are long-lived responses
-    /// axum's graceful shutdown would otherwise wait on forever; by now that
-    /// transport has dropped its senders and every one of those streams has
-    /// ended on its own.
+    /// Called last, after the server and the workers have stopped, so a client
+    /// gets a 503 rather than a closed socket while in-flight work drains.
+    /// Every response this gateway serves is a request/response pair, so the
+    /// wait is bounded by the slowest one.
     async fn stop(&self) -> Result<(), Unavailable> {
-        if let Some(tx) = self.shutdown.lock().await.take() {
-            let _ = tx.send(());
-        }
-        let handle = self.task.lock().await.take();
-        if let Some(handle) = handle {
-            let _ = handle.await;
+        // Out of the guard before the await: a std MutexGuard is not Send.
+        let serving = self
+            .serving
+            .lock()
+            .expect("http gateway serving mutex")
+            .take();
+        if let Some(serving) = serving {
+            let _ = serving.shutdown.send(());
+            let _ = serving.task.await;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn workos(api_key: Option<&str>, org_id: Option<&str>) -> resonate_auth::workos::Config {
+        resonate_auth::workos::Config {
+            api_key: api_key.map(str::to_owned),
+            org_id: org_id.map(str::to_owned),
+            base_url: "https://api.workos.com".to_string(),
+        }
+    }
+
+    #[test]
+    fn no_section_means_no_policy() {
+        assert!(auth_mode(&Config::default()).unwrap().is_none());
+    }
+
+    /// One edge verifies tokens one way. Two policies would make the answer
+    /// depend on an order nobody wrote down, so startup refuses instead.
+    #[test]
+    fn naming_both_modes_is_refused() {
+        let config = Config {
+            auth: Some(resonate_auth::Config {
+                publickey: "none".into(),
+                iss: None,
+                aud: None,
+            }),
+            workos: Some(workos(Some("sk_test"), Some("org_abc"))),
+            ..Default::default()
+        };
+        let Err(err) = auth_mode(&config) else {
+            panic!("two policies is not a policy");
+        };
+        assert!(err.contains("cannot both be configured"), "{err}");
+    }
+
+    #[test]
+    fn a_jwt_section_selects_local_verification() {
+        let config = Config {
+            auth: Some(resonate_auth::Config {
+                publickey: "none".into(),
+                iss: None,
+                aud: None,
+            }),
+            ..Default::default()
+        };
+        assert!(matches!(
+            auth_mode(&config).unwrap(),
+            Some(resonate_auth::AuthMode::Jwt(_))
+        ));
+    }
+
+    #[test]
+    fn a_workos_section_selects_remote_validation() {
+        let config = Config {
+            workos: Some(workos(Some("sk_test"), Some("org_abc"))),
+            ..Default::default()
+        };
+        assert!(matches!(
+            auth_mode(&config).unwrap(),
+            Some(resonate_auth::AuthMode::WorkOs(_))
+        ));
+    }
+
+    /// A WorkOS section is a request for WorkOS auth, so an incomplete one is
+    /// a startup failure rather than a policy that admits everything.
+    #[test]
+    fn an_incomplete_workos_section_fails_startup() {
+        for (api_key, org_id, missing) in [
+            (None, Some("org_abc"), "api_key"),
+            (Some("sk_test"), None, "org_id"),
+        ] {
+            let config = Config {
+                workos: Some(workos(api_key, org_id)),
+                ..Default::default()
+            };
+            let Err(err) = auth_mode(&config) else {
+                panic!("an incomplete WorkOS section must not start");
+            };
+            assert!(err.contains(missing), "{err}");
+        }
     }
 }

@@ -1,11 +1,20 @@
 [workspace]
 members = [
     "crates/resonate-auth",
+    "crates/resonate-base",
+    "crates/resonate-cli",
     "crates/resonate-core",
     "crates/resonate-gateway-http",
+    "crates/resonate-gateway-metrics",
     "crates/resonate-gateway-web",
+    "crates/resonate-plugin",
+    "crates/resonate-sql",
+    "crates/resonate-server-scylladb",
     "crates/resonate-server-blob",
-    "crates/resonate-server-dbms",
+    "crates/resonate-server-sqlite",
+    "crates/resonate-server-postgres",
+    "crates/resonate-server-mysql",
+    "crates/resonate-oracle",
     "crates/resonate-timer-wheel",
     "crates/resonate-transport-gcps",
     "crates/resonate-transport-http-poll",
@@ -32,10 +41,6 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-[lib]
-name = "resonate"
-path = "src/lib.rs"
-
 [[bin]]
 name = "resonate"
 path = "src/main.rs"
@@ -43,60 +48,55 @@ path = "src/main.rs"
 [[test]]
 name = "differential"
 path = "diff/differential.rs"
-
-[[test]]
-name = "test_workos_startup"
-path = "test/test_workos_startup.rs"
-# It compares the engines against each other, so it needs all of them; with any
-# turned off cargo skips the target rather than failing to build it.
-required-features = ["sqlite", "postgres", "mysql"]
+# It compares the engines against each other. They are all compiled in, so
+# there is nothing to require.
 
 [features]
-# All forwarded: the cfg'd code lives in resonate-server-dbms, except blob,
-# which is its own crate — gating it keeps object_store out of a build that
-# does not run it.
-default = ["sqlite", "postgres", "mysql", "blob"]
-sqlite = ["resonate-server-dbms/sqlite"]
-postgres = ["resonate-server-dbms/postgres"]
-mysql = ["resonate-server-dbms/mysql"]
-blob = ["dep:resonate-server-blob", "dep:object_store"]
-concurrency-stress = ["resonate-server-dbms/concurrency-stress"]
+# No feature per plugin. Choosing plugins is what a *binary* does, by naming
+# them — a dependency here and a line in `registry()` — and this binary is the
+# one that carries all of them. A feature would be a second way to say the same
+# thing, and the two drifted: a `--features postgres` build still had a default
+# of `server_sqlite` and could not start.
+#
+# See "Build a server with the plugins you want" in the README for the shape a
+# smaller build takes: ten lines of `main`, and only what it names is compiled.
+concurrency-stress = [
+    "resonate-server-sqlite/concurrency-stress",
+    "resonate-server-mysql/concurrency-stress",
+]
 
 [dependencies]
-resonate-auth = { path = "crates/resonate-auth" }
-resonate-core = { path = "crates/resonate-core" }
+# The composition root, and the plugins this build carries. Everything that
+# makes this *this* server is the registry in `main.rs`.
+resonate-base = { path = "crates/resonate-base" }
+resonate-plugin = { path = "crates/resonate-plugin" }
+resonate-server-sqlite = { path = "crates/resonate-server-sqlite" }
+resonate-server-postgres = { path = "crates/resonate-server-postgres" }
+resonate-server-mysql = { path = "crates/resonate-server-mysql" }
+resonate-server-scylladb = { path = "crates/resonate-server-scylladb" }
+resonate-server-blob = { path = "crates/resonate-server-blob" }
+resonate-transport-http-push = { path = "crates/resonate-transport-http-push" }
+resonate-transport-http-poll = { path = "crates/resonate-transport-http-poll" }
+resonate-transport-gcps = { path = "crates/resonate-transport-gcps" }
+resonate-worker-bash = { path = "crates/resonate-worker-bash" }
 resonate-gateway-http = { path = "crates/resonate-gateway-http" }
 resonate-gateway-web = { path = "crates/resonate-gateway-web" }
-resonate-server-blob = { path = "crates/resonate-server-blob", optional = true }
-resonate-server-dbms = { path = "crates/resonate-server-dbms", default-features = false }
-resonate-timer-wheel = { path = "crates/resonate-timer-wheel" }
-resonate-transport-gcps = { path = "crates/resonate-transport-gcps" }
-resonate-transport-http-poll = { path = "crates/resonate-transport-http-poll" }
-resonate-transport-http-push = { path = "crates/resonate-transport-http-push" }
-resonate-worker-bash = { path = "crates/resonate-worker-bash" }
-jsonwebtoken = "9"
-tokio = { version = "1", features = ["full"] }
-axum = { version = "0.7", features = ["json"] }
-serde = { workspace = true }
-serde_json = { workspace = true }
+resonate-gateway-metrics = { path = "crates/resonate-gateway-metrics" }
+
+# The CLI client, which talks to a server over HTTP and shares no code with
+# one. Its own crate, so this one stays a list of plugins and a `run`.
+resonate-cli = { path = "crates/resonate-cli" }
+
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
 clap = { version = "4", features = ["derive", "env"] }
-figment = { version = "0.10", features = ["toml", "env"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-reqwest = { version = "0.12", features = ["json"] }
-cron = "0.12"
-chrono = "0.4"
-async-stream = "0.3"
-prometheus = "0.13"
-lazy_static = "1"
-fastrand = "2"
-tracing-appender = "0.2"
-async-trait = { workspace = true }
-validator = { workspace = true }
-url = { workspace = true }
-base64 = "0.22"
-object_store = { version = "0.14.1", features = ["aws"], optional = true }
-tower-http = { version = "0.6", features = ["trace", "catch-panic", "cors"] }
 
 [dev-dependencies]
-toml = "0.8"
+# `tests/ui.rs` drives the console's read model against every engine that is
+# compiled in, so it reaches past the plugins to what they are built on.
+resonate-core = { path = "crates/resonate-core" }
+resonate-sql = { path = "crates/resonate-sql" }
+resonate-oracle = { path = "crates/resonate-oracle" }
+serde_json = { workspace = true }
+base64 = "0.22"
+reqwest = { version = "0.12", features = ["json"] }
+fastrand = "2"

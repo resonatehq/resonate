@@ -7,26 +7,26 @@
 //! are made here — what the protocol admits is `core`'s, and what an operation
 //! does is the server's.
 
+use crate::axum;
+
 use std::sync::Arc;
-use std::time::Duration;
 
 use axum::{
-    extract::{Path, State},
+    extract::State,
     http::StatusCode,
-    response::{
-        sse::{Event, KeepAlive, Sse},
-        IntoResponse, Response,
-    },
+    response::IntoResponse,
     routing::{any, get, post},
     Json, Router,
 };
 use lazy_static::lazy_static;
-use prometheus::{register_counter_vec, register_histogram_vec, CounterVec, HistogramVec};
+// Through the ABI's re-export, so there is one default registry in the build.
+use resonate_plugin::prometheus::{
+    register_counter_vec, register_histogram_vec, CounterVec, HistogramVec,
+};
 
 use resonate_auth::AuthMode;
 use resonate_core::types::{self, RequestEnvelope, ResponseEnvelope};
 use resonate_core::{ui, ResonateServer};
-use resonate_transport_http_poll::PollRegistry;
 
 lazy_static! {
     /// Requests by kind and status. Registered into prometheus' default
@@ -57,17 +57,10 @@ lazy_static! {
 /// crate fronts the in-process engine, the reference model or a client for a
 /// remote server without knowing which.
 ///
-/// The poll registry is the one thing here that is not the gateway's own. It
-/// is a [`ResonateWorker`](resonate_core::ResonateWorker) — the far end of a
-/// `poll://` address — and it needs an HTTP endpoint to hand its connections
-/// out through. So the transport that owns those connections is handed in, and
-/// this serves them; it does not manage them, and stopping them is the
-/// transport's job, not this crate's.
 #[derive(Clone)]
 pub struct AppState {
     pub server: Arc<dyn ResonateServer>,
     pub auth: Option<AuthMode>,
-    pub poll_registry: Arc<PollRegistry>,
 }
 
 // Sub-state for API handlers — the server, and whether to authenticate.
@@ -86,27 +79,10 @@ impl axum::extract::FromRef<AppState> for ApiState {
     }
 }
 
-// Sub-state for poll handler — authentication and the connection registry.
-#[derive(Clone)]
-pub struct PollState {
-    pub auth: Option<AuthMode>,
-    pub poll_registry: Arc<PollRegistry>,
-}
-
-impl axum::extract::FromRef<AppState> for PollState {
-    fn from_ref(state: &AppState) -> Self {
-        PollState {
-            auth: state.auth.clone(),
-            poll_registry: state.poll_registry.clone(),
-        }
-    }
-}
-
-/// API routes: RPC endpoint, health, readiness.
+/// API routes: the RPC endpoint, the readiness probe, and the legacy paths.
 pub fn api_routes() -> Router<AppState> {
-    Router::new()
+    axum::Router::new()
         .route("/", post(handle_api))
-        .route("/health", get(handle_health))
         .route("/ready", get(handle_ready))
         .route("/promises", any(handle_legacy))
         .route("/promises/*path", any(handle_legacy))
@@ -129,16 +105,15 @@ async fn handle_legacy() -> impl IntoResponse {
     )
 }
 
-/// Poll transport routes: SSE endpoint for workers.
-pub fn poll_routes() -> Router<AppState> {
-    Router::new().route("/poll/:group/:id", get(handle_poll))
-}
-
-async fn handle_health() -> StatusCode {
-    StatusCode::OK
-}
-
-async fn handle_ready(State(state): State<ApiState>) -> StatusCode {
+/// The one probe: this process is running, and the server behind it says it
+/// can serve.
+///
+/// `/health` alongside this said the same thing twice, so there is one. What
+/// it answers is the server's to decide: `ready` defaults to true, and a
+/// server that can actually tell — the blob server asks its bucket — answers
+/// for itself, which is how a pod whose storage went away reports 503 rather
+/// than taking traffic it cannot serve.
+async fn handle_ready(State(state): State<AppState>) -> StatusCode {
     if state.server.ready().await {
         StatusCode::OK
     } else {
@@ -153,11 +128,15 @@ fn into_response(resp: ResponseEnvelope) -> (axum::http::StatusCode, Json<Respon
     (code, Json(resp))
 }
 
-/// The bearer token from the `Authorization` header, when one is present.
+/// The bearer token from `Authorization`, when there is one.
 ///
-/// Exact `Bearer ` prefix, the same shape the SDKs send. A missing header or
-/// a non-bearer scheme yields `None`; an empty value yields `Some("")`, which
-/// verification rejects downstream.
+/// Exact `Bearer ` prefix — another scheme is not a token this endpoint can
+/// read, so it is `None` rather than a guess. `Bearer ` with nothing after it
+/// is `Some("")`, which the auth check rejects like any other bad token.
+///
+/// The poll transport does this for its own endpoint, in its own crate. It is
+/// three lines against a header name fixed by the protocol; sharing them would
+/// buy a dependency between two plugins to save nothing.
 fn bearer_token(headers: &axum::http::HeaderMap) -> Option<&str> {
     headers
         .get(axum::http::header::AUTHORIZATION)
@@ -187,9 +166,11 @@ async fn handle_api(
         }
     };
 
-    // Auth: envelope first, HTTP header second. The SDKs send the token in
-    // both places, so the envelope normally wins; the header is the fallback
-    // for callers that carry only a bearer token and no `head.auth`.
+    // Where the token came from is HTTP's business; that there is one is the
+    // protocol's. The envelope carries it, so the header only fills the field
+    // when the envelope left it empty — a caller holding a bearer token and
+    // nothing else. Nothing downstream can tell the two apart, which is the
+    // point: `auth_check` still reads one field.
     if req.head.auth.is_none() {
         if let Some(token) = bearer_token(&headers) {
             req.head.auth = Some(token.to_string());
@@ -224,22 +205,22 @@ async fn handle_api(
         "Received request"
     );
 
-    if let Some(mode) = &api_state.auth {
-        if let Err(rejection) = mode.check_envelope(&req).await {
-            let status_str = rejection.head.status.to_string();
+    if let Some(auth) = &api_state.auth {
+        if let Err(err_response) = auth.check_envelope(&req).await {
+            let status = err_response.head.status.to_string();
             let elapsed_ms = start.elapsed().as_millis();
             tracing::warn!(
                 kind = %kind,
                 corr_id = %corr_id,
-                status = %status_str,
+                status = %status,
                 elapsed_ms = elapsed_ms,
                 "Request rejected by auth"
             );
-            REQUEST_TOTAL.with_label_values(&[&kind, &status_str]).inc();
+            REQUEST_TOTAL.with_label_values(&[&kind, &status]).inc();
             REQUEST_DURATION
                 .with_label_values(&[&kind])
                 .observe(start.elapsed().as_secs_f64());
-            return into_response(*rejection);
+            return into_response(*err_response);
         }
     }
 
@@ -285,113 +266,4 @@ async fn handle_api(
         .with_label_values(&[&kind])
         .observe(start.elapsed().as_secs_f64());
     into_response(response)
-}
-
-async fn handle_poll(
-    State(poll_state): State<PollState>,
-    headers: axum::http::HeaderMap,
-    Path((group, id)): Path<(String, String)>,
-) -> Response {
-    // Authenticate when auth is configured.
-    if let Some(mode) = &poll_state.auth {
-        let token = bearer_token(&headers);
-
-        if !mode.check_token(token).await {
-            tracing::warn!(group = %group, id = %id, "Poll connection rejected: unauthorized");
-            return (StatusCode::UNAUTHORIZED, "Unauthorized").into_response();
-        }
-    }
-
-    tracing::info!(group = %group, id = %id, "Poll SSE connection requested");
-    let registry = &poll_state.poll_registry;
-
-    let rx = registry.register(&group, &id).await;
-
-    match rx {
-        Some((conn_id, mut rx)) => {
-            tracing::info!(
-                group = %group,
-                id = %id,
-                conn_id = conn_id,
-                "Poll SSE connection established"
-            );
-            // The stream ends when the channel closes, and nothing else. A
-            // client disconnecting drops this response; the transport stopping
-            // clears its registry, which drops the only sender. There is no
-            // shutdown signal to keep in step with, because the thing that owns
-            // the connection is the thing that ends it.
-            let keepalive_ms = registry.keepalive_interval_ms;
-            let stream = async_stream::stream! {
-                let _guard = PollGuard {
-                    registry: poll_state.poll_registry.clone(),
-                    group: group.clone(),
-                    conn_id,
-                };
-                while let Some(msg) = rx.recv().await {
-                    yield Ok::<_, std::convert::Infallible>(Event::default().data(msg));
-                }
-            };
-
-            let mut sse = Sse::new(stream);
-            if keepalive_ms > 0 {
-                sse = sse.keep_alive(
-                    KeepAlive::new()
-                        .interval(Duration::from_millis(keepalive_ms))
-                        .text("ping"),
-                );
-            }
-            sse.into_response()
-        }
-        None => {
-            tracing::warn!(group = %group, id = %id, "Poll connection rejected: at capacity");
-            (
-                StatusCode::SERVICE_UNAVAILABLE,
-                "Poll registration at capacity",
-            )
-                .into_response()
-        }
-    }
-}
-
-struct PollGuard {
-    registry: Arc<PollRegistry>,
-    group: String,
-    conn_id: u64,
-}
-
-impl Drop for PollGuard {
-    fn drop(&mut self) {
-        let registry = self.registry.clone();
-        let group = self.group.clone();
-        let conn_id = self.conn_id;
-        tokio::spawn(async move {
-            registry.deregister(&group, conn_id).await;
-        });
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::bearer_token;
-    use axum::http::header::AUTHORIZATION;
-    use axum::http::HeaderMap;
-
-    #[test]
-    fn bearer_token_extracts_exact_prefix() {
-        let mut headers = HeaderMap::new();
-        headers.insert(AUTHORIZATION, "Bearer abc123".parse().unwrap());
-        assert_eq!(bearer_token(&headers), Some("abc123"));
-    }
-
-    #[test]
-    fn bearer_token_rejects_non_bearer_schemes() {
-        let mut headers = HeaderMap::new();
-        headers.insert(AUTHORIZATION, "Basic abc123".parse().unwrap());
-        assert_eq!(bearer_token(&headers), None);
-    }
-
-    #[test]
-    fn bearer_token_is_none_when_absent() {
-        assert_eq!(bearer_token(&HeaderMap::new()), None);
-    }
 }

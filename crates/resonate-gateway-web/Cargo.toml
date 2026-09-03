@@ -12,9 +12,12 @@ path = "src/lib.rs"
 [dependencies]
 resonate-auth = { path = "../resonate-auth" }
 resonate-core = { path = "../resonate-core" }
-axum = { version = "0.7", features = ["json"] }
+resonate-plugin = { path = "../resonate-plugin" }
+async-trait = { workspace = true }
+tokio = { version = "1", features = ["rt", "net", "sync", "macros"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+tower-http = { version = "0.6", features = ["catch-panic"] }
 tracing = "0.1"
 # `debug-embed`: the assets are compiled in for every profile, not read off the
 # disk in dev. A console that is embedded in release and a directory read in
@@ -26,9 +29,7 @@ rust-embed = { version = "8", features = ["debug-embed"] }
 # the binary does. The dependency runs one way only: the gateway knows nothing
 # about a console.
 resonate-gateway-http = { path = "../resonate-gateway-http" }
-resonate-transport-http-poll = { path = "../resonate-transport-http-poll" }
-resonate-server-dbms = { path = "../resonate-server-dbms", default-features = false, features = ["sqlite"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+resonate-oracle = { path = "../resonate-oracle" }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
-async-trait = { workspace = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

@@ -1,7 +1,7 @@
 //! Resonate transport: Google Cloud Pub/Sub.
 //!
 //! Delivers a message by publishing it to a topic. A transport rather than a
-//! plugin: it knows how to put a message on the wire and nothing about what
+//! router: it knows how to put a message on the wire and nothing about what
 //! the message means.
 //!
 //! Authentication uses Application Default Credentials. Address format:
@@ -10,8 +10,34 @@
 /// The address scheme this transport serves.
 pub const SCHEME: &str = "gcps";
 
-/// Everything under `[transports.gcps]`.
+/// This transport, as a plugin. The one thing a binary names to get `gcps://`
+/// addresses delivered.
+pub static PLUGIN: resonate_plugin::WorkerPlugin =
+    resonate_plugin::WorkerPlugin::new(env!("CARGO_PKG_NAME"), &[SCHEME], configure);
+
+/// Read `[workers.transport_gcps]`, and build the transport unless it is off.
+fn configure(
+    settings: &resonate_plugin::Settings<'_>,
+    deps: resonate_plugin::WorkerDependencies,
+) -> Result<Option<std::sync::Arc<dyn ResonateWorker>>, resonate_plugin::ConfigError> {
+    let config: Config = settings.extract()?;
+    if !config.enabled {
+        return Ok(None);
+    }
+    // Zero permits sizes the publish semaphore to nothing, so nothing could
+    // ever acquire a slot and every message would queue forever.
+    if config.concurrency == 0 {
+        return Err(settings.reject("concurrency", "must be at least 1 (got 0)"));
+    }
+    Ok(Some(std::sync::Arc::new(GcpsPubSubTransport::new(
+        deps.server,
+        config,
+    ))))
+}
+
+/// Everything under `[workers.transport_gcps]`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// Enable the gcps:// address scheme [default: false]
     #[serde(default)]
@@ -55,8 +81,8 @@ use std::time::Duration;
 use google_cloud_pubsub::client::Publisher;
 use tokio::sync::{mpsc, Mutex, Semaphore};
 
-use resonate_core::types::Message;
-use resonate_core::{ResonateServer, ResonateWorker, Unavailable};
+use resonate_plugin::types::Message;
+use resonate_plugin::{ResonateServer, ResonateWorker, Unavailable};
 
 /// A `gcps://` destination: `gcps://<project>/<topic>`.
 #[derive(Debug, Clone)]
@@ -261,7 +287,7 @@ impl ResonateWorker for GcpsPubSubTransport {
         Ok(())
     }
 
-    async fn send(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
+    async fn process(&self, address: &str, msg: &Message) -> Result<(), Unavailable> {
         let addr = GcpsAddress::parse(address)?;
         let payload = serde_json::to_value(msg)
             .map_err(|e| Unavailable::new(format!("cannot serialize message: {e}")))?;
