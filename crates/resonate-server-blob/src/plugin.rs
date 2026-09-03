@@ -378,6 +378,9 @@ mod tests {
     async fn stop_is_safe_when_init_never_ran() {
         let config = settings(&[]);
         let server = (PLUGIN.configure)(&config.server(&PLUGIN.id()), deps()).unwrap();
-        server.stop().await.expect("nothing to stop is not an error");
+        server
+            .stop()
+            .await
+            .expect("nothing to stop is not an error");
     }
 }

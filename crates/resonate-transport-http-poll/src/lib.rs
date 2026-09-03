@@ -41,6 +41,14 @@ fn configure(
     if config.max_connections == 0 {
         return Err(settings.reject("max_connections", "must be at least 1 (got 0)"));
     }
+    // Not `0` meaning off: off is `unset`. A zero interval would be a timer
+    // that fires as fast as it can, which is not what anyone writing it means.
+    if config.keepalive_interval_ms == Some(0) {
+        return Err(settings.reject(
+            "keepalive_interval_ms",
+            "must be at least 1, or unset for no keepalive (got 0)",
+        ));
+    }
     let registry = PollRegistry::new(deps.server, config);
 
     // The inbound half. A worker that cannot be dialled dials in, so this
@@ -74,6 +82,14 @@ pub struct Config {
     /// Per-connection message buffer [default: 100]
     #[serde(default = "default_buffer_size")]
     pub buffer_size: usize,
+
+    /// How often to send a keepalive down an idle connection, in
+    /// milliseconds. A proxy or load balancer between the worker and here
+    /// closes a connection that has been quiet too long, and an SSE comment
+    /// frame is enough to stop it. Unset sends none, which is right when
+    /// nothing sits in the middle [default: unset]
+    #[serde(default)]
+    pub keepalive_interval_ms: Option<u64>,
     // No `bind` and no `auth`. This transport serves a route, not a socket:
     // the gateway that owns the listener owns the address it is reachable at
     // and the policy that admits a connection to it. One door, one lock.
@@ -95,6 +111,7 @@ impl Default for Config {
             enabled: default_enabled(),
             max_connections: default_max_connections(),
             buffer_size: default_buffer_size(),
+            keepalive_interval_ms: None,
         }
     }
 }
@@ -159,6 +176,7 @@ pub struct PollRegistry {
     next_conn_id: AtomicU64,
     pub max_connections: usize,
     pub buffer_size: usize,
+    pub keepalive_interval_ms: Option<u64>,
     /// Held so a delivery failure can be reported back to the server (e.g.
     /// releasing the task instead of dropping it). Not used yet.
     ///
@@ -176,6 +194,7 @@ impl PollRegistry {
             next_conn_id: AtomicU64::new(1),
             max_connections: config.max_connections,
             buffer_size: config.buffer_size,
+            keepalive_interval_ms: config.keepalive_interval_ms,
             server,
         })
     }
@@ -366,7 +385,7 @@ impl ResonateWorker for PollRegistry {
 // reason the gateway could not be a plugin itself.
 
 use axum::extract::{Path, State};
-use axum::response::sse::{Event, Sse};
+use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 
@@ -401,13 +420,25 @@ async fn handle(
             // clears its registry, which drops the only sender. There is no
             // shutdown signal to keep in step with, because the thing that owns
             // the connection is the thing that ends it.
+            // Read before the stream takes the registry.
+            let keepalive = registry.keepalive_interval_ms;
             let stream = async_stream::stream! {
                 let _guard = PollGuard { registry: registry.clone(), group: group.clone(), conn_id };
                 while let Some(msg) = rx.recv().await {
                     yield Ok::<_, std::convert::Infallible>(Event::default().data(msg));
                 }
             };
-            Sse::new(stream).into_response()
+            let sse = Sse::new(stream);
+            match keepalive {
+                Some(ms) => sse
+                    .keep_alive(
+                        KeepAlive::new()
+                            .interval(std::time::Duration::from_millis(ms))
+                            .text("ping"),
+                    )
+                    .into_response(),
+                None => sse.into_response(),
+            }
         }
         None => {
             tracing::warn!(group = %group, id = %id, "Poll connection rejected: at capacity");
@@ -460,6 +491,14 @@ mod tests {
         )
     }
 
+    /// What `configure` builds, without the deps it does not touch here.
+    fn registry(config: Config) -> Arc<PollRegistry> {
+        PollRegistry::new(
+            std::sync::Weak::<NoopServer>::new() as Weak<dyn ResonateServer>,
+            config,
+        )
+    }
+
     fn settings(pairs: &[(&str, &str)]) -> resonate_plugin::Configuration {
         let mut loader = resonate_plugin::Loader::new();
         for (k, v) in pairs {
@@ -499,6 +538,40 @@ mod tests {
             panic!("channel construction would panic");
         };
         assert_eq!(err.key, "workers.transport_http_poll.buffer_size");
+    }
+
+    /// Nothing between the worker and here by default, so nothing to keep
+    /// alive. A deployment that has a proxy in the middle is the one that
+    /// knows it.
+    #[test]
+    fn no_keepalive_unless_a_deployment_asks_for_one() {
+        let config = settings(&[]);
+        assert_eq!(Config::default().keepalive_interval_ms, None);
+        let settings = config.worker(&PLUGIN.id());
+        let extracted: Config = settings.extract().unwrap();
+        assert_eq!(extracted.keepalive_interval_ms, None);
+        assert_eq!(registry(extracted).keepalive_interval_ms, None);
+    }
+
+    /// The interval reaches the registry, which is what the handler reads it
+    /// from when it builds the SSE response.
+    #[test]
+    fn an_interval_reaches_the_thing_that_serves_the_stream() {
+        let config = settings(&[("workers.transport_http_poll.keepalive_interval_ms", "30000")]);
+        let extracted: Config = config.worker(&PLUGIN.id()).extract().unwrap();
+        assert_eq!(extracted.keepalive_interval_ms, Some(30_000));
+        assert_eq!(registry(extracted).keepalive_interval_ms, Some(30_000));
+    }
+
+    /// Off is `unset`, not `0` — so `0` is a mistake, and startup says so
+    /// rather than spinning a timer as fast as it can fire.
+    #[test]
+    fn a_zero_interval_is_refused_rather_than_read_as_off() {
+        let config = settings(&[("workers.transport_http_poll.keepalive_interval_ms", "0")]);
+        let Err(err) = (PLUGIN.configure)(&config.worker(&PLUGIN.id()), no_server()) else {
+            panic!("a zero interval must not be taken as \"no keepalive\"");
+        };
+        assert_eq!(err.key, "workers.transport_http_poll.keepalive_interval_ms");
     }
 
     /// Registering a route is what this transport does instead of binding.

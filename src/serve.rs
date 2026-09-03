@@ -146,6 +146,10 @@ pub struct CommonArgs {
     #[arg(long = "transports-http-poll-buffer-size", value_name = "N")]
     pub transports_http_poll_buffer_size: Option<usize>,
 
+    /// Keepalive interval for poll (SSE) connections, in ms [default: none]
+    #[arg(long = "transports-http-poll-keepalive-interval", value_name = "MS")]
+    pub transports_http_poll_keepalive_interval_ms: Option<u64>,
+
     // --- HTTP Push Auth ---
     /// Outbound auth mode for HTTP push deliveries: none, bearer, gcp [default: none]
     #[arg(long = "transports-http-push-auth-mode", value_name = "MODE")]
@@ -349,6 +353,10 @@ impl CommonArgs {
         o.maybe(
             "workers.transport_http_poll.buffer_size",
             self.transports_http_poll_buffer_size,
+        );
+        o.maybe(
+            "workers.transport_http_poll.keepalive_interval_ms",
+            self.transports_http_poll_keepalive_interval_ms,
         );
 
         o.maybe(
