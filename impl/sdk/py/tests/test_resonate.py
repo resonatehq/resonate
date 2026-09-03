@@ -1164,6 +1164,31 @@ async def test_get_existing_returns_handle() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_settled_local_promise_does_not_register_listener() -> None:
+    # Local ``ctx.run`` children are durable, but they are not externally
+    # awaitable on the server. A settled child can still be inspected through
+    # ``promise.get``; trying to register a listener returns 422.
+    async with local() as r:
+        await r.promises.create(
+            "g-local",
+            2**63 - 1,
+            Value(),
+            {"resonate:scope": "local"},
+        )
+        await r.promises.resolve("g-local", Value(data=42))
+
+        with mock.patch.object(
+            r._sender,
+            "promise_register_listener",
+            side_effect=ServerError(422, "Awaited promise is not awaitable"),
+        ) as register_listener:
+            handle = await r.get("g-local")
+
+        register_listener.assert_not_awaited()
+        assert await handle.result() == 42
+
+
+@pytest.mark.asyncio
 async def test_get_pending_promise_returns_unsettled_handle() -> None:
     # get on a still-pending promise returns a handle that is not yet done.
     async with local() as r:

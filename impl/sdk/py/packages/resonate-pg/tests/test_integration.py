@@ -228,9 +228,7 @@ async def test_an_unresolved_promise_times_out_and_rejects_the_workflow() -> Non
     """
     async with _resonate() as resonate:
         resonate.register(never_approved)
-        handle = resonate.run(
-            f"itest-timeout-{uuid.uuid4().hex[:8]}", never_approved
-        )
+        handle = resonate.run(f"itest-timeout-{uuid.uuid4().hex[:8]}", never_approved)
         with pytest.raises(ApplicationError):
             await asyncio.wait_for(handle.result(), timeout=15)
 

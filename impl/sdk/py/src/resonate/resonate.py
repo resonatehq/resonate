@@ -758,24 +758,33 @@ class Resonate:
         """Return a handle for an existing promise.
 
         Unlike :meth:`run` / :meth:`rpc`, this is ``async``: a lookup has nothing
-        to fire-and-forget, and the listener registration is what surfaces a
-        :class:`~resonate.error.ServerError` (code 404) when the promise does not
-        exist. The result is untyped (``Any``): with no local function to read a
-        return annotation from -- the source :meth:`run` uses, and which :meth:`rpc`
-        likewise lacks -- there is nothing to infer a decode type from, so the
-        settled value passes through undecoded rather than asking the caller for
-        a type.
+        to fire-and-forget. Read the promise first so an already-settled promise
+        can be returned without registering a listener. This matters for local
+        ``ctx.run`` children: they are durable and readable, but the server does
+        not consider them externally awaitable and rejects listener registration.
+        A still-pending promise uses the normal listener/polling path, which
+        surfaces a :class:`~resonate.error.ServerError` (code 404) when it does
+        not exist. The result is untyped (``Any``): with no local function to
+        read a return annotation from -- the source :meth:`run` uses, and which
+        :meth:`rpc` likewise lacks -- there is nothing to infer a decode type
+        from, so the settled value passes through undecoded rather than asking
+        the caller for a type.
         """
         sub, is_new = self._subscribe(id)
         if is_new:
             try:
-                record = await self._observe(id)
+                # A settled local-scope promise cannot accept a listener even
+                # though it is perfectly valid to read it. Only observe through
+                # the source after confirming that the promise is still pending.
+                record = await self._sender.promise_get(id)
+                if record.state == "pending" and self._source is not None:
+                    record = await self._observe(id)
+                if record.state != "pending":
+                    self._settle_and_cleanup(id, sub, record.state, record.value)
             except ResonateError:
                 if self._runtime.subs.get(id) is sub and not sub.settled():
                     del self._runtime.subs[id]
                 raise
-            if record.state != "pending":
-                self._settle_and_cleanup(id, sub, record.state, record.value)
 
         created: asyncio.Future[None] = asyncio.Future()
         created.set_result(None)
