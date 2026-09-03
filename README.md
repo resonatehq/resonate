@@ -1,230 +1,185 @@
-![resonate banner](./assets/resonate-banner.png)
+<div align="center">
 
-# Resonate Server
+![Resonate](./assets/resonate-banner.png)
 
-## About this component
+[![License](https://img.shields.io/badge/license-Apache--2.0-1EE3CF?style=flat-square)](./LICENSE)
+[![Rust](https://img.shields.io/badge/built%20with-Rust-1EE3CF?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![Discord](https://img.shields.io/badge/Discord-join-1EE3CF?style=flat-square&logo=discord&logoColor=white)](https://resonatehq.io/discord)
+[![Docs](https://img.shields.io/badge/docs-resonatehq.io-1EE3CF?style=flat-square)](https://docs.resonatehq.io/)
 
-The Resonate Server is a highly efficient single binary that pairs with a Resonate SDK to bring durable execution to your application — reliable, distributed function execution that survives process restarts and failures. It acts as both a supervisor and orchestrator for Resonate Workers, persisting execution state so long-running functions always run to completion.
+[Example](#example) · [Install](#install-and-run) · [Console](#console) · [Architecture](#architecture) · [Backends](#backends) · [Workers](#workers) · [Plugins](#plugins) · [Deploy](#deploy) · [Docs](https://docs.resonatehq.io/)
 
-- [Evaluate Resonate for your next project](https://docs.resonatehq.io/evaluate/)
-- [Example application library](https://github.com/resonatehq-examples)
-- [The concepts that power Resonate](https://www.distributed-async-await.io/)
-- [Join the Discord](https://resonatehq.io/discord)
-- [Subscribe to the Blog](https://journal.resonatehq.io/subscribe)
-- [Follow on X](https://x.com/resonatehqio)
-- [Follow on LinkedIn](https://www.linkedin.com/company/resonatehqio)
-- [Subscribe on YouTube](https://www.youtube.com/@resonatehqio)
+</div>
 
-## Resonate quickstart
+---
 
-![resonate quickstart banner](./assets/quickstart-banner.png)
+[Resonate](https://resonatehq.io/) is an AI-native, extensible durable execution platform for agentic and classic workloads. Resonate features a dead simple programming model and a dead simple operational model: functions and promises on a single binary. Write normal code and get durable, scalable, and reliable applications.
 
-### 1. Install the Resonate Server & CLI
+---
+
+## Example
+
+A deep research agent: plan the searches, fan them out, synthesize the results.
+
+```typescript
+async function research(context: Context, question: string) {
+  // Plan the searches
+  const queries = await context.run(agent,
+    `Plan the searches for: ${question}`
+  );
+  // Fan out the searches
+  const results = await Promise.allSettled(
+    queries.map((q) => context.rpc(search, q))
+  );
+  // Synthesize the results
+  const cited = results.filter((r) => r.status === "fulfilled").map((r) => r.value);
+  return await context.run(agent,
+    `Write a cited report. ${question}: ${cited}`
+  );
+}
+```
+
+That is the whole orchestration — no queue to drain, no state machine to
+advance, no scheduler to configure.
+
+- **`context.run`** calls a function and persists its result. On recovery the
+  call is not made again, its result is read back — you never pay for the same
+  tokens twice.
+- **`context.rpc`** calls a function on another worker, on another machine, in
+  another language. It returns a promise, so `Promise.allSettled` gives you
+  fan-out with per-branch failure handling — the same code you would write
+  in-process.
+- **Everything in between survives.** Kill the worker mid-flight and the
+  execution is still there, waiting for the next one to pick it up.
+
+---
+
+## Install and run
+
+**1. Install Resonate**
 
 ```shell
 brew install resonatehq/tap/resonate
 ```
 
-### 2. Install the Resonate SDK
-
-#### TypeScript
+**2. Install an SDK**
 
 ```shell
 npm install @resonatehq/sdk
 ```
 
-### 3. Write your first Resonate Function
+**3. Write the worker** — `research.ts`
 
-A countdown as a loop. Simple, but the function can run for minutes, hours, or days, despite restarts.
-
-#### TypeScript (countdown.ts)
+`agent` and `search` are your code: a model call and a search API. Resonate does
+not care what is inside them, only that their results are worth keeping.
 
 ```typescript
-import { Resonate, type Context } from "@resonatehq/sdk";
+import { type Context, type Info, Resonate } from "@resonatehq/sdk/async";
 
-function* countdown(context: Context, count: number, delay: number) {
-  for (let i = count; i > 0; i--) {
-    // Run a function, persist its result
-    yield* context.run((context: Context) => console.log(`Countdown: ${i}`));
-    // Sleep
-    yield* context.sleep(delay * 1000);
-  }
-  console.log("Done!");
+async function agent(info: Info, prompt: string) {
+  // your model call
 }
-// Instantiate Resonate
+
+async function search(info: Info, query: string) {
+  // your search API
+}
+
+async function research(context: Context, question: string) {
+  // as above
+}
+
 const resonate = new Resonate({ url: "http://localhost:8001" });
-// Register the function
-resonate.register(countdown);
+resonate.register("research", research);
+resonate.register("search", search);
+resonate.register("agent", agent);
 ```
 
-[Working example](https://github.com/resonatehq-examples/example-quickstart-ts)
-
-### 4. Start the server
+**4. Start Resonate, then the worker**
 
 ```shell
-resonate serve
+resonate dev
+npx tsx research.ts
 ```
 
-### 5. Start the worker
+`resonate dev` keeps state in memory, for development. `resonate serve` keeps it
+in a database — see [Backends](#backends).
 
-#### TypeScript
+**5. Activate the function**
 
 ```shell
-npx ts-node countdown.ts
+resonate invoke research.1 --func research --arg "What is durable execution?"
 ```
 
-### 6. Activate the function
-
-Activate the function with execution ID `countdown.1`:
-
-```shell
-resonate invoke countdown.1 --func countdown --arg 5 --arg 60
+```
+[agent]  Plan the searches for: What is durable execution?
+[search] durable execution
+[search] workflow recovery
+[search] sagas
+[agent]  Write a cited report. What is durable execution? ...
 ```
 
-### 7. Result
+Kill the worker while the searches are in flight and start it again. The
+execution waits in the meantime, then resumes: the searches that never finished
+run again, and the plan — already persisted — does not.
 
-You will see the countdown in the terminal
+---
 
-#### TypeScript
+## Console
 
-```shell
-npx ts-node countdown.ts
-Countdown: 5
-Countdown: 4
-Countdown: 3
-Countdown: 2
-Countdown: 1
-Done!
-```
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./assets/console-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="./assets/console-light.png">
+    <img alt="Resonate console showing durable executions" src="./assets/console-light.png">
+  </picture>
+</div>
 
-### 8. Watch it in the console
+Every durable execution, live: status, function, when it was created, when it settled, and when it times out. Filter by status, function, or time window, and search by id, function, or tag.
 
-The server serves a web console on its own port. Open it at
-[http://localhost:8001/console/](http://localhost:8001/console/) — `http://localhost:8001/`
-redirects there — and `countdown.1` is on the list.
+The console is compiled into the binary, fonts included, so it works on an
+air-gapped or on-prem host. Turn it off with `[gateways.gateway_web] enabled =
+false`, or `RESONATE_GATEWAYS__GATEWAY_WEB__ENABLED=false`.
 
-The console is three screens: **Durable Executions** (every root promise,
-newest first), an execution's **detail** (its whole promise tree on a timeline,
-with task boundaries drawn, and a step's param and value in the inspector), and
-**Schedules**. It reads; the two things it writes are **Invoke** — the same
-`promise.create` that `resonate invoke` sends, so you can start a function from
-the browser — and **Cancel execution**.
+---
 
-Nothing to install: the app is compiled into the binary, fonts included, so it
-works on an air-gapped or on-prem host. Turn it off with
+## Architecture
 
-```toml
-[gateways.gateway_web]
-enabled = false
-```
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./assets/architecture-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="./assets/architecture-light.svg">
+    <img alt="Resonate architecture" src="./assets/architecture-light.svg">
+  </picture>
+</div>
 
-or `RESONATE_GATEWAYS__GATEWAY_WEB__ENABLED=false`.
-
-## More ways to install the server
-
-For more Resonate Server deployment information see the [Set up and run a Resonate Server](https://docs.resonatehq.io/operate/run-server) guide.
-
-## Install with Homebrew
-
-You can download and install the Resonate Server using Homebrew with the following commands:
-
-```shell
-brew install resonatehq/tap/resonate
-```
-
-This previous example installs the latest release.
-You can see all available releases and associated release artifacts on the [releases page](https://github.com/resonatehq/resonate/releases).
-
-Once installed, you can start the server with:
-
-```shell
-resonate serve
-```
-
-You will see log output like the following:
-
-```shell
-2026-04-02T05:05:32.480430Z  INFO resonate_base: Server plugin selected server=server_sqlite
-2026-04-02T05:05:32.480805Z  INFO resonate_base: Worker plugin registered worker=transport_http_push schemes=["http", "https"]
-2026-04-02T05:05:32.481102Z  INFO resonate_base: Worker plugin registered worker=transport_http_poll schemes=["poll"]
-2026-04-02T05:05:32.481540Z  INFO resonate_base: Gateway plugin registered gateway=gateway_http
-2026-04-02T05:05:32.481712Z  INFO resonate_base: Gateway plugin registered gateway=gateway_web
-2026-04-02T05:05:32.481884Z  INFO resonate_base: Gateway plugin registered gateway=gateway_metrics
-2026-04-02T05:05:32.492689Z  INFO resonate_sql::server: Timer and sweep started sweep_interval_ms=60000
-2026-04-02T05:05:32.492715Z  INFO resonate_gateway_http: Serving routes for plugin plugin=transport_http_poll
-2026-04-02T05:05:32.492815Z  INFO resonate_gateway_http: Serving routes for plugin plugin=gateway_web
-2026-04-02T05:05:32.492915Z  INFO resonate_gateway_http: Server listening bind=0.0.0.0:8001
-2026-04-02T05:05:32.493388Z  INFO resonate_gateway_metrics: Metrics listening bind=0.0.0.0:9090
-```
-
-Each of those is a plugin. There are two listeners, not five: the HTTP gateway
-serves the protocol on 8001 and every route another plugin registered — the
-poll (SSE) endpoint, the console — so one port is one origin, and Prometheus is
-on 9090 because that is the one an operator exposes differently.
-
-These are the default ports and can be changed via configuration.
-The SDKs are all configured to use these defaults unless otherwise specified.
-
-### Run with Docker
-
-The Resonate Server repository contains a Dockerfile that you can use to build and run the server in a Docker container.
-You can also clone the repository and start the server using Docker Compose:
-
-Every server service sits behind a profile naming its storage, so a bare
-`docker compose up` starts the observability stack and no server. Pick one:
-
-```shell
-git clone https://github.com/resonatehq/resonate
-cd resonate
-docker compose --profile sqlite up
-```
-
-`postgres` and `mysql` are the other two, and each has an `-auth` variant that
-serves with the dev key under `config/auth/dev`. `make serve` runs
-`sqlite-auth`; `make serve STORAGE=postgres` runs `postgres-auth`.
-
-### Build from source
-
-If you don't have Homebrew, we recommend building from source using Cargo.
-Run the following commands to download the repository and build the server:
-
-```
-git clone https://github.com/resonatehq/resonate
-cd resonate
-cargo build --release
-```
-
-After it is built, you can run it through Cargo using the following command:
-
-```
-cargo run serve
-```
-
-Or, you can run it as an executable using the following command:
-
-```
-./target/release/resonate serve
-```
+Resonate sits in the middle of the stack you already run — your language, your compute, your storage, your transport — and a plugin for everything it does not reach yet.
 
 ### Build a server with the plugins you want
 
 A Resonate server is a list of plugins and a `run`. Everything that varies —
 which storage backend answers requests, which transports deliver, which edges
-listen — is a plugin, and which ones a binary carries is decided by the binary,
-not by us. Cargo is the plugin manager: name what you want as a dependency,
-name it again in the registry, and only that is resolved, downloaded and
-compiled.
+listen — is a plugin, and which ones a binary carries is decided by the binary.
+Cargo is the plugin manager: name what you want as a dependency, name it again
+in the registry, and only that is resolved, downloaded and compiled.
+
+There is no cargo feature per engine. Choosing plugins is what a *binary* does,
+by naming them, and the binary this repository ships is simply the one that
+carries all of them.
 
 `Cargo.toml`:
 
 ```toml
 [dependencies]
-resonate-base = "0.9"
-resonate-server-postgres = "0.9"
-acme-worker-kafka = "1.2"          # anyone can publish one
-resonate-gateway-http = "0.9"
+resonate-base = { git = "https://github.com/resonatehq/resonate" }
+resonate-server-postgres = { git = "https://github.com/resonatehq/resonate" }
+resonate-transport-http-push = { git = "https://github.com/resonatehq/resonate" }
+resonate-gateway-http = { git = "https://github.com/resonatehq/resonate" }
 tokio = { version = "1", features = ["full"] }
 ```
+
+These crates are not on crates.io yet, so depend on them by git — or by `path`
+against a local checkout. Once they are published a version requirement
+(`resonate-base = "0.10"`) will say the same thing.
 
 `src/main.rs`:
 
@@ -236,7 +191,7 @@ async fn main() -> std::process::ExitCode {
     resonate_base::main(
         Registry::new()
             .server(&resonate_server_postgres::PLUGIN)
-            .worker(&acme_worker_kafka::PLUGIN)
+            .worker(&resonate_transport_http_push::PLUGIN)
             .gateway(&resonate_gateway_http::PLUGIN),
         Options::default().default_server("server_postgres"),
     )
@@ -244,23 +199,173 @@ async fn main() -> std::process::ExitCode {
 }
 ```
 
-That is the whole binary. It reads the same `resonate.toml` and the same
-`RESONATE_*` variables as the one this repository ships: each plugin reads its
-own section, at `servers.<id>`, `workers.<id>` or `gateways.<id>`, where `<id>`
-is its crate name with the `resonate-` prefix dropped and dashes turned into
-underscores — so `acme-worker-kafka` configures itself under
-`[workers.acme_worker_kafka]`.
+That is the whole binary: PostgreSQL for state, HTTP push for delivery, the
+HTTP API at the edge, and nothing else compiled in. It will not fall back to
+SQLite — with no `servers.server_postgres.url` configured it refuses to start
+and says so. A worker plugin someone else publishes joins the list as one more
+`.worker(&…::PLUGIN)` line.
+
+It reads the same `resonate.toml` and the same `RESONATE_*` variables as the
+server this repository ships. Each plugin reads its own section — `servers.<id>`,
+`workers.<id>` or `gateways.<id>`, where `<id>` is the crate name with the
+`resonate-` prefix dropped and dashes turned into underscores, so
+`acme-worker-kafka` configures itself under `[workers.acme_worker_kafka]`.
 
 It has no command-line flags of its own. `Options` is where a binary adds them:
-`resonate serve`'s flags are just `Options::set` calls over those same keys, and
-a custom binary can parse whatever it likes and do the same, or parse nothing at
+`resonate serve`'s flags are `Options::set` calls over those same keys, and a
+custom binary can parse whatever it likes and do the same — or parse nothing at
 all and let the file and the environment say everything.
 
-## Outbound authentication for HTTP push
+| Plugin kind | What it is | Configured under |
+|---|---|---|
+| **server** | the storage backend that answers requests | `servers.<id>` |
+| **worker** | how work reaches your code | `workers.<id>` |
+| **gateway** | an edge that listens — the HTTP API, the console, metrics | `gateways.<id>` |
 
-When the Resonate Server delivers execute messages to protected Cloud Functions or Cloud Run services, it can attach an outbound authentication header. Configure this under `[workers.transport_http_push.auth]`.
+The plugins this repository carries: servers `server_sqlite`, `server_postgres`,
+`server_mysql`, `server_scylladb` and `server_blob`; workers
+`transport_http_push`, `transport_http_poll`, `transport_gcps` and
+`worker_bash`; gateways `gateway_http`, `gateway_web` and `gateway_metrics`.
 
-### Google Cloud ID token (recommended for Cloud Run / Cloud Functions)
+---
+
+## Why Resonate
+
+|  | |
+|---|---|
+| **Durable by construction** | Promises, tasks, and schedules are persisted before they are acted on. A crash mid-flight is a resume, not a loss. |
+| **Formally specified** | The protocol has a machine-checked specification in [resonate-specification](https://github.com/resonatehq/resonate-specification), with mechanized invariants — not a prose document that drifted. |
+| **Differentially tested** | Every storage engine is compared step-for-step against an executable oracle on randomized traffic, across SQLite, PostgreSQL, and MySQL, with a snapshot diff after every request. |
+| **One binary** | `brew install`, `resonate serve`, done. No control plane to operate, no cluster to bootstrap. |
+| **Boring where it counts** | Your existing database is the state store. Your existing observability stack gets Prometheus metrics and OpenTelemetry traces. |
+
+---
+
+## Backends
+
+Resonate keeps its state in a database you already run.
+
+| Backend | Best for | Select with |
+|---|---|---|
+| **SQLite** | local development, single-node deployments | the default — `resonate serve` |
+| **PostgreSQL** | the production default | `--storage-type postgres`, or `servers.active = "server_postgres"` |
+| **MySQL** | wherever it already runs | `--storage-type mysql`, or `servers.active = "server_mysql"` |
+
+`server_scylladb` and `server_blob` ship in the same binary and are selected the
+same way.
+
+All three are held to the same behaviour by the differential test suite — the same requests go to every engine and to an executable model of the specification, and any divergence fails the build.
+
+---
+
+## Workers
+
+A worker is your code. Resonate does not care where it runs.
+
+- **In-process** — embed the SDK in your application and let it serve its own executions.
+- **Out-of-process** — run a fleet of workers with their own lifecycle, scaled independently.
+
+Resonate reaches them however suits your network:
+
+| Transport | Shape |
+|---|---|
+| **HTTP push** | Resonate calls your endpoint. Ideal for Cloud Run, Cloud Functions, and anything with a URL. |
+| **HTTP long-poll** | Your worker holds a connection open. Ideal behind NAT, in a laptop, or in a private cluster. |
+| **Google Cloud Pub/Sub** | Resonate publishes; your subscribers pick up the work. |
+
+---
+
+## Plugins
+
+A plugin represents an **external system's unit of work** — anything with a beginning and an end — as a durable promise. The plugin begins the work, sees it through to its terminal state, and settles the promise with the outcome.
+
+These are integration plugins, and they are a different thing from the server
+plugins in [Architecture](#build-a-server-with-the-plugins-you-want) — those are
+the crates a server binary is built from.
+
+The [catalogue](https://github.com/resonatehq/resonate-plugins/blob/main/Plugins.md) lists **447** systems on the roadmap. Seven are built today: Apache Airflow, Bannerbear, Baserow, Gotify, n8n, Rundeck, and Zendesk.
+
+→ [resonatehq/resonate-plugins](https://github.com/resonatehq/resonate-plugins)
+
+---
+
+## SDKs
+
+| Language | Repository |
+|---|---|
+| TypeScript | [resonate-sdk-ts](https://github.com/resonatehq/resonate-sdk-ts) |
+| Python | [resonate-sdk-py](https://github.com/resonatehq/resonate-sdk-py) |
+| Go | [resonate-sdk-go](https://github.com/resonatehq/resonate-sdk-go) |
+| Java | [resonate-sdk-java](https://github.com/resonatehq/resonate-sdk-java) |
+| Rust | [resonate-sdk-rs](https://github.com/resonatehq/resonate-sdk-rs) |
+
+---
+
+## Deploy
+
+For the full guide see [Set up and run Resonate](https://docs.resonatehq.io/operate/run-server).
+
+### Homebrew
+
+```shell
+brew install resonatehq/tap/resonate
+resonate serve
+```
+
+Every release and its artifacts are on the [releases page](https://github.com/resonatehq/resonate/releases).
+
+On start you will see:
+
+```shell
+INFO resonate_base: Server plugin selected server=server_sqlite
+INFO resonate_base: Worker plugin registered worker=transport_http_push schemes=["http", "https"]
+INFO resonate_base: Gateway plugin registered gateway=gateway_http
+INFO resonate_base: Gateway plugin registered gateway=gateway_web
+INFO resonate_gateway_http: Server listening bind=0.0.0.0:8001
+INFO resonate_gateway_metrics: Metrics listening bind=0.0.0.0:9090
+```
+
+HTTP on `8001`, metrics on `9090`. These are the defaults every SDK assumes, and both are configurable.
+
+### Docker
+
+```shell
+git clone https://github.com/resonatehq/resonate
+cd resonate
+docker-compose up
+```
+
+### From source
+
+```shell
+git clone https://github.com/resonatehq/resonate
+cd resonate
+cargo build --release
+./target/release/resonate serve
+```
+
+---
+
+## Configuration
+
+Configuration comes from a TOML file, environment variables (`RESONATE_` prefix, `__` for nesting), or CLI flags — in that order of increasing precedence.
+
+```shell
+RESONATE_GATEWAYS__GATEWAY_HTTP__BIND=0.0.0.0:3000
+RESONATE_SERVERS__ACTIVE=server_postgres
+RESONATE_SERVERS__SERVER_POSTGRES__URL=postgres://...
+```
+
+Every flag is one key, and `--set` says the same thing in the general case —
+`--server-port 3000` and `--set gateways.gateway_http.bind=0.0.0.0:3000` are the
+same override. That is what lets a binary carrying a plugin this repository has
+never heard of be configured without a flag being added for it.
+
+### Outbound authentication for HTTP push
+
+When Resonate delivers execute messages to protected Cloud Functions or Cloud Run services, it can attach an outbound authentication header. Configure it under `[workers.transport_http_push.auth]`.
+
+**Google Cloud ID token** (recommended for Cloud Run / Cloud Functions)
 
 ```toml
 [workers.transport_http_push.auth]
@@ -268,20 +373,18 @@ mode = "gcp"
 # audience = "https://my-function.example.com"  # optional; defaults to the delivery URL
 ```
 
-Equivalent environment variables:
-```
+```shell
 RESONATE_WORKERS__TRANSPORT_HTTP_PUSH__AUTH__MODE=gcp
 RESONATE_WORKERS__TRANSPORT_HTTP_PUSH__AUTH__AUDIENCE=https://...   # optional
 ```
 
-Equivalent CLI flags:
-```
+```shell
 resonate serve --transports-http-push-auth-mode gcp
 ```
 
-Tokens are obtained via [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials). On Cloud Run, this resolves to the service account identity automatically. Token acquisition and refresh are managed by the `google-cloud-auth` crate.
+Tokens come from [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials); on Cloud Run this resolves to the service account identity automatically. Acquisition and refresh are handled by the `google-cloud-auth` crate.
 
-### Static bearer token
+**Static bearer token**
 
 ```toml
 [workers.transport_http_push.auth]
@@ -289,19 +392,37 @@ mode = "bearer"
 token = "my-static-token"
 ```
 
-### No auth (default)
+**No auth** (default)
 
 ```toml
 [workers.transport_http_push.auth]
 mode = "none"
 ```
 
-### Custom header name
-
-The auth header defaults to `Authorization`. Override with:
+**Custom header name** — defaults to `Authorization`.
 
 ```toml
 [workers.transport_http_push.auth]
 mode = "gcp"
 header = "X-Custom-Auth"
 ```
+
+---
+
+## Learn more
+
+- [Evaluate Resonate for your next project](https://docs.resonatehq.io/evaluate/)
+- [The concepts that power Resonate](https://www.distributed-async-await.io/)
+- [Example application library](https://github.com/resonatehq-examples)
+
+## Community
+
+[Discord](https://resonatehq.io/discord) · [Blog](https://journal.resonatehq.io/subscribe) · [X](https://x.com/resonatehqio) · [LinkedIn](https://www.linkedin.com/company/resonatehqio) · [YouTube](https://www.youtube.com/@resonatehqio)
+
+## License
+
+[Apache-2.0](./LICENSE)
+
+<div align="center">
+<sub>Logos are the trademarks of their respective owners and appear here to identify the systems Resonate integrates with.</sub>
+</div>

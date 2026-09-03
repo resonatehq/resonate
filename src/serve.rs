@@ -1,9 +1,10 @@
 //! The `serve` and `dev` flags, and what they override.
 //!
 //! Every flag here is one configuration key. `--server-port 3000` is
-//! `gateways.gateway_http.port = 3000`, and `--set` says the same thing in the
-//! general case — which is what lets a binary carrying a plugin this repository
-//! has never heard of configure it without a flag being added for it.
+//! `gateways.gateway_http.bind = "0.0.0.0:3000"`, and `--set` says the same
+//! thing in the general case — which is what lets a binary carrying a plugin
+//! this repository has never heard of configure it without a flag being added
+//! for it.
 //!
 //! This is the top level's, not the CLI client's: the keys are the composition
 //! root's own vocabulary, and a build with a different set of plugins has a
@@ -16,9 +17,11 @@ use clap::Args;
 /// Common CLI flags shared between `serve` and `dev`.
 ///
 /// Every one of these is an override on a configuration key, and that is all
-/// they are: `--server-port 3000` is `gateways.gateway_http.port = 3000`, and
-/// `--set gateways.gateway_http.port=3000` says the same thing. Precedence:
-/// defaults < the file < the environment < these.
+/// they are: `--server-port 3000` is `gateways.gateway_http.bind =
+/// "0.0.0.0:3000"`, and `--set gateways.gateway_http.bind=0.0.0.0:3000` says
+/// the same thing. The gateway listens on one address, so `--server-host` and
+/// `--server-port` are two halves of one key rather than two keys of their
+/// own. Precedence: defaults < the file < the environment < these.
 ///
 /// `--set` is the general case, and the reason there is no flag per plugin
 /// field: a binary carrying a plugin this repository has never heard of
