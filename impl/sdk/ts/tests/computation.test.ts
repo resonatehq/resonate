@@ -16,8 +16,8 @@ import type { Effects } from "../src/types.js";
 import * as util from "../src/util.js";
 
 class TestHeartbeat implements Heartbeat {
-  start(): void {}
-  stop(): void {}
+  start(_task: { id: string; version: number }): void {}
+  stop(_task?: { id: string; version: number }): void {}
 }
 
 async function buildComputation(registry: Registry): Promise<{

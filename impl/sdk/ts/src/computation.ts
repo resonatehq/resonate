@@ -98,9 +98,6 @@ export class Computation {
     if (version !== 0) util.assert(version === registered.version, "versions must match");
     util.assert(func === registered.name, "names must match");
 
-    // start heartbeat
-    this.heartbeat.start();
-
     const retryCtor = retry ? this.retries.get(retry.type) : undefined;
     const retryPolicy = retryCtor
       ? new retryCtor(retry?.data)

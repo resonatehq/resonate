@@ -191,8 +191,6 @@ export class Core {
     if (version !== 0) util.assert(version === registered.version, "versions must match");
     util.assert(func === registered.name, "names must match");
 
-    this.heartbeat.start();
-
     // One trace per pass (mirrors Computation.processGenerator); threaded into
     // the root context and propagated to every child via AsyncContext.child.
     const trace = new TraceCollector();
@@ -343,7 +341,14 @@ export class Core {
     }
 
     const rootPromise = this.codec.decodePromise(res.data.promise);
-    return this.executeUntilBlocked(res.data.task, rootPromise, res.data.preload);
+    const acquiredTask = res.data.task;
+
+    this.heartbeat.start(acquiredTask);
+    try {
+      return await this.executeUntilBlocked(acquiredTask, rootPromise, res.data.preload);
+    } finally {
+      this.heartbeat.stop(acquiredTask);
+    }
   }
 }
 

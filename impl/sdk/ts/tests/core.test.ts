@@ -15,8 +15,8 @@ import type { Effects, Send } from "../src/types.js";
 import { VERSION } from "../src/util.js";
 
 class TestHeartbeat implements Heartbeat {
-  start(): void {}
-  stop(): void {}
+  start(_task: { id: string; version: number }): void {}
+  stop(_task?: { id: string; version: number }): void {}
 }
 
 class MockComputation {

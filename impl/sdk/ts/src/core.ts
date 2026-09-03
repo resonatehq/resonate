@@ -250,6 +250,13 @@ export class Core {
     }
 
     const rootPromise = this.codec.decodePromise(res.data.promise);
-    return this.executeUntilBlocked(res.data.task, rootPromise, res.data.preload);
+    const acquiredTask = res.data.task;
+
+    this.heartbeat.start(acquiredTask);
+    try {
+      return await this.executeUntilBlocked(acquiredTask, rootPromise, res.data.preload);
+    } finally {
+      this.heartbeat.stop(acquiredTask);
+    }
   }
 }
