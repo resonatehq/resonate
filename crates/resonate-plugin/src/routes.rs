@@ -53,8 +53,7 @@
 use std::sync::{Arc, Mutex};
 
 /// A router, built once the gateway's auth policy is known.
-pub type RouteBuilder =
-    Box<dyn FnOnce(Option<Arc<resonate_auth::AuthConfig>>) -> axum::Router + Send>;
+pub type RouteBuilder = Box<dyn FnOnce(Option<resonate_auth::AuthMode>) -> axum::Router + Send>;
 
 /// What the plugins in this binary want served, alongside the protocol's own.
 ///
@@ -84,7 +83,7 @@ impl Routes {
     pub fn add(
         &self,
         plugin: impl Into<String>,
-        build: impl FnOnce(Option<Arc<resonate_auth::AuthConfig>>) -> axum::Router + Send + 'static,
+        build: impl FnOnce(Option<resonate_auth::AuthMode>) -> axum::Router + Send + 'static,
     ) {
         self.pending
             .lock()

@@ -24,7 +24,7 @@ use resonate_plugin::prometheus::{
     register_counter_vec, register_histogram_vec, CounterVec, HistogramVec,
 };
 
-use resonate_auth::{auth_check, AuthConfig};
+use resonate_auth::AuthMode;
 use resonate_core::types::{self, RequestEnvelope, ResponseEnvelope};
 use resonate_core::{ui, ResonateServer};
 
@@ -60,14 +60,14 @@ lazy_static! {
 #[derive(Clone)]
 pub struct AppState {
     pub server: Arc<dyn ResonateServer>,
-    pub auth: Option<Arc<AuthConfig>>,
+    pub auth: Option<AuthMode>,
 }
 
 // Sub-state for API handlers — the server, and whether to authenticate.
 #[derive(Clone)]
 pub struct ApiState {
     pub server: Arc<dyn ResonateServer>,
-    pub auth: Option<Arc<AuthConfig>>,
+    pub auth: Option<AuthMode>,
 }
 
 impl axum::extract::FromRef<AppState> for ApiState {
@@ -206,7 +206,7 @@ async fn handle_api(
     );
 
     if let Some(auth) = &api_state.auth {
-        if let Err(err_response) = auth_check(auth, &req) {
+        if let Err(err_response) = auth.check_envelope(&req).await {
             let status = err_response.head.status.to_string();
             let elapsed_ms = start.elapsed().as_millis();
             tracing::warn!(

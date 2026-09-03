@@ -1324,7 +1324,7 @@ fn gen_schedule_create(rng: &mut fastrand::Rng, now: i64) -> RequestEnvelope {
         json!({
             "id": id,
             "cron": "* * * * *",
-            "promiseId": format!("sched-promise-{{{{.id}}}}-{{{{.timestamp}}}}"),
+            "promiseId": "sched-promise-{{.id}}-{{.timestamp}}".to_string(),
             "promiseTimeout": promise_timeout,
             "promiseParam": {},
             "promiseTags": { "resonate:target": WORKER_URL }

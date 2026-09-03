@@ -107,6 +107,19 @@ pub struct CommonArgs {
     #[arg(long = "auth-aud", value_name = "AUD")]
     pub auth_aud: Option<String>,
 
+    // --- WorkOS auth ---
+    /// The server's own WorkOS secret key (enables WorkOS auth)
+    #[arg(long = "workos-api-key", value_name = "KEY")]
+    pub workos_api_key: Option<String>,
+
+    /// WorkOS organization every client API key must belong to
+    #[arg(long = "workos-org-id", value_name = "ORG")]
+    pub workos_org_id: Option<String>,
+
+    /// WorkOS API base URL [default: https://api.workos.com]
+    #[arg(long = "workos-base-url", value_name = "URL")]
+    pub workos_base_url: Option<String>,
+
     // --- Tasks ---
     /// Task lease timeout (ms) [default: 15000]
     #[arg(long = "tasks-lease-timeout", value_name = "MS")]
@@ -437,6 +450,22 @@ impl CommonArgs {
         );
         o.maybe_str("gateways.gateway_http.auth.iss", self.auth_iss.clone());
         o.maybe_str("gateways.gateway_http.auth.aud", self.auth_aud.clone());
+
+        // The other mode, on the same edge. Naming both is refused by the
+        // gateway at startup rather than resolved by a precedence nobody wrote
+        // down.
+        o.maybe_str(
+            "gateways.gateway_http.workos.api_key",
+            self.workos_api_key.clone(),
+        );
+        o.maybe_str(
+            "gateways.gateway_http.workos.org_id",
+            self.workos_org_id.clone(),
+        );
+        o.maybe_str(
+            "gateways.gateway_http.workos.base_url",
+            self.workos_base_url.clone(),
+        );
 
         // Whatever the named flags do not cover.
         for assignment in self.set {

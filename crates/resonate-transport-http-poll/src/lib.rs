@@ -393,7 +393,7 @@ use axum::routing::get;
 /// What the handler needs: the registry to register into, and the gateway's
 /// auth policy — handed over when it built these routes, so this endpoint
 /// admits exactly whom the protocol endpoint admits.
-type PollState = (Arc<PollRegistry>, Option<Arc<resonate_auth::AuthConfig>>);
+type PollState = (Arc<PollRegistry>, Option<resonate_auth::AuthMode>);
 
 async fn handle(
     State((registry, auth)): State<PollState>,
@@ -405,7 +405,7 @@ async fn handle(
             .get(axum::http::header::AUTHORIZATION)
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.strip_prefix("Bearer "));
-        if resonate_auth::auth_check_token(auth, token).is_err() {
+        if !auth.check_token(token).await {
             tracing::warn!(group = %group, id = %id, "Poll connection rejected: unauthorized");
             return (axum::http::StatusCode::UNAUTHORIZED, "Unauthorized").into_response();
         }

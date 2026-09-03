@@ -62,7 +62,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use resonate_auth::{auth_check, AuthConfig};
+use resonate_auth::AuthMode;
 use resonate_core::types::{self, RequestEnvelope, ResponseEnvelope};
 use resonate_core::{ui, ResonateServer};
 use rust_embed::Embed;
@@ -120,7 +120,7 @@ impl Default for Config {
 #[derive(Clone)]
 pub struct ConsoleState {
     pub server: Arc<dyn ResonateServer>,
-    pub auth: Option<Arc<AuthConfig>>,
+    pub auth: Option<AuthMode>,
 }
 
 /// The console's routes, with its state already applied.
@@ -267,7 +267,7 @@ async fn handle_rpc(
     let corr_id = req.head.corr_id.clone();
 
     if let Some(auth) = &state.auth {
-        if let Err(rejection) = auth_check(auth, &req) {
+        if let Err(rejection) = auth.check_envelope(&req).await {
             tracing::warn!(kind = %kind, corr_id = %corr_id, "Console request rejected by auth");
             return render(*rejection);
         }

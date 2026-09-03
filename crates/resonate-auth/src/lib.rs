@@ -5,8 +5,14 @@
 //! all authorize identically. What it needs beyond the envelope is an
 //! [`AuthConfig`] — policy, not protocol, which is why this is its own crate
 //! rather than part of `core`.
+//!
+//! Which policy is [`AuthMode`]: local JWT verification, or WorkOS. A gateway
+//! picks one at startup and every endpoint behind it asks the same one.
+
+pub mod workos;
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
@@ -32,6 +38,57 @@ pub struct AuthConfig {
 pub struct VerificationKey {
     pub decoding_key: DecodingKey,
     pub algorithms: Vec<Algorithm>,
+}
+
+/// Which authentication mode is active.
+///
+/// Exactly one — the gateway picks at startup based on config, and the two
+/// are mutually exclusive there.
+#[derive(Clone)]
+pub enum AuthMode {
+    /// Local JWT verification against a public key.
+    Jwt(Arc<AuthConfig>),
+    /// Remote token validation via the WorkOS API.
+    WorkOs(workos::WorkOsClient),
+}
+
+impl AuthMode {
+    /// Authenticate and authorize an envelope-bearing request.
+    ///
+    /// The caller gets back a ready-to-render error envelope on failure.
+    ///
+    /// The two arms do different amounts. JWT mode authenticates and then
+    /// applies the prefix rule; a WorkOS key carries no prefix claim and no
+    /// role — validation answers only which organization it belongs to — so
+    /// that arm authenticates and matches the organization, and there is
+    /// nothing further for it to authorize against.
+    pub async fn check_envelope(&self, req: &RequestEnvelope) -> Result<(), Box<ResponseEnvelope>> {
+        match self {
+            AuthMode::Jwt(cfg) => auth_check(cfg, req),
+            AuthMode::WorkOs(client) => {
+                let token = req.head.auth.as_deref();
+                match workos::auth_check_workos(client, token).await {
+                    Ok(()) => Ok(()),
+                    Err(rejection) => Err(Box::new(ResponseEnvelope::error(
+                        req.kind.clone(),
+                        req.head.corr_id.clone(),
+                        rejection.status as i32,
+                        &rejection.message,
+                    ))),
+                }
+            }
+        }
+    }
+
+    /// Verify a bearer token — no envelope, no authorization, just
+    /// authentication. For endpoints like `/poll` that carry no protocol
+    /// envelope and so have no resource to authorize against.
+    pub async fn check_token(&self, token: Option<&str>) -> bool {
+        match self {
+            AuthMode::Jwt(cfg) => auth_check_token(cfg, token),
+            AuthMode::WorkOs(client) => workos::auth_check_workos(client, token).await.is_ok(),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -177,13 +234,12 @@ pub fn load_public_key(path: &str) -> Result<VerificationKey, String> {
 /// by the configured public key.  Used for endpoints (like `/poll`) that don't
 /// carry a protocol envelope and therefore cannot do prefix-based authorization.
 ///
-/// Returns `Ok(())` if the token is valid.
-/// Returns `Err(())` if the token is missing, empty, or fails verification.
-#[allow(clippy::result_unit_err)]
-pub fn auth_check_token(auth: &AuthConfig, token: Option<&str>) -> Result<(), ()> {
+/// Returns `true` if the token is valid.
+/// Returns `false` if the token is missing, empty, or fails verification.
+pub fn auth_check_token(auth: &AuthConfig, token: Option<&str>) -> bool {
     match token {
-        Some(t) if !t.is_empty() => verify_jwt(auth, t).map(|_| ()).map_err(|_| ()),
-        _ => Err(()),
+        Some(t) if !t.is_empty() => verify_jwt(auth, t).is_ok(),
+        _ => false,
     }
 }
 

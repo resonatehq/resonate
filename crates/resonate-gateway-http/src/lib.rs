@@ -82,6 +82,13 @@ pub struct Config {
     #[serde(default)]
     pub auth: Option<resonate_auth::Config>,
 
+    /// WorkOS authentication. Absent means WorkOS auth is off.
+    ///
+    /// Mutually exclusive with `auth`: a gateway verifies tokens one way, and
+    /// naming both is a startup error rather than a silent precedence.
+    #[serde(default)]
+    pub workos: Option<resonate_auth::workos::Config>,
+
     /// Abort the process when a handler panics, rather than answering 500.
     ///
     /// For a single-process store — SQLite — a panic mid-transaction can leave
@@ -107,6 +114,7 @@ impl Default for Config {
             bind: default_bind(),
             cors_allow_origins: Vec::new(),
             auth: None,
+            workos: None,
             abort_on_panic: false,
         }
     }
@@ -233,6 +241,28 @@ fn cors_layer(allow_origins: &[String]) -> Option<tower_http::cors::CorsLayer> {
     Some(layer)
 }
 
+/// Which policy this gateway will verify tokens against.
+///
+/// Separate from `init` because it is the whole of the decision and none of
+/// the I/O it triggers: a test can ask what a config means without a socket.
+/// Reading the key material still happens here, so a bad path is a startup
+/// failure like the rest.
+fn auth_mode(config: &Config) -> Result<Option<resonate_auth::AuthMode>, String> {
+    match (&config.auth, &config.workos) {
+        (Some(_), Some(_)) => {
+            Err("auth and workos cannot both be configured — choose exactly one mode".to_string())
+        }
+        (Some(cfg), None) => Ok(Some(resonate_auth::AuthMode::Jwt(Arc::new(cfg.load()?)))),
+        (None, Some(cfg)) => Ok(Some(resonate_auth::AuthMode::WorkOs(
+            resonate_auth::workos::WorkOsClient::new(cfg.load()?),
+        ))),
+        (None, None) => {
+            tracing::info!("Auth disabled — all requests accepted");
+            Ok(None)
+        }
+    }
+}
+
 #[async_trait]
 impl ResonateGateway for HttpGateway {
     async fn init(&self, _debug: bool) -> Result<(), Unavailable> {
@@ -240,13 +270,7 @@ impl ResonateGateway for HttpGateway {
         // touches the disk and it can fail, which is what `init` is for. A bad
         // key path stops the process here rather than surfacing later as a
         // request nobody can authenticate.
-        let auth = match &self.config.auth {
-            Some(cfg) => Some(Arc::new(cfg.load().map_err(Unavailable::new)?)),
-            None => {
-                tracing::info!("Auth disabled — all requests accepted");
-                None
-            }
-        };
+        let auth = auth_mode(&self.config).map_err(Unavailable::new)?;
         // Every other plugin's routes, built now that the auth policy exists.
         // This is why registration is a builder and not a router: a route that
         // must authenticate the same way as the protocol cannot be built before
@@ -317,5 +341,89 @@ impl ResonateGateway for HttpGateway {
             let _ = serving.task.await;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn workos(api_key: Option<&str>, org_id: Option<&str>) -> resonate_auth::workos::Config {
+        resonate_auth::workos::Config {
+            api_key: api_key.map(str::to_owned),
+            org_id: org_id.map(str::to_owned),
+            base_url: "https://api.workos.com".to_string(),
+        }
+    }
+
+    #[test]
+    fn no_section_means_no_policy() {
+        assert!(auth_mode(&Config::default()).unwrap().is_none());
+    }
+
+    /// One edge verifies tokens one way. Two policies would make the answer
+    /// depend on an order nobody wrote down, so startup refuses instead.
+    #[test]
+    fn naming_both_modes_is_refused() {
+        let config = Config {
+            auth: Some(resonate_auth::Config {
+                publickey: "none".into(),
+                iss: None,
+                aud: None,
+            }),
+            workos: Some(workos(Some("sk_test"), Some("org_abc"))),
+            ..Default::default()
+        };
+        let Err(err) = auth_mode(&config) else {
+            panic!("two policies is not a policy");
+        };
+        assert!(err.contains("cannot both be configured"), "{err}");
+    }
+
+    #[test]
+    fn a_jwt_section_selects_local_verification() {
+        let config = Config {
+            auth: Some(resonate_auth::Config {
+                publickey: "none".into(),
+                iss: None,
+                aud: None,
+            }),
+            ..Default::default()
+        };
+        assert!(matches!(
+            auth_mode(&config).unwrap(),
+            Some(resonate_auth::AuthMode::Jwt(_))
+        ));
+    }
+
+    #[test]
+    fn a_workos_section_selects_remote_validation() {
+        let config = Config {
+            workos: Some(workos(Some("sk_test"), Some("org_abc"))),
+            ..Default::default()
+        };
+        assert!(matches!(
+            auth_mode(&config).unwrap(),
+            Some(resonate_auth::AuthMode::WorkOs(_))
+        ));
+    }
+
+    /// A WorkOS section is a request for WorkOS auth, so an incomplete one is
+    /// a startup failure rather than a policy that admits everything.
+    #[test]
+    fn an_incomplete_workos_section_fails_startup() {
+        for (api_key, org_id, missing) in [
+            (None, Some("org_abc"), "api_key"),
+            (Some("sk_test"), None, "org_id"),
+        ] {
+            let config = Config {
+                workos: Some(workos(api_key, org_id)),
+                ..Default::default()
+            };
+            let Err(err) = auth_mode(&config) else {
+                panic!("an incomplete WorkOS section must not start");
+            };
+            assert!(err.contains(missing), "{err}");
+        }
     }
 }
