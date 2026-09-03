@@ -10,6 +10,7 @@ members = [
     "crates/resonate-plugin",
     "crates/resonate-sql",
     "crates/resonate-server-scylladb",
+    "crates/resonate-server-blob",
     "crates/resonate-server-sqlite",
     "crates/resonate-server-postgres",
     "crates/resonate-server-mysql",
@@ -73,6 +74,7 @@ resonate-server-sqlite = { path = "crates/resonate-server-sqlite" }
 resonate-server-postgres = { path = "crates/resonate-server-postgres" }
 resonate-server-mysql = { path = "crates/resonate-server-mysql" }
 resonate-server-scylladb = { path = "crates/resonate-server-scylladb" }
+resonate-server-blob = { path = "crates/resonate-server-blob" }
 resonate-transport-http-push = { path = "crates/resonate-transport-http-push" }
 resonate-transport-http-poll = { path = "crates/resonate-transport-http-poll" }
 resonate-transport-gcps = { path = "crates/resonate-transport-gcps" }

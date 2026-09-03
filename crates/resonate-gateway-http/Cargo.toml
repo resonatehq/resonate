@@ -18,6 +18,5 @@ serde = { workspace = true }
 tower-http = { version = "0.6", features = ["trace", "catch-panic", "cors"] }
 tokio = { version = "1", features = ["rt", "sync", "macros", "signal", "net"] }
 serde_json = { workspace = true }
-prometheus = "0.13"
 lazy_static = "1"
 tracing = "0.1"

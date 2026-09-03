@@ -174,42 +174,42 @@ pub struct ResponseHead {
 
 // --- Outgoing Message Types ---
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct MessageHead {
     #[serde(rename = "serverUrl")]
     pub server_url: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ExecuteMsg {
     pub kind: String,
     pub head: MessageHead,
     pub data: ExecuteMsgData,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ExecuteMsgData {
     pub task: ExecuteMsgTask,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ExecuteMsgTask {
     pub id: String,
     pub version: i64,
 }
 
 /// Head of an `unblock` message. Empty on the wire, unlike [`MessageHead`].
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct UnblockMsgHead {}
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct UnblockMsg {
     pub kind: String,
     pub head: UnblockMsgHead,
     pub data: UnblockMsgData,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct UnblockMsgData {
     pub promise: PromiseRecord,
 }
@@ -220,7 +220,7 @@ pub struct UnblockMsgData {
 ///
 /// Untagged: each variant already carries its own `kind` field, so this
 /// serializes exactly as the hand-built JSON it replaces.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
 pub enum Message {
     Execute(ExecuteMsg),
@@ -229,7 +229,7 @@ pub enum Message {
 
 // --- Record Types ---
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PromiseValue {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub headers: Option<std::collections::HashMap<String, String>>,
@@ -237,7 +237,7 @@ pub struct PromiseValue {
     pub data: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PromiseRecord {
     pub id: String,
     pub state: PromiseState,
@@ -252,7 +252,7 @@ pub struct PromiseRecord {
     pub settled_at: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskRecord {
     pub id: String,
     pub state: TaskState,

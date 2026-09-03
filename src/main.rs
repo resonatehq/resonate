@@ -71,6 +71,7 @@ fn registry() -> Registry {
         .server(&resonate_server_postgres::PLUGIN)
         .server(&resonate_server_mysql::PLUGIN)
         .server(&resonate_server_scylladb::PLUGIN)
+        .server(&resonate_server_blob::PLUGIN)
         .worker(&resonate_transport_http_push::PLUGIN)
         .worker(&resonate_transport_http_poll::PLUGIN)
         .worker(&resonate_transport_gcps::PLUGIN)

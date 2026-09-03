@@ -72,6 +72,20 @@ pub trait ResonateServer: Send + Sync {
         Ok(())
     }
 
+    /// Whether this server can serve right now.
+    ///
+    /// What a readiness probe asks, and it is here rather than on whatever sits
+    /// behind the server because a gateway has to answer `/ready` without
+    /// knowing whether there is a database back there, an object store, or a
+    /// socket to somewhere else. Each implementation knows what "ready" means
+    /// for itself — `resonate-server-blob` asks whether its bucket answers.
+    ///
+    /// Defaulted to `true`, which is the honest answer for an implementation
+    /// with nothing to check: a process that is up is a process that can serve.
+    async fn ready(&self) -> bool {
+        true
+    }
+
     /// Apply one request and return its response.
     ///
     /// A non-2xx outcome is still a completed exchange: it comes back as `Ok`

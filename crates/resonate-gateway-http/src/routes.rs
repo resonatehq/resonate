@@ -19,7 +19,10 @@ use axum::{
     Json, Router,
 };
 use lazy_static::lazy_static;
-use prometheus::{register_counter_vec, register_histogram_vec, CounterVec, HistogramVec};
+// Through the ABI's re-export, so there is one default registry in the build.
+use resonate_plugin::prometheus::{
+    register_counter_vec, register_histogram_vec, CounterVec, HistogramVec,
+};
 
 use resonate_auth::{auth_check, AuthConfig};
 use resonate_core::types::{self, RequestEnvelope, ResponseEnvelope};
@@ -108,8 +111,13 @@ async fn handle_legacy() -> impl IntoResponse {
 /// had gone away answered 503. Nothing here can tell that any more — the port
 /// has no `ready` — so this is liveness, and `/health` alongside it said the
 /// same thing twice.
-async fn handle_ready() -> StatusCode {
-    StatusCode::OK
+async fn handle_ready(State(state): State<AppState>) -> StatusCode {
+    if state.server.ready().await {
+        StatusCode::OK
+    } else {
+        tracing::error!("Readiness check failed: server reports not ready");
+        StatusCode::SERVICE_UNAVAILABLE
+    }
 }
 
 fn into_response(resp: ResponseEnvelope) -> (axum::http::StatusCode, Json<ResponseEnvelope>) {
