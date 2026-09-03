@@ -105,12 +105,14 @@ async fn handle_legacy() -> impl IntoResponse {
     )
 }
 
-/// The one probe: this process is running and serving.
+/// The one probe: this process is running, and the server behind it says it
+/// can serve.
 ///
-/// It used to ask the server, which pinged its storage, so a pod whose database
-/// had gone away answered 503. Nothing here can tell that any more — the port
-/// has no `ready` — so this is liveness, and `/health` alongside it said the
-/// same thing twice.
+/// `/health` alongside this said the same thing twice, so there is one. What
+/// it answers is the server's to decide: `ready` defaults to true, and a
+/// server that can actually tell — the blob server asks its bucket — answers
+/// for itself, which is how a pod whose storage went away reports 503 rather
+/// than taking traffic it cannot serve.
 async fn handle_ready(State(state): State<AppState>) -> StatusCode {
     if state.server.ready().await {
         StatusCode::OK
@@ -126,8 +128,25 @@ fn into_response(resp: ResponseEnvelope) -> (axum::http::StatusCode, Json<Respon
     (code, Json(resp))
 }
 
+/// The bearer token from `Authorization`, when there is one.
+///
+/// Exact `Bearer ` prefix — another scheme is not a token this endpoint can
+/// read, so it is `None` rather than a guess. `Bearer ` with nothing after it
+/// is `Some("")`, which the auth check rejects like any other bad token.
+///
+/// The poll transport does this for its own endpoint, in its own crate. It is
+/// three lines against a header name fixed by the protocol; sharing them would
+/// buy a dependency between two plugins to save nothing.
+fn bearer_token(headers: &axum::http::HeaderMap) -> Option<&str> {
+    headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+}
+
 async fn handle_api(
     State(api_state): State<ApiState>,
+    headers: axum::http::HeaderMap,
     body: axum::body::Bytes,
 ) -> (axum::http::StatusCode, Json<ResponseEnvelope>) {
     let server = &api_state.server;
@@ -138,7 +157,7 @@ async fn handle_api(
     // rejection reads, and this renders it — which is the only part that is
     // HTTP's. `salvage_context` digs out what it can from bytes that would not
     // parse, so even that answer can be correlated.
-    let req: RequestEnvelope = match types::parse_and_validate(&body) {
+    let mut req: RequestEnvelope = match types::parse_and_validate(&body) {
         Ok(req) => req,
         Err(invalid) => {
             let (kind, corr_id) = types::salvage_context(&body);
@@ -146,6 +165,17 @@ async fn handle_api(
             return into_response(invalid.to_response(kind, corr_id));
         }
     };
+
+    // Where the token came from is HTTP's business; that there is one is the
+    // protocol's. The envelope carries it, so the header only fills the field
+    // when the envelope left it empty — a caller holding a bearer token and
+    // nothing else. Nothing downstream can tell the two apart, which is the
+    // point: `auth_check` still reads one field.
+    if req.head.auth.is_none() {
+        if let Some(token) = bearer_token(&headers) {
+            req.head.auth = Some(token.to_string());
+        }
+    }
 
     let kind = req.kind.clone();
     let corr_id = req.head.corr_id.clone();
