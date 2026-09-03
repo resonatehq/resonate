@@ -1,7 +1,8 @@
 //! The Prometheus endpoint.
 //!
-//! A gateway like any other — its own socket, its own port — and the one that
-//! reads nothing from the server. What it serves is prometheus' process-wide
+//! One of the two gateways that own a listener — its own socket, on its own
+//! port, kept off the API's so a metrics scrape reaches nothing else — and the
+//! one that reads nothing from the server. What it serves is prometheus' process-wide
 //! default registry, which every plugin in the binary declares into through the
 //! `prometheus` re-exported from `resonate-plugin`. That is the whole reason
 //! this crate needs no list of counters and no wiring to the plugins whose
@@ -45,6 +46,7 @@ fn configure(
 
 /// Where to serve metrics.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// Serve at all. On by default: an endpoint nobody scrapes costs a socket,
     /// and one that is off when an operator expected it costs an incident.

@@ -37,6 +37,7 @@ fn configure(
 
 /// Everything under `[workers.transport_gcps]`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// Enable the gcps:// address scheme [default: false]
     #[serde(default)]

@@ -39,6 +39,7 @@ fn configure(
 
 /// Everything under `[workers.worker_bash]`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// Enable the bash:// address scheme [default: false]
     #[serde(default)]

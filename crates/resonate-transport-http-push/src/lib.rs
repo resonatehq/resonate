@@ -35,6 +35,7 @@ fn configure(
 
 /// Everything under `[workers.transport_http_push]`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// Enable the http:// and https:// address schemes [default: true]
     #[serde(default = "default_enabled")]
@@ -121,6 +122,7 @@ impl Default for AuthConfig {
 ///   RESONATE_WORKERS__TRANSPORT_HTTP_PUSH__AUTH__MODE=gcp
 ///   RESONATE_WORKERS__TRANSPORT_HTTP_PUSH__AUTH__AUDIENCE=https://...
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AuthConfig {
     /// Auth mode. Default: `none`.
     #[serde(default)]

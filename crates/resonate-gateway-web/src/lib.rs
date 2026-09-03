@@ -3,11 +3,12 @@
 //!
 //! # What this crate is
 //!
-//! A [`ResonateGateway`](resonate_core::ResonateGateway), like every other
-//! edge: it binds its own socket, on its own port, and enforces its own auth.
-//! It used to hand a set of routes to the HTTP gateway to merge, which meant
-//! the composition root had to know that one plugin was routes rather than a
-//! gateway, and had to hand them to another. A plugin owns what it owns.
+//! A [`ResonateGateway`](resonate_core::ResonateGateway), but not one with a
+//! listener of its own. It contributes routes, and the HTTP gateway that owns
+//! the socket serves them: that gateway owns the address, the auth that admits
+//! a request, and the panic guard over the handlers. Turning this plugin off
+//! leaves the API where it was and `/console` a 404 — there is no second port
+//! to notice.
 //!
 //! What it also owns is the boundary. The console's `ui.*` requests are
 //! answered **here and nowhere else**: the worker route refuses the whole
@@ -84,6 +85,7 @@ struct Assets;
 /// Plain data, like every gateway's `Config`, so it deserializes straight out
 /// of a config file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// Serve the console. On by default: it is compiled in either way, and a
     /// binary that carries a console nobody can reach is a surprise.

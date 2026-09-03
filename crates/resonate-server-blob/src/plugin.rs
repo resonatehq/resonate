@@ -45,6 +45,7 @@ fn configure(
 
 /// Everything under `[servers.server_blob]`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// Bucket holding every object. When unset the backend runs against an
     /// in-process, in-memory store — nothing survives the process. That is a

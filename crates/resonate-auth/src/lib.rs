@@ -102,6 +102,7 @@ impl AuthMode {
 /// the gateway hosting it calls from `init` — where anything that touches the
 /// filesystem and can fail belongs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// Public key for JWT verification.
     /// Set to "none" to accept unsigned tokens (debug/testing).

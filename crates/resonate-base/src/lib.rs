@@ -116,6 +116,22 @@ pub struct Process {
     pub shutdown_timeout: u64,
 }
 
+/// [`Process`]'s own keys, and the three section names, which together are
+/// everything that may appear at the top level.
+///
+/// `Process` cannot say this itself: it is extracted from the whole
+/// configuration, so `deny_unknown_fields` on it would reject `servers`,
+/// `workers` and `gateways` — the sections it is deliberately blind to. Keep
+/// this list in step with the fields above.
+const TOP_LEVEL_KEYS: &[&str] = &[
+    "level",
+    "debug",
+    "shutdown_timeout",
+    "servers",
+    "workers",
+    "gateways",
+];
+
 fn default_level() -> String {
     "info".to_string()
 }
@@ -170,6 +186,10 @@ pub async fn run(registry: Registry, options: Options) -> Result<(), String> {
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&process.level));
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
+    // After the subscriber, because half of what it reports is a warning, and
+    // before anything is built, because the other half is fatal.
+    check_key_space(&registry, &config)?;
+
     let debug = process.debug;
     if debug {
         tracing::info!(
@@ -185,6 +205,69 @@ pub async fn run(registry: Registry, options: Options) -> Result<(), String> {
         .stop(std::time::Duration::from_millis(process.shutdown_timeout))
         .await;
     tracing::info!("Resonate Server stopped");
+    Ok(())
+}
+
+/// Refuse a top-level key nothing will ever read, and say so about a plugin id
+/// this binary does not carry.
+///
+/// A plugin's own settings are checked by its `Config`, which denies unknown
+/// fields — but only once something extracts that section. A key at the top
+/// level, or a section belonging to a plugin that is not here, is extracted by
+/// nobody, so without this it is read by nobody and reported by nobody. That is
+/// how `storage.type` survived being renamed: the server started, on the
+/// default backend, and said nothing.
+///
+/// The two halves are not the same kind of wrong. A top-level key that is not a
+/// process setting or a section cannot be meant for any binary, so it is fatal.
+/// An unknown *id* under a real section can be: one `resonate.toml` may serve
+/// several binaries built from different plugin sets, and the one that does not
+/// carry `worker_kafka` should not refuse to start over a section meant for the
+/// one that does. That is a warning, naming what this binary does carry.
+fn check_key_space(registry: &Registry, config: &Configuration) -> Result<(), String> {
+    let unknown: Vec<String> = config
+        .keys()
+        .into_iter()
+        .filter(|k| !TOP_LEVEL_KEYS.contains(&k.as_str()))
+        .collect();
+    if !unknown.is_empty() {
+        return Err(format!(
+            "unknown configuration: {} — the top level takes {}",
+            unknown
+                .iter()
+                .map(|k| format!("`{k}`"))
+                .collect::<Vec<_>>()
+                .join(", "),
+            TOP_LEVEL_KEYS
+                .iter()
+                .map(|k| format!("`{k}`"))
+                .collect::<Vec<_>>()
+                .join(", "),
+        ));
+    }
+
+    let servers: Vec<String> = registry.servers().iter().map(|p| p.id()).collect();
+    let workers: Vec<String> = registry.workers().iter().map(|p| p.id()).collect();
+    let gateways: Vec<String> = registry.gateways().iter().map(|p| p.id()).collect();
+    for (section, carried) in [
+        ("servers", &servers),
+        ("workers", &workers),
+        ("gateways", &gateways),
+    ] {
+        for id in config.keys_in(section) {
+            // `servers.active` names a server rather than being one.
+            if section == "servers" && id == "active" {
+                continue;
+            }
+            if !carried.contains(&id) {
+                tracing::warn!(
+                    "{section}.{id} configured, but this binary carries no such \
+                     plugin — it has {}",
+                    carried.join(", ")
+                );
+            }
+        }
+    }
     Ok(())
 }
 

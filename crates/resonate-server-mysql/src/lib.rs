@@ -4885,6 +4885,7 @@ pub static PLUGIN: ServerPlugin = ServerPlugin::new(env!("CARGO_PKG_NAME"), conf
 
 /// Everything under `[servers.server_mysql]`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// Connection URL. Required — there is no sensible default host.
     #[serde(default)]

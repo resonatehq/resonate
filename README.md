@@ -32,9 +32,8 @@ async function research(context: Context, question: string) {
     queries.map((q) => context.rpc(search, q))
   );
   // Synthesize the results
-  const cited = results.filter((r) => r.status === "fulfilled").map((r) => r.value);
   return await context.run(agent,
-    `Write a cited report. ${question}: ${cited}`
+    `Write a cited report. ${question}: ${results}`
   );
 }
 ```

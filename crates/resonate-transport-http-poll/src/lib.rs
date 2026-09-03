@@ -5,8 +5,9 @@
 //! router — it knows how to reach a worker, not what the message means.
 //!
 //! Unlike the dialled transports this one has an inbound half: the endpoint
-//! workers connect to. So it binds its own socket and serves it — one plugin,
-//! one listener, and no gateway hosting a route on another plugin's behalf.
+//! workers connect to. It binds no socket for it — it registers the route, and
+//! the HTTP gateway that owns the listener serves it. One listener, whatever
+//! the set of plugins that have put routes on it.
 //!
 //! Workers connect via `GET /poll/{group}/{id}` and receive messages as
 //! Server-Sent Events; [`PollRegistry`] holds those connections open and
@@ -70,6 +71,7 @@ pub const POLL_PATH: &str = "/poll/:group/:id";
 
 /// Everything under `[workers.transport_http_poll]`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// Enable the poll:// address scheme [default: true]
     #[serde(default = "default_enabled")]

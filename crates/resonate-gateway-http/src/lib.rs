@@ -58,6 +58,7 @@ fn configure(
 /// out of a config file. Nothing here is read from disk or opened; that is
 /// [`HttpGateway::init`]'s.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// Serve at all.
     #[serde(default = "yes")]

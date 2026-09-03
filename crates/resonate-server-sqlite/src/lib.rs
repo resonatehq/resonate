@@ -4315,6 +4315,7 @@ pub static PLUGIN: ServerPlugin = ServerPlugin::new(env!("CARGO_PKG_NAME"), conf
 
 /// Everything under `[servers.server_sqlite]`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// Path to the database file. `:memory:` for an ephemeral one.
     #[serde(default = "default_path")]

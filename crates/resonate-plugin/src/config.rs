@@ -112,6 +112,27 @@ impl Configuration {
         self.at("gateways", id)
     }
 
+    /// The keys present at the top level, whatever they are.
+    ///
+    /// For the caller that knows which ones mean something: a key here that no
+    /// plugin and no process setting answers to was written by someone who
+    /// believed it would be read.
+    pub fn keys(&self) -> Vec<String> {
+        self.figment
+            .extract::<figment::value::Dict>()
+            .map(|d| d.keys().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// The keys present under one section — the plugin ids that have been
+    /// configured, and anything misspelled in their place.
+    pub fn keys_in(&self, section: &str) -> Vec<String> {
+        self.figment
+            .extract_inner::<figment::value::Dict>(section)
+            .map(|d| d.keys().cloned().collect())
+            .unwrap_or_default()
+    }
+
     /// Which server this configuration points at, or the fallback when it says
     /// nothing.
     pub fn active_server(&self, fallback: &str) -> String {
@@ -186,11 +207,62 @@ fn describe(md: &figment::Metadata) -> String {
 }
 
 fn to_config_error(base: &str, e: &figment::Error) -> ConfigError {
+    // An unknown field is the error a typo produces, so it is the one most
+    // often read, and figment's own rendering of it is the least useful: it
+    // nests the section beneath the field in `path` — `port.gateways.
+    // gateway_http` for a bad `gateways.gateway_http.port` — and wraps the
+    // candidate list in a second layer of backticks. The field and the
+    // candidates are both in the kind, so the key is built from `base`
+    // instead, and the list is written out plainly.
+    if let figment::error::Kind::UnknownField(field, expected) = &e.kind {
+        // `path` is the path *within* the extracted section followed by the
+        // section's own segments — `["auth", "tokn", "workers",
+        // "transport_http_push"]` for `workers.transport_http_push.auth.tokn`.
+        // Dropping the tail leaves the part that has to be appended to `base`,
+        // which is what keeps a nested field's key from losing `auth`.
+        let depth = if base.is_empty() {
+            0
+        } else {
+            base.split('.').count()
+        };
+        let inner: Vec<&str> = if e.path.len() > depth {
+            e.path[..e.path.len() - depth]
+                .iter()
+                .map(String::as_str)
+                .collect()
+        } else {
+            vec![field.as_str()]
+        };
+        let key = if base.is_empty() {
+            inner.join(".")
+        } else {
+            format!("{base}.{}", inner.join("."))
+        };
+        let message = if expected.is_empty() {
+            "unknown setting".to_string()
+        } else {
+            let names = expected
+                .iter()
+                .map(|n| format!("`{n}`"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("unknown setting; this section takes {names}")
+        };
+        return ConfigError {
+            key,
+            message,
+            source: e.metadata.as_ref().map(describe),
+        };
+    }
+
     let path = e.path.join(".");
     let key = match (base.is_empty(), path.is_empty()) {
         (true, true) => "configuration".to_string(),
         (true, false) => path,
         (false, true) => base.to_string(),
+        // figment reports the path relative to what was extracted, so a
+        // section that is already the base is not repeated.
+        (false, false) if path == base || path.starts_with(&format!("{base}.")) => path,
         (false, false) => format!("{base}.{path}"),
     };
     ConfigError {

@@ -47,6 +47,7 @@ const SCHEMA_CQL: &str = include_str!("../schema.cql");
 /// deadline every retry path arms. Same constant, same meaning, as the
 /// other engines' `task_retry_timeout` — carried in config here too.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// Seed hosts, bare or host:port.
     #[serde(default = "default_hosts")]
