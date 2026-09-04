@@ -100,7 +100,7 @@ resonate dev
 npx tsx research.ts
 ```
 
-`resonate dev` keeps state in memory, for development. `resonate serve` keeps it
+`resonate dev` keeps state in memory for development. `resonate serve` keeps it
 in a database — see [Backends](#backends).
 
 **5. Activate the function**
@@ -135,9 +135,7 @@ run again, and the plan — already persisted — does not.
 
 Every durable execution, live: status, function, when it was created, when it settled, and when it times out. Filter by status, function, or time window, and search by id, function, or tag.
 
-The console is compiled into the binary, fonts included, so it works on an
-air-gapped or on-prem host. Turn it off with `[gateways.gateway_web] enabled =
-false`, or `RESONATE_GATEWAYS__GATEWAY_WEB__ENABLED=false`.
+The console is compiled into the binary, so it works on an air-gapped or on-prem host.
 
 ---
 
@@ -151,19 +149,16 @@ false`, or `RESONATE_GATEWAYS__GATEWAY_WEB__ENABLED=false`.
   </picture>
 </div>
 
-Resonate sits in the middle of the stack you already run — your language, your compute, your storage, your transport — and a plugin for everything it does not reach yet.
+Resonate sits in the middle of the stack you already run — your language, your compute, your storage, your transport — and a plugin for everything it does not natively support yet.
 
 ### Build a server with the plugins you want
 
-A Resonate server is a list of plugins and a `run`. Everything that varies —
-which storage backend answers requests, which transports deliver, which edges
-listen — is a plugin, and which ones a binary carries is decided by the binary.
-Cargo is the plugin manager: name what you want as a dependency, name it again
-in the registry, and only that is resolved, downloaded and compiled.
+Resonate lets you build a server from three kinds of plugins: **servers** for
+storage, **workers** for transport, and **gateways** for the edge. Name the
+crates in `Cargo.toml`, register them in a `Registry`, and call `run` — Cargo
+resolves, downloads, and compiles only what you named.
 
-There is no cargo feature per engine. Choosing plugins is what a *binary* does,
-by naming them, and the binary this repository ships is simply the one that
-carries all of them.
+You pick plugins by naming them in `Cargo.toml` and registering them in `main.rs`.
 
 `Cargo.toml`:
 
@@ -176,9 +171,7 @@ resonate-gateway-http = { git = "https://github.com/resonatehq/resonate" }
 tokio = { version = "1", features = ["full"] }
 ```
 
-These crates are not on crates.io yet, so depend on them by git — or by `path`
-against a local checkout. Once they are published a version requirement
-(`resonate-base = "0.10"`) will say the same thing.
+These crates are not on crates.io yet, so specify them by git or by `path`.
 
 `src/main.rs`:
 
@@ -198,73 +191,63 @@ async fn main() -> std::process::ExitCode {
 }
 ```
 
-That is the whole binary: PostgreSQL for state, HTTP push for delivery, the
-HTTP API at the edge, and nothing else compiled in. It will not fall back to
-SQLite — with no `servers.server_postgres.url` configured it refuses to start
-and says so. A worker plugin someone else publishes joins the list as one more
-`.worker(&…::PLUGIN)` line.
+Resonate ships with the following plugins:
 
-It reads the same `resonate.toml` and the same `RESONATE_*` variables as the
-server this repository ships. Each plugin reads its own section — `servers.<id>`,
-`workers.<id>` or `gateways.<id>`, where `<id>` is the crate name with the
-`resonate-` prefix dropped and dashes turned into underscores, so
-`acme-worker-kafka` configures itself under `[workers.acme_worker_kafka]`.
-
-It has no command-line flags of its own. `Options` is where a binary adds them:
-`resonate serve`'s flags are `Options::set` calls over those same keys, and a
-custom binary can parse whatever it likes and do the same — or parse nothing at
-all and let the file and the environment say everything.
-
-| Plugin kind | What it is | Configured under |
-|---|---|---|
-| **server** | the storage backend that answers requests | `servers.<id>` |
-| **worker** | how work reaches your code | `workers.<id>` |
-| **gateway** | an edge that listens — the HTTP API, the console, metrics | `gateways.<id>` |
-
-The plugins this repository carries: servers `server_sqlite`, `server_postgres`,
-`server_mysql`, `server_scylladb` and `server_blob`; workers
-`transport_http_push`, `transport_http_poll`, `transport_gcps` and
-`worker_bash`; gateways `gateway_http`, `gateway_web` and `gateway_metrics`.
+| Kind | Plugin |
+|---|---|
+| Server | `server_sqlite` |
+| Server | `server_postgres` |
+| Server | `server_mysql` |
+| Server | `server_scylladb` |
+| Server | `server_blob` |
+| Worker | `transport_http_push` |
+| Worker | `transport_http_poll` |
+| Worker | `transport_gcps` |
+| Worker | `worker_bash` |
+| Gateway | `gateway_http` |
+| Gateway | `gateway_web` |
+| Gateway | `gateway_metrics` |
 
 ---
 
 ## Why Resonate
 
-|  | |
-|---|---|
-| **Durable by construction** | Promises, tasks, and schedules are persisted before they are acted on. A crash mid-flight is a resume, not a loss. |
-| **Formally specified** | The protocol has a machine-checked specification in [resonate-specification](https://github.com/resonatehq/resonate-specification), with mechanized invariants — not a prose document that drifted. |
-| **Differentially tested** | Every storage engine is compared step-for-step against an executable oracle on randomized traffic, across SQLite, PostgreSQL, and MySQL, with a snapshot diff after every request. |
-| **One binary** | `brew install`, `resonate serve`, done. No control plane to operate, no cluster to bootstrap. |
-| **Boring where it counts** | Your existing database is the state store. Your existing observability stack gets Prometheus metrics and OpenTelemetry traces. |
+**Durable by construction.** Promises, tasks, and schedules are persisted before they are acted on. A crash mid-flight is a resume, not a loss.
+
+**Formally specified.** The protocol has a machine-checked specification in [resonate-specification](https://github.com/resonatehq/resonate-specification), with mechanized invariants — not a prose document that drifted.
+
+**Differentially tested.** Every storage engine is compared step-for-step against an executable oracle on randomized traffic, across SQLite, PostgreSQL, and MySQL, with a snapshot diff after every request.
+
+**One binary.** `brew install`, `resonate serve`, done. No control plane to operate, no cluster to bootstrap.
+
+**Boring where it counts.** Your existing database is the state store. Your existing observability stack gets Prometheus metrics and OpenTelemetry traces.
 
 ---
 
 ## Backends
 
-Resonate keeps its state in a database you already run.
+Supported backends:
 
-| Backend | Best for | Select with |
-|---|---|---|
-| **SQLite** | local development, single-node deployments | the default — `resonate serve` |
-| **PostgreSQL** | the production default | `--storage-type postgres`, or `servers.active = "server_postgres"` |
-| **MySQL** | wherever it already runs | `--storage-type mysql`, or `servers.active = "server_mysql"` |
+| Backend | Flag |
+|---|---|
+| **SQLite** | *(default)* |
+| **PostgreSQL** | `--storage-type postgres` |
+| **MySQL** | `--storage-type mysql` |
+| **ScyllaDB** | `--storage-type scylladb` |
+| **Blob** | `--storage-type blob` |
 
-`server_scylladb` and `server_blob` ship in the same binary and are selected the
-same way.
-
-All three are held to the same behaviour by the differential test suite — the same requests go to every engine and to an executable model of the specification, and any divergence fails the build.
+All backends are held to the same behaviour by the differential test suite — the same requests go to every engine and to an executable model of the specification, and any divergence fails the build.
 
 ---
 
 ## Workers
 
-A worker is your code. Resonate does not care where it runs.
+A worker is your code. Run it anywhere.
 
 - **In-process** — embed the SDK in your application and let it serve its own executions.
 - **Out-of-process** — run a fleet of workers with their own lifecycle, scaled independently.
 
-Resonate reaches them however suits your network:
+Resonate supports the following transports:
 
 | Transport | Shape |
 |---|---|
@@ -276,15 +259,11 @@ Resonate reaches them however suits your network:
 
 ## Plugins
 
-A plugin represents an **external system's unit of work** — anything with a beginning and an end — as a durable promise. The plugin begins the work, sees it through to its terminal state, and settles the promise with the outcome.
+**Integration plugins** connect external systems to Resonate. Start a job in Airflow, render an image in Bannerbear, send a notification in Gotify — Resonate begins the work, tracks it to completion, and settles the promise with the result.
 
-These are integration plugins, and they are a different thing from the server
-plugins in [Architecture](#build-a-server-with-the-plugins-you-want) — those are
-the crates a server binary is built from.
+These are different from the [server plugins](#build-a-server-with-the-plugins-you-want) that define storage, transport, and the API edge.
 
-The [catalogue](https://github.com/resonatehq/resonate-plugins/blob/main/Plugins.md) lists **447** systems on the roadmap. Seven are built today: Apache Airflow, Bannerbear, Baserow, Gotify, n8n, Rundeck, and Zendesk.
-
-→ [resonatehq/resonate-plugins](https://github.com/resonatehq/resonate-plugins)
+See the [catalogue](https://github.com/resonatehq/resonate-plugins) for all **447** systems on the roadmap.
 
 ---
 
@@ -302,7 +281,7 @@ The [catalogue](https://github.com/resonatehq/resonate-plugins/blob/main/Plugins
 
 ## Deploy
 
-For the full guide see [Set up and run Resonate](https://docs.resonatehq.io/operate/run-server).
+See the [full guide](https://docs.resonatehq.io/operate/run-server) for deployment instructions.
 
 ### Homebrew
 
@@ -311,20 +290,8 @@ brew install resonatehq/tap/resonate
 resonate serve
 ```
 
-Every release and its artifacts are on the [releases page](https://github.com/resonatehq/resonate/releases).
+Or download binaries directly from the [releases page](https://github.com/resonatehq/resonate/releases).
 
-On start you will see:
-
-```shell
-INFO resonate_base: Server plugin selected server=server_sqlite
-INFO resonate_base: Worker plugin registered worker=transport_http_push schemes=["http", "https"]
-INFO resonate_base: Gateway plugin registered gateway=gateway_http
-INFO resonate_base: Gateway plugin registered gateway=gateway_web
-INFO resonate_gateway_http: Server listening bind=0.0.0.0:8001
-INFO resonate_gateway_metrics: Metrics listening bind=0.0.0.0:9090
-```
-
-HTTP on `8001`, metrics on `9090`. These are the defaults every SDK assumes, and both are configurable.
 
 ### Docker
 
@@ -347,7 +314,11 @@ cargo build --release
 
 ## Configuration
 
-Configuration comes from a TOML file, environment variables (`RESONATE_` prefix, `__` for nesting), or CLI flags — in that order of increasing precedence.
+Configuration layers in order of increasing precedence:
+
+1. TOML file (`resonate.toml`)
+2. Environment variables
+3. CLI flags
 
 ```shell
 RESONATE_GATEWAYS__GATEWAY_HTTP__BIND=0.0.0.0:3000
@@ -355,56 +326,17 @@ RESONATE_SERVERS__ACTIVE=server_postgres
 RESONATE_SERVERS__SERVER_POSTGRES__URL=postgres://...
 ```
 
-Every flag is one key, and `--set` says the same thing in the general case —
-`--server-port 3000` and `--set gateways.gateway_http.bind=0.0.0.0:3000` are the
-same override. That is what lets a binary carrying a plugin this repository has
-never heard of be configured without a flag being added for it.
-
 ### Outbound authentication for HTTP push
 
-When Resonate delivers execute messages to protected Cloud Functions or Cloud Run services, it can attach an outbound authentication header. Configure it under `[workers.transport_http_push.auth]`.
+When Resonate calls protected endpoints, it can attach an auth header under `[workers.transport_http_push.auth]`:
 
-**Google Cloud ID token** (recommended for Cloud Run / Cloud Functions)
-
-```toml
-[workers.transport_http_push.auth]
-mode = "gcp"
-# audience = "https://my-function.example.com"  # optional; defaults to the delivery URL
-```
-
-```shell
-RESONATE_WORKERS__TRANSPORT_HTTP_PUSH__AUTH__MODE=gcp
-RESONATE_WORKERS__TRANSPORT_HTTP_PUSH__AUTH__AUDIENCE=https://...   # optional
-```
-
-```shell
-resonate serve --transports-http-push-auth-mode gcp
-```
+| Mode | TOML | CLI |
+|---|---|---|
+| **GCP ID token** (Cloud Run / Cloud Functions) | `mode = "gcp"` | `--transports-http-push-auth-mode gcp` |
+| **Static bearer** | `mode = "bearer"` <br> `token = "my-token"` | `--transports-http-push-auth-mode bearer` <br> `--transports-http-push-auth-token my-token` |
+| **None** (default) | `mode = "none"` | — |
 
 Tokens come from [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials); on Cloud Run this resolves to the service account identity automatically. Acquisition and refresh are handled by the `google-cloud-auth` crate.
-
-**Static bearer token**
-
-```toml
-[workers.transport_http_push.auth]
-mode = "bearer"
-token = "my-static-token"
-```
-
-**No auth** (default)
-
-```toml
-[workers.transport_http_push.auth]
-mode = "none"
-```
-
-**Custom header name** — defaults to `Authorization`.
-
-```toml
-[workers.transport_http_push.auth]
-mode = "gcp"
-header = "X-Custom-Auth"
-```
 
 ---
 
