@@ -761,6 +761,11 @@ export class InnerContext implements Context {
           "resonate:branch": id,
           "resonate:parent": breaksLineage ? id : this.id,
           "resonate:origin": breaksLineage ? id : this.originId,
+          // A latent promise has no function behind it: only an out-of-band actor
+          // calling `promises.resolve` can settle it, which makes it external. Marking
+          // it so entitles it to an armed timeout and to awaiters. Before the caller's
+          // tags, so an explicit tag still wins.
+          "resonate:external": "true",
           ...tags,
         },
       },

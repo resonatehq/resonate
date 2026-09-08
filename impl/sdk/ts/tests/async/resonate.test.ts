@@ -444,6 +444,7 @@ describe("Resonate usage tests", () => {
     expect(await h.result()).toBe("myValue");
     expect((await resonate.promises.get("hitl-1:0")).tags).toEqual({
       "resonate:branch": "hitl-1:0",
+      "resonate:external": "true",
       "resonate:origin": "hitl-1",
       "resonate:parent": "hitl-1",
       "resonate:scope": "global",
@@ -470,6 +471,7 @@ describe("Resonate usage tests", () => {
     expect(durable.timeoutAt).toBeLessThan(time + 5 * util.HOUR + 1000);
     expect(durable.tags).toEqual({
       "resonate:branch": "timeout-1:0",
+      "resonate:external": "true",
       "resonate:origin": "timeout-1",
       "resonate:parent": "timeout-1",
       "resonate:scope": "global",
