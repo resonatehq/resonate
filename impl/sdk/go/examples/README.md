@@ -33,11 +33,11 @@ hello, world!
 1. Create `examples/<name>/` with a `main.go` (`package main`).
 2. Add a `go.mod`:
    ```
-   module github.com/resonatehq/resonate-sdk-go/examples/<name>
+   module github.com/resonatehq/resonate/impl/sdk/go/examples/<name>
 
    go 1.22
 
-   require github.com/resonatehq/resonate-sdk-go v0.0.0-00010101000000-000000000000
+   require github.com/resonatehq/resonate/impl/sdk/go v0.0.0-00010101000000-000000000000
    ```
 3. Append `./<name>` to the `use (...)` block in `examples/go.work`.
 4. `cd examples/<name> && go mod tidy && go run .`

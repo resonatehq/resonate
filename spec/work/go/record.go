@@ -10,8 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	resonate "github.com/resonatehq/resonate-sdk-go"
-	"github.com/resonatehq/resonate-sdk-go/httpnet"
+	resonate "github.com/resonatehq/resonate/impl/sdk/go"
+	"github.com/resonatehq/resonate/impl/sdk/go/httpnet"
 )
 
 // Recording every request and response.

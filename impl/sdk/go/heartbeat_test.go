@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/resonatehq/resonate-sdk-go"
+	"github.com/resonatehq/resonate/impl/sdk/go"
 )
 
 // recordingNetwork captures every Send call and returns a canned 200 envelope

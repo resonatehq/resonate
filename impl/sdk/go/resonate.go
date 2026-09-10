@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/resonatehq/resonate-sdk-go/httpnet"
+	"github.com/resonatehq/resonate/impl/sdk/go/httpnet"
 )
 
 // ──────────────────────────────────────────────────────────────────────────

@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/resonatehq/resonate-sdk-go"
-	"github.com/resonatehq/resonate-sdk-go/localnet"
+	"github.com/resonatehq/resonate/impl/sdk/go"
+	"github.com/resonatehq/resonate/impl/sdk/go/localnet"
 )
 
 func newTestSender(t *testing.T) (*resonate.Sender, func()) {

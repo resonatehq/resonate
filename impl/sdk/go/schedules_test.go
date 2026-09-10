@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	resonate "github.com/resonatehq/resonate-sdk-go"
+	resonate "github.com/resonatehq/resonate/impl/sdk/go"
 )
 
 func TestSchedulesCreateGetRoundtrip(t *testing.T) {

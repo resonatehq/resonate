@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	resonate "github.com/resonatehq/resonate-sdk-go"
-	"github.com/resonatehq/resonate-sdk-go/localnet"
+	resonate "github.com/resonatehq/resonate/impl/sdk/go"
+	"github.com/resonatehq/resonate/impl/sdk/go/localnet"
 )
 
 // ──────────────────────────────────────────────────────────────────────────

@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	resonate "github.com/resonatehq/resonate-sdk-go"
-	"github.com/resonatehq/resonate-sdk-go/httpnet"
+	resonate "github.com/resonatehq/resonate/impl/sdk/go"
+	"github.com/resonatehq/resonate/impl/sdk/go/httpnet"
 )
 
 // ──────────────────────────────────────────────────────────────────────────

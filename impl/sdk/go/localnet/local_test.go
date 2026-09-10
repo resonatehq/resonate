@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	resonate "github.com/resonatehq/resonate-sdk-go"
+	resonate "github.com/resonatehq/resonate/impl/sdk/go"
 )
 
 // sendEnvelope is a small test helper that wraps a flat data payload into a

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	resonate "github.com/resonatehq/resonate-sdk-go"
+	resonate "github.com/resonatehq/resonate/impl/sdk/go"
 )
 
 func TestConstantRetry_NextDelay(t *testing.T) {

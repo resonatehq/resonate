@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
-	resonate "github.com/resonatehq/resonate-sdk-go"
+	resonate "github.com/resonatehq/resonate/impl/sdk/go"
 )
 
 // pendingRetryTTL is how long a pending task waits before being re-dispatched

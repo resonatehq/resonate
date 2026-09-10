@@ -38,7 +38,7 @@ brew install resonatehq/tap/resonate
 2. Install the Resonate Go SDK
 
 ```shell
-go get github.com/resonatehq/resonate-sdk-go@latest
+go get github.com/resonatehq/resonate/impl/sdk/go@latest
 ```
 
 No semver tag is published yet — `@latest` resolves to a Go module pseudo-version pinned to the latest `main` commit. Pin to a specific commit if you need stability before `v0.1.0` is cut.
@@ -56,7 +56,7 @@ import (
 	"log"
 	"time"
 
-	resonate "github.com/resonatehq/resonate-sdk-go"
+	resonate "github.com/resonatehq/resonate/impl/sdk/go"
 )
 
 type GreetArgs struct {
@@ -136,8 +136,8 @@ import (
     "log"
     "time"
 
-    resonate "github.com/resonatehq/resonate-sdk-go"
-    "github.com/resonatehq/resonate-sdk-go/localnet"
+    resonate "github.com/resonatehq/resonate/impl/sdk/go"
+    "github.com/resonatehq/resonate/impl/sdk/go/localnet"
 )
 
 type GreetArgs struct {
@@ -225,7 +225,7 @@ The package owns the workflow API (`Context`, `Effects`, `Run`, `RPC`, `Sleep`, 
 - [`httpnet`](./httpnet) — HTTP + SSE transport for talking to a live Resonate server.
 - [`localnet`](./localnet) — in-process transport that runs the server state machine in a single actor goroutine. Useful for tests and for "no-server-required" local development.
 
-See the package documentation on [pkg.go.dev](https://pkg.go.dev/github.com/resonatehq/resonate-sdk-go) (published once the first semver tag is cut) or read `doc.go` directly.
+See the package documentation on [pkg.go.dev](https://pkg.go.dev/github.com/resonatehq/resonate/impl/sdk/go) (published once the first semver tag is cut) or read `doc.go` directly.
 
 ## Documentation
 
