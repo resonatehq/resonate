@@ -1,0 +1,41 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Example binaries (compiled output named after each example directory)
+/examples/fibonacci/fibonacci
+/examples/hello/hello
+/examples/pipeline/pipeline
+/examples/saga/saga
+
+# Test binaries and coverage
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# Go workspace
+go.work
+go.work.sum
+!examples/go.work
+
+# Dependency directories
+vendor/
+
+# Editor/IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
