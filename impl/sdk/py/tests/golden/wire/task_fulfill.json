@@ -1,0 +1,25 @@
+{
+  "data": {
+    "action": {
+      "data": {
+        "id": "wf-1",
+        "state": "resolved",
+        "value": {
+          "data": "NDI="
+        }
+      },
+      "head": {
+        "corrId": "sr-golden",
+        "version": "2026-04-01"
+      },
+      "kind": "promise.settle"
+    },
+    "id": "t1",
+    "version": 3
+  },
+  "head": {
+    "corrId": "sr-golden",
+    "version": "2026-04-01"
+  },
+  "kind": "task.fulfill"
+}

@@ -1,0 +1,72 @@
+name: cd
+
+on:
+  release:
+    types: [released]
+
+jobs:
+  # One job: every check that can reject a bad release (version == tag, tests
+  # from source, and -- the check that matters for independent versioning --
+  # tests against the built wheels) runs before the publish step, so nothing
+  # ships if any of them fail. The publish step ships exactly the dist/ this
+  # job built and tested.
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: 0.11.21
+
+      - name: set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The tag tracks the root SDK's version; a mismatch means the wheel
+      # would publish under the wrong version, so nothing ships.
+      - name: verify the root version matches the release tag
+        run: |
+          version=$(uv version --short)
+          test "$version" = "${GITHUB_REF_NAME#v}" \
+            || { echo "root version $version != tag ${GITHUB_REF_NAME#v}"; exit 1; }
+
+      - name: install
+        run: uv sync --locked --all-extras --all-packages
+
+      - name: run tests
+        run: uv run pytest
+
+      - name: build library
+        run: uv build --all-packages
+
+      # Reinstall the workspace packages from the built wheels with the
+      # real resolver (no --no-deps), then run the whole suite against
+      # exactly the code that will be published. Explicit wheel paths pin
+      # every workspace package to its built artifact, so the resolver
+      # cannot substitute a PyPI release, and it must satisfy each
+      # member's declared range against the shipped set -- a range that
+      # does not admit the built root fails the install here. No package
+      # is named, so a new member is covered the day it appears in dist.
+      - name: run tests against the built artifacts
+        run: |
+          uv pip install --reinstall dist/*.whl
+          uv run --no-sync pytest
+
+      # --check-url skips any package whose version is already on PyPI, so an
+      # unchanged member rides along a root release without republishing and a
+      # re-run finishes a partial publish. The checks above reject a changed
+      # member whose version is already out, so a skip here is always a
+      # deliberate ride-along.
+      #
+      # Publishing uses the PYPI_TOKEN API token, not trusted publishing
+      # (OIDC): a single OIDC publisher identity maps to exactly one PyPI
+      # project, so it cannot cover the whole workspace. The token is taken
+      # from the UV_PUBLISH_TOKEN env var to keep it out of the logs.
+      - name: publish to PyPI
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
+        run: uv publish --check-url https://pypi.org/simple/

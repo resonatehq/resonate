@@ -1,0 +1,12 @@
+{
+  "data": {
+    "id": "t1",
+    "version": 1
+  },
+  "head": {
+    "auth": "secret-token",
+    "corrId": "sr-golden",
+    "version": "2026-04-01"
+  },
+  "kind": "task.release"
+}
