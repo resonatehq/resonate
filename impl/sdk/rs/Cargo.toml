@@ -1,0 +1,12 @@
+[workspace]
+members = ["resonate", "resonate-macros", "resonate-postgres"]
+resolver = "2"
+
+[workspace.package]
+version = "0.6.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Resonate SDK for Rust"
+repository = "https://github.com/resonatehq/resonate-sdk-rs"
+keywords = ["durable", "async", "workflow", "sdk", "durable-execution"]
+categories = ["asynchronous", "development-tools"]
