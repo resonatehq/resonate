@@ -42,6 +42,7 @@ async function research(context: Context, question: string) {
 }
 ```
 
+That is the whole program, location transparent and failure transparent.
 The same program can be written in any Resonate-compatible SDK and run on
 any Resonate-compatible server.
 
