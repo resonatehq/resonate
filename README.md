@@ -12,20 +12,16 @@
 
 ---
 
-[Resonate](https://resonatehq.io/) is a durable execution platform and a
-durable execution factory, built on an open, formal specification of
-[distributed async await](https://www.distributed-async-await.io/).
-
-The platform is dead simple: functions and promises, on a single binary or on
-Postgres. Write normal code and get durable, scalable, and reliable
-applications. The factory is what makes it trustworthy: the specification is
-executable, and every server and SDK in this repository is held to it.
+Resonate is a durable execution platform and a durable execution factory,
+built on an open, formal specification of distributed async await.
 
 ---
 
 ## Example
 
-A deep research agent: plan the searches, fan them out, synthesize the results.
+Resonate durable execution is dead simple: durable functions and durable
+promises. The example shows a research agent that plans the searches, fans
+them out, and synthesizes the results.
 
 ```typescript
 async function research(context: Context, question: string) {
