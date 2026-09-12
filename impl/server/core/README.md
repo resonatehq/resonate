@@ -2,7 +2,7 @@
 
 ![Resonate](./assets/resonate-banner.png)
 
-[![License](https://img.shields.io/badge/license-Apache--2.0-1EE3CF?style=flat-square)](./LICENSE)
+[![License](https://img.shields.io/badge/license-Apache--2.0-1EE3CF?style=flat-square)](../../../LICENSE)
 [![Rust](https://img.shields.io/badge/built%20with-Rust-1EE3CF?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![Discord](https://img.shields.io/badge/Discord-join-1EE3CF?style=flat-square&logo=discord&logoColor=white)](https://resonatehq.io/discord)
 [![Docs](https://img.shields.io/badge/docs-resonatehq.io-1EE3CF?style=flat-square)](https://docs.resonatehq.io/)
@@ -352,7 +352,7 @@ Tokens come from [Application Default Credentials](https://cloud.google.com/docs
 
 ## License
 
-[Apache-2.0](./LICENSE)
+[Apache-2.0](../../../LICENSE)
 
 <div align="center">
 <sub>Logos are the trademarks of their respective owners and appear here to identify the systems Resonate integrates with.</sub>

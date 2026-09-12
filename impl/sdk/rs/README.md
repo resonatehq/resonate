@@ -1,6 +1,6 @@
 # Resonate Rust SDK
 
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](../../../LICENSE)
 
 The Resonate Rust SDK lets you build reliable, distributed applications using Rust's async/await model.
 Built on [tokio](https://tokio.rs), it gives you durable execution with automatic recovery, idempotency, and distributed coordination — without the infrastructure headache.

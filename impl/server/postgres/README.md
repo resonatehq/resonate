@@ -80,4 +80,4 @@ Questions, ideas, or want to help? Join the [Resonate Discord](https://resonateh
 
 ## License
 
-[Apache 2.0](./LICENSE).
+[Apache 2.0](../../../LICENSE).
