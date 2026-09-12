@@ -6,7 +6,7 @@
 [![Discord](https://img.shields.io/badge/Discord-join-1EE3CF?style=flat-square&logo=discord&logoColor=white)](https://resonatehq.io/discord)
 [![Docs](https://img.shields.io/badge/docs-resonatehq.io-1EE3CF?style=flat-square)](https://docs.resonatehq.io/)
 
-[Example](#example) · [Layout](#layout) · [Get started](#get-started) · [Docs](https://docs.resonatehq.io/)
+[Example](#example) · [Architecture](#architecture) · [Layout](#layout) · [Get started](#get-started) · [Docs](https://docs.resonatehq.io/)
 
 </div>
 
@@ -45,6 +45,22 @@ async function research(context: Context, question: string) {
 That is the whole program, location transparent and failure transparent.
 The same program can be written in any Resonate-compatible SDK and run on
 any Resonate-compatible server.
+
+---
+
+## Architecture
+
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./impl/server/core/assets/architecture-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="./impl/server/core/assets/architecture-light.svg">
+    <img alt="Resonate architecture" src="./impl/server/core/assets/architecture-light.svg">
+  </picture>
+</div>
+
+Resonate sits in the middle of the stack you already run: your language, your
+compute, your storage, your transport, and a plugin for everything it does not
+natively support yet.
 
 ---
 
@@ -102,3 +118,7 @@ Running on Postgres instead? See [`impl/server/postgres/`](impl/server/postgres)
 ## License
 
 [Apache-2.0](./LICENSE)
+
+<div align="center">
+<sub>Logos are the trademarks of their respective owners and appear here to identify the systems Resonate integrates with.</sub>
+</div>
