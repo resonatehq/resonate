@@ -2,7 +2,7 @@
 
 ![Resonate](./impl/server/core/assets/resonate-banner.png)
 
-[![License](https://img.shields.io/badge/license-Apache--2.0-1EE3CF?style=flat-square)](#license)
+[![License](https://img.shields.io/badge/license-Apache--2.0-1EE3CF?style=flat-square)](./LICENSE)
 [![Discord](https://img.shields.io/badge/Discord-join-1EE3CF?style=flat-square&logo=discord&logoColor=white)](https://resonatehq.io/discord)
 [![Docs](https://img.shields.io/badge/docs-resonatehq.io-1EE3CF?style=flat-square)](https://docs.resonatehq.io/)
 
@@ -113,4 +113,4 @@ Running on Postgres instead? See [`impl/server/postgres/`](impl/server/postgres)
 
 ## License
 
-Apache-2.0. Each component carries its own `LICENSE` file.
+[Apache-2.0](./LICENSE)
