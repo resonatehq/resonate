@@ -20,8 +20,8 @@ built on an open, formal specification of distributed async await.
 ## Example
 
 Resonate durable execution is dead simple: durable functions and durable
-promises. The example shows a research agent that plans the searches, fans
-them out, and synthesizes the results.
+promises. The example shows a research agent. The research agent accepts a
+question, plans searches, fans them out, and synthesizes the results.
 
 ```typescript
 async function research(context: Context, question: string) {
