@@ -42,11 +42,8 @@ async function research(context: Context, question: string) {
 }
 ```
 
-That is the whole orchestration — no queue to drain, no state machine to
-advance, no scheduler to configure.
-
-The same program can be written in any of the SDKs below and run against
-either server.
+The same program can be written in any Resonate-compatible SDK and run on
+any Resonate-compatible server.
 
 ---
 
