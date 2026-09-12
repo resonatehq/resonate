@@ -26,10 +26,12 @@ question, plans searches, fans them out, and synthesizes the results.
 ```typescript
 async function research(context: Context, question: string) {
   // Plan the searches
+  // context.run calls a function and persists its result
   const queries = await context.run(agent,
     `Plan the searches for: ${question}`
   );
   // Fan out the searches
+  // context.rpc calls a function on another worker, even in another language
   const results = await Promise.allSettled(
     queries.map((q) => context.rpc(search, q))
   );
@@ -42,14 +44,6 @@ async function research(context: Context, question: string) {
 
 That is the whole orchestration — no queue to drain, no state machine to
 advance, no scheduler to configure.
-
-- **`context.run`** calls a function and persists its result. On recovery the
-  call is not made again, its result is read back.
-- **`context.rpc`** calls a function on another worker, on another machine, in
-  another language. It returns a promise, so fan-out with per-branch failure
-  handling is the same code you would write in-process.
-- **Everything in between survives.** Kill the worker mid-flight and the
-  execution is still there, waiting for the next one to pick it up.
 
 The same program can be written in any of the SDKs below and run against
 either server.
