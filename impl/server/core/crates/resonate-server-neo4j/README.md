@@ -29,6 +29,10 @@ default; every statement is `IF NOT EXISTS`).
 | `(w)-[:AWAITS {ready: true}]->(p)` | `p` settled and `w` has not consumed it yet: `w`'s `resumes` entry for `p`. |
 | `(c)-[:CHILD_OF]->(p)` | The `resonate:parent` tag, as an edge. Nothing in the protocol reads it. |
 
+Every node also carries `origin` (the id before the first `:`) and `lineage`
+(everything after it, `1.2.1`, empty for a root), so a graph tool has a short
+caption for a node's place in its tree.
+
 The tag map and both header maps are JSON strings on the node (Neo4j has no
 map properties). The tags are also flattened into `tag_kv`, a list of
 JSON-encoded `[key, value]` pairs, which is what makes tag containment a
@@ -43,13 +47,24 @@ snapshot this engine reports is byte-identical to the relational engines'.
 
 ## Seeing an execution
 
-Open Neo4j Browser (`:7474` on the compose profile) and paste:
+Open Neo4j Browser (`:7474` on the compose profile), caption the nodes by
+their place in the tree, and draw one execution:
+
+```
+:style node.Promise { caption: '{lineage}'; color: #1EE3CF; border-color: #17b8a8; text-color-internal: #0b3d3a; diameter: 44px; }
+```
 
 ```cypher
 // One execution, as a tree
 MATCH path = (root:Promise {id: 'billing.invoice-1'})<-[:CHILD_OF*0..]-(:Promise)
 RETURN path
 ```
+
+![Fibonacci of 7 on the Neo4j backend, in Neo4j Browser](assets/fibonacci-neo4j-browser.png)
+
+That is `fibonacci.ts --mode=rpc --n=7` from the TypeScript SDK's examples:
+forty-one promises, one per recursive call, and the forty `CHILD_OF` edges
+that make them a tree.
 
 ```cypher
 // The same tree, with who is blocked on whom
