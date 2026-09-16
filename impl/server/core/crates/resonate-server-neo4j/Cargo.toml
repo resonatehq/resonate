@@ -1,0 +1,24 @@
+[package]
+name = "resonate-server-neo4j"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Resonate server: durable state in Neo4j — one node per promise, AWAITS and CHILD_OF relationships, one Bolt transaction per transition."
+
+# Depends on no other plugin, and on no other server's library. What it shares
+# with the SQL servers and with ScyllaDB is a resemblance: the same shape of
+# engine and the same shape of shell, copied a third time, so the three copies
+# can be diffed and any divergence between them read off rather than argued.
+
+[dependencies]
+resonate-core = { path = "../resonate-core" }
+resonate-plugin = { path = "../resonate-plugin" }
+resonate-timer-wheel = { path = "../resonate-timer-wheel" }
+neo4rs = "0.8"
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+validator = { workspace = true }
+tokio = { version = "1", features = ["rt", "sync", "macros", "time"] }
+tracing = "0.1"
+lazy_static = "1"

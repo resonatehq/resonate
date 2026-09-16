@@ -7,6 +7,7 @@
 //   Oracle   — always active (in-memory reference model)
 //   Postgres — active when TEST_POSTGRES_URL env var is set
 //   MySQL    — active when TEST_MYSQL_URL env var is set
+//   Neo4j    — active when TEST_NEO4J_URI env var is set
 //
 // Coverage requirement: the test runs until every operation kind has produced
 // at least one 2xx response, guaranteeing that we are not trivially passing by
@@ -18,6 +19,7 @@
 // Run (all backends):
 //   TEST_POSTGRES_URL=postgres://resonate:resonate@localhost:5432/resonate \
 //   TEST_MYSQL_URL=mysql://resonate:resonate@localhost:3306/resonate \
+//   TEST_NEO4J_URI=bolt://localhost:7687 TEST_NEO4J_PASSWORD=resonate \
 //     cargo test --test differential -- --nocapture
 //
 // Run another trajectory:
@@ -44,6 +46,8 @@ use resonate_oracle::{Oracle, SharedOracle};
 use resonate_server_mysql::MysqlEngine;
 use resonate_server_postgres::PostgresEngine;
 use resonate_server_sqlite::SqliteEngine;
+
+mod neo4j_adapter;
 use serde_json::{json, Value};
 
 const TASK_RETRY_TIMEOUT_MS: i64 = 30_000;
@@ -244,10 +248,11 @@ async fn differential_random() {
     // Postgres and MySQL are opt-in via env vars.
     let pg_url = std::env::var("TEST_POSTGRES_URL").ok();
     let my_url = std::env::var("TEST_MYSQL_URL").ok();
+    let neo_uri = std::env::var("TEST_NEO4J_URI").ok();
 
     // Hold the lock while connecting + initializing schemas so concurrent test
     // runs on the same DB don't race on debug.reset / schema creation.
-    let _db_guard = if pg_url.is_some() || my_url.is_some() {
+    let _db_guard = if pg_url.is_some() || my_url.is_some() || neo_uri.is_some() {
         Some(db_lock().lock().unwrap_or_else(|e| e.into_inner()))
     } else {
         None
@@ -281,6 +286,16 @@ async fn differential_random() {
         }
     };
 
+    let neo_backend: Option<Backend> = match neo_uri {
+        Some(_) => neo4j_adapter::connect_from_env(TASK_RETRY_TIMEOUT_MS, PRELOAD_LIMIT)
+            .await
+            .map(|b| Arc::new(b) as Backend),
+        None => {
+            eprintln!("[diff] TEST_NEO4J_URI not set — Neo4j skipped");
+            None
+        }
+    };
+
     let mut backends: Vec<(String, Backend)> = vec![
         ("sqlite".into(), sqlite),
         ("oracle".into(), Arc::clone(&oracle) as Backend),
@@ -290,6 +305,9 @@ async fn differential_random() {
     }
     if let Some(my) = my_backend {
         backends.push(("mysql".into(), my));
+    }
+    if let Some(neo) = neo_backend {
+        backends.push(("neo4j".into(), neo));
     }
 
     // Iterating on one backend does not need all of them, and a full run is

@@ -68,6 +68,31 @@ services:
       resonate:
         aliases: [resonate-server]
 
+  resonate-server-neo4j:
+    build: .
+    profiles: [neo4j]
+    ports:
+      - "8001:8001"   # the protocol, the poll endpoint and the console
+      - "9090:9090"   # prometheus
+    environment:
+      - RESONATE_GATEWAYS__GATEWAY_HTTP__BIND=0.0.0.0:8001
+      - RESONATE_GATEWAYS__GATEWAY_METRICS__BIND=0.0.0.0:9090
+      - RESONATE_LEVEL=info
+      - RESONATE_SERVERS__ACTIVE=server_neo4j
+      - RESONATE_SERVERS__SERVER_NEO4J__URI=bolt://neo4j:7687
+      - RESONATE_SERVERS__SERVER_NEO4J__PASSWORD=resonate
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8001/ready || exit 1"]
+      interval: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      resonate:
+        aliases: [resonate-server]
+
   resonate-server-sqlite-auth:
     build: .
     profiles: [sqlite-auth]
@@ -178,6 +203,24 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - resonate
+
+  # Neo4j Browser is on http://localhost:7474 (user neo4j, password resonate):
+  # MATCH path = (r:Promise)<-[:CHILD_OF*0..]-(:Promise) WHERE r.id = r.origin RETURN path
+  neo4j:
+    image: neo4j:5
+    profiles: [neo4j]
+    environment:
+      NEO4J_AUTH: neo4j/resonate
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p resonate 'RETURN 1' || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
     networks:
       - resonate
 

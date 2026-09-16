@@ -200,6 +200,7 @@ Resonate ships with the following plugins:
 | Server | `server_mysql` |
 | Server | `server_scylladb` |
 | Server | `server_blob` |
+| Server | `server_neo4j` |
 | Worker | `transport_http_push` |
 | Worker | `transport_http_poll` |
 | Worker | `transport_gcps` |
@@ -235,8 +236,11 @@ Supported backends:
 | **MySQL** | `--storage-type mysql` |
 | **ScyllaDB** | `--storage-type scylladb` |
 | **Blob** | `--storage-type blob` |
+| **Neo4j** | `--storage-type neo4j` |
 
 All backends are held to the same behaviour by the differential test suite — the same requests go to every engine and to an executable model of the specification, and any divergence fails the build.
+
+On Neo4j every promise is a node, every await is an edge, and every call tree is a path — open the database in Neo4j Browser and the execution draws itself. See [`crates/resonate-server-neo4j`](crates/resonate-server-neo4j) for the queries.
 
 ---
 
@@ -324,6 +328,7 @@ Configuration layers in order of increasing precedence:
 RESONATE_GATEWAYS__GATEWAY_HTTP__BIND=0.0.0.0:3000
 RESONATE_SERVERS__ACTIVE=server_postgres
 RESONATE_SERVERS__SERVER_POSTGRES__URL=postgres://...
+RESONATE_SERVERS__SERVER_NEO4J__URI=bolt://...
 ```
 
 ### Outbound authentication for HTTP push

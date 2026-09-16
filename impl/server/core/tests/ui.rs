@@ -7,9 +7,9 @@
 //! same JSON from each. Where a dialect has an opinion — how NULLs sort, what
 //! a JSON containment operator is called — the answer must still be the same.
 //!
-//! SQLite and the oracle always run. Postgres and MySQL run when
-//! `TEST_POSTGRES_URL` / `TEST_MYSQL_URL` name a database, exactly as the
-//! differential does.
+//! SQLite and the oracle always run. Postgres, MySQL and Neo4j run when
+//! `TEST_POSTGRES_URL` / `TEST_MYSQL_URL` / `TEST_NEO4J_URI` name a database,
+//! exactly as the differential does.
 
 use std::collections::HashMap;
 
@@ -19,6 +19,9 @@ use resonate_core::types::{
 use resonate_oracle::SharedOracle;
 use resonate_sql::engine::{Engine, Input};
 use serde_json::{json, Value};
+
+#[path = "../diff/neo4j_adapter.rs"]
+mod neo4j_adapter;
 
 const T0: i64 = 1_700_000_000_000;
 const WORKER: &str = "http://worker:9999";
@@ -541,6 +544,13 @@ async fn every_backend_gives_the_same_answer() {
         my.init(true).await.expect("mysql schema");
         reset(&my).await;
         engines.push(("mysql", &my));
+    }
+
+    let neo;
+    if let Some(backend) = neo4j_adapter::connect_from_env(30_000, 10).await {
+        neo = backend;
+        reset(&neo).await;
+        engines.push(("neo4j", &neo));
     }
 
     same_answers(&engines).await;
