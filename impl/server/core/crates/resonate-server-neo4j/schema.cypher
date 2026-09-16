@@ -21,7 +21,9 @@
 //
 //   (child:Promise)-[:CHILD_OF]->(parent:Promise)
 //     the resonate:parent tag, as an edge. Nothing in the protocol reads it;
-//     it is there so the call tree is a path a graph tool can draw.
+//     it is there so the call tree is a path a graph tool can draw. Beside
+//     it every node carries `lineage`, the id after the origin, so the tool
+//     has a short caption for the node's place in that tree.
 //
 // Every statement is IF NOT EXISTS, so applying this to a database that
 // already carries it is a no-op. Neo4j runs schema statements outside data

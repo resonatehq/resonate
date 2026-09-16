@@ -238,11 +238,17 @@ impl Neo4jEngine {
     /// One transaction: begin, run the body, commit; and once more from the
     /// top when a conditional write lost its race.
     ///
-    /// One retry, unconditionally, as the SQL engines do. A deadlock or a
-    /// constraint violation means the transaction rolled back with nothing
-    /// committed, and what the body emitted is dropped with it — the messages
-    /// and deadlines come back only from an attempt that committed, which is
-    /// the atomicity the port promises.
+    /// A deadlock or a constraint violation means the transaction rolled back
+    /// with nothing committed, and what the body emitted is dropped with it —
+    /// the messages and deadlines come back only from an attempt that
+    /// committed, which is the atomicity the port promises.
+    ///
+    /// Three retries where the SQL engines take one. A transaction here holds
+    /// its node locks across several round trips rather than for one
+    /// statement, so two workers on one call tree — a parent suspending on
+    /// its children while a child fulfils and fans out to the parent — meet in
+    /// a deadlock more often than they do on Postgres. Each loser rolls back
+    /// and runs again; only after the last does the caller see a 503.
     pub(crate) async fn transact<'c, T, F>(
         &self,
         f: F,
@@ -250,7 +256,7 @@ impl Neo4jEngine {
     where
         F: for<'a> Fn(&'a mut Tx<'c>) -> TxFuture<'a, T>,
     {
-        const MAX_RETRIES: u32 = 1;
+        const MAX_RETRIES: u32 = 3;
         for attempt in 0..=MAX_RETRIES {
             let txn = self.graph.start_txn().await.map_err(map_err)?;
             let mut tx: Tx<'c> = Tx::new(txn, self.task_retry_timeout, self.preload_limit);
@@ -316,12 +322,15 @@ impl Neo4jEngine {
                 503,
                 "Serialization failure, please retry",
             )),
-            Err(e) => Output::response(ResponseEnvelope::error(
-                req.kind.clone(),
-                req.head.corr_id.clone(),
-                500,
-                &format!("Internal error: {}", e),
-            )),
+            Err(e) => {
+                tracing::error!(kind = %req.kind, error = %e, "Storage error");
+                Output::response(ResponseEnvelope::error(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    500,
+                    &format!("Internal error: {}", e),
+                ))
+            }
         }
     }
 

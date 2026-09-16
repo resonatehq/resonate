@@ -25,6 +25,13 @@ pub(crate) fn origin_of(id: &str) -> &str {
     id.split_once(':').map(|(o, _)| o).unwrap_or(id)
 }
 
+/// The lineage is everything after the first ':' — the promise's place in
+/// its tree (`1.2.1`), and the empty string for a root. Stored so a graph
+/// tool has something short to caption a node with.
+pub(crate) fn lineage_of(id: &str) -> &str {
+    id.split_once(':').map(|(_, l)| l).unwrap_or("")
+}
+
 /// A driver error, as this crate reports it.
 ///
 /// Three things mean "nothing was committed, run it again": a transient error
@@ -32,21 +39,28 @@ pub(crate) fn origin_of(id: &str) -> &str {
 /// transaction's termination, and a uniqueness constraint violation — which is
 /// how two concurrent creates of the same id resolve, the loser re-reading the
 /// winner's node on the retry.
+///
+/// Classified on the rendered error rather than on the variant. A failure the
+/// server reports while a result is being pulled reaches this crate as the
+/// driver's "unexpected response for PULL" string, with the Neo4j code inside
+/// it, rather than as a typed `Neo4j` error — and a deadlock is detected
+/// exactly then, while the locking statement streams its rows.
 pub(crate) fn map_err(e: neo4rs::Error) -> StorageError {
-    match &e {
-        neo4rs::Error::Neo4j(err) => {
-            let code = err.code();
-            if code.starts_with("Neo.TransientError")
-                || code.contains("DeadlockDetected")
-                || code.contains("LockClientStopped")
-                || code.contains("ConstraintValidationFailed")
-            {
-                return StorageError::Serialization;
-            }
-            StorageError::Backend(format!("{code}: {}", err.message()))
-        }
-        _ => StorageError::Backend(e.to_string()),
+    let rendered = match &e {
+        neo4rs::Error::Neo4j(err) => format!("{}: {}", err.code(), err.message()),
+        other => other.to_string(),
+    };
+    const RETRYABLE: &[&str] = &[
+        "TransientError",
+        "DeadlockDetected",
+        "LockClientStopped",
+        "ConstraintValidationFailed",
+        "Transaction.Terminated",
+    ];
+    if RETRYABLE.iter().any(|m| rendered.contains(m)) {
+        return StorageError::Serialization;
     }
+    StorageError::Backend(rendered)
 }
 
 // ─── JSON on the node ────────────────────────────────────────────────────────
@@ -469,6 +483,7 @@ impl<'c> Tx<'c> {
         let mut props: HashMap<&str, BoltType> = HashMap::new();
         props.insert("id", p.id.into());
         props.insert("origin", origin_of(p.id).into());
+        props.insert("lineage", lineage_of(p.id).into());
         props.insert("state", p.state.into());
         props.insert("param_headers", p.param_headers.clone().into());
         props.insert("param_data", p.param_data.map(str::to_string).into());
