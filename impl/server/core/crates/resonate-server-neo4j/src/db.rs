@@ -685,15 +685,39 @@ impl<'c> Tx<'c> {
         Ok(())
     }
 
-    /// The ghost operation, run before every user operation: lock the named
-    /// promises and settle whichever are pending past their deadline.
+    /// The ghost operation, run before every user operation: settle whichever
+    /// of the named promises are pending past their deadline.
+    ///
+    /// An unlocked read first, and locks only for the rows it will expire —
+    /// the `FOR UPDATE` in the Postgres cascade covers the selected rows and
+    /// nothing else. Locking every named promise here made every read, a
+    /// `promise.get` included, a party to the write locks of everything else
+    /// touching that promise, and under contention that is where the retries
+    /// ran out. A promise that expires between the read and the lock is
+    /// caught by the operation's own lock, which re-reads it, and by the
+    /// sweep.
     pub(crate) async fn try_timeout(&mut self, ids: &[&str], now: i64) -> StorageResult<()> {
         if ids.is_empty() {
             return Ok(());
         }
         let ids: Vec<String> = ids.iter().map(|s| s.to_string()).collect();
+        let q = query(
+            "UNWIND $ids AS id MATCH (p:Promise {id: id}) \
+             WHERE p.state = 'pending' AND p.timeout_at <= $now RETURN p.id AS id",
+        )
+        .param("ids", ids)
+        .param("now", now);
+        let due: Vec<String> = self
+            .rows(q)
+            .await?
+            .iter()
+            .map(|r| col::<String>(r, "id"))
+            .collect::<StorageResult<_>>()?;
+        if due.is_empty() {
+            return Ok(());
+        }
         let rows: Vec<PromiseRow> = self
-            .lock_many(&ids)
+            .lock_many(&due)
             .await?
             .into_iter()
             .filter(|r| r.is_pending() && r.timeout_at <= now)
