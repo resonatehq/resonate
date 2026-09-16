@@ -271,6 +271,7 @@ impl Neo4jEngine {
                                 attempt = attempt + 1,
                                 "Transaction lost its race at commit, retrying"
                             );
+                            backoff(attempt).await;
                             continue;
                         }
                         Err(e) => return Err(e),
@@ -283,6 +284,7 @@ impl Neo4jEngine {
                             attempt = attempt + 1,
                             "Transaction lost its race, retrying"
                         );
+                        backoff(attempt).await;
                         continue;
                     }
                     return Err(StorageError::Serialization);
@@ -392,6 +394,22 @@ impl Neo4jEngine {
             )),
         }
     }
+}
+
+/// A short, randomised pause before a retry.
+///
+/// Two transactions that deadlocked and both retry at once tend to deadlock
+/// again; a few milliseconds of jitter, doubling per attempt, is what breaks
+/// the tie. Bounded well below a request timeout — the point is to spread the
+/// losers, not to wait for anything.
+async fn backoff(attempt: u32) {
+    let ceiling = 8u64 << attempt.min(4);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .subsec_nanos() as u64;
+    let millis = 1 + nanos % ceiling;
+    tokio::time::sleep(std::time::Duration::from_millis(millis)).await;
 }
 
 /// Split the embedded schema into statements: Neo4j runs one per query, and
