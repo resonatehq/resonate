@@ -57,7 +57,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [sqlite, postgres, mysql]
+        backend: [sqlite, postgres, mysql, neo4j]
 
     # Services cannot be selected per matrix leg, so both start everywhere
     # and the step below picks the one this leg talks to.
@@ -89,6 +89,17 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 15
+      neo4j:
+        image: neo4j:5
+        env:
+          NEO4J_AUTH: neo4j/resonate
+        ports:
+          - 7687:7687
+        options: >-
+          --health-cmd "cypher-shell -u neo4j -p resonate 'RETURN 1' || exit 1"
+          --health-interval 10s
+          --health-timeout 10s
+          --health-retries 20
 
     steps:
       - name: Checkout
@@ -111,6 +122,10 @@ jobs:
               ;;
             mysql)
               export TEST_MYSQL_URL=mysql://resonate:resonate@localhost:3306/resonate
+              ;;
+            neo4j)
+              export TEST_NEO4J_URI=bolt://localhost:7687
+              export TEST_NEO4J_PASSWORD=resonate
               ;;
           esac
           cargo test --release --test differential --all-features -- --nocapture
@@ -141,7 +156,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [sqlite, postgres, mysql, blob]
+        backend: [sqlite, postgres, mysql, blob, neo4j]
 
     services:
       postgres:
@@ -171,6 +186,17 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 15
+      neo4j:
+        image: neo4j:5
+        env:
+          NEO4J_AUTH: neo4j/resonate
+        ports:
+          - 7687:7687
+        options: >-
+          --health-cmd "cypher-shell -u neo4j -p resonate 'RETURN 1' || exit 1"
+          --health-interval 10s
+          --health-timeout 10s
+          --health-retries 20
 
     steps:
       - name: Checkout
@@ -211,6 +237,11 @@ jobs:
             mysql)
               export RESONATE_SERVERS__ACTIVE=server_mysql
               export RESONATE_SERVERS__SERVER_MYSQL__URL=mysql://resonate:resonate@localhost:3306/resonate
+              ;;
+            neo4j)
+              export RESONATE_SERVERS__ACTIVE=server_neo4j
+              export RESONATE_SERVERS__SERVER_NEO4J__URI=bolt://localhost:7687
+              export RESONATE_SERVERS__SERVER_NEO4J__PASSWORD=resonate
               ;;
             blob)
               # No bucket configured: the blob backend runs against its

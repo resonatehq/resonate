@@ -8,7 +8,7 @@ serve:
 # Every profile by name, because compose has no "all": a profile that is not
 # named is not brought down, and `make clean` leaving services running is the
 # kind of thing nobody notices until a port is taken.
-PROFILES := sqlite postgres mysql sqlite-auth postgres-auth mysql-auth
+PROFILES := sqlite postgres mysql neo4j sqlite-auth postgres-auth mysql-auth
 
 .PHONY: clean
 clean:

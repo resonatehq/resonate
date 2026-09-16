@@ -77,7 +77,7 @@ pub struct CommonArgs {
     pub cors_allow_origins: Vec<String>,
 
     // --- Storage ---
-    /// Storage backend: sqlite, postgres, mysql or scylladb [default: sqlite]
+    /// Storage backend: sqlite, postgres, mysql, scylladb, blob or neo4j [default: sqlite]
     #[arg(long = "storage-type")]
     pub storage_type: Option<String>,
 
@@ -96,6 +96,18 @@ pub struct CommonArgs {
     /// MySQL connection pool size [default: 10]
     #[arg(long = "storage-mysql-pool-size", value_name = "N")]
     pub mysql_pool_size: Option<u32>,
+
+    /// Neo4j Bolt URI [default: bolt://localhost:7687]
+    #[arg(long = "storage-neo4j-uri", value_name = "URI")]
+    pub neo4j_uri: Option<String>,
+
+    /// Neo4j user [default: neo4j]
+    #[arg(long = "storage-neo4j-user", value_name = "USER")]
+    pub neo4j_user: Option<String>,
+
+    /// Neo4j password
+    #[arg(long = "storage-neo4j-password", value_name = "PASSWORD")]
+    pub neo4j_password: Option<String>,
 
     // --- Auth ---
     /// Public key for JWT verification (enables auth; use "none" for unsigned mode)
@@ -299,6 +311,9 @@ impl CommonArgs {
         o.maybe("servers.server_postgres.pool_size", self.postgres_pool_size);
         o.maybe_str("servers.server_mysql.url", self.mysql_url.clone());
         o.maybe("servers.server_mysql.pool_size", self.mysql_pool_size);
+        o.maybe_str("servers.server_neo4j.uri", self.neo4j_uri.clone());
+        o.maybe_str("servers.server_neo4j.user", self.neo4j_user.clone());
+        o.maybe_str("servers.server_neo4j.password", self.neo4j_password.clone());
 
         // The URL a worker is told to call back on. The server stamps it into
         // every execute message, so it is the server's setting — the gateway
