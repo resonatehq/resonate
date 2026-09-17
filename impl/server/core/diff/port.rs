@@ -32,15 +32,15 @@
 //   TEST_TRACE_FROM=N         print tasks, callbacks and promises per backend
 //                             after every step from step N on
 //
-// Findings so far (oracle, sqlite, blob over an in-memory store):
-//   - Strict, no knobs: stops at the first cross-origin `task.fence`. Blob
-//     answers 400 before reading state; the oracle and SQLite answer from the
-//     state (404 or 409, or 200 and apply it). Documented in the blob server
-//     as its own constraint. Blob's private copy of the differential filters
-//     those fences out of its generator, which is how it stayed green.
-//   - TEST_SAME_ORIGIN_FENCE=1: 37000 steps to the coverage plateau, 427
-//     behavioural signatures, no divergence in responses, routed messages or
-//     snapshots.
+// Findings so far:
+//   - The shared fence validator (resonate-core) now states the origin rule:
+//     a settle shares the task's origin; a create shares it or names a root.
+//     Strict, oracle + sqlite: 34000 steps to the coverage plateau, 424
+//     behavioural signatures, no divergence.
+//   - Blob still refuses every cross-origin fence before reading state, so a
+//     fenced root create diverges there (200 elsewhere). Tracked as the
+//     check-then-create issue; TEST_SAME_ORIGIN_FENCE=1 is the way past it
+//     until then: 48200 steps, 427 signatures, no divergence with blob in.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -1100,14 +1100,15 @@ fn gen_task_suspend(rng: &mut fastrand::Rng, oracle: &Oracle, now: i64) -> Reque
 fn gen_task_fence(rng: &mut fastrand::Rng, oracle: &Oracle, now: i64) -> RequestEnvelope {
     let acquired = oracle.tasks_by_state(TaskState::Acquired);
     let (task_id, version) = pick(rng, &acquired).unwrap_or_else(|| (random_task_id(rng), 1));
-    // TEST_SAME_ORIGIN_FENCE=1 keeps a fence's action inside the task's
-    // origin. The blob server refuses a cross-origin fence with a 400 before
-    // reading any state — its own constraint, not the protocol's, which the
-    // oracle and the SQL engines accept — so with that backend in the
-    // comparison this is the only way past the first fence to whatever else
-    // may differ. Off, the divergence is reported like any other.
-    let same_origin = std::env::var("TEST_SAME_ORIGIN_FENCE").is_ok();
     let task_origin = task_id.split(':').next().unwrap_or("").to_string();
+    // TEST_SAME_ORIGIN_FENCE=1 keeps every fence action inside the task's
+    // origin. The rule is: a settle must share the origin; a create may share
+    // it or name a root (an id with no ':'), which is a detached computation.
+    // The blob server still refuses every cross-origin fence before reading
+    // state, so with that backend in the comparison this is what gets past
+    // the first cross-origin root create to whatever else may differ. Off,
+    // the divergence is reported like any other.
+    let same_origin = std::env::var("TEST_SAME_ORIGIN_FENCE").is_ok();
     let pending_p: Vec<String> = oracle
         .pending_promise_ids()
         .into_iter()
@@ -1115,10 +1116,15 @@ fn gen_task_fence(rng: &mut fastrand::Rng, oracle: &Oracle, now: i64) -> Request
         .collect();
     let do_settle = !pending_p.is_empty() && rng.u32(0..4) != 0;
     if !do_settle {
-        let new_promise_id = if same_origin {
-            format!("{task_origin}:p{}", rng.u32(0..8))
-        } else {
-            promise_id(rng.u32(0..8))
+        // Four flavours of create: a child in the task's origin (the common
+        // case), a root in another origin (detached: allowed), a child in
+        // another origin (refused), and a root that is the task's own origin
+        // (refused as self-reference when it is, allowed otherwise).
+        let new_promise_id = match rng.u32(0..8) {
+            0 | 1 | 2 | 3 | 4 => format!("{task_origin}:p{}", rng.u32(0..8)),
+            5 if !same_origin => format!("root{}", rng.u32(0..4)),
+            6 if !same_origin => format!("other:p{}", rng.u32(0..4)),
+            _ => promise_id(rng.u32(0..8)),
         };
         let timeout_at = now + rng.i64(30_000..300_000);
         req(
