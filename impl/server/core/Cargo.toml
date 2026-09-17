@@ -51,6 +51,11 @@ path = "diff/differential.rs"
 # It compares the engines against each other. They are all compiled in, so
 # there is nothing to require.
 
+# The same trajectory at the ports: `ResonateServer` in, `ResonateRouter` out.
+[[test]]
+name = "port"
+path = "diff/port.rs"
+
 [features]
 # No feature per plugin. Choosing plugins is what a *binary* does, by naming
 # them — a dependency here and a line in `registry()` — and this binary is the
@@ -100,3 +105,4 @@ serde_json = { workspace = true }
 base64 = "0.22"
 reqwest = { version = "0.12", features = ["json"] }
 fastrand = "2"
+async-trait = { workspace = true }

@@ -2910,6 +2910,7 @@ dependencies = [
 name = "resonate"
 version = "0.10.1"
 dependencies = [
+ "async-trait",
  "base64 0.22.1",
  "clap",
  "fastrand",
