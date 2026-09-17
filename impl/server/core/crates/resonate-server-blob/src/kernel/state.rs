@@ -131,13 +131,17 @@ impl PromiseDoc {
         }
     }
 
-    /// Whether this promise has a deadline the drain sweep must fire.
+    /// Whether this promise has a deadline the sweep must fire: every pending
+    /// promise does.
     ///
-    /// Mirrors the `promise_timeouts` table, which the SQL backends populate
-    /// only for promises carrying a `resonate:target` (an undispatched promise
-    /// has nothing to notify, so its expiry is applied lazily on read).
+    /// No exception for a promise without a `resonate:target`. The SQL
+    /// backends arm only targeted promises and expire the rest lazily on
+    /// read; this backend sweeps its whole origin document before every
+    /// request, so there is no lazy path and nothing to except. This is the
+    /// rule the Lean model of this backend (`resonatehq/s3`, `promiseTimeout`)
+    /// states, with no target guard.
     pub fn timeout_armed(&self) -> bool {
-        self.state == PromiseState::Pending && self.target().is_some()
+        self.state == PromiseState::Pending
     }
 
     /// The protocol view of this promise.
@@ -490,13 +494,13 @@ mod tests {
     }
 
     #[test]
-    fn a_promise_without_a_target_arms_no_deadline() {
-        // The SQL backends only insert a promise_timeouts row when the promise
-        // carries a resonate:target; an undispatched promise expires lazily.
+    fn a_promise_without_a_target_arms_its_deadline_too() {
+        // No exception: the sweep fires every pending promise's deadline, so
+        // every pending promise counts toward the origin's timer.
         let mut doc = OriginDoc::default();
         doc.promises
             .insert("o:a".into(), promise(PromiseState::Pending, 500, false));
-        assert_eq!(min_deadline(&doc), None);
+        assert_eq!(min_deadline(&doc), Some(500));
     }
 
     #[test]

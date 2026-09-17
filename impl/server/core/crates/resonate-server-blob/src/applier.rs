@@ -622,8 +622,18 @@ fn decide(loaded: &OriginDoc, batch: &[Work], shared: &Arc<Shared>) -> Decision 
         clock = clock.max(now);
         let fx = match work {
             Work::Request { req, .. } => {
-                let (fx, reply) = handle(&doc, req, now, &shared.cfg.kernel);
+                // Every request first sweeps its origin document, as the Lean
+                // model of this backend does (`resonatehq/s3`, `handle`): the
+                // handler then sees a document that is quiescent at `now`,
+                // with nothing due and nothing owed. The document is already
+                // in memory, the sweep's changes ride the same CAS, and an
+                // idle sweep emits nothing — so this costs no store operation
+                // the request was not going to make.
+                let mut fx = drain(&doc, now, &shared.cfg.kernel);
+                apply_effects(&mut doc, &fx);
+                let (mut hfx, reply) = handle(&doc, req, now, &shared.cfg.kernel);
                 replies.push(reply);
+                fx.append(&mut hfx);
                 fx
             }
             Work::Tick { .. } => {

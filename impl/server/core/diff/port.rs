@@ -369,7 +369,13 @@ async fn port_differential_random() {
     const BATCH_SIZE: usize = 200;
     const PLATEAU_BATCHES: usize = 20;
 
-    let mut rng = fastrand::Rng::with_seed(0x00c0_ffee_dead_beef);
+    // TEST_SEED=<u64> picks the trajectory; the default is the one CI walks.
+    let seed: u64 = std::env::var("TEST_SEED")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0x00c0_ffee_dead_beef);
+    eprintln!("[port] seed: {seed:#x}");
+    let mut rng = fastrand::Rng::with_seed(seed);
     let mut now = T0;
     let mut covered: HashMap<String, usize> = HashMap::new();
     let mut total_steps = 0usize;
@@ -1121,7 +1127,7 @@ fn gen_task_fence(rng: &mut fastrand::Rng, oracle: &Oracle, now: i64) -> Request
         // another origin (refused), and a root that is the task's own origin
         // (refused as self-reference when it is, allowed otherwise).
         let new_promise_id = match rng.u32(0..8) {
-            0 | 1 | 2 | 3 | 4 => format!("{task_origin}:p{}", rng.u32(0..8)),
+            0..=4 => format!("{task_origin}:p{}", rng.u32(0..8)),
             5 if !same_origin => format!("root{}", rng.u32(0..4)),
             6 if !same_origin => format!("other:p{}", rng.u32(0..4)),
             _ => promise_id(rng.u32(0..8)),

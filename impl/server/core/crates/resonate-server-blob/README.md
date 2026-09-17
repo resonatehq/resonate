@@ -109,11 +109,12 @@ The document's own timeout tables — what the SQL backends keep in
 | `id` | string | Relative id. |
 | `k` | int | `kt` only — `0` retry (task pending, awaiting re-dispatch), `1` lease (task acquired, lease expiry). |
 
-A `pt` line exists only for a pending promise carrying `resonate:target`: an
-undispatched promise has nothing to notify, so its expiry is applied lazily on
-read. Each kind is sorted by `(dl, id)`, so **the first line of each kind is
-that kind's minimum armed deadline** — recovery can find the next deadline
-without parsing the whole document.
+A `pt` line exists for every pending promise, targeted or not: this backend
+sweeps every deadline, with no lazy path for the untargeted ones (the SQL
+backends arm only targeted promises and expire the rest on read). Each kind is
+sorted by `(dl, id)`, so **the first line of each kind is that kind's minimum
+armed deadline** — recovery can find the next deadline without parsing the
+whole document.
 
 ### Canonical encoding
 
@@ -232,10 +233,13 @@ callback); messages go to `tx.sends`. Then `tx.finish(before)` recomputes
 4. `Send { address, msg }` — the wire `Message`, strictly post-commit.
 
 One wrinkle worth knowing: a request that returns a 4xx still returns
-effects. `try_timeout` runs first in most ops and lazily settles expired
-promises it walked past, so even a rejected request can commit the
-expirations it observed — which is also why reads go through the applier
-rather than a separate read path.
+effects. Every request first sweeps its origin document at the request's
+`now` — the same sweep the timer runs — so even a rejected request, or a plain
+read, can commit the expirations that were due. That is also why reads go
+through the applier rather than a separate read path, and why the handler
+never expires anything itself: it runs on a swept, quiescent document. This
+is the rule the Lean model of this backend states (`resonatehq/s3`: `sweep`,
+then `handleExternal`).
 
 **Per batch.** The applier's `decide()` ([`src/applier.rs`](src/applier.rs))
 folds a mailbox batch through the kernel sequentially: clone the loaded

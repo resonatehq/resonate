@@ -15,9 +15,11 @@
 //! writer to trip over.
 //!
 //! Searches see stored state, not effective state: a promise whose deadline has
-//! passed but which nothing has named yet still reads as pending. The SQL
-//! backends behave identically — a row changes when `try_timeout` or the
-//! timeout sweep touches it, not when someone looks at it.
+//! passed but whose origin has not been swept since — by its timer or by a
+//! request on it — still reads as pending. A search does not sweep: it reads
+//! every origin, and sweeping each would be a write per origin. The SQL
+//! backends behave the same way — a row changes when the timeout sweep
+//! touches it, not when someone looks at it.
 //!
 //! # Dependencies
 //!

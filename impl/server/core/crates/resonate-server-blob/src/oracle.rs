@@ -314,9 +314,7 @@ impl Oracle {
                 );
             }
         } else {
-            if addr.is_some() {
-                self.set_p_timeout(&r.id, r.timeout_at);
-            }
+            self.set_p_timeout(&r.id, r.timeout_at);
             if let Some(ref addr) = addr {
                 self.tasks.insert(
                     r.id.clone(),
@@ -1234,9 +1232,7 @@ impl Oracle {
                             );
                         }
                     } else {
-                        if addr.is_some() {
-                            self.set_p_timeout(&create_data.id, create_data.timeout_at);
-                        }
+                        self.set_p_timeout(&create_data.id, create_data.timeout_at);
                         if let Some(ref a) = addr {
                             self.tasks.insert(
                                 create_data.id.clone(),
@@ -2024,9 +2020,7 @@ impl Oracle {
                             );
                         }
                     } else {
-                        if addr.is_some() {
-                            self.set_p_timeout(&promise_id, timeout_at);
-                        }
+                        self.set_p_timeout(&promise_id, timeout_at);
                         if let Some(ref a) = addr {
                             self.tasks.insert(
                                 promise_id.clone(),

@@ -215,12 +215,14 @@ mod tests {
     }
 
     #[test]
-    fn an_untargeted_promise_is_not_swept() {
-        // No resonate:target means no promise_timeouts row: it expires lazily,
-        // when a request names it.
+    fn an_untargeted_promise_is_swept_too() {
+        // No exception for a promise without a target: it expires when its
+        // deadline passes, like every other pending promise. Nothing is
+        // dispatched, since there is no task to notify.
         let doc = apply(&OriginDoc::default(), plain("o:a", 1_000), 0);
         let (next, sends) = sweep(&doc, 5_000);
-        assert_eq!(next.promises["o:a"].state, PromiseState::Pending);
+        assert_eq!(next.promises["o:a"].state, PromiseState::RejectedTimedout);
+        assert_eq!(next.promises["o:a"].settled_at, Some(1_000));
         assert!(sends.is_empty());
     }
 
