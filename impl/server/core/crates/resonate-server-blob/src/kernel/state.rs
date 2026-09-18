@@ -427,6 +427,42 @@ pub fn check_invariants(doc: &OriginDoc) -> Result<(), String> {
         }
     }
 
+    // Arming is justified by observers, and stated here without going
+    // through `timeout_armed` or `min_deadline`, so a change to either rule
+    // has to answer to this one. A timer is armed for a deadline exactly when
+    // something can observe it firing: a listener or an awaiter on a
+    // non-internal promise, or the task a pending or acquired task's own
+    // deadline redispatches. An internal promise can have neither — the
+    // registration paths refuse it — so its deadline arms nothing.
+    let mut armed_by_observers: Option<i64> = None;
+    let mut arm = |at: i64| armed_by_observers = Some(armed_by_observers.map_or(at, |m| m.min(at)));
+    for (id, p) in &doc.promises {
+        let internal = !p.is_external();
+        if internal && (!p.callbacks.is_empty() || !p.listeners.is_empty()) {
+            return Err(format!(
+                "promise {id}: internal, yet something waits on it ({} callbacks, {} listeners)",
+                p.callbacks.len(),
+                p.listeners.len()
+            ));
+        }
+        if p.state == PromiseState::Pending && !internal {
+            arm(p.timeout_at);
+        }
+    }
+    for t in doc.tasks.values() {
+        if let Some(at) = t.retry_at {
+            arm(at);
+        }
+        if let Some(at) = t.lease_at {
+            arm(at);
+        }
+    }
+    if doc.timer_at != armed_by_observers {
+        return Err(format!(
+            "timer_at {:?} arms what no one can observe, or misses what someone can: observers say {:?}",
+            doc.timer_at, armed_by_observers
+        ));
+    }
     if doc.timer_at != min_deadline(doc) {
         return Err(format!(
             "timer_at {:?} != min_deadline {:?}",
@@ -603,6 +639,46 @@ mod tests {
             .insert("o:a".into(), promise(PromiseState::Pending, 500, true));
         doc.timer_at = Some(999);
         assert!(check_invariants(&doc).unwrap_err().contains("timer_at"));
+    }
+
+    #[test]
+    fn invariants_reject_a_timer_armed_for_an_internal_promise() {
+        // Nothing can observe an internal promise expire, so a timer for it
+        // is a wake-up with no one waiting.
+        let mut doc = OriginDoc::default();
+        doc.promises
+            .insert("o:a".into(), promise(PromiseState::Pending, 500, false));
+        doc.timer_at = Some(500);
+        assert!(check_invariants(&doc)
+            .unwrap_err()
+            .contains("no one can observe"));
+    }
+
+    #[test]
+    fn invariants_reject_an_unarmed_external_deadline() {
+        // A listener or an awaiter may be waiting, so the deadline must wake
+        // the timer.
+        let mut doc = OriginDoc::default();
+        let mut p = promise(PromiseState::Pending, 500, false);
+        p.tags
+            .insert("resonate:external".to_string(), "true".to_string());
+        doc.promises.insert("o:a".into(), p);
+        doc.timer_at = None;
+        assert!(check_invariants(&doc)
+            .unwrap_err()
+            .contains("misses what someone can"));
+    }
+
+    #[test]
+    fn invariants_reject_a_registration_on_an_internal_promise() {
+        let mut doc = OriginDoc::default();
+        let mut p = promise(PromiseState::Pending, 500, false);
+        p.listeners.push("http://w".to_string());
+        doc.promises.insert("o:a".into(), p);
+        doc.timer_at = None;
+        assert!(check_invariants(&doc)
+            .unwrap_err()
+            .contains("internal, yet something waits"));
     }
 
     #[test]
