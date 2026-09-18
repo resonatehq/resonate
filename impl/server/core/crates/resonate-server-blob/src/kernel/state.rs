@@ -131,17 +131,19 @@ impl PromiseDoc {
         }
     }
 
-    /// Whether this promise has a deadline the sweep must fire: every pending
-    /// promise does.
+    /// Whether this promise's deadline arms the origin's timer.
     ///
-    /// No exception for a promise without a `resonate:target`. The SQL
-    /// backends arm only targeted promises and expire the rest lazily on
-    /// read; this backend sweeps its whole origin document before every
-    /// request, so there is no lazy path and nothing to except. This is the
-    /// rule the Lean model of this backend (`resonatehq/s3`, `promiseTimeout`)
-    /// states, with no target guard.
+    /// Only a promise something can wait on does: an external one (a listener
+    /// may be registered against it, a task may await it) or a runnable one
+    /// (its task is the one that gets redispatched). An internal promise
+    /// arms nothing — nothing can await it and nothing listens to it, so a
+    /// timer for its expiry would wake the process for no observer. It still
+    /// expires: the sweep settles *every* pending promise past its deadline,
+    /// armed or not, and every request and every timer on the origin sweeps
+    /// the whole document, so the expiry is applied the first time anything
+    /// looks. Arming is about who is waiting; expiring is about time.
     pub fn timeout_armed(&self) -> bool {
-        self.state == PromiseState::Pending
+        self.state == PromiseState::Pending && self.is_external()
     }
 
     /// The protocol view of this promise.
@@ -494,12 +496,23 @@ mod tests {
     }
 
     #[test]
-    fn a_promise_without_a_target_arms_its_deadline_too() {
-        // No exception: the sweep fires every pending promise's deadline, so
-        // every pending promise counts toward the origin's timer.
+    fn an_internal_promise_arms_no_deadline() {
+        // Nothing can wait on it, so no timer wakes for it. The sweep still
+        // expires it when something next looks at the origin.
         let mut doc = OriginDoc::default();
         doc.promises
             .insert("o:a".into(), promise(PromiseState::Pending, 500, false));
+        assert_eq!(min_deadline(&doc), None);
+    }
+
+    #[test]
+    fn an_external_promise_without_a_target_arms_its_deadline() {
+        // No task, but a listener or an awaiter may be waiting on its expiry.
+        let mut doc = OriginDoc::default();
+        let mut p = promise(PromiseState::Pending, 500, false);
+        p.tags
+            .insert("resonate:external".to_string(), "true".to_string());
+        doc.promises.insert("o:a".into(), p);
         assert_eq!(min_deadline(&doc), Some(500));
     }
 

@@ -30,15 +30,16 @@ use super::state::{Effect, KernelCfg, OriginDoc};
 pub fn drain(doc: &OriginDoc, now: i64, cfg: &KernelCfg) -> Vec<Effect> {
     let mut tx = Tx::new(doc, cfg);
 
-    // Phase 1 — settle every armed promise deadline that has passed. All of
-    // them first, then their chains, so an awaiter that is itself expiring is
-    // already settled when its awaited promise fans out and is skipped rather
-    // than resumed.
+    // Phase 1 — settle every pending promise whose deadline has passed,
+    // armed or not: an internal promise never arms the timer, but it expires
+    // like any other the moment the origin is swept. All of them first, then
+    // their chains, so an awaiter that is itself expiring is already settled
+    // when its awaited promise fans out and is skipped rather than resumed.
     let expired: Vec<String> = tx
         .doc
         .promises
         .iter()
-        .filter(|(_, p)| p.timeout_armed() && now >= p.timeout_at)
+        .filter(|(_, p)| p.state == PromiseState::Pending && now >= p.timeout_at)
         .map(|(id, _)| id.clone())
         .collect();
     for id in &expired {
@@ -103,8 +104,8 @@ pub fn drain(doc: &OriginDoc, now: i64, cfg: &KernelCfg) -> Vec<Effect> {
         tx.doc
             .promises
             .values()
-            .all(|p| p.state != PromiseState::Pending || now < p.timeout_at || !p.timeout_armed()),
-        "drain left an armed deadline in the past"
+            .all(|p| p.state != PromiseState::Pending || now < p.timeout_at),
+        "drain left a pending promise past its deadline"
     );
     tx.finish(doc)
 }
@@ -224,6 +225,9 @@ mod tests {
         assert_eq!(next.promises["o:a"].state, PromiseState::RejectedTimedout);
         assert_eq!(next.promises["o:a"].settled_at, Some(1_000));
         assert!(sends.is_empty());
+        // It armed nothing before and arms nothing after.
+        assert_eq!(doc.timer_at, None);
+        assert_eq!(next.timer_at, None);
     }
 
     #[test]

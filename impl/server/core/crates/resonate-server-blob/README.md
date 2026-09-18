@@ -109,12 +109,14 @@ The document's own timeout tables — what the SQL backends keep in
 | `id` | string | Relative id. |
 | `k` | int | `kt` only — `0` retry (task pending, awaiting re-dispatch), `1` lease (task acquired, lease expiry). |
 
-A `pt` line exists for every pending promise, targeted or not: this backend
-sweeps every deadline, with no lazy path for the untargeted ones (the SQL
-backends arm only targeted promises and expire the rest on read). Each kind is
-sorted by `(dl, id)`, so **the first line of each kind is that kind's minimum
-armed deadline** — recovery can find the next deadline without parsing the
-whole document.
+A `pt` line exists for a pending promise that is external or runnable — one
+something can wait on. An internal promise never arms a timer: nothing can
+await it and nothing listens to it. It still expires, because the sweep settles
+every pending promise past its deadline, armed or not, and every request and
+every timer on the origin sweeps the whole document. Each kind is sorted by
+`(dl, id)`, so **the first line of each kind is that kind's minimum armed
+deadline** — recovery can find the next deadline without parsing the whole
+document.
 
 ### Canonical encoding
 

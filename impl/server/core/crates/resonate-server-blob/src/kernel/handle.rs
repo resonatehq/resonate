@@ -1169,12 +1169,28 @@ mod tests {
     // --- create ------------------------------------------------------------
 
     #[test]
-    fn creating_an_untargeted_promise_makes_no_task_but_arms_its_deadline() {
-        // No target means no task and nothing to dispatch — but the deadline
-        // is still the sweep's to fire, so it arms the origin's timer.
+    fn creating_an_internal_promise_makes_no_task_and_arms_no_timer() {
+        // Nothing can wait on an internal promise, so its deadline wakes no
+        // timer. The sweep still expires it the next time the origin is
+        // looked at.
         let (doc, sends, reply) = step(&OriginDoc::default(), create("o:a", 100, json!({})), 0);
         assert_eq!(reply.status, 200);
         assert_eq!(doc.promises["o:a"].state, PromiseState::Pending);
+        assert!(doc.tasks.is_empty());
+        assert_eq!(doc.timer_at, None);
+        assert!(sends.is_empty());
+    }
+
+    #[test]
+    fn creating_an_external_promise_arms_its_deadline_without_a_task() {
+        // No target means no task and nothing to dispatch, but a listener or
+        // an awaiter may wait on it, so its deadline arms the origin's timer.
+        let (doc, sends, reply) = step(
+            &OriginDoc::default(),
+            create("o:a", 100, json!({ "resonate:external": "true" })),
+            0,
+        );
+        assert_eq!(reply.status, 200);
         assert!(doc.tasks.is_empty());
         assert_eq!(doc.timer_at, Some(100));
         assert!(sends.is_empty());
