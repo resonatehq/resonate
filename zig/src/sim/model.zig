@@ -50,6 +50,15 @@ pub const Model = struct {
     runtime: *server_mod.Runtime = undefined,
     /// Per-call working memory, reset between calls.
     arena: std.heap.ArenaAllocator,
+    /// The arena one request runs on, reset rather than rebuilt between calls.
+    ///
+    /// The search applies hundreds of thousands of requests, and an arena built
+    /// and torn down for each one asks the kernel for its pages and hands them
+    /// back every time. Keeping one and resetting it is what makes a step cost
+    /// what the model does rather than what a page fault does.
+    request_arena: std.heap.ArenaAllocator,
+    /// The store's keys, in order. Reused by every save and every restore.
+    keys: std.ArrayList([]const u8),
 
     applied: u64 = 0,
 
@@ -61,6 +70,8 @@ pub const Model = struct {
             .mem = store_mod.MemoryStore.init(allocator),
             .sim = env.Simulated.init(allocator, 0),
             .arena = std.heap.ArenaAllocator.init(allocator),
+            .request_arena = std.heap.ArenaAllocator.init(allocator),
+            .keys = std.ArrayList([]const u8).init(allocator),
         };
         self.runtime = try server_mod.Runtime.create(
             allocator,
@@ -81,6 +92,8 @@ pub const Model = struct {
 
     pub fn destroy(self: *Model) void {
         self.runtime.destroy();
+        self.keys.deinit();
+        self.request_arena.deinit();
         self.arena.deinit();
         self.sim.deinit();
         self.mem.deinit();
@@ -108,9 +121,7 @@ pub const Model = struct {
         };
         var answer = Answer{};
         const request = a.create(server_mod.Request) catch return .{ .status = 503, .data = "\"out of memory\"" };
-        const request_arena = a.create(std.heap.ArenaAllocator) catch
-            return .{ .status = 503, .data = "\"out of memory\"" };
-        request_arena.* = std.heap.ArenaAllocator.init(self.allocator);
+        const request_arena = &self.request_arena;
         request.* = .{
             .body = envelope_json,
             .arena = request_arena,
@@ -129,7 +140,9 @@ pub const Model = struct {
         const data = parsed.get("data") orelse json.Value.null_value;
         json.write_value(&out, data) catch {};
         const owned = self.allocator.dupe(u8, out.items) catch "";
-        request_arena.deinit();
+        // Nothing outlives the call: the store keeps its own copies, and the reply
+        // was just copied out.
+        _ = request_arena.reset(.retain_capacity);
         // Copied out of the per-call arena, because the caller keeps it past the
         // next reset.
         const result = Reply{ .status = answer.status, .data = owned };
@@ -149,12 +162,8 @@ pub const Model = struct {
     /// canonical. That is what lets the search memoize on a hash of this.
     pub fn snapshot(self: *Model, out: *std.ArrayList(u8)) !void {
         out.clearRetainingCapacity();
-        var keys = std.ArrayList([]const u8).init(self.allocator);
-        defer keys.deinit();
-        var it = self.mem.objects.keyIterator();
-        while (it.next()) |k| try keys.append(k.*);
-        std.mem.sort([]const u8, keys.items, {}, stdx.less_than_bytes);
-        for (keys.items) |key| {
+        try self.sorted_keys();
+        for (self.keys.items) |key| {
             const entry = self.mem.objects.get(key).?;
             const etag = entry.etag.slice();
             try out.writer().print("{d}:", .{key.len});
@@ -173,13 +182,21 @@ pub const Model = struct {
         try out.writer().print("v{d}\n", .{self.mem.next_version});
     }
 
+    /// Put the state back, object by object rather than all at once.
+    ///
+    /// A restore usually undoes one operation, which touched one document. Emptying
+    /// the store and building fifteen objects again to achieve that is the single
+    /// most expensive thing the search does, so this walks the snapshot (which is
+    /// in key order) alongside the store's keys and touches only what differs.
     pub fn restore(self: *Model, bytes: []const u8) !void {
-        self.mem.clear();
         // Versions are read back from the snapshot, so the counter starts where it
         // did and a restored state is indistinguishable from the original.
         self.mem.next_version = 1;
         self.runtime.applier.reset();
         self.runtime.timerd.reset();
+        try self.sorted_keys();
+
+        var current: usize = 0;
         var rest = bytes;
         while (rest.len > 0) {
             if (rest[0] == 'v') {
@@ -191,8 +208,49 @@ pub const Model = struct {
             const etag = try take_field(&rest) orelse return error.Corrupt;
             const body = try take_field(&rest) orelse return error.Corrupt;
             if (rest.len > 0 and rest[0] == '\n') rest = rest[1..];
-            try self.put_raw(key, etag, body);
+
+            // Everything the store has before this key is something the snapshot
+            // does not have.
+            while (current < self.keys.items.len and
+                stdx.less_than_bytes({}, self.keys.items[current], key)) : (current += 1)
+            {
+                self.remove_raw(self.keys.items[current]);
+            }
+            if (current < self.keys.items.len and std.mem.eql(u8, self.keys.items[current], key)) {
+                self.overwrite_raw(key, etag, body) catch return error.OutOfMemory;
+                current += 1;
+            } else {
+                try self.put_raw(key, etag, body);
+            }
         }
+        while (current < self.keys.items.len) : (current += 1) self.remove_raw(self.keys.items[current]);
+    }
+
+    /// The store's keys, in order, in the buffer this model keeps for the purpose.
+    fn sorted_keys(self: *Model) !void {
+        self.keys.clearRetainingCapacity();
+        var it = self.mem.objects.keyIterator();
+        while (it.next()) |k| try self.keys.append(k.*);
+        std.mem.sort([]const u8, self.keys.items, {}, stdx.less_than_bytes);
+    }
+
+    fn remove_raw(self: *Model, key: []const u8) void {
+        if (self.mem.objects.fetchRemove(key)) |kv| {
+            self.allocator.free(kv.key);
+            self.allocator.free(kv.value.body);
+        }
+    }
+
+    fn overwrite_raw(self: *Model, key: []const u8, etag: []const u8, body: []const u8) !void {
+        const entry = self.mem.objects.getPtr(key).?;
+        if (std.mem.eql(u8, entry.etag.slice(), etag) and std.mem.eql(u8, entry.body, body)) return;
+        if (entry.body.len != body.len) {
+            const owned = try self.allocator.alloc(u8, body.len);
+            self.allocator.free(entry.body);
+            entry.body = owned;
+        }
+        @memcpy(entry.body, body);
+        entry.etag = store_mod.Etag.from(etag);
     }
 
     /// One `<length>:<bytes>` field, followed by a space or a newline.

@@ -91,9 +91,16 @@ pub const Report = struct {
     contentions: u64 = 0,
     conflicts: u64 = 0,
     store_objects: usize = 0,
-    /// Whether the state a cold server reads equals the state the order produces.
+    /// Whether the order the search found also leaves the state a cold server
+    /// reads out of the bucket. Part of the search rather than a second pass:
+    /// two orders can explain the same answers and leave different state, so
+    /// checking one particular order would fail a correct server.
     refined: bool = false,
     refinement_checked: bool = false,
+    /// Set when every answer is explicable and no such order leaves the state
+    /// that is there. A different shape of bug from an answer nothing explains,
+    /// and worth saying apart: the concurrency is fine and something was lost.
+    state_unexplained: bool = false,
     /// Operation kinds that never succeeded.
     uncovered: usize = 0,
     /// Statuses seen, so a run that only ever got 400s is visible.
@@ -109,6 +116,12 @@ pub const Report = struct {
     status_5xx: usize = 0,
     /// Whether the run injected anything that legitimately produces a 503.
     faults_injected: bool = false,
+    /// How many sweeps had to be sent again because they did not finish.
+    sweep_resends: u64 = 0,
+    /// Set when a sweep never finished, however many attempts it was given. Its
+    /// effects are then partial, which no sequential operation can mean — so the
+    /// run is not checked rather than checked against something it cannot be.
+    sweep_unfinished: bool = false,
 
     pub fn ok(self: Report) bool {
         if (self.verdict == .violation) return false;
@@ -128,7 +141,7 @@ pub const Report = struct {
             \\  commits         {d} ({d} lost races, {d} unordered conflicts)
             \\  objects         {d}
             \\  checked         {d} operations -> {s}
-            \\  refinement      {s}
+            \\  final state     {s}
             \\  coverage        {d} operation kinds never succeeded
             \\
         , .{
@@ -150,11 +163,25 @@ pub const Report = struct {
             self.store_objects,
             self.checked,
             @tagName(self.verdict),
-            if (!self.refinement_checked) "not checked" else if (self.refined) "holds" else "BROKEN",
+            if (self.state_unexplained)
+                "BROKEN: every answer explained, no order leaves this state"
+            else if (self.verdict != .linearizable)
+                "not reached"
+            else if (!self.refinement_checked)
+                "not checked"
+            else if (self.refined) "matches the order found" else "BROKEN",
             self.uncovered,
         });
         if (self.blocked_kind.len > 0) {
             try writer.print("  blocked on     {s} after {d} operations\n", .{ self.blocked_kind, self.prefix_length });
+        }
+        if (self.sweep_unfinished) {
+            try writer.print(
+                "  not checked    a sweep fired part of what was due and stopped\n",
+                .{},
+            );
+        } else if (self.sweep_resends > 0) {
+            try writer.print("  sweeps         {d} sent again to finish\n", .{self.sweep_resends});
         }
     }
 };
@@ -171,7 +198,14 @@ const Pending = struct {
     arena: std.heap.ArenaAllocator,
     /// Set when the server it was sent to died first.
     abandoned: bool = false,
+    /// Set when this operation is to be sent again rather than recorded as it
+    /// came back. See `on_answered`.
+    resend: bool = false,
+    attempts: u32 = 0,
 };
+
+/// How many times a sweep that did not finish is sent again.
+const max_sweep_attempts: u32 = 16;
 
 const Instance = struct {
     runtime: *server_mod.Runtime,
@@ -281,6 +315,12 @@ pub const Simulation = struct {
             guard += 1;
             if (guard > @as(u64, self.options.operations) * 2_000 + 100_000) return error.SimulationStuck;
 
+            // A sweep that did not finish goes again before anything else does.
+            for (self.in_flight) |slot| {
+                const pending = slot orelse continue;
+                if (pending.resend) self.resend(pending);
+            }
+
             // Issue. An exclusive operation waits for the system to go quiet and
             // holds everything else off while it runs, which is what makes it a
             // barrier the recorded history can hold it to.
@@ -369,6 +409,33 @@ pub const Simulation = struct {
         self.instances[server_index].runtime.server.process(&pending.request);
     }
 
+    /// Send an operation again, as the same operation.
+    ///
+    /// Only a sweep, and only because a sweep is the one operation whose failure
+    /// can be *partial*: it fires every deadline due at one instant, and a store
+    /// that stops answering halfway through leaves it having fired some of them.
+    /// No single sequential operation means that, so a history with one in it is
+    /// a history nothing can explain — including a correct server.
+    ///
+    /// Sending it again is exact rather than a convenience. A sweep is issued as
+    /// a barrier: nothing else is in flight while it runs, so nothing can observe
+    /// the state between two attempts, and the attempts together do what one
+    /// sweep does. So the history keeps one operation, called when the first
+    /// attempt was and answered when the last one was.
+    fn resend(self: *Simulation, pending: *Pending) void {
+        pending.resend = false;
+        pending.attempts += 1;
+        _ = pending.arena.reset(.retain_capacity);
+        pending.server = @intCast(self.random.below(self.instances.len));
+        pending.request = .{
+            .body = self.history.items[pending.index].envelope,
+            .arena = &pending.arena,
+            .callback = on_answered,
+            .context = pending,
+        };
+        self.instances[pending.server].runtime.server.process(&pending.request);
+    }
+
     fn on_answered(request: *server_mod.Request) void {
         const pending: *Pending = @ptrCast(@alignCast(request.context.?));
         const self = pending.simulation;
@@ -389,6 +456,17 @@ pub const Simulation = struct {
         var out = std.ArrayList(u8).init(run_arena);
         json.write_value(&out, parsed.get("data") orelse json.Value.null_value) catch {};
         entry.data = out.items;
+
+        // Not finished: go again. The entry keeps the last attempt's answer, so
+        // a sweep that never finishes is still recorded as the failure it was.
+        if (pending.kind == .debug_tick and (request.status < 200 or request.status >= 300)) {
+            self.report.sweep_resends += 1;
+            if (pending.attempts < max_sweep_attempts) {
+                pending.resend = true;
+                return;
+            }
+            self.report.sweep_unfinished = true;
+        }
 
         self.workload.observe(pending.kind, request.status, entry.data, run_arena);
         self.settle(pending);
@@ -427,7 +505,13 @@ pub const Simulation = struct {
             // "this may or may not have been applied".
             pending.abandoned = true;
             self.history.items[pending.index].answered = false;
-            self.history.items[pending.index].ret = checker.never_returned;
+            // Whatever it did, it did before now: the store was quiesced above and
+            // a destroyed server submits nothing more, so nothing this request
+            // started can land after the crash. Saying so is not a detail — an
+            // operation that may take effect at any later time constrains no
+            // other, and a history with a few of those is a search with no
+            // pruning left.
+            self.history.items[pending.index].ret = self.wall;
             self.in_flight[client] = null;
             assert(self.outstanding > 0);
             self.outstanding -= 1;
@@ -491,6 +575,11 @@ pub const Simulation = struct {
 
         if (self.options.dump) |path| try self.write_history(path);
         if (!self.options.check) return report;
+        // A sweep that fired part of what was due and then stopped is not an
+        // operation any sequential execution has, so there is nothing to check
+        // this history against. Reported rather than passed over: a run that was
+        // not checked must not read like a run that was.
+        if (report.sweep_unfinished) return report;
 
         // Only the operations a specification can speak about. The cross-origin
         // reads are surveys, not atomic steps, and were never promised to be.
@@ -504,28 +593,122 @@ pub const Simulation = struct {
         report.checked = checkable.items.len;
         report.concurrency = checker.Concurrency.measure(checkable.items);
 
+        // What the bucket actually holds, read by a server with no cache and no
+        // deadline queue: nothing but the objects.
+        const final = try self.read_final_state();
+        defer if (final) |f| {
+            self.allocator.free(f.envelope);
+            self.allocator.free(f.expected_data);
+        };
+
         const model = try Model.create(self.allocator);
         defer model.destroy();
-        const result = try checker.check(self.allocator, model, checkable.items, self.options.check_options);
+        var check_options = self.options.check_options;
+        if (final) |f| {
+            check_options.final = .{ .envelope = f.envelope, .expected_data = f.expected_data };
+        }
+        const result = try checker.check(self.allocator, model, checkable.items, check_options);
         switch (result) {
             .linearizable => |order| {
                 defer self.allocator.free(order);
                 report.verdict = .linearizable;
-                // The responses agreeing is not enough: the state the order leaves
-                // behind has to be the state the bucket holds.
-                report.refined = try self.check_refinement(checkable.items, order);
-                report.refinement_checked = true;
+                // The order explains every answer *and* leaves the state that is
+                // there, because the search would not have accepted it otherwise.
+                // A search that gave up or came back empty proves nothing about
+                // the state, which is why this is recorded only here.
+                report.refinement_checked = final != null;
+                report.refined = report.refinement_checked;
             },
             .violation => |violation| {
                 defer self.allocator.free(violation.prefix);
+                defer self.allocator.free(violation.abandoned);
+                defer if (violation.final_data.len > 0) self.allocator.free(violation.final_data);
                 defer if (violation.expected_data.len > 0) self.allocator.free(violation.expected_data);
                 report.verdict = .violation;
                 report.prefix_length = violation.prefix.len;
                 if (violation.blocked) |i| report.blocked_kind = checkable.items[i].kind;
+                report.state_unexplained = violation.final_mismatches > 0 and
+                    violation.prefix.len == checkable.items.len;
+                if (report.state_unexplained and self.options.verbose) {
+                    std.debug.print(
+                        "the state an order that explains every answer leaves:\n{s}\n" ++
+                            "the state the bucket holds:\n{s}\n",
+                        .{ violation.final_data, if (final) |f| f.expected_data else "" },
+                    );
+                }
             },
             .exhausted => report.verdict = .exhausted,
         }
         return report;
+    }
+
+    const FinalState = struct {
+        envelope: []const u8,
+        expected_data: []const u8,
+    };
+
+    /// Read the whole state out of the bucket with a cold server.
+    ///
+    /// Cold on purpose: no cache, no deadline queue, nothing in memory. What it
+    /// reads is what survived, which is the only thing a restart would have.
+    fn read_final_state(self: *Simulation) !?FinalState {
+        const at = self.workload.now;
+        const envelope = try std.fmt.allocPrint(
+            self.allocator,
+            "{{\"kind\":\"debug.snap\",\"head\":{{\"corrId\":\"r\",\"version\":\"{s}\",\"resonate:debug_time\":{d}}},\"data\":{{}}}}",
+            .{ protocol.protocol_version, at },
+        );
+        errdefer self.allocator.free(envelope);
+
+        const cold = try self.build_runtime();
+        defer cold.destroy();
+        const Answer = struct {
+            status: i32 = 0,
+            data: []const u8 = "",
+            done: bool = false,
+            fn callback(request: *server_mod.Request) void {
+                const answer: *@This() = @ptrCast(@alignCast(request.context.?));
+                answer.status = request.status;
+                answer.data = request.response;
+                answer.done = true;
+            }
+        };
+        var answer = Answer{};
+        var request_arena = std.heap.ArenaAllocator.init(self.allocator);
+        defer request_arena.deinit();
+        var request = server_mod.Request{
+            .body = envelope,
+            .arena = &request_arena,
+            .callback = Answer.callback,
+            .context = &answer,
+        };
+        cold.server.process(&request);
+        // The store holds operations back, so a cold read takes several rounds: it
+        // lists the bucket and then reads every object in it.
+        var rounds: u32 = 0;
+        while (!answer.done) {
+            rounds += 1;
+            if (rounds > 100_000) {
+                self.allocator.free(envelope);
+                return null;
+            }
+            self.mem.drain_delayed();
+            cold.drain();
+        }
+        if (answer.status != 200) {
+            self.allocator.free(envelope);
+            return null;
+        }
+
+        var arena = std.heap.ArenaAllocator.init(self.allocator);
+        defer arena.deinit();
+        const parsed = json.parse(arena.allocator(), answer.data) catch {
+            self.allocator.free(envelope);
+            return null;
+        };
+        var text = std.ArrayList(u8).init(arena.allocator());
+        try json.write_value(&text, parsed.get("data") orelse json.Value.null_value);
+        return .{ .envelope = envelope, .expected_data = try self.allocator.dupe(u8, text.items) };
     }
 
     /// Write the history out, one operation per line.
@@ -580,81 +763,6 @@ pub const Simulation = struct {
         return null;
     }
 
-    /// Replay the order against a fresh model and compare the whole state.
-    ///
-    /// The linearizability check says the answers were explicable. This says the
-    /// state was too: a server that answered correctly and then wrote something
-    /// else down would pass the first and fail this.
-    fn check_refinement(
-        self: *Simulation,
-        operations: []const checker.Operation,
-        order: []const usize,
-    ) !bool {
-        const model = try Model.create(self.allocator);
-        defer model.destroy();
-        for (order) |i| model.free_reply(model.apply(operations[i].envelope));
-
-        const at = self.workload.now;
-        const snap_envelope = try std.fmt.allocPrint(
-            self.allocator,
-            "{{\"kind\":\"debug.snap\",\"head\":{{\"corrId\":\"r\",\"version\":\"{s}\",\"resonate:debug_time\":{d}}},\"data\":{{}}}}",
-            .{ protocol.protocol_version, at },
-        );
-        defer self.allocator.free(snap_envelope);
-
-        // The model's store has no faults, so its snapshot is answered inline.
-        const expected = model.apply(snap_envelope);
-        defer model.free_reply(expected);
-
-        // A cold server: no cache, no deadline queue, nothing but the bucket.
-        const cold = try self.build_runtime();
-        defer cold.destroy();
-        var arena = std.heap.ArenaAllocator.init(self.allocator);
-        defer arena.deinit();
-        const Answer = struct {
-            status: i32 = 0,
-            data: []const u8 = "",
-            done: bool = false,
-            fn callback(request: *server_mod.Request) void {
-                const answer: *@This() = @ptrCast(@alignCast(request.context.?));
-                answer.status = request.status;
-                answer.data = request.response;
-                answer.done = true;
-            }
-        };
-        var answer = Answer{};
-        var request_arena = std.heap.ArenaAllocator.init(self.allocator);
-        defer request_arena.deinit();
-        var request = server_mod.Request{
-            .body = snap_envelope,
-            .arena = &request_arena,
-            .callback = Answer.callback,
-            .context = &answer,
-        };
-        cold.server.process(&request);
-        // The store holds operations back, so a cold read takes several rounds:
-        // the snapshot lists the bucket and then reads every object in it.
-        var rounds: u32 = 0;
-        while (!answer.done) {
-            rounds += 1;
-            if (rounds > 100_000) return false;
-            self.mem.drain_delayed();
-            cold.drain();
-        }
-
-        const parsed = json.parse(arena.allocator(), answer.data) catch return false;
-        const actual = parsed.get("data") orelse return false;
-        var actual_text = std.ArrayList(u8).init(arena.allocator());
-        try json.write_value(&actual_text, actual);
-
-        // The prefix of a document is stored under a prefix, so a cold server sees
-        // exactly what the live ones wrote. Everything must match.
-        const matches = json.equal_text(arena.allocator(), expected.data, actual_text.items);
-        if (!matches and self.options.verbose) {
-            std.debug.print("refinement broken\n  expected {s}\n  actual   {s}\n", .{ expected.data, actual_text.items });
-        }
-        return matches;
-    }
 };
 
 pub fn run(allocator: std.mem.Allocator, options: Options) !Report {

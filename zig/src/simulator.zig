@@ -51,9 +51,11 @@ const usage =
 const Command = enum { run, soak, check };
 
 pub fn main() u8 {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    // The search allocates and frees hundreds of thousands of times a second, and
+    // a general purpose allocator hands every large block back to the kernel as it
+    // goes — which costs more than the model does. This one keeps what it has.
+    // Leaks are the test binary's to catch, where the allocator checks for them.
+    const allocator = std.heap.smp_allocator;
 
     const argv = std.process.argsAlloc(allocator) catch return 1;
     defer std.process.argsFree(allocator, argv);
@@ -170,9 +172,24 @@ pub fn main() u8 {
                 if (!report.ok()) {
                     stdout.print("FAILED\n", .{}) catch {};
                     report.write(stdout) catch {};
+                    // Every knob, because a run without the faults that broke it
+                    // is a different run.
                     stdout.print(
-                        "\nreproduce with: simulator run --seed {d} --servers {d} --clients {d} --operations {d} --verbose\n",
-                        .{ options.seed, options.servers, options.clients, options.operations },
+                        "\nreproduce with: simulator run --seed {d} --servers {d} --clients {d}" ++
+                            " --operations {d} --conflict {d} --reorder {d} --defer {d}" ++
+                            " --unavailable {d} --lost-ack {d} --crash {d} --verbose\n",
+                        .{
+                            options.seed,
+                            options.servers,
+                            options.clients,
+                            options.operations,
+                            options.faults.conflict_percent,
+                            options.faults.reorder_percent,
+                            options.faults.defer_percent,
+                            options.faults.unavailable_percent,
+                            options.faults.lost_ack_percent,
+                            options.crash_percent,
+                        },
                     ) catch {};
                     return 1;
                 }
@@ -257,6 +274,8 @@ fn check_history(allocator: std.mem.Allocator, path: []const u8, options: checke
         },
         .violation => |violation| {
             defer allocator.free(violation.prefix);
+            defer allocator.free(violation.abandoned);
+            defer if (violation.final_data.len > 0) allocator.free(violation.final_data);
             defer if (violation.expected_data.len > 0) allocator.free(violation.expected_data);
             try stdout.print(
                 "  NOT LINEARIZABLE\n    the deepest order reached placed {d} of {d} operations\n",
@@ -285,8 +304,14 @@ fn check_history(allocator: std.mem.Allocator, path: []const u8, options: checke
                     violation.expected_data,
                 });
             }
-            try stdout.print("    the order it reached, by operation index:\n      ", .{});
-            for (violation.prefix) |index| try stdout.print("{d} ", .{index});
+            try stdout.print(
+                "    the order it reached, by operation index (~n: taken to have never happened):\n      ",
+                .{},
+            );
+            for (violation.prefix, violation.abandoned) |index, gone| {
+                if (gone) try stdout.print("~", .{});
+                try stdout.print("{d} ", .{index});
+            }
             try stdout.print("\n", .{});
             return 1;
         },
