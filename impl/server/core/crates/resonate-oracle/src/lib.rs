@@ -214,7 +214,7 @@ impl Oracle {
 
         for pt in &self.p_timeouts {
             if self.promises.get(&pt.id).is_some_and(|p| {
-                p.state == PromiseState::Pending && p.tags.contains_key("resonate:target")
+                p.state == PromiseState::Pending && resonate_core::types::is_external(&p.tags)
             }) {
                 out.push(Scheduled {
                     at: pt.timeout,
@@ -421,7 +421,7 @@ impl Oracle {
                 );
             }
         } else {
-            if addr.is_some() {
+            if resonate_core::types::is_external(&r.tags) {
                 self.set_p_timeout(&r.id, r.timeout_at);
             }
             if let Some(ref addr) = addr {
@@ -1506,7 +1506,7 @@ impl Oracle {
                             );
                         }
                     } else {
-                        if addr.is_some() {
+                        if resonate_core::types::is_external(&create_data.tags) {
                             self.set_p_timeout(&create_data.id, create_data.timeout_at);
                         }
                         if let Some(ref a) = addr {
@@ -2116,9 +2116,11 @@ impl Oracle {
             }
         }
 
-        // Collect expired promise timeouts — after fix 1, p_timeouts only contains
-        // promises with resonate:target, and del_p_timeout is always called on settlement
-        // so all entries here are guaranteed to be Pending with a target.
+        // Collect expired promise timeouts. `p_timeouts` holds every pending
+        // promise that is not internal — one a listener or an awaiter can wait
+        // on, or whose own task is redispatched — and `del_p_timeout` runs on
+        // every settlement, so every entry here is pending and external.
+        // Internal promises arm nothing and expire lazily, on read.
         let expired_promise_ids: Vec<String> = self
             .p_timeouts
             .iter()
@@ -2298,7 +2300,7 @@ impl Oracle {
                             );
                         }
                     } else {
-                        if addr.is_some() {
+                        if resonate_core::types::is_external(&tags) {
                             self.set_p_timeout(&promise_id, timeout_at);
                         }
                         if let Some(ref a) = addr {
