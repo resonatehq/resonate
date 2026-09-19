@@ -173,6 +173,13 @@ jobs:
       - name: A deadline survives a restart
         run: tools/deadline-survives-a-restart.sh
 
+      # And the defect none of the others can see: the simulator drives the state
+      # machine in process, the tests answer a handful of requests and exit, and a
+      # differential compares answers rather than resident memory. A few kilobytes
+      # a request kills a server that is otherwise correct.
+      - name: Answering costs nothing to keep
+        run: tools/memory-stays-flat.sh
+
       # With the search off a run costs milliseconds, so this is thousands of
       # seeds rather than tens — and what it still checks is everything a
       # linearizability search cannot see: a 5xx, a deadline with no object to

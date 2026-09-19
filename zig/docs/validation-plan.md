@@ -1,6 +1,6 @@
 # How this implementation is validated
 
-Five checks. They answer different questions, and none of them substitutes for
+Six checks. They answer different questions, and none of them substitutes for
 another.
 
 | | asks | answers with |
@@ -10,6 +10,7 @@ another.
 | `differ` | is this the protocol everybody else implements | another server, request for request |
 | `simulator check` | was *that* run sound | a recorded history from a real server |
 | `tools/deadline-survives-a-restart.sh` | does a deadline outlive the process | a server stopped before one and started again |
+| `tools/memory-stays-flat.sh` | does answering cost anything to keep | three thousand reads, and the resident set either side |
 
 ## 1. Unit tests — `zig build test`
 
@@ -154,6 +155,24 @@ A stand-in S3, a server with no debug mode, a promise that times out in eight
 seconds, the server stopped before the deadline and started again — and then the
 deadline fires by itself, the promise resolves at the instant it was due, and the
 deadline object is collected. It fails loudly on the first thing that is not true.
+
+### What none of the others can see
+
+A request that changes nothing must cost nothing to have answered. The simulator
+drives the state machine in process, the tests answer a handful of requests and
+exit, and a differential compares answers rather than resident memory — so a
+server that grows by a few kilobytes a request passes every one of them, and dies
+inside a day.
+
+```
+zig/tools/memory-stays-flat.sh
+```
+
+Three thousand reads down one connection, with the resident set measured either
+side of them. It found the defect it was written for: every protocol request was
+given an arena of its own that nothing freed, about five kilobytes a request. The
+same script fails the build from before that fix, at 7295 bytes a request, and
+passes the one after it at 23.
 
 ### The one thing that cannot be checked
 

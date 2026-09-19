@@ -120,7 +120,7 @@ Three ideas hold it together, all of them TigerBeetle's:
 
 ## Is it right?
 
-Five checks, described in [docs/validation-plan.md](docs/validation-plan.md):
+Six checks, described in [docs/validation-plan.md](docs/validation-plan.md):
 
 ```
 zig build test                                   # 210 unit tests
@@ -129,6 +129,7 @@ zig-out/bin/simulator run  --seed 1 --servers 3 --clients 4 --operations 200 \
 zig-out/bin/simulator soak --runs 200 --crash 2 --unavailable 5 --lost-ack 5
 zig-out/bin/differ --a http://127.0.0.1:8021/ --b http://127.0.0.1:8022/
 tools/deadline-survives-a-restart.sh
+tools/memory-stays-flat.sh
 ```
 
 The simulator runs several servers over one bucket with faults injected into the
@@ -163,6 +164,10 @@ And two the checker could not have found, which the differential did:
   linearizable.
 * An occurrence reached after its own deadline had passed was offered to a worker
   for work that was already over.
+
+And one that no check could see until there was a check for it: every protocol
+request was given an arena of its own that nothing freed, about five kilobytes a
+request. `tools/memory-stays-flat.sh` is that check.
 
 ## What is not here
 
