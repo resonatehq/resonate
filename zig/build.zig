@@ -21,7 +21,7 @@ pub fn build(b: *std.Build) void {
     // ── The simulator (VOPR) ──────────────────────────────────────────────────
     const sim = b.addExecutable(.{
         .name = "simulator",
-        .root_source_file = b.path("src/sim/main.zig"),
+        .root_source_file = b.path("src/simulator.zig"),
         .target = target,
         .optimize = optimize,
     });

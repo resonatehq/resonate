@@ -503,6 +503,9 @@ pub const Scanner = struct {
 
         var matches = std.ArrayList(*const ScheduleDoc).init(a);
         for (req.schedules.items) |*s| {
+            // A tombstone is a schedule that has been deleted; its object has
+            // simply not gone yet.
+            if (s.deleted) continue;
             if (!s.promise_tags.contains_all(tag_filter)) continue;
             if (cursor) |c| {
                 if (!std.mem.lessThan(u8, c, s.id)) continue;

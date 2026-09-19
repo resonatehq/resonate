@@ -826,6 +826,16 @@ pub const ScheduleDoc = struct {
     next_run_at: i64 = 0,
     last_run_at: ?i64 = null,
 
+    /// A schedule that has been deleted, but whose object has not gone yet.
+    ///
+    /// Deleting cannot be a read followed by an unconditional remove: two callers
+    /// would both read it, both remove it, and both report that they were the one
+    /// who did. So a delete is a compare-and-swap that writes this flag — exactly
+    /// one caller can win it — and the object is removed afterwards. A tombstone
+    /// left behind by a process that died in between reads as absent and is
+    /// reclaimed by the next create.
+    deleted: bool = false,
+
     pub fn init(child: std.mem.Allocator) ScheduleDoc {
         return .{ .arena = std.heap.ArenaAllocator.init(child) };
     }
@@ -858,6 +868,7 @@ pub const ScheduleDoc = struct {
             try out.appendSlice(",\"lr\":");
             try out.writer().print("{d}", .{lr});
         }
+        if (self.deleted) try out.appendSlice(",\"del\":true");
         if (!self.promise_param.is_empty()) {
             try out.appendSlice(",\"pa\":");
             try Doc.encode_value(out, self.promise_param);
@@ -885,6 +896,10 @@ pub const ScheduleDoc = struct {
         sched.created_at = v.get_i64("ca") orelse return error.Corrupt;
         sched.next_run_at = v.get_i64("nr") orelse return error.Corrupt;
         sched.last_run_at = v.get_i64("lr");
+        sched.deleted = blk: {
+            const del = v.get("del") orelse break :blk false;
+            break :blk del.as_bool() orelse false;
+        };
         sched.promise_param = try Doc.decode_value(a, v.get("pa"));
         sched.promise_tags = if (v.get("tg")) |t|
             StringMap.from_json(a, t) catch return error.Corrupt

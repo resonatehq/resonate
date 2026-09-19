@@ -771,3 +771,76 @@ test "ascii only escaping is canonical and total" {
     try write_string_ascii(&out, "café", false);
     try testing.expectEqualStrings("\"café\"", out.items);
 }
+
+/// Structural equality: objects compare irrespective of member order, arrays do
+/// not.
+///
+/// Byte comparison is not enough where the two documents came from different
+/// encoders — a recorded history has been through another JSON library, which
+/// may have sorted the keys or written the numbers differently. Order does matter
+/// inside an array, because the protocol's arrays are ordered: a page of a search
+/// and a task's preload are both sorted by id, and two different orders are two
+/// different answers.
+pub fn equal(a: Value, b: Value) bool {
+    return switch (a) {
+        .null => b == .null,
+        .bool => |x| b == .bool and b.bool == x,
+        .int => |x| switch (b) {
+            .int => |y| x == y,
+            .float => |y| @floor(y) == y and @as(f64, @floatFromInt(x)) == y,
+            else => false,
+        },
+        .float => |x| switch (b) {
+            .float => |y| x == y,
+            .int => |y| @floor(x) == x and x == @as(f64, @floatFromInt(y)),
+            else => false,
+        },
+        .string => |x| b == .string and std.mem.eql(u8, x, b.string),
+        .array => |x| {
+            const y = if (b == .array) b.array else return false;
+            if (x.len != y.len) return false;
+            for (x, y) |xi, yi| {
+                if (!equal(xi, yi)) return false;
+            }
+            return true;
+        },
+        .object => |x| {
+            const y = if (b == .object) b.object else return false;
+            if (x.entries.len != y.entries.len) return false;
+            for (x.entries) |entry| {
+                const other = y.get(entry.key) orelse return false;
+                if (!equal(entry.value, other)) return false;
+            }
+            return true;
+        },
+    };
+}
+
+/// `equal` over two documents that have not been parsed yet. Returns false when
+/// either fails to parse, because a document that is not JSON is not equal to one
+/// that is.
+pub fn equal_text(arena: std.mem.Allocator, a: []const u8, b: []const u8) bool {
+    if (std.mem.eql(u8, a, b)) return true;
+    const va = parse(arena, a) catch return false;
+    const vb = parse(arena, b) catch return false;
+    return equal(va, vb);
+}
+
+test "structural equality ignores member order but not array order" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try testing.expect(equal_text(a, "{\"x\":1,\"y\":2}", "{\"y\":2,\"x\":1}"));
+    try testing.expect(equal_text(a, "{\"n\":{\"a\":[1,2]}}", "{\"n\":{\"a\":[1,2]}}"));
+    try testing.expect(!equal_text(a, "[1,2]", "[2,1]"));
+    try testing.expect(!equal_text(a, "{\"x\":1}", "{\"x\":1,\"y\":2}"));
+    try testing.expect(!equal_text(a, "{\"x\":1}", "{\"x\":2}"));
+    // A number is a number however it was written.
+    try testing.expect(equal_text(a, "{\"t\":5}", "{\"t\":5.0}"));
+    try testing.expect(equal_text(a, "{\"t\":1000}", "{\"t\":1e3}"));
+    try testing.expect(!equal_text(a, "{\"t\":5}", "{\"t\":5.5}"));
+    // Not JSON is not equal to JSON.
+    try testing.expect(!equal_text(a, "nope", "{}"));
+    // And two identical strings are equal without parsing at all.
+    try testing.expect(equal_text(a, "also not json", "also not json"));
+}

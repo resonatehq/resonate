@@ -24,4 +24,9 @@ comptime {
     _ = @import("net.zig");
     _ = @import("s3.zig");
     _ = @import("bus.zig");
+    _ = @import("sim/model.zig");
+    _ = @import("sim/checker.zig");
+    _ = @import("sim/workload.zig");
+    _ = @import("sim/simulation.zig");
+    _ = @import("sim/history.zig");
 }

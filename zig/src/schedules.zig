@@ -82,8 +82,8 @@ pub const Request = struct {
         arming,
         committing,
         disarming,
-        deleting_doc,
-        deleting_timer,
+        purging_doc,
+        purging_timer,
         firing,
         done,
     } = .start,
@@ -104,7 +104,13 @@ pub const Request = struct {
     /// `create` only: what the request asked for, held between the validation
     /// and the read that decides whether there is anything to create.
     create_fields: ?CreateFields = null,
+    /// How many times a contended write has been re-decided.
+    attempt: u32 = 0,
 };
+
+/// How many times a contended schedule is re-read before the caller is told the
+/// truth: this did not happen, try again.
+pub const max_cas_retries: u32 = 8;
 
 const CreateFields = struct {
     cron: []const u8,
@@ -182,8 +188,8 @@ pub const Service = struct {
             .arming => self.on_armed(req, op.result),
             .committing => self.on_committed(req, op.result),
             .disarming => self.finish_ok(req),
-            .deleting_doc => self.on_doc_deleted(req, op.result),
-            .deleting_timer => self.finish_empty(req),
+            .purging_doc => self.on_purged_doc(req),
+            .purging_timer => self.finish_empty(req),
             else => unreachable,
         }
     }
@@ -205,6 +211,17 @@ pub const Service = struct {
                 req.etag = f.etag;
                 req.sched = ScheduleDoc.decode(a, f.body, req.id) catch
                     return fail(req, 500, "the schedule object is corrupt");
+                if (req.sched.?.deleted) {
+                    // A tombstone: the schedule is gone, and only the object is
+                    // still there.
+                    switch (req.kind) {
+                        .get, .delete => return fail(req, 404, "Schedule not found"),
+                        .fire => return self.finish_empty(req),
+                        // Reclaimed rather than refused: the id is free again, and
+                        // the write that takes it replaces the tombstone.
+                        .create => return self.build_and_commit(req),
+                    }
+                }
             },
             .unavailable => |detail| return fail(req, 503, detail),
             else => return fail(req, 500, "the store answered a read with something else"),
@@ -213,7 +230,7 @@ pub const Service = struct {
             // Creating a schedule that exists is the same request arriving
             // twice, and the answer is the schedule that is there.
             .get, .create => self.reply_schedule(req),
-            .delete => self.delete_doc(req),
+            .delete => self.tombstone(req),
             .fire => self.fire(req),
         }
     }
@@ -297,7 +314,8 @@ pub const Service = struct {
         sched.last_run_at = null;
         req.sched = sched;
 
-        req.etag = null;
+        // The version read, if any: reclaiming a tombstone replaces an object that
+        // is there, and creating a fresh schedule replaces nothing.
         req.old_next_run_at = 0;
         req.new_next_run_at = sched.next_run_at;
         self.encode_and_arm(req);
@@ -353,19 +371,31 @@ pub const Service = struct {
     fn on_committed(self: *Service, req: *Request, result: store_mod.Result) void {
         switch (result) {
             .written => {
+                if (req.kind == .delete) {
+                    // The tombstone landed, so this caller is the one that deleted
+                    // it. Now the object itself can go.
+                    return self.purge(req);
+                }
                 if (self.deadline_hook) |hook| {
                     hook(self.deadline_context, req.id, req.new_next_run_at);
                 }
                 self.disarm(req);
             },
             .precondition_failed => {
+                req.attempt += 1;
+                if (req.attempt > max_cas_retries) {
+                    return fail(req, 503, "the schedule was contended for too long");
+                }
                 switch (req.kind) {
-                    // Someone else created it first. Creating a schedule that
-                    // exists is the same request arriving twice, so the answer is
-                    // the schedule — read it back rather than guess at it.
-                    .create => {
-                        req.kind = .get;
+                    // Someone else wrote first, so this decision was made against
+                    // state that no longer exists: read again and decide again.
+                    // Never turn it into a different operation — a create that
+                    // found the schedule deleted in between still has a schedule
+                    // to create, and answering "not found" to a create is an
+                    // answer no sequential execution could give.
+                    .create, .delete => {
                         req.sched = null;
+                        req.etag = null;
                         self.load(req);
                     },
                     // The schedule moved under us. Whoever moved it did this
@@ -407,10 +437,35 @@ pub const Service = struct {
 
     // ── Deleting ──────────────────────────────────────────────────────────────
 
-    fn delete_doc(self: *Service, req: *Request) void {
+    /// Claim the deletion with a compare-and-swap.
+    ///
+    /// Exactly one caller can win the write, and that caller is the one that
+    /// deleted the schedule. A read followed by an unconditional remove would let
+    /// two callers both report that they had — and two successful deletes of one
+    /// schedule is a history no sequential execution can explain.
+    fn tombstone(self: *Service, req: *Request) void {
+        const sched = &req.sched.?;
+        sched.deleted = true;
+        req.old_next_run_at = sched.next_run_at;
+        req.new_next_run_at = sched.next_run_at;
+
+        const a = req.arena.allocator();
+        var body = std.ArrayList(u8).init(a);
+        sched.encode(&body) catch return fail(req, 503, "out of memory");
+        req.body = body.items;
+        self.commit(req);
+    }
+
+    /// The object, and then the deadline it armed.
+    ///
+    /// Both unconditional and both idempotent: the tombstone is the record that
+    /// this caller won, so everything after it is cleanup that can be repeated. A
+    /// crash in the middle leaves a tombstone, which reads as absent and is
+    /// reclaimed by the next create.
+    fn purge(self: *Service, req: *Request) void {
         const key = self.keys.sched_key(&req.key_buf, req.id) catch
-            return fail(req, 503, "out of memory");
-        req.phase = .deleting_doc;
+            return self.finish_empty(req);
+        req.phase = .purging_doc;
         req.op = .{
             .kind = .delete,
             .key = key,
@@ -421,18 +476,10 @@ pub const Service = struct {
         self.store.submit(&req.op);
     }
 
-    fn on_doc_deleted(self: *Service, req: *Request, result: store_mod.Result) void {
-        switch (result) {
-            .deleted => {},
-            .unavailable => |detail| return fail(req, 503, detail),
-            else => return fail(req, 500, "the store answered a delete with something else"),
-        }
-        // The deadline goes after the schedule, so a crash in between leaves a
-        // key that fires into a schedule that is not there — which the firing
-        // loop treats as an orphan and collects.
-        const key = self.keys.sched_timer_key(&req.key_buf, req.id, req.sched.?.next_run_at) catch
+    fn on_purged_doc(self: *Service, req: *Request) void {
+        const key = self.keys.sched_timer_key(&req.key_buf, req.id, req.old_next_run_at) catch
             return self.finish_empty(req);
-        req.phase = .deleting_timer;
+        req.phase = .purging_timer;
         req.op = .{
             .kind = .delete,
             .key = key,
@@ -749,6 +796,7 @@ const Fixture = struct {
         kind: []const u8,
         data_json: []const u8,
     ) !Reply {
+        // Anything the store is holding back has to land for the answer to arrive.
         var reply = Reply{};
         var req = Request{
             .kind = Kind.parse(kind).?,
@@ -760,8 +808,13 @@ const Fixture = struct {
             .context = &reply,
         };
         self.service.submit(&req);
-        self.applier.drain();
-        try testing.expect(reply.done);
+        var guard: usize = 0;
+        while (!reply.done) {
+            guard += 1;
+            if (guard > 1_000) return error.NeverAnswered;
+            self.mem.drain_delayed();
+            self.applier.drain();
+        }
         return reply;
     }
 
@@ -987,4 +1040,108 @@ test "the promise id template substitutes only what it documents" {
     try testing.expectEqualStrings("fixed", try render_promise_id(a, "fixed", "s0", 1234));
     try testing.expectEqualStrings("{{.other}}", try render_promise_id(a, "{{.other}}", "s0", 1234));
     try testing.expectEqualStrings("run-1234-s0", try render_promise_id(a, "run-{{.timestamp}}-{{.id}}", "s0", 1234));
+}
+
+test "two callers deleting one schedule: exactly one of them deleted it" {
+    const f = try Fixture.create(testing.allocator);
+    defer f.destroy();
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    _ = try f.call(&arena, "schedule.create",
+        \\{"id":"s0","cron":"* * * * *","promiseId":"{{.id}}.{{.timestamp}}","promiseTimeout":60000,"promiseTags":{"resonate:target":"http://w"}}
+    );
+
+    // Both submitted before either is driven, which is what makes them race.
+    var first = Fixture.Reply{};
+    var second = Fixture.Reply{};
+    var a_request = Request{
+        .kind = .delete,
+        .data = try json.parse(arena.allocator(), "{\"id\":\"s0\"}"),
+        .now = f.sim.now,
+        .arena = &arena,
+        .callback = Fixture.Reply.callback,
+        .context = &first,
+    };
+    var b_arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer b_arena.deinit();
+    var b_request = Request{
+        .kind = .delete,
+        .data = try json.parse(b_arena.allocator(), "{\"id\":\"s0\"}"),
+        .now = f.sim.now,
+        .arena = &b_arena,
+        .callback = Fixture.Reply.callback,
+        .context = &second,
+    };
+    // Held back so both read the schedule before either writes.
+    var rng = stdx.Random.init(1);
+    f.mem.random = &rng;
+    f.mem.faults.defer_percent = 100;
+    f.service.submit(&a_request);
+    f.service.submit(&b_request);
+    var guard: usize = 0;
+    while (!first.done or !second.done) {
+        guard += 1;
+        if (guard > 1_000) return error.NeverAnswered;
+        f.mem.drain_delayed();
+        f.applier.drain();
+    }
+
+    // One deleted it; the other found it gone. Two successes would be a history
+    // no sequential execution could explain.
+    const successes = @as(u32, if (first.status == 200) 1 else 0) + @as(u32, if (second.status == 200) 1 else 0);
+    try testing.expectEqual(@as(u32, 1), successes);
+    const missing = @as(u32, if (first.status == 404) 1 else 0) + @as(u32, if (second.status == 404) 1 else 0);
+    try testing.expectEqual(@as(u32, 1), missing);
+
+    // And it really is gone.
+    f.mem.faults.defer_percent = 0;
+    const got = try f.call(&arena, "schedule.get", "{\"id\":\"s0\"}");
+    try testing.expectEqual(@as(i32, 404), got.status);
+}
+
+test "a tombstone left by a crash reads as absent and is reclaimed by a create" {
+    const f = try Fixture.create(testing.allocator);
+    defer f.destroy();
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    // Exactly what a process that died between the tombstone and the purge leaves.
+    var sched = doc_mod.ScheduleDoc.init(testing.allocator);
+    defer sched.deinit();
+    const owned = sched.allocator();
+    sched.id = try owned.dupe(u8, "s0");
+    sched.cron = try owned.dupe(u8, "* * * * *");
+    sched.promise_id = try owned.dupe(u8, "p");
+    sched.promise_timeout = 1;
+    sched.created_at = 1;
+    sched.next_run_at = 60_000;
+    sched.deleted = true;
+    var body = std.ArrayList(u8).init(a);
+    try sched.encode(&body);
+    var key_buf = std.ArrayList(u8).init(a);
+    const key = try f.keys.sched_key(&key_buf, "s0");
+    var op = store_mod.Operation{
+        .kind = .put,
+        .key = key,
+        .body = body.items,
+        .arena = a,
+        .callback = struct {
+            fn cb(_: *store_mod.Operation) void {}
+        }.cb,
+    };
+    f.mem.store().submit(&op);
+
+    // It reads as absent.
+    try testing.expectEqual(@as(i32, 404), (try f.call(&arena, "schedule.get", "{\"id\":\"s0\"}")).status);
+    try testing.expectEqual(@as(i32, 404), (try f.call(&arena, "schedule.delete", "{\"id\":\"s0\"}")).status);
+    // And the id is free again.
+    const created = try f.call(&arena, "schedule.create",
+        \\{"id":"s0","cron":"0 * * * *","promiseId":"{{.id}}.{{.timestamp}}","promiseTimeout":5000,"promiseTags":{"resonate:target":"http://w"}}
+    );
+    try testing.expectEqual(@as(i32, 200), created.status);
+    try testing.expect(std.mem.indexOf(u8, created.data, "\"cron\":\"0 * * * *\"") != null);
+    const got = try f.call(&arena, "schedule.get", "{\"id\":\"s0\"}");
+    try testing.expect(std.mem.indexOf(u8, got.data, "\"cron\":\"0 * * * *\"") != null);
 }

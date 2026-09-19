@@ -65,15 +65,20 @@ pub const Etag = struct {
     }
 };
 
-/// What a write requires of what is already there.
+/// What an operation requires of what is already there.
 pub const Precondition = union(enum) {
-    /// Write regardless. Used for timer objects, where the *key* carries the
-    /// whole value being written, so a blind overwrite is idempotent.
+    /// No condition. For a write, this is a blind overwrite — used for timer
+    /// objects, where the *key* carries the whole value being written, so
+    /// overwriting is idempotent.
     none,
-    /// Create only. The object must not exist.
+    /// A write that creates only: the object must not exist.
     absent,
-    /// Replace only if the object is still at this version.
+    /// A write that replaces only if the object is still at this version.
     match: Etag,
+    /// A **read** that only wants the body if it has changed since this version.
+    /// Answered `not_modified` when it has not, which is what makes validating a
+    /// cached document cost a round trip rather than a transfer.
+    unchanged: Etag,
 };
 
 pub const Kind = enum { get, put, delete, list };
@@ -87,6 +92,9 @@ pub const Result = union(enum) {
     /// `get` found nothing. Not an error: an origin with no document is an
     /// origin with no promises.
     not_found,
+    /// `get` found the object still at the version the caller named, so it did
+    /// not send the body. The caller's own copy is current.
+    not_modified,
     /// `put` landed, at this version.
     written: Etag,
     /// `delete` is done. Deleting what is not there succeeds.
@@ -401,7 +409,17 @@ pub const MemoryStore = struct {
         /// `unavailable`. The nastiest case a caller has to survive: it must
         /// retry, and the retry must be idempotent.
         lost_ack_percent: u64 = 0,
-        /// Percent of operations held back to complete out of submission order.
+        /// Percent of operations held back to complete on a later drain.
+        ///
+        /// Not a fault: it is what a store across a network does, and it is the
+        /// only way two requests can actually be in flight at once. Serving
+        /// everything inline makes a concurrent workload sequential, and a
+        /// linearizability check over a sequential history says nothing.
+        defer_percent: u64 = 0,
+        /// Percent of held-back operations completed out of submission order.
+        ///
+        /// This one *is* a fault: a caller that depends on its own operations
+        /// completing in the order it submitted them is a caller with a bug.
         reorder_percent: u64 = 0,
     };
 
@@ -455,7 +473,7 @@ pub const MemoryStore = struct {
 
     pub fn submit(self: *MemoryStore, op: *Operation) void {
         if (self.random) |rng| {
-            if (rng.chance(self.faults.reorder_percent)) {
+            if (rng.chance(self.faults.defer_percent)) {
                 self.delayed.append(self.allocator, op) catch {
                     // Nowhere to put it: serve it now rather than drop it.
                     self.serve(op);
@@ -466,10 +484,26 @@ pub const MemoryStore = struct {
         self.serve(op);
     }
 
-    /// Complete everything held back, oldest first.
+    /// Complete everything held back.
+    ///
+    /// Oldest first, unless reordering is injected: then the order is shuffled,
+    /// because nothing about a store promises that two requests come back in the
+    /// order they went out.
     pub fn drain_delayed(self: *MemoryStore) void {
         const held = self.delayed.toOwnedSlice(self.allocator) catch return;
         defer self.allocator.free(held);
+        if (self.random) |rng| {
+            if (held.len > 1 and rng.chance(self.faults.reorder_percent)) {
+                var i = held.len;
+                while (i > 1) {
+                    i -= 1;
+                    const j = rng.below(i + 1);
+                    const swap = held[i];
+                    held[i] = held[j];
+                    held[j] = swap;
+                }
+            }
+        }
         for (held) |op| self.serve(op);
     }
 
@@ -498,6 +532,12 @@ pub const MemoryStore = struct {
             op.complete(.not_found);
             return;
         };
+        if (op.precondition == .unchanged) {
+            if (Etag.eql(entry.etag, op.precondition.unchanged)) {
+                op.complete(.not_modified);
+                return;
+            }
+        }
         const body = op.arena.dupe(u8, entry.body) catch {
             op.complete(.{ .unavailable = "out of memory reading an object" });
             return;
@@ -518,7 +558,8 @@ pub const MemoryStore = struct {
         }
         const existing = self.objects.getPtr(op.key);
         switch (op.precondition) {
-            .none => {},
+            // A read's condition means nothing on a write.
+            .none, .unchanged => {},
             .absent => if (existing != null) {
                 op.complete(.precondition_failed);
                 return;
@@ -789,6 +830,31 @@ test "timer keys spread across shards" {
     try testing.expect(seen.count() > 1);
 }
 
+test "a validating read is answered without a body when nothing changed" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var mem = MemoryStore.init(testing.allocator);
+    defer mem.deinit();
+    const s = mem.store();
+    var d: Sync = .{};
+
+    const written = d.run(s, a, .{ .kind = .put, .key = "k", .body = "one", .precondition = .absent, .arena = a, .callback = undefined });
+    const etag = written.written;
+
+    // Still at that version: the store says so and sends nothing.
+    try testing.expect(d.run(s, a, .{ .kind = .get, .key = "k", .precondition = .{ .unchanged = etag }, .arena = a, .callback = undefined }) == .not_modified);
+
+    // Moved on: the body comes back.
+    _ = d.run(s, a, .{ .kind = .put, .key = "k", .body = "two", .precondition = .{ .match = etag }, .arena = a, .callback = undefined });
+    const fresh = d.run(s, a, .{ .kind = .get, .key = "k", .precondition = .{ .unchanged = etag }, .arena = a, .callback = undefined });
+    try testing.expectEqualStrings("two", fresh.found.body);
+
+    // And an object that is gone is gone, whatever version the caller held.
+    _ = d.run(s, a, .{ .kind = .delete, .key = "k", .arena = a, .callback = undefined });
+    try testing.expect(d.run(s, a, .{ .kind = .get, .key = "k", .precondition = .{ .unchanged = etag }, .arena = a, .callback = undefined }) == .not_found);
+}
+
 test "injected faults reach the caller" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
@@ -817,7 +883,7 @@ test "injected faults reach the caller" {
     try testing.expectEqualStrings("landed", d.run(s, a, .{ .kind = .get, .key = "j", .arena = a, .callback = undefined }).found.body);
 }
 
-test "reordering holds operations back until the caller drains them" {
+test "deferring holds operations back until the caller drains them" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -825,7 +891,7 @@ test "reordering holds operations back until the caller drains them" {
     var mem = MemoryStore.init(testing.allocator);
     defer mem.deinit();
     mem.random = &rng;
-    mem.faults.reorder_percent = 100;
+    mem.faults.defer_percent = 100;
     const s = mem.store();
 
     var got: usize = 0;

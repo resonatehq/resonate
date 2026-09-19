@@ -66,9 +66,22 @@ pub const Config = struct {
     /// How many times a contended origin is re-decided before the caller is
     /// told the truth: this did not happen, try again.
     max_cas_retries: u32 = 8,
-    /// Documents held in memory. A miss costs one GET, so this is a latency
-    /// budget rather than a correctness one.
+    /// Documents held in memory.
     cache_entries: u32 = 4096,
+    /// Validate a cached document against the store before deciding against it.
+    ///
+    /// On by default, and it has to be for reads to be linearizable when more than
+    /// one process writes the bucket. A cached document was committed, so it is a
+    /// state that really existed — but another process may have committed past it,
+    /// and answering a read from it is then a read of a state that is no longer
+    /// current. A write does not have this problem: its compare-and-swap is
+    /// refused and it re-decides.
+    ///
+    /// The validation is a conditional read: the store answers "not modified" and
+    /// sends no body, so a cache hit costs a round trip rather than a transfer.
+    /// Turning it off is sound only where this process is the only writer, and
+    /// nothing can check that for you — so it is off only if you say so.
+    linearizable_reads: bool = true,
 };
 
 /// One unit of work for an origin's document.
@@ -257,6 +270,9 @@ const Actor = struct {
     doc: ?Doc = null,
     before_bytes: []const u8 = &.{},
     body: []const u8 = &.{},
+    /// The copy held in memory, while the store is being asked whether it is
+    /// still current.
+    cached_bytes: []const u8 = &.{},
     etag: ?Etag = null,
     old_timer_at: ?i64 = null,
     new_timer_at: ?i64 = null,
@@ -267,7 +283,10 @@ const Actor = struct {
     retry_same_write: bool = false,
 
     op: store_mod.Operation = undefined,
-    backoff: env.Timeout = undefined,
+    /// Initialized rather than left undefined: `destroy` has to be able to ask
+    /// whether it is armed, and an actor that went away leaving a deadline
+    /// pointing at it is a crash on the next tick of the clock.
+    backoff: env.Timeout = .{ .at_ms = 0, .callback = on_backoff },
     key: std.ArrayList(u8),
     old_key: std.ArrayList(u8),
 
@@ -290,6 +309,8 @@ const Actor = struct {
 
     fn destroy(self: *Actor) void {
         const allocator = self.applier.allocator;
+        // Nothing may outlive this actor holding a pointer to it.
+        if (self.backoff.armed) self.applier.timer.cancel(&self.backoff);
         if (self.doc) |*d| d.deinit();
         self.scratch.deinit();
         self.key.deinit();
@@ -305,6 +326,7 @@ const Actor = struct {
         }
         self.effects = .{};
         self.before_bytes = &.{};
+        self.cached_bytes = &.{};
         self.body = &.{};
         _ = self.scratch.reset(.retain_capacity);
     }
@@ -335,11 +357,23 @@ const Actor = struct {
     fn load(self: *Actor) void {
         self.reset_batch();
         const a = self.scratch.allocator();
+        var precondition: store_mod.Precondition = .none;
         if (self.applier.cache.get(self.origin)) |entry| {
-            self.before_bytes = a.dupe(u8, entry.bytes) catch return self.fail_batch(503, "out of memory");
+            if (!self.applier.cfg.linearizable_reads) {
+                // Trusted without asking. Sound only where nothing else writes
+                // this bucket; see `Config.linearizable_reads`.
+                self.before_bytes = a.dupe(u8, entry.bytes) catch return self.fail_batch(503, "out of memory");
+                self.etag = entry.etag;
+                self.decide();
+                return;
+            }
+            // Ask whether it is still current. The answer is a status, not a
+            // document, unless something else has committed since.
+            self.cached_bytes = a.dupe(u8, entry.bytes) catch return self.fail_batch(503, "out of memory");
             self.etag = entry.etag;
-            self.decide();
-            return;
+            precondition = .{ .unchanged = entry.etag };
+        } else {
+            self.cached_bytes = &.{};
         }
         const key = self.applier.keys.doc_key(&self.key, self.origin) catch
             return self.fail_batch(503, "out of memory");
@@ -347,6 +381,7 @@ const Actor = struct {
         self.op = .{
             .kind = .get,
             .key = key,
+            .precondition = precondition,
             .arena = a,
             .callback = on_store_complete,
             .context = self,
@@ -370,6 +405,12 @@ const Actor = struct {
             .found => |f| {
                 self.before_bytes = f.body;
                 self.etag = f.etag;
+            },
+            // Still at the version this process holds, so the copy in hand is
+            // current and the store sent no body.
+            .not_modified => {
+                assert(self.cached_bytes.len > 0);
+                self.before_bytes = self.cached_bytes;
             },
             .not_found => {
                 // An origin with no document is an origin with no promises. The
@@ -580,12 +621,17 @@ const Actor = struct {
 
     fn on_backoff(timeout: *env.Timeout) void {
         const self: *Actor = @ptrCast(@alignCast(timeout.context.?));
+        // Read before the call: retrying can finish the batch and retire this
+        // actor, and then `self` is freed memory. Every place that continues after
+        // handing control back to the applier has to hold the applier, not the
+        // actor.
+        const applier = self.applier;
         if (self.retry_same_write) {
             self.commit();
         } else {
             self.load();
         }
-        self.applier.drain();
+        applier.drain();
     }
 
     fn disarm(self: *Actor) void {
@@ -944,12 +990,21 @@ test "a request is committed, cached, and answered" {
     try testing.expectEqual(@as(usize, 1), h.bus_sent.items.len);
     try testing.expect(std.mem.indexOf(u8, h.bus_sent.items[0], "\"kind\":\"execute\"") != null);
 
-    // The actor is gone but the document is cached, so the next read is free.
+    // The actor is gone but the document is cached, so the next read costs one
+    // conditional read — a status and no body — and no write at all.
     try testing.expect(h.applier.idle());
     const gets_before = h.mem.gets;
+    const puts_before = h.mem.puts;
     const got = try h.call("promise.get", "{\"id\":\"o:a\"}");
     try testing.expectEqual(@as(i32, 200), got.status);
-    try testing.expectEqual(gets_before, h.mem.gets);
+    try testing.expectEqual(gets_before + 1, h.mem.gets);
+    try testing.expectEqual(puts_before, h.mem.puts);
+
+    // Told that nothing else writes this bucket, it does not even ask.
+    h.applier.cfg.linearizable_reads = false;
+    const trusted = try h.call("promise.get", "{\"id\":\"o:a\"}");
+    try testing.expectEqual(@as(i32, 200), trusted.status);
+    try testing.expectEqual(gets_before + 1, h.mem.gets);
 }
 
 test "a read that changes nothing writes nothing" {
@@ -1088,13 +1143,18 @@ test "a lost race is re-decided, not replayed" {
     defer h.destroy();
     const a = h.arena.allocator();
 
+    // Trust the cache, so the applier decides against a version the store has
+    // moved past and its compare-and-swap is refused. That is the path this test
+    // is about; with the cache validated the staleness is caught by the read
+    // instead, which is the same correctness and a different code path.
+    h.applier.cfg.linearizable_reads = false;
+
     // Commit once, so the applier holds a cached document and the version it was
     // read at.
     _ = try h.call("promise.create", "{\"id\":\"o:seed\",\"timeoutAt\":9000000000000}");
 
     // Now move the stored document on behind the applier's back, the way another
-    // process would. The applier's cached version is stale, so its next
-    // conditional write must be refused.
+    // process would.
     {
         var d = Doc.init(testing.allocator);
         defer d.deinit();
@@ -1135,9 +1195,56 @@ test "a lost race is re-decided, not replayed" {
     try testing.expect(std.mem.indexOf(u8, r.data, "\"state\":\"resolved\"") != null);
     try testing.expect(std.mem.indexOf(u8, r.data, "\"createdAt\":123") != null);
     try testing.expect(h.applier.contentions >= 1);
-    // And the promise the other writer planted is still there: nothing was lost.
+    // And the promise the other writer replaced is gone: nothing was invented.
     const seed = try h.call("promise.get", "{\"id\":\"o:seed\"}");
     try testing.expectEqual(@as(i32, 404), seed.status);
+}
+
+test "a validated read catches a write another process made" {
+    const h = try Harness.create(testing.allocator);
+    defer h.destroy();
+    const a = h.arena.allocator();
+
+    // Commit, so the document is cached.
+    _ = try h.call("promise.create", "{\"id\":\"o:a\",\"timeoutAt\":9000000000000}");
+
+    // Another process settles it.
+    {
+        var d = Doc.init(testing.allocator);
+        defer d.deinit();
+        const owned = d.allocator();
+        _ = try d.promise_insert(.{
+            .id = try owned.dupe(u8, "o:a"),
+            .state = .rejected,
+            .param = .empty,
+            .value = .empty,
+            .tags = .empty,
+            .timeout_at = 9_000_000_000_000,
+            .created_at = 1_000_000_000,
+            .settled_at = 1_000_000_001,
+            .timeout_armed = false,
+            .callbacks = .empty,
+            .listeners = .empty,
+        });
+        var buf = std.ArrayList(u8).init(a);
+        try d.encode(&buf, "o");
+        var op = store_mod.Operation{
+            .kind = .put,
+            .key = "wf/o",
+            .body = buf.items,
+            .precondition = .none,
+            .arena = a,
+            .callback = struct {
+                fn cb(_: *store_mod.Operation) void {}
+            }.cb,
+        };
+        h.mem.store().submit(&op);
+    }
+
+    // A read must see it. Serving the cached copy would be a read of a state the
+    // bucket has moved past, which is exactly the violation the simulator found.
+    const got = try h.call("promise.get", "{\"id\":\"o:a\"}");
+    try testing.expect(std.mem.indexOf(u8, got.data, "\"state\":\"rejected\"") != null);
 }
 
 test "contention past the retry limit is reported rather than hidden" {

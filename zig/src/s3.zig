@@ -119,11 +119,18 @@ pub const S3 = struct {
             .put => {
                 headers.append(.{ .name = "Content-Type", .value = "application/octet-stream" }) catch {};
                 switch (op.precondition) {
-                    .none => {},
+                    .none, .unchanged => {},
                     // `*` means "no version at all", which is what create-only is.
                     .absent => headers.append(.{ .name = "If-None-Match", .value = "*" }) catch {},
                     .match => |etag| headers.append(.{ .name = "If-Match", .value = etag.slice() }) catch {},
                 }
+            },
+            .get => switch (op.precondition) {
+                // The same header as a create-only write, and for the same reason:
+                // "only if it is not at this version". On a read the store answers
+                // 304 and sends nothing.
+                .unchanged => |etag| headers.append(.{ .name = "If-None-Match", .value = etag.slice() }) catch {},
+                else => {},
             },
             else => {},
         }
@@ -197,6 +204,7 @@ pub const S3 = struct {
                     };
                     self.finish(pending, .{ .found = .{ .body = body, .etag = Etag.from(etag) } });
                 },
+                304 => self.finish(pending, .not_modified),
                 404 => self.finish(pending, .not_found),
                 else => self.finish(pending, self.error_for(pending, call)),
             },
