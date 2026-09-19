@@ -51,6 +51,8 @@ const usage =
     \\                           nothing on wall time
     \\  --preload-limit <n>      branch siblings carried in a task response [default: 10]
     \\  --cas-retries <n>        re-decides before a contended origin gives up [default: 8]
+    \\  --shutdown-timeout <ms>  how long SIGTERM waits for work in flight
+    \\                           [default: 2000]
     \\
     \\There is no TLS and no authentication here on purpose. Put a proxy in front:
     \\it terminates TLS, authenticates, authorizes, and forwards what is left.
@@ -70,6 +72,7 @@ const Args = struct {
     debug: bool = false,
     preload_limit: u32 = protocol.preload_limit_default,
     cas_retries: u32 = 8,
+    shutdown_timeout: i64 = 2_000,
 };
 
 pub fn main() u8 {
@@ -147,6 +150,12 @@ pub fn main() u8 {
             const v = value orelse return fail("--cas-retries needs a value");
             i += 1;
             args.cas_retries = std.fmt.parseInt(u32, v, 10) catch return fail("--cas-retries is not a number");
+        } else if (std.mem.eql(u8, arg, "--shutdown-timeout")) {
+            const v = value orelse return fail("--shutdown-timeout needs a value");
+            i += 1;
+            args.shutdown_timeout = std.fmt.parseInt(i64, v, 10) catch
+                return fail("--shutdown-timeout is not a number");
+            if (args.shutdown_timeout < 0) return fail("--shutdown-timeout must not be negative");
         } else {
             std.debug.print("unknown option: {s}\n\n{s}", .{ arg, usage });
             return 1;
@@ -177,6 +186,9 @@ const Process = struct {
     s3: ?*s3_mod.S3,
     seeded: bool = false,
     seed_timeout: env.Timeout = undefined,
+    /// How long a shutdown waits for what is in flight, and when it began.
+    shutdown_timeout: i64 = 2_000,
+    stopping_since: ?i64 = null,
 
     fn handler(self: *Process) net.Handler {
         return .{ .ptr = self, .handle = handle };
@@ -354,8 +366,64 @@ const Process = struct {
         const self: *Process = @ptrCast(@alignCast(context.?));
         // Everything that arrived in this poll gets to commit together.
         self.runtime.drain();
+        if (stop_requested.load(.monotonic)) self.step_shutdown();
+    }
+
+    /// Stop taking work, let what is in flight finish, and then leave.
+    ///
+    /// Nothing here is needed for *safety*: every transition is committed before
+    /// it is answered and every operation is idempotent, so a server that is
+    /// killed outright loses nothing and a caller that was told nothing retries.
+    /// What it is for is the caller that was about to be told something: a
+    /// shutdown that drops a connection mid-answer turns a completed transition
+    /// into a 503, and during a rolling restart that is every request in flight.
+    fn step_shutdown(self: *Process) void {
+        const now = self.loop.clock().now_ms();
+        if (self.stopping_since == null) {
+            self.stopping_since = now;
+            self.http_server.close_to_new();
+            log("stopping: no new connections, {d}ms for what is in flight", .{self.shutdown_timeout});
+        }
+        const quiet = self.runtime.applier.idle() and self.runtime.sender.pending() == 0;
+        const out_of_time = now - self.stopping_since.? >= self.shutdown_timeout;
+        if (quiet or out_of_time) {
+            if (!quiet) log("stopping: time is up, with work still in flight", .{});
+            log("stopped", .{});
+            self.loop.stop();
+        }
     }
 };
+
+/// Set by a signal handler and read by the loop. A handler may do nothing else:
+/// it runs between two instructions of whatever was running, so the only safe
+/// thing is to store a word somebody else reads.
+var stop_requested = std.atomic.Value(bool).init(false);
+
+fn on_stop_signal(_: i32) callconv(.C) void {
+    stop_requested.store(true, .monotonic);
+}
+
+/// Take SIGTERM and SIGINT as "stop", and ignore SIGPIPE.
+///
+/// SIGPIPE is the one that matters even without a shutdown: a peer that hangs up
+/// mid-response would otherwise end the process, and a client closing its
+/// connection is not something a server dies of. The sends ask for
+/// `MSG_NOSIGNAL` as well, and this is the belt to that pair of braces.
+fn install_signal_handlers() void {
+    var stop = posix.Sigaction{
+        .handler = .{ .handler = on_stop_signal },
+        .mask = posix.empty_sigset,
+        .flags = 0,
+    };
+    posix.sigaction(posix.SIG.TERM, &stop, null);
+    posix.sigaction(posix.SIG.INT, &stop, null);
+    var ignore = posix.Sigaction{
+        .handler = .{ .handler = posix.SIG.IGN },
+        .mask = posix.empty_sigset,
+        .flags = 0,
+    };
+    posix.sigaction(posix.SIG.PIPE, &ignore, null);
+}
 
 fn log(comptime fmt: []const u8, args: anytype) void {
     const stderr = std.io.getStdErr().writer();
@@ -440,8 +508,11 @@ fn run(allocator: std.mem.Allocator, args: Args) !void {
     var rng = stdx.Random.init(@bitCast(std.time.milliTimestamp()));
     runtime.applier.random = &rng;
 
+    install_signal_handlers();
+
     var process = Process{
         .allocator = allocator,
+        .shutdown_timeout = args.shutdown_timeout,
         .loop = &loop,
         .runtime = runtime,
         .http_server = undefined,

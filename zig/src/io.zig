@@ -106,7 +106,11 @@ pub const IO = struct {
 
     pub fn send(self: *IO, completion: *Completion, socket: posix.socket_t, buffer: []const u8) Error!void {
         const s = try self.sqe();
-        s.prep_send(socket, buffer, 0);
+        // `MSG_NOSIGNAL`, because a peer that hangs up mid-response would
+        // otherwise raise `SIGPIPE`, whose default disposition is to end the
+        // process. A client closing its connection is not an event a server dies
+        // of; it is `EPIPE` on this one send, which the caller already handles.
+        s.prep_send(socket, buffer, posix.MSG.NOSIGNAL);
         s.user_data = @intFromPtr(completion);
         self.in_flight += 1;
     }

@@ -164,3 +164,14 @@ And two the checker could not have found, which the differential did:
   flag for them.
 * Anything on wall time under `--debug`: the clock belongs to the caller, which
   is what makes a differential and a recorded history comparable at all.
+* Retrying the *store*. A bucket that answers 503 SlowDown is a caller told 503,
+  which is the honest answer — the request may or may not have been applied, and
+  the protocol says so. Backing off inside the store would hide from the caller
+  how long its request has been outstanding, and every operation is idempotent,
+  so the retry belongs where the deadline is known.
+
+`SIGTERM` stops it gracefully: no new connections, then up to
+`--shutdown-timeout` milliseconds for what is in flight. Nothing about that is
+needed for safety — every transition is committed before it is answered, so a
+server killed outright loses nothing — it is for the caller that was about to be
+told something, which during a rolling restart is every request in flight.

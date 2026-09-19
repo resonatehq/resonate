@@ -270,6 +270,10 @@ pub const Server = struct {
     connections: []Connection,
     accept_completion: Completion = undefined,
     accepting: bool = false,
+    /// Set to stop taking connections. What is already open is left to finish:
+    /// a shutdown that closed a socket mid-answer would turn a completed
+    /// transition into a caller that was told nothing.
+    closing: bool = false,
     open: u32 = 0,
 
     accepted: u64 = 0,
@@ -306,7 +310,13 @@ pub const Server = struct {
         self.allocator.free(self.connections);
     }
 
+    /// Stop taking new connections.
+    pub fn close_to_new(self: *Server) void {
+        self.closing = true;
+    }
+
     pub fn accept_more(self: *Server) void {
+        if (self.closing) return;
         if (self.accepting) return;
         if (self.open >= self.connections.len) return;
         self.accepting = true;
@@ -322,6 +332,11 @@ pub const Server = struct {
         defer self.accept_more();
         if (completion.result < 0) return;
         const fd: posix.socket_t = @intCast(completion.result);
+        if (self.closing) {
+            // An accept that was already in flight when the shutdown began.
+            posix.close(fd);
+            return;
+        }
         const slot = self.free_slot() orelse {
             // At the connection bound. Closing immediately is honest: a
             // connection accepted and never read from looks like a hang.
