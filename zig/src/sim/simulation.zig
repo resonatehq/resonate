@@ -228,6 +228,10 @@ const Pending = struct {
 /// How many times a sweep that did not finish is sent again.
 const max_sweep_attempts: u32 = 16;
 
+/// The key prefix every server in a run shares. Named once, because the
+/// invariant below builds keys the servers are supposed to have written.
+const prefix = "sim";
+
 const Instance = struct {
     runtime: *server_mod.Runtime,
     random: stdx.Random,
@@ -292,7 +296,7 @@ pub const Simulation = struct {
             self.allocator,
             // The clock belongs to the caller, so the trace decides when things
             // happen and the run is reproducible.
-            .{ .debug = true, .server_url = "http://sim", .prefix = "sim" },
+            .{ .debug = true, .server_url = "http://sim", .prefix = prefix },
             self.mem.store(),
             self.sim.clock(),
             self.sim.timer(),
@@ -500,7 +504,7 @@ pub const Simulation = struct {
         var keys = std.ArrayList([]const u8).init(scratch);
         defer keys.deinit();
         try self.mem.keys(&keys);
-        const space = store_mod.KeySpace.init("sim/", store_mod.KeySpace.default_timer_shards);
+        const space = store_mod.KeySpace.init(prefix ++ "/", store_mod.KeySpace.default_timer_shards);
         var buf = std.ArrayList(u8).init(scratch);
 
         for (keys.items) |key| {
