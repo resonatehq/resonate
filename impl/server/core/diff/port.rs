@@ -17,6 +17,19 @@
 // per-engine checks. Time exists in one place — `head.debug_time` — and moves
 // only through `debug.tick`.
 //
+// # Two scales
+//
+// A step's signature is its operation, its status, and the class of the state
+// it ran against. There are two classes, because one number cannot do both
+// jobs. `state_class` is rich: which promise states and which task states are
+// present, not merely which collections are non-empty, so a store holding a
+// halted task is not the same situation as one holding a pending task. That
+// is what the run reports and what the frontier scores. `plateau_class` is
+// the coarse presence bitmask, and only the stopping rule uses it, because a
+// run judged saturated on the rich class never saturates at all: scored that
+// way the default seed runs to the 200000-step cap with 8674 signatures and
+// still climbing.
+//
 // # Compared modulo materialisation
 //
 // A pending promise whose deadline has passed *is* expired, whether or not
@@ -508,8 +521,11 @@ async fn port_differential_random() {
     let mut covered: HashMap<String, usize> = HashMap::new();
     let mut total_steps = 0usize;
     let mut replayed_steps = 0usize;
-    let mut seen_sigs: HashSet<(String, u16, u8)> = HashSet::new();
-    let mut sig_depth: HashMap<(String, u16, u8), usize> = HashMap::new();
+    let mut seen_sigs: HashSet<(String, u16, u32)> = HashSet::new();
+    // The plateau counts on the coarse class, the report on the rich one:
+    // two questions, two scales.
+    let mut plateau_sigs: HashSet<(String, u16, u8)> = HashSet::new();
+    let mut sig_depth: HashMap<(String, u16, u32), usize> = HashMap::new();
     let mut plateau_count = 0usize;
     let mut search = Search::new(forking);
     let mut episodes = 0usize;
@@ -542,7 +558,7 @@ async fn port_differential_random() {
         }
         now = T0;
 
-        let sigs_before = seen_sigs.len();
+        let sigs_before = plateau_sigs.len();
 
         for (seg_idx, seg_seed) in plan.path.iter().enumerate() {
             let depth = seg_idx + 1;
@@ -593,6 +609,7 @@ async fn port_differential_random() {
                 if seen_sigs.insert(sig.clone()) {
                     sig_depth.insert(sig, depth);
                 }
+                plateau_sigs.insert((kind.clone(), status as u16, plateau_class(&pre_snaps[0].1)));
 
                 // TEST_SOFT=1 records a response divergence and carries on, as long
                 // as the state and the routed messages still agree — a validation
@@ -646,12 +663,13 @@ async fn port_differential_random() {
             }
         }
 
-        let new_sigs = seen_sigs.len().saturating_sub(sigs_before);
+        let new_sigs = plateau_sigs.len().saturating_sub(sigs_before);
         if covered.len() == ALL_OPS.len() {
             if new_sigs == 0 {
                 plateau_count += 1;
                 eprintln!(
-                    "[port] plateau {plateau_count}/{PLATEAU_BATCHES} — {} total signatures, no new in this batch",
+                    "[port] plateau {plateau_count}/{PLATEAU_BATCHES} — {} coarse, {} rich signatures, no new coarse in this batch",
+                    plateau_sigs.len(),
                     seen_sigs.len()
                 );
             } else {
@@ -659,7 +677,8 @@ async fn port_differential_random() {
             }
             if plateau_count >= PLATEAU_BATCHES {
                 eprintln!(
-                    "[port] coverage plateau reached after {total_steps} steps ({} signatures)",
+                    "[port] coverage plateau reached after {total_steps} steps ({} coarse, {} rich signatures)",
+                    plateau_sigs.len(),
                     seen_sigs.len()
                 );
                 break 'outer;
@@ -735,10 +754,11 @@ async fn port_differential_random() {
         eprintln!("[port] signatures written to {path}");
     }
     eprintln!(
-        "[port] PASSED — {total_steps} steps, {} backends, all {} ops covered, {} behavioral signatures",
+        "[port] PASSED — {total_steps} steps, {} backends, all {} ops covered, {} behavioral signatures ({} coarse)",
         backends.len(),
         ALL_OPS.len(),
         seen_sigs.len(),
+        plateau_sigs.len(),
     );
     print_timing_summary(&mut timings, &backends);
 }
@@ -1064,36 +1084,101 @@ fn sort_by_id(arr: &mut [Value]) {
     });
 }
 
-fn state_class(snap: &Value) -> u8 {
+/// The coarse class the stopping rule counts on.
+///
+/// The rich class below has tens of thousands of reachable values, so a run
+/// scored by it never stops finding new ones and the plateau never fires: a
+/// 200000-step run on the default seed ended at the cap with 8674 signatures
+/// and still climbing. Saturation has to be judged on something that
+/// saturates, so the plateau still watches presence alone, exactly as it
+/// always did, while the rich class does what it is good at: telling
+/// situations apart, for the frontier to score and for the run to report.
+fn plateau_class(snap: &Value) -> u8 {
     let mut c = 0u8;
+    for (i, key) in [
+        "promises",
+        "tasks",
+        "callbacks",
+        "listeners",
+        "promiseTimeouts",
+        "schedules",
+        "taskTimeouts",
+    ]
+    .iter()
+    .enumerate()
+    {
+        if snap
+            .get(key)
+            .and_then(|v| v.as_array())
+            .is_some_and(|a| !a.is_empty())
+        {
+            c |= 1 << i;
+        }
+    }
+    c
+}
+
+/// The state a request ran against, as a class.
+///
+/// Half a signature: what kind of store the request met, coarse enough that
+/// a run can plateau on it but fine enough that two genuinely different
+/// situations are told apart. Presence of a collection is not enough, since
+/// a store holding one pending task and a store holding one halted task
+/// answer the same request differently, so the promise and task states
+/// present are part of the class. Counts are deliberately not: the point is
+/// which situations have been met, not how large they got.
+///
+/// `messages` is not here because the snapshot drops it before the class is
+/// taken; what was emitted is compared at the router instead.
+fn state_class(snap: &Value) -> u32 {
+    let mut c = 0u32;
     let non_empty = |key: &str| {
         snap.get(key)
             .and_then(|v| v.as_array())
             .is_some_and(|a| !a.is_empty())
     };
-    if non_empty("promises") {
-        c |= 1 << 0;
-    }
-    if non_empty("tasks") {
-        c |= 1 << 1;
-    }
-    if non_empty("callbacks") {
-        c |= 1 << 2;
-    }
-    if non_empty("listeners") {
-        c |= 1 << 3;
-    }
-    if non_empty("messages") {
-        c |= 1 << 4;
-    }
-    if non_empty("promiseTimeouts") {
-        c |= 1 << 5;
-    }
-    if non_empty("schedules") {
-        c |= 1 << 6;
-    }
-    if non_empty("taskTimeouts") {
-        c |= 1 << 7;
+    // Which promise states are present, and which task states. A collection
+    // being non-empty is implied by any of its state bits being set.
+    let present = |key: &str, states: &[&str]| -> u32 {
+        let mut bits = 0u32;
+        if let Some(rows) = snap.get(key).and_then(|v| v.as_array()) {
+            for r in rows {
+                if let Some(state) = r["state"].as_str() {
+                    if let Some(i) = states.iter().position(|s| *s == state) {
+                        bits |= 1 << i;
+                    }
+                }
+            }
+        }
+        bits
+    };
+    c |= present(
+        "promises",
+        &[
+            "pending",
+            "resolved",
+            "rejected",
+            "rejected_canceled",
+            "rejected_timedout",
+        ],
+    );
+    c |= present(
+        "tasks",
+        &["pending", "acquired", "suspended", "halted", "fulfilled"],
+    ) << 5;
+    for (i, key) in [
+        "callbacks",
+        "listeners",
+        "promiseTimeouts",
+        "taskTimeouts",
+        "schedules",
+    ]
+    .iter()
+    .enumerate()
+    {
+        if non_empty(key) {
+            c |= 1 << (10 + i);
+        }
     }
     c
 }
@@ -1111,7 +1196,7 @@ fn state_class(snap: &Value) -> u8 {
 /// the search scores.
 struct Node {
     seeds: Vec<u64>,
-    class: u8,
+    class: u32,
     print: u64,
     branches: usize,
 }
@@ -1134,40 +1219,47 @@ struct Plan {
 /// # What it is worth, measured
 ///
 /// Six seeds, oracle against SQLite against blob, the same stopping rule on
-/// both arms. Forking reached depth five or six every time and found states
-/// the shallow arm cannot reach, and it still lost on every seed:
+/// both arms, scored on the rich class. Forking reached depth five or six
+/// every time and found situations the shallow arm never reaches. It still
+/// lost on every seed:
 ///
 /// ```text
-///   seed      off: signatures / steps     on: signatures / steps / replayed
-///   default        433 /  24400               410 /  88400 / 53600
-///   1              433 /  39400               383 / 139600 / 84400
-///   2              440 /  40400               395 / 125400 / 71800
-///   3              422 /  23800               360 /  91000 / 55800
-///   7              446 /  31000               408 /  91600 / 52000
-///   11             456 /  48800               390 / 130200 / 82200
+///   seed     off: signatures / steps     on: signatures / steps / replayed
+///   default       3828 / 24400                2186 /  59000 / 33200
+///   1             4545 / 39400                2655 / 140200 / 85000
+///   2             4895 / 40400                2481 / 110000 / 65800
+///   3             3694 / 23800                2276 /  85800 / 50600
+///   7             4292 / 31000                2048 /  91600 / 46000
+///   11            5101 / 48800                2803 / 120000 / 72000
 /// ```
 ///
-/// Counting is not the whole story, so compare the signatures themselves. On
-/// the default seed 397 are found both ways, 13 only with forking, 36 only
-/// without. The 13 are real and shallow runs do not reach them: a listener
-/// or a callback registered in a store already holding tasks, callbacks and
-/// both kinds of deadline; an acquire, a fence, a get, a halt and a release
-/// that lose a race in a store that deep. They cost about 60% of the run
-/// retracing known ground, and deep states are slower per request, so the
-/// wall clock rises four to seven times.
+/// Counting is not the whole story, so compare the sets. Per seed, forking
+/// finds 443 to 605 signatures the plain run never finds, and misses 1977 to
+/// 2881 that it does. The unique ones are real: callbacks and listeners
+/// registered in stores that already hold tasks, callbacks and both kinds of
+/// deadline, and acquires, fences, halts and releases that lose a race in a
+/// store that deep.
 ///
-/// The number that settles it: forking and not forking together find 446
-/// signatures on this seed, and the plain run on seed 11 finds 456 by
-/// itself. Another trajectory buys more than more depth on this one does.
+/// The number that decides it is the marginal one. On top of the default
+/// seed, another seed adds about 1900 to 2200 signatures for 40000 steps;
+/// forking that same seed adds 605 for 59000. Across all six seeds together
+/// the plain runs find 8975 signatures in 208000 steps, and adding all six
+/// fork runs, 607000 further steps, adds 575 more.
 ///
-/// So depth is a complement and a narrow one: worth running when the
-/// question is specifically about rich states, not worth the default. It
-/// stays off, and with it off the generator draws from one stream and walks
-/// exactly the trajectory it always has.
+/// So enriching the class multiplied the visible worth of depth roughly
+/// fortyfold, from 13 unique signatures to around 575, which means the
+/// coarse class really was hiding it. It did not change the decision.
+/// Another trajectory is still worth about forty times more per step than
+/// more depth on an existing one.
+///
+/// It stays off, then, and it is worth having: when the question is
+/// specifically about deep states, this is the only thing here that reaches
+/// them. With it off the generator draws from one stream and walks exactly
+/// the trajectory it always has.
 struct Search {
     on: bool,
     frontier: Vec<Node>,
-    counts: HashMap<u8, usize>,
+    counts: HashMap<u32, usize>,
 }
 
 impl Search {
@@ -1243,7 +1335,7 @@ impl Search {
         }
     }
 
-    fn record(&mut self, seeds: Vec<u64>, class: u8, print: u64, replayable: bool) {
+    fn record(&mut self, seeds: Vec<u64>, class: u32, print: u64, replayable: bool) {
         *self.counts.entry(class).or_insert(0) += 1;
         if !self.on || !replayable || seeds.len() >= Self::MAX_DEPTH {
             return;
