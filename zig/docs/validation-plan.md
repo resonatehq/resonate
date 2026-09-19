@@ -5,7 +5,7 @@ another.
 
 | | asks | answers with |
 |---|---|---|
-| `zig build test` | does each part do what it says | 206 unit tests |
+| `zig build test` | does each part do what it says | 207 unit tests |
 | `simulator run` / `soak` | is the concurrency sound | a linearizability search over a simulated run |
 | `differ` | is this the protocol everybody else implements | another server, request for request |
 | `simulator check` | was *that* run sound | a recorded history from a real server |
@@ -114,16 +114,56 @@ about the answers.
 Nothing is injected: a difference is a difference, and failures in two
 independent processes would produce differences that mean nothing.
 
+The peer to compare against is the Rust tree's blob server: it holds its
+messages for the snapshot, as this one does under debug, so the whole state is
+comparable.
+
 ```
+zig build -Doptimize=ReleaseSafe
 zig-out/bin/resonate serve --debug --store memory --port 8021 &
-RESONATE_DEBUG=true cargo run --release -- serve &      # the reference, on 8022
+cargo build --release
+./target/release/resonate serve --debug --server-port 8022 --level error \
+    --set servers.active=server_blob \
+    --set servers.server_blob.search_enabled=true \
+    --set servers.server_blob.retry_timeout=30000 &
 zig-out/bin/differ --a http://127.0.0.1:8021/ --label-a zig \
-                   --b http://127.0.0.1:8022/ --label-b rust \
-                   --seed 1 --operations 500
+                   --b http://127.0.0.1:8022/ --label-b blob \
+                   --seed 1 --operations 2000
 ```
 
-A difference is printed with the request, both answers, and — for a state
-difference — only the sections of the snapshot that differ.
+The two settings are not cosmetic: the blob plugin answers no searches unless
+told to, and its pending-retry default is 60s where the oracle's, the SQL
+engines' and this server's is 30s. A difference is printed with the request,
+both answers, and — for a state difference — only the sections of the snapshot
+that differ.
+
+A SQL engine works as a peer too, with `--storage-type sqlite` and
+`--ignore-messages`, because it *delivers* its messages rather than holding
+them: the section then says how far delivery got rather than what the server
+decided to send, which is not a comparison of anything.
+
+### What it found, and the two places it disagrees on purpose
+
+It found a real bug here: the outbox keys an `unblock` on the promise and the
+address, and the effect the state machine emitted never carried the promise id —
+so one address listening on two promises was told about whichever settled last.
+The simulator could not have found it. A server that loses the same message on
+both sides of a comparison with itself is still linearizable.
+
+Two differences remain, and this server is deliberately on the side it is on:
+
+* **`task.create` on a task that is already fulfilled.** The oracle, the SQLite
+  engine and the ScyllaDB engine all answer with the branch preload — "preload
+  is branch-scoped, not lifecycle-scoped, so a fulfilled task's siblings are as
+  real as an acquired one's". `resonate-server-blob` answers with an empty one,
+  citing a line range in a `server.rs` that no longer says that. This server
+  does what the three of them do, so a run against the blob server reports this
+  difference and nothing else.
+* **How far a sweep catches a schedule up.** A tick that crosses several cron
+  boundaries fires every occurrence it passed here and in the blob server; the
+  SQL engines fire one per sweep. So a run against a SQL engine agrees until a
+  tick crosses two boundaries of the workload's 30-second schedules, and then
+  diverges by the occurrences the other has not created yet.
 
 ## 4. Linearizability of a real history — `simulator check <file>`
 

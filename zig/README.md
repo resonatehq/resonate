@@ -115,7 +115,7 @@ Three ideas hold it together, all of them TigerBeetle's:
 Four checks, described in [docs/validation-plan.md](docs/validation-plan.md):
 
 ```
-zig build test                                   # 206 unit tests
+zig build test                                   # 207 unit tests
 zig-out/bin/simulator run  --seed 1 --servers 3 --clients 4 --operations 200 \
     --conflict 15 --reorder 30 --unavailable 3 --lost-ack 3
 zig-out/bin/simulator soak --runs 200 --crash 2 --unavailable 5 --lost-ack 5
@@ -140,6 +140,11 @@ Found by the checker, in the order they turned up:
 6. A delete that purged a schedule restarted the counter its deadlines are named
    by.
 7. A schedule advanced past a run that was never stored.
+
+And one the checker could not have found, which the differential did: the outbox
+keyed every `unblock` to one address the same way, so an address listening on two
+promises was told about whichever settled last. A server that loses the same
+message on both sides of a comparison with itself is still linearizable.
 
 ## What is not here
 
