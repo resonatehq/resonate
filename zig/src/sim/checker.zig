@@ -84,10 +84,19 @@ pub const Final = struct {
 pub const Options = struct {
     /// Reject orders in which the instants the requests carry would go backwards.
     ///
-    /// The real server's clock is monotone and every request's instant comes from
-    /// it, so no real execution has a decreasing one. Enforcing it rules out
-    /// orders the server could not have produced, which both prunes the search and
-    /// stops the checker excusing a violation with an order that never happened.
+    /// Sound only where the instants were stamped in the order they were applied,
+    /// and that depends on who stamped them.
+    ///
+    /// In a simulated run they are: the clock moves only on a sweep, a sweep is
+    /// issued as a barrier, and so every request between two of them carries the
+    /// same instant. Enforcing it there rules out orders the server could not have
+    /// produced, which prunes the search enormously and stops it excusing a
+    /// violation with an order that never happened.
+    ///
+    /// A *recorder* stamps an instant and then sends, from several clients at
+    /// once, so a request carrying an earlier instant is routinely applied after
+    /// one carrying a later instant — the server does not order by it. Enforcing it
+    /// there refutes correct servers, which is why `simulator check` does not.
     enforce_time_order: bool = true,
     /// How many model steps the search may take before giving up.
     max_steps: u64 = 20_000_000,

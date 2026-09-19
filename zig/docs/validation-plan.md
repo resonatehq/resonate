@@ -254,3 +254,13 @@ The check refuses a vacuous history — one where nothing succeeded, or where
 nothing overlapped — because passing one would mean nothing. A refutation prints
 the deepest order it reached, the operation it could not place, and what the
 specification would have answered instead.
+
+One thing differs from §2, and it is the recorder's fault rather than the
+server's: `check` does **not** require the instants the requests carry to be
+non-decreasing. A simulated run's do not go backwards by construction — the clock
+moves only on a sweep and a sweep is a barrier — but a recorder stamps an instant
+and *then* sends, from several clients at once, so a request carrying an earlier
+instant is routinely applied after one carrying a later instant. The server does
+not order by it. Insisting on it refutes a correct server, which is what it did
+here at 1500 operations and twelve clients before the default was changed.
+`--time-order` asks for it anyway, for a recorder that can promise it.

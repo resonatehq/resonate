@@ -45,6 +45,13 @@ const usage =
     \\Options for check:
     \\  --max-steps <n>        the search's budget         [default: 20000000]
     \\  --no-time-order        allow orders in which the instants go backwards
+    \\                         [the default for `check`: a recorder stamps an
+    \\                         instant before it sends, and the server does not
+    \\                         order by it]
+    \\  --time-order           require the instants not to go backwards
+    \\                         [the default for `run` and `soak`: the simulator's
+    \\                         clock moves only on a sweep, and a sweep is a
+    \\                         barrier]
     \\
 ;
 
@@ -77,7 +84,15 @@ pub fn main() u8 {
     var runs: u32 = 100;
     var path: ?[]const u8 = null;
     var max_steps: u64 = 20_000_000;
-    var enforce_time_order = true;
+    // On for a simulated run and off for a recorded one, and the flags below say
+    // so either way. The difference is who stamped the instants: the simulator
+    // moves its clock only on a sweep, and a sweep is a barrier, so every request
+    // between two of them carries the same instant and no order can make them go
+    // backwards. A recorder stamps an instant and *then* sends, from several
+    // clients at once, so a request carrying an earlier instant is routinely
+    // applied after one carrying a later instant — the server does not order by
+    // it, and a checker that insists on it refutes correct servers.
+    var enforce_time_order = std.mem.eql(u8, argv[1], "check") == false;
 
     var i: usize = 2;
     while (i < argv.len) : (i += 1) {
@@ -100,6 +115,10 @@ pub fn main() u8 {
         }
         if (std.mem.eql(u8, arg, "--no-time-order")) {
             enforce_time_order = false;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--time-order")) {
+            enforce_time_order = true;
             continue;
         }
         i += 1;
