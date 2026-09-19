@@ -98,15 +98,6 @@ Both are invisible to a linearizability search, which is what makes them worth
 checking separately — and a run that breaks either fails whatever the search
 says, naming what was wrong and the operation it was first wrong after.
 
-With `--no-check` a run costs milliseconds instead of seconds, because the search
-is the whole cost. That buys a *wide* sweep — thousands of seeds, more servers,
-more clients, heavier faults — over exactly the properties above:
-
-```
-zig-out/bin/simulator soak --runs 3000 --servers 4 --clients 6 --operations 400 \
-    --conflict 20 --reorder 40 --unavailable 5 --lost-ack 5 --crash 2 --no-check
-```
-
 Every report says how much overlap there actually was (`concurrency 34 at once,
 323 overlapping pairs`) and which operation kinds never succeeded, because a
 green result over a sequential run, or over a run that only reached 400s, has
@@ -118,6 +109,16 @@ zig-out/bin/simulator run  --seed 1 --servers 3 --clients 4 --operations 200 \
     --conflict 15 --reorder 30 --unavailable 3 --lost-ack 3
 zig-out/bin/simulator soak --runs 200 --servers 3 --clients 4 --operations 200 \
     --unavailable 5 --lost-ack 5 --crash 2
+```
+
+With `--no-check` a run costs milliseconds instead of seconds, because the search
+is the whole cost. That buys a *wide* sweep — thousands of seeds, more servers,
+more clients, heavier faults — over exactly the invariants above, and over the
+statuses: three thousand runs in twenty seconds.
+
+```
+zig-out/bin/simulator soak --runs 3000 --servers 4 --clients 6 --operations 400 \
+    --conflict 20 --reorder 40 --unavailable 5 --lost-ack 5 --crash 2 --no-check
 ```
 
 A search that runs out of steps says so and proves nothing either way, which is
