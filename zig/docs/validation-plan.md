@@ -150,6 +150,24 @@ A SQL engine works as a peer too, with `--storage-type sqlite` and
 them: the section then says how far delivery got rather than what the server
 decided to send, which is not a comparison of anything.
 
+### Over the S3 path, not only the memory one
+
+`--store memory` and `--store s3` are the same server over two implementations
+of one port, and the memory one is not the one that ships. `fakes3` serves a
+stand-in S3 — the six operations the port has, with real conditional writes, and
+nothing else — so the whole server can be run and checked over the code that
+talks HTTP to an object store:
+
+```
+zig-out/bin/fakes3 --port 9100 &
+zig-out/bin/resonate serve --debug --store s3 \
+    --endpoint http://127.0.0.1:9100 --bucket b --port 8031 &
+zig-out/bin/differ --a http://127.0.0.1:8031/ --b http://127.0.0.1:8022/ --seed 5 --operations 400
+```
+
+The same trajectory, the same answers, the same state: the S3 path is not a
+second implementation of anything, and this is what says so.
+
 ### What it found, and the two places it disagrees on purpose
 
 It found two real bugs here, neither of which the simulator could have found: a
@@ -188,7 +206,7 @@ the same question §2 asks, about a run that really happened over real sockets.
 
 ```
 cargo build --release --example conctrace
-zig-out/bin/resonate serve --debug --store memory --port 8021 &
+zig-out/bin/resonate serve --debug --store memory --port 8021 &   # or --store s3
 ./target/release/examples/conctrace --url http://127.0.0.1:8021/ \
     --out trace --clients 8 --ops 600
 zig-out/bin/simulator check trace.history

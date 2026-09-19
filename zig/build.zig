@@ -46,6 +46,20 @@ pub fn build(b: *std.Build) void {
     if (b.args) |args| run_differ.addArgs(args);
     b.step("differ", "Compare this server with another one").dependOn(&run_differ.step);
 
+    // ── A stand-in S3, for running the server over its S3 path ────────────────
+    const fakes3 = b.addExecutable(.{
+        .name = "fakes3",
+        .root_source_file = b.path("src/fakes3.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    b.installArtifact(fakes3);
+
+    const run_fakes3 = b.addRunArtifact(fakes3);
+    run_fakes3.step.dependOn(b.getInstallStep());
+    if (b.args) |args| run_fakes3.addArgs(args);
+    b.step("fakes3", "Serve a stand-in S3").dependOn(&run_fakes3.step);
+
     // ── Unit tests ────────────────────────────────────────────────────────────
     const unit = b.addTest(.{
         .root_source_file = b.path("src/tests.zig"),

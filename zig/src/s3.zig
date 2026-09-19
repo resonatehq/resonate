@@ -487,191 +487,13 @@ test "an empty listing is empty, not an error" {
     try testing.expect(listing.next == null);
 }
 
-/// A stand-in S3 over the real HTTP client and server, so the request shapes and
-/// the status mapping are exercised end to end rather than asserted about.
-const FakeS3 = struct {
-    const Object = struct { body: []u8, version: u64 };
-
-    allocator: std.mem.Allocator,
-    objects: std.StringHashMapUnmanaged(Object) = .{},
-    next_version: u64 = 1,
-    /// A status to answer the next request with, instead of serving it.
-    inject_status: ?u16 = null,
-    /// Answer 200 to a GET but without an ETag.
-    omit_etag: bool = false,
-    /// Truncate every listing to one key, so pagination is exercised.
-    page_size: usize = 1000,
-    seen: std.ArrayListUnmanaged([]u8) = .{},
-
-    fn handler(self: *FakeS3) net.Handler {
-        return .{ .ptr = self, .handle = handle };
-    }
-
-    fn deinit(self: *FakeS3) void {
-        var it = self.objects.iterator();
-        while (it.next()) |e| {
-            self.allocator.free(e.key_ptr.*);
-            self.allocator.free(e.value_ptr.body);
-        }
-        self.objects.deinit(self.allocator);
-        for (self.seen.items) |s| self.allocator.free(s);
-        self.seen.deinit(self.allocator);
-    }
-
-    fn handle(ptr: ?*anyopaque, exchange: *net.Exchange) void {
-        const self: *FakeS3 = @ptrCast(@alignCast(ptr.?));
-        const a = exchange.arena;
-        self.seen.append(
-            self.allocator,
-            std.fmt.allocPrint(self.allocator, "{s} {s}", .{ exchange.method, exchange.target }) catch return,
-        ) catch {};
-
-        if (self.inject_status) |status| {
-            self.inject_status = null;
-            return exchange.respond(status, "application/xml", "<Error><Code>Boom</Code></Error>\nmore");
-        }
-
-        // `/bucket/key` or `/bucket?list-type=2&...`
-        const target = exchange.target;
-        if (std.mem.indexOfScalar(u8, target, '?') != null) return self.list(exchange);
-        const after_bucket = std.mem.indexOfScalarPos(u8, target, 1, '/') orelse
-            return exchange.respond(400, "text/plain", "no key");
-        const key = decode(a, target[after_bucket + 1 ..]) catch
-            return exchange.respond(400, "text/plain", "bad key");
-
-        if (std.mem.eql(u8, exchange.method, "GET")) {
-            const object = self.objects.get(key) orelse
-                return exchange.respond(404, "application/xml", "<Error><Code>NoSuchKey</Code></Error>");
-            if (self.omit_etag) return exchange.respond(200, "application/octet-stream", object.body);
-            return self.respond_with_etag(exchange, 200, object.version, object.body);
-        }
-        if (std.mem.eql(u8, exchange.method, "DELETE")) {
-            if (self.objects.fetchRemove(key)) |kv| {
-                self.allocator.free(kv.key);
-                self.allocator.free(kv.value.body);
-            }
-            return exchange.respond(204, "", "");
-        }
-        if (!std.mem.eql(u8, exchange.method, "PUT")) {
-            return exchange.respond(405, "text/plain", "no");
-        }
-
-        // The conditional headers, which are the whole point.
-        const existing = self.objects.getPtr(key);
-        const if_none_match = self.header(exchange, "if-none-match");
-        const if_match = self.header(exchange, "if-match");
-        if (if_none_match != null and existing != null) {
-            return exchange.respond(412, "application/xml", "<Error><Code>PreconditionFailed</Code></Error>");
-        }
-        if (if_match) |want| {
-            const object = existing orelse
-                return exchange.respond(412, "application/xml", "<Error><Code>PreconditionFailed</Code></Error>");
-            const have = std.fmt.allocPrint(a, "\"{x:0>16}\"", .{object.version}) catch return;
-            if (!std.mem.eql(u8, want, have)) {
-                return exchange.respond(412, "application/xml", "<Error><Code>PreconditionFailed</Code></Error>");
-            }
-        }
-
-        const body = self.allocator.dupe(u8, exchange.body) catch return;
-        const version = self.next_version;
-        self.next_version += 1;
-        if (existing) |object| {
-            self.allocator.free(object.body);
-            object.body = body;
-            object.version = version;
-        } else {
-            const owned_key = self.allocator.dupe(u8, key) catch return;
-            self.objects.put(self.allocator, owned_key, .{ .body = body, .version = version }) catch return;
-        }
-        return self.respond_with_etag(exchange, 200, version, "");
-    }
-
-    fn header(self: *FakeS3, exchange: *net.Exchange, name: []const u8) ?[]const u8 {
-        _ = self;
-        // The exchange does not expose headers, so they are read back off the
-        // raw request the connection still holds.
-        const raw = exchange.connection.in.items;
-        const parsed = http.parse_request_head(raw) catch return null;
-        const head = parsed orelse return null;
-        return head.headers.get(name);
-    }
-
-    fn respond_with_etag(self: *FakeS3, exchange: *net.Exchange, status: u16, version: u64, body: []const u8) void {
-        _ = self;
-        // `write_response` does not take extra headers, so this writes the
-        // response by hand — which is also a check that the client parses a head
-        // it did not produce.
-        var out = std.ArrayList(u8).init(exchange.arena);
-        out.writer().print(
-            "HTTP/1.1 {d} {s}\r\nETag: \"{x:0>16}\"\r\nContent-Length: {d}\r\nConnection: keep-alive\r\n\r\n",
-            .{ status, http.reason_phrase(status), version, body.len },
-        ) catch return;
-        out.appendSlice(body) catch return;
-        exchange.connection.respond_raw(out.items);
-    }
-
-    fn list(self: *FakeS3, exchange: *net.Exchange) void {
-        const a = exchange.arena;
-        const query = exchange.target[std.mem.indexOfScalar(u8, exchange.target, '?').? + 1 ..];
-        const prefix = decode(a, param(query, "prefix") orelse "") catch "";
-        const token = blk: {
-            const raw = param(query, "continuation-token") orelse break :blk null;
-            break :blk decode(a, raw) catch null;
-        };
-
-        var matching = std.ArrayList([]const u8).init(a);
-        var it = self.objects.keyIterator();
-        while (it.next()) |k| {
-            if (!std.mem.startsWith(u8, k.*, prefix)) continue;
-            if (token) |after| {
-                if (!std.mem.lessThan(u8, after, k.*)) continue;
-            }
-            matching.append(k.*) catch return;
-        }
-        std.mem.sort([]const u8, matching.items, {}, stdx.less_than_bytes);
-
-        const page = @min(matching.items.len, self.page_size);
-        const truncated = matching.items.len > page;
-        var out = std.ArrayList(u8).init(a);
-        out.appendSlice("<ListBucketResult>") catch return;
-        out.writer().print("<IsTruncated>{s}</IsTruncated>", .{if (truncated) "true" else "false"}) catch return;
-        if (truncated) {
-            out.writer().print("<NextContinuationToken>{s}</NextContinuationToken>", .{matching.items[page - 1]}) catch return;
-        }
-        for (matching.items[0..page]) |key| {
-            out.writer().print("<Contents><Key>{s}</Key></Contents>", .{key}) catch return;
-        }
-        out.appendSlice("</ListBucketResult>") catch return;
-        exchange.respond(200, "application/xml", out.items);
-    }
-
-    fn param(query: []const u8, name: []const u8) ?[]const u8 {
-        var it = std.mem.splitScalar(u8, query, '&');
-        while (it.next()) |pair| {
-            const eq = std.mem.indexOfScalar(u8, pair, '=') orelse continue;
-            if (std.mem.eql(u8, pair[0..eq], name)) return pair[eq + 1 ..];
-        }
-        return null;
-    }
-
-    fn decode(a: std.mem.Allocator, s: []const u8) ![]const u8 {
-        var out = std.ArrayList(u8).init(a);
-        var i: usize = 0;
-        while (i < s.len) {
-            if (s[i] == '%' and i + 3 <= s.len) {
-                try out.append(try std.fmt.parseInt(u8, s[i + 1 ..][0..2], 16));
-                i += 3;
-            } else {
-                try out.append(s[i]);
-                i += 1;
-            }
-        }
-        return out.items;
-    }
-};
 
 const io_mod = @import("io.zig");
 const posix = std.posix;
+/// The stand-in S3 this exercises the client against. Its own module, because the
+/// `fakes3` binary serves the same thing on a port — which is how the whole
+/// server gets run over its S3 path.
+const FakeS3 = @import("fakes3.zig").FakeS3;
 
 const Rig = struct {
     allocator: std.mem.Allocator,
@@ -691,7 +513,7 @@ const Rig = struct {
             .listener = undefined,
             .server = undefined,
             .client = undefined,
-            .fake = .{ .allocator = allocator },
+            .fake = .{ .allocator = allocator, .watch = true },
             .s3 = undefined,
             .endpoint = undefined,
         };

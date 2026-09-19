@@ -94,6 +94,7 @@ src/
   bus.zig         HTTP push, and nowhere
   sim/            the simulator, the model, the checker, the workload
   differ.zig      this server against another one
+  fakes3.zig      a stand-in S3, as a library and as a process
   simulator.zig   run, soak, check
 ```
 
