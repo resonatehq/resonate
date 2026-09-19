@@ -99,4 +99,22 @@ if grew > allowed:
     raise SystemExit(f"grew {grew} kB over {reads} reads, which is more than the {allowed} kB allowed")
 PY
 
-echo "answering a request that changes nothing costs nothing to keep"
+# And the precise version of the same question, which the resident set is too
+# coarse for: the allocator reports every allocation still outstanding when the
+# process exits, and a graceful stop is what makes it exit rather than be killed.
+kill -TERM "$server_pid"
+for _ in $(seq 1 20); do
+  kill -0 "$server_pid" 2>/dev/null || break
+  sleep 1
+done
+kill -0 "$server_pid" 2>/dev/null && fail "the server did not stop when asked"
+server_pid=""
+
+if grep -q "leaked" "$work/server.log"; then
+  echo "FAILED: the allocator reported memory still held after a clean stop:" >&2
+  grep -c "leaked" "$work/server.log" >&2
+  grep -m 5 "leaked" "$work/server.log" >&2
+  exit 1
+fi
+
+echo "answering a request that changes nothing costs nothing to keep, and a clean stop holds nothing"

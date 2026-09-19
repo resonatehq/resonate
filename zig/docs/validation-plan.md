@@ -10,7 +10,7 @@ another.
 | `differ` | is this the protocol everybody else implements | another server, request for request |
 | `simulator check` | was *that* run sound | a recorded history from a real server |
 | `tools/deadline-survives-a-restart.sh` | does a deadline outlive the process | a server stopped before one and started again |
-| `tools/memory-stays-flat.sh` | does answering cost anything to keep | three thousand reads, and the resident set either side |
+| `tools/memory-stays-flat.sh` | does answering cost anything to keep | the resident set either side of three thousand reads, and the allocator's own report at exit |
 
 ## 1. Unit tests — `zig build test`
 
@@ -169,10 +169,16 @@ zig/tools/memory-stays-flat.sh
 ```
 
 Three thousand reads down one connection, with the resident set measured either
-side of them. It found the defect it was written for: every protocol request was
-given an arena of its own that nothing freed, about five kilobytes a request. The
-same script fails the build from before that fix, at 7295 bytes a request, and
-passes the one after it at 23.
+side of them, and then the precise version of the same question: the allocator
+reports every allocation still outstanding when the process exits, and `SIGTERM`
+is what makes it exit rather than be killed. The resident set is too coarse to see
+a small leak; the allocator sees any of them.
+
+It found the defect it was written for: every protocol request was given an arena
+of its own that nothing freed, about five kilobytes a request. The same script
+fails the build from before that fix — at 7495 bytes a request, and again on the
+allocator's report even when the allowance is raised past it — and passes the one
+after it at 23 bytes and nothing outstanding.
 
 ### The one thing that cannot be checked
 
