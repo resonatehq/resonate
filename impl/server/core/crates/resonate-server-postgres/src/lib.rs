@@ -3531,7 +3531,6 @@ impl PostgresDb<'_> {
             SELECT
               EXISTS (SELECT 1 FROM fence_check) AS task_exists,
               (SELECT ok FROM fence_ok) AS fence_ok,
-              EXISTS (SELECT 1 FROM inserted_or_skipped_promise) AS was_created,
               {cols}, {messages}
             FROM (SELECT 1) AS dummy
             LEFT JOIN result r ON true

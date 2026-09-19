@@ -20,6 +20,9 @@
 // Run:
 //   cargo test --release --test port -- --nocapture
 //   TEST_BACKENDS=oracle,blob cargo test --release --test port -- --nocapture
+//   TEST_POSTGRES_URL=postgres://resonate:resonate@localhost:5432/resonate \
+//   TEST_MYSQL_URL=mysql://resonate:resonate@localhost:3306/resonate \
+//     cargo test --release --test port -- --nocapture
 //
 // Knobs, all environment variables:
 //   TEST_MAX_STEPS=N          stop after N steps (default 200000)
@@ -55,6 +58,8 @@ use resonate_core::{ResonateRouter, ResonateServer, Unavailable};
 use resonate_oracle::{Oracle, SharedOracle};
 use resonate_server_blob::server::{Server as BlobServer, ServerCfg as BlobCfg};
 use resonate_server_blob::store::ObjectStoreAdapter;
+use resonate_server_mysql::MysqlEngine;
+use resonate_server_postgres::PostgresEngine;
 use resonate_server_sqlite::SqliteEngine;
 use resonate_sql::engine::{Engine, Outgoing};
 use serde_json::{json, Value};
@@ -258,16 +263,78 @@ async fn sqlite_backend() -> Backend {
             })
         }),
         router.clone(),
-        resonate_sql::server::Options {
-            server_url: SERVER_URL.to_string(),
-            wheel_capacity: 8192,
-            wheel_refresh: 30_000,
-            sweep_interval: 60_000,
-        },
+        sql_options(),
     );
     server.init(true).await.expect("sqlite init");
     Backend {
         name: "sqlite".into(),
+        server,
+        router,
+    }
+}
+
+/// The SQL shell's options, the same for every engine it fronts.
+fn sql_options() -> resonate_sql::server::Options {
+    resonate_sql::server::Options {
+        server_url: SERVER_URL.to_string(),
+        wheel_capacity: 8192,
+        wheel_refresh: 30_000,
+        sweep_interval: 60_000,
+    }
+}
+
+/// The SQL shell over Postgres. Opt-in through `TEST_POSTGRES_URL`, like the
+/// engine differential; the schema is migrated on `init`.
+async fn postgres_backend(url: String) -> Backend {
+    let router = Arc::new(Recorder::default());
+    let server = resonate_sql::server::Server::new(
+        Box::new(move |debug| {
+            Box::pin(async move {
+                let engine =
+                    PostgresEngine::connect(&url, 5, TASK_RETRY_TIMEOUT_MS, PRELOAD_LIMIT, debug)
+                        .await
+                        .map_err(|e| Unavailable::new(format!("cannot connect: {e}")))?;
+                engine
+                    .init(true)
+                    .await
+                    .map_err(|e| Unavailable::new(format!("schema: {e}")))?;
+                Ok(Arc::new(engine) as Arc<dyn Engine>)
+            })
+        }),
+        router.clone(),
+        sql_options(),
+    );
+    server.init(true).await.expect("postgres init");
+    Backend {
+        name: "postgres".into(),
+        server,
+        router,
+    }
+}
+
+/// The SQL shell over MySQL. Opt-in through `TEST_MYSQL_URL`.
+async fn mysql_backend(url: String) -> Backend {
+    let router = Arc::new(Recorder::default());
+    let server = resonate_sql::server::Server::new(
+        Box::new(move |debug| {
+            Box::pin(async move {
+                let engine =
+                    MysqlEngine::connect(&url, 5, TASK_RETRY_TIMEOUT_MS, PRELOAD_LIMIT, debug)
+                        .await
+                        .map_err(|e| Unavailable::new(format!("cannot connect: {e}")))?;
+                engine
+                    .init(true)
+                    .await
+                    .map_err(|e| Unavailable::new(format!("schema: {e}")))?;
+                Ok(Arc::new(engine) as Arc<dyn Engine>)
+            })
+        }),
+        router.clone(),
+        sql_options(),
+    );
+    server.init(true).await.expect("mysql init");
+    Backend {
+        name: "mysql".into(),
         server,
         router,
     }
@@ -321,11 +388,19 @@ async fn port_differential_random() {
     // pending task's current version, and only a model of the state knows it.
     let oracle = Arc::new(SharedOracle::with_preload_limit(PRELOAD_LIMIT));
 
-    let mut backends: Vec<Backend> = vec![
-        oracle_backend(&oracle).await,
-        sqlite_backend().await,
-        blob_backend().await,
-    ];
+    let mut backends: Vec<Backend> = vec![oracle_backend(&oracle).await, sqlite_backend().await];
+    // Postgres and MySQL are opt-in, as in the engine differential: they need
+    // a database to be there. A shared database is reset by `debug.reset` at
+    // every batch, so two runs against the same one would trample each other.
+    match std::env::var("TEST_POSTGRES_URL") {
+        Ok(url) => backends.push(postgres_backend(url).await),
+        Err(_) => eprintln!("[port] TEST_POSTGRES_URL not set — postgres skipped"),
+    }
+    match std::env::var("TEST_MYSQL_URL") {
+        Ok(url) => backends.push(mysql_backend(url).await),
+        Err(_) => eprintln!("[port] TEST_MYSQL_URL not set — mysql skipped"),
+    }
+    backends.push(blob_backend().await);
 
     if let Ok(want) = std::env::var("TEST_BACKENDS") {
         let want: Vec<&str> = want
@@ -923,11 +998,14 @@ fn gen_promise_create(rng: &mut fastrand::Rng, oracle: &Oracle, now: i64) -> Req
     // Roughly half the pool is awaitable. Create is idempotent by id, so an
     // id's tags are fixed by its first success and the pool stays split —
     // which is what keeps both sides of the awaitability rule reachable: a
-    // callback on an external promise is a 200, on a plain one a 422.
-    let tags = if rng.bool() {
-        json!({ "resonate:external": "true" })
-    } else {
-        json!({})
+    // callback on an external promise is a 200, on a plain one a 422. One
+    // create in six is a timer with no target — a durable sleep as the SDK
+    // could issue it — which must arm on its own and resolve, not time out,
+    // when its deadline passes.
+    let tags = match rng.u32(0..6) {
+        0..=2 => json!({ "resonate:external": "true" }),
+        3 => json!({ "resonate:timer": "true" }),
+        _ => json!({}),
     };
     req(
         "promise.create",
