@@ -243,16 +243,29 @@ const Process = struct {
                 @intCast(request.status)
             else
                 500;
+            // Copied out before answering, because answering may be the last thing
+            // that happens to this connection: a write that fails closes it, and
+            // `self` lives in the arena that goes with it.
+            var arena = self.arena;
+            const exchange = self.exchange;
             // The status travels twice: in the envelope, because that is the
             // protocol, and as the HTTP status, because that is the transport.
             // A client reads whichever it has.
-            self.exchange.respond(status, "application/json", request.response);
+            exchange.respond(status, "application/json", request.response);
+            // The answer has been copied into the connection's own buffer, so
+            // everything this request allocated can go. Without this the arena
+            // outlived the request that made it, which is a few kilobytes per
+            // request and a server that dies of them in a day.
+            arena.deinit();
         }
     };
 
     fn handle_rpc(self: *Process, exchange: *net.Exchange) void {
-        // The exchange's arena backs both the protocol request and its answer, so
-        // everything this request allocates goes when the response is written.
+        // Two arenas, and they are not the same one. The exchange's holds what the
+        // *transport* needs and is reset when the response has been written; this
+        // request's holds what the *protocol* needs — the parsed envelope, the
+        // decided answer — and `Rpc.on_answered` frees it once the answer has been
+        // copied out.
         const rpc = exchange.arena.create(Rpc) catch {
             return exchange.respond(503, "text/plain", "out of memory\n");
         };
