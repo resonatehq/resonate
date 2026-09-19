@@ -20,6 +20,7 @@ members = [
     "crates/resonate-transport-http-poll",
     "crates/resonate-transport-http-push",
     "crates/resonate-worker-bash",
+    "xtask",
 ]
 
 [workspace.package]
@@ -30,6 +31,7 @@ license = "Apache-2.0"
 # Shared with the workspace members so a version bump happens in one place.
 [workspace.dependencies]
 async-trait = "0.1"
+clap = { version = "4", features = ["derive", "env"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 url = "2"
@@ -93,7 +95,7 @@ resonate-gateway-metrics = { path = "crates/resonate-gateway-metrics" }
 resonate-cli = { path = "crates/resonate-cli" }
 
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
-clap = { version = "4", features = ["derive", "env"] }
+clap = { workspace = true }
 
 [dev-dependencies]
 # `tests/ui.rs` drives the console's read model against every engine that is

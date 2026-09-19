@@ -22,20 +22,10 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Format
-        run: cargo fmt -- --check
-
+      # fmt, check, clippy, test — the same command a laptop runs. What each
+      # step is, and why `--workspace`, is in xtask/src/main.rs.
       - name: Check
-        run: cargo check --workspace --all-targets --all-features
-
-      # clippy fully compiles the crate, so a separate build step is redundant
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-
-      # --workspace, or the members' own tests are silently skipped: this is a
-      # workspace with a root package, so a bare `cargo test` selects only that.
-      - name: Test
-        run: cargo test --workspace --all-features
+        run: cargo xtask check
 
       # The blob crate's oracle is a deliberate copy of the dbms oracle, and
       # the extraction decision (plan.md, Phase 8) is read off this diff. It
@@ -99,21 +89,15 @@ jobs:
       - name: Setup Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
 
-      # --release: the run walks to a coverage plateau or 200k steps, which
-      # a debug build turns from minutes into an afternoon.
+      # The engine differential and the port differential over this leg's
+      # backend, each on a database the xtask creates fresh and drops after.
+      # The admin URLs are the services' superusers; no job touches the
+      # `resonate` database the services create.
       - name: Differential
         env:
-          BACKEND: ${{ matrix.backend }}
-        run: |
-          case "$BACKEND" in
-            postgres)
-              export TEST_POSTGRES_URL=postgres://resonate:resonate@localhost:5432/resonate
-              ;;
-            mysql)
-              export TEST_MYSQL_URL=mysql://resonate:resonate@localhost:3306/resonate
-              ;;
-          esac
-          cargo test --release --test differential --all-features -- --nocapture
+          XTASK_POSTGRES_ADMIN_URL: postgres://resonate:resonate@localhost:5432/postgres
+          XTASK_MYSQL_ADMIN_URL: mysql://root:resonate@127.0.0.1:3306/mysql
+        run: cargo xtask differential --backend ${{ matrix.backend }}
 
   # Porcupine, from the specification repository, against a live server under
   # real concurrency.
@@ -192,59 +176,17 @@ jobs:
         with:
           go-version-file: spec/valid/porc/go.mod
 
-      - name: Build
-        run: cargo build --release --bin resonate --example conctrace
-
-      # Debug mode is what makes a history checkable: the clock belongs to the
-      # caller, so every request carries the `resonate:debug_time` the model's
-      # non-decreasing clock needs, and no background sweep settles anything
-      # the trace did not ask for.
-      - name: Start server
+      # Build the server and the recorder, start the server in debug mode on
+      # a fresh database (debug mode is what makes a history checkable: the
+      # clock belongs to the caller, and no background sweep settles anything
+      # the trace did not ask for), record a concurrent history, and check it
+      # with the specification's conccheck. The recorder exits non-zero on a
+      # history with no successes or no overlap, so a server that refuses
+      # everything, or a run that failed to be concurrent, fails rather than
+      # linearizing vacuously. All of it is the one command.
+      - name: Linearizability
         env:
-          BACKEND: ${{ matrix.backend }}
-        run: |
-          case "$BACKEND" in
-            postgres)
-              export RESONATE_SERVERS__ACTIVE=server_postgres
-              export RESONATE_SERVERS__SERVER_POSTGRES__URL=postgres://resonate:resonate@localhost:5432/resonate
-              ;;
-            mysql)
-              export RESONATE_SERVERS__ACTIVE=server_mysql
-              export RESONATE_SERVERS__SERVER_MYSQL__URL=mysql://resonate:resonate@localhost:3306/resonate
-              ;;
-            blob)
-              # No bucket configured: the blob backend runs against its
-              # in-process, in-memory object store, which has real
-              # conditional-write semantics — the concurrency is still real.
-              export RESONATE_SERVERS__ACTIVE=server_blob
-              ;;
-            *)
-              export RESONATE_SERVERS__ACTIVE=server_sqlite
-              export RESONATE_SERVERS__SERVER_SQLITE__PATH=/tmp/conccheck.db
-              ;;
-          esac
-          RESONATE_DEBUG=true RESONATE_GATEWAYS__GATEWAY_HTTP__BIND=0.0.0.0:8021 ./target/release/resonate serve &
-          ready=false
-          for _ in $(seq 1 40); do
-            if curl -sf -o /dev/null http://127.0.0.1:8021/ready; then
-              ready=true
-              break
-            fi
-            sleep 1
-          done
-          if [ "$ready" != true ]; then
-            echo "server did not become ready"
-            exit 1
-          fi
-
-      # The producer exits non-zero on a history with no successes or no
-      # overlap, so a server that refuses everything, or a run that failed to
-      # be concurrent, fails here rather than linearizing vacuously.
-      - name: Record history
-        run: |
-          ./target/release/examples/conctrace \
-            --url http://127.0.0.1:8021/ --out trace --clients 8 --ops 600
-
-      - name: Check
-        working-directory: spec/valid/porc
-        run: go run ./cmd/conccheck -partition=false < "$GITHUB_WORKSPACE/trace.history"
+          XTASK_POSTGRES_ADMIN_URL: postgres://resonate:resonate@localhost:5432/postgres
+          XTASK_MYSQL_ADMIN_URL: mysql://root:resonate@127.0.0.1:3306/mysql
+          XTASK_SPEC_DIR: ${{ github.workspace }}/spec/valid/porc
+        run: cargo xtask porcupine --backend ${{ matrix.backend }}
