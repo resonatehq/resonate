@@ -69,6 +69,10 @@ One actor per origin, and a request only *enqueues*: the event loop drains, so
 everything that arrived in one poll rides one commit and each request still sees
 the one before it.
 
+[docs/on-s3.md](docs/on-s3.md) is the argument in full: why one document per
+origin is enough, what each of the three failure outcomes of a conditional write
+means, what is left at every point a process can stop, and what repairs it.
+
 ## The shape of the code
 
 ```
