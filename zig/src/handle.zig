@@ -1607,7 +1607,13 @@ pub fn schedule_fire(
     }
     const owned = d.allocator();
     const timeout_at = fired_at + promise_timeout;
-    const already_timedout = fired_at >= timeout_at;
+    // Against *now*, not against the instant it was due at. A sweep can reach an
+    // occurrence after the run it would have started has already timed out — the
+    // deadline object was late, or the store was — and that run is over before it
+    // begins. Comparing with `fired_at` instead only ever caught a schedule whose
+    // promise timeout was zero, and left the rest to be created pending and
+    // offered to a worker for work that had expired.
+    const already_timedout = now >= timeout_at;
     const owned_tags = try tags.clone(owned);
     const address = owned_tags.get(protocol.tag_target);
     _ = try d.promise_insert(.{
@@ -1808,6 +1814,25 @@ const Fixture = struct {
 
     fn sweep(self: *Fixture) !void {
         const outcome = try drain(&self.doc, self.now, self.cfg, self.arena.allocator());
+        self.last_effects = outcome.effects;
+        self.doc.reseat_timer();
+    }
+
+    fn fire(self: *Fixture, promise_id: []const u8, fired_at: i64, promise_timeout: i64) !void {
+        const a = self.arena.allocator();
+        var tags = protocol.StringMap.empty;
+        try tags.put(a, protocol.tag_target, "http://w:1");
+        const outcome = try schedule_fire(
+            &self.doc,
+            promise_id,
+            fired_at,
+            promise_timeout,
+            .empty,
+            tags,
+            self.now,
+            self.cfg,
+            a,
+        );
         self.last_effects = outcome.effects;
         self.doc.reseat_timer();
     }
@@ -2459,6 +2484,30 @@ test "validation refuses what the protocol does not admit" {
         const expected = try std.fmt.allocPrint(f.arena.allocator(), "\"{s}\"", .{c.message});
         try testing.expectEqualStrings(expected, r.data);
     }
+}
+
+test "an occurrence reached after its own deadline is not offered to anyone" {
+    var f = Fixture.init();
+    defer f.deinit();
+
+    // Due a minute ago, with ten seconds to run it in: the run is over before it
+    // begins, so the promise is born timed out, its task is born finished, and
+    // nothing is offered.
+    try f.fire("s0.999940000", 999_940_000, 10_000);
+    try testing.expectEqual(@as(usize, 0), f.executes());
+    const late = f.doc.promise("s0.999940000").?;
+    try testing.expectEqual(protocol.PromiseState.rejected_timedout, late.state);
+    try testing.expectEqual(@as(?i64, 999_950_000), late.settled_at);
+    try testing.expectEqual(@as(i64, 999_940_000), late.created_at);
+    try testing.expectEqual(TaskState.fulfilled, f.doc.task("s0.999940000").?.state);
+    try testing.expect(f.doc.timer_at == null);
+
+    // The same occurrence with room to run is offered, and owes a deadline.
+    try f.fire("s0.999940001", 999_940_001, 200_000);
+    try testing.expectEqual(@as(usize, 1), f.executes());
+    try testing.expectEqual(protocol.PromiseState.pending, f.doc.promise("s0.999940001").?.state);
+    try testing.expectEqual(TaskState.pending, f.doc.task("s0.999940001").?.state);
+    try testing.expect(f.doc.timer_at != null);
 }
 
 test "the branch preload carries the siblings and stops at the limit" {

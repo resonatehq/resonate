@@ -1122,6 +1122,52 @@ test "the timer object moves with the earliest deadline and the old one goes" {
     try testing.expect(!std.mem.eql(u8, first, after.items[0]));
 }
 
+test "an arm that failed to commit does not hand its name to the retry" {
+    const h = try Harness.create(testing.allocator);
+    defer h.destroy();
+    const a = h.arena.allocator();
+
+    // Let the read and the arm through and stop the store before the document.
+    // That is the window the whole token exists for: the object is there, the
+    // commit is not, and the caller is told nothing happened.
+    h.mem.faults.unavailable_after = h.mem.gets + h.mem.puts + h.mem.deletes + h.mem.lists + 2;
+    const refused = try h.call("promise.create",
+        \\{"id":"o:a","timeoutAt":9000000000000,"tags":{"resonate:target":"http://w:1"}}
+    );
+    try testing.expectEqual(@as(i32, 503), refused.status);
+    h.mem.faults.unavailable_after = null;
+
+    var orphans = std.ArrayList([]const u8).init(a);
+    try collect_timer_keys(h, &orphans, a);
+    try testing.expectEqual(@as(usize, 1), orphans.items.len);
+    const orphan = try a.dupe(u8, orphans.items[0]);
+
+    // The same request again. It arms the same deadline, and it must not arm the
+    // same *object*: the orphan is about to be collected by whatever fires it,
+    // and a collect that named this one would take the live deadline with it.
+    const created = try h.call("promise.create",
+        \\{"id":"o:a","timeoutAt":9000000000000,"tags":{"resonate:target":"http://w:1"}}
+    );
+    try testing.expectEqual(@as(i32, 200), created.status);
+
+    var live = std.ArrayList([]const u8).init(a);
+    try collect_timer_keys(h, &live, a);
+    try testing.expectEqual(@as(usize, 2), live.items.len);
+    var found_other = false;
+    for (live.items) |k| {
+        if (!std.mem.eql(u8, k, orphan)) found_other = true;
+    }
+    try testing.expect(found_other);
+}
+
+fn collect_timer_keys(h: *Harness, out: *std.ArrayList([]const u8), a: std.mem.Allocator) !void {
+    _ = a;
+    var it = h.mem.objects.keyIterator();
+    while (it.next()) |k| {
+        if (std.mem.startsWith(u8, k.*, "t/")) try out.append(k.*);
+    }
+}
+
 test "a batch of concurrent requests rides one commit" {
     const h = try Harness.create(testing.allocator);
     defer h.destroy();
