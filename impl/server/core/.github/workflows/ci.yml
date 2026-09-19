@@ -47,7 +47,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [sqlite, postgres, mysql]
+        backend: [sqlite, postgres, mysql, blob]
 
     # Services cannot be selected per matrix leg, so both start everywhere
     # and the step below picks the one this leg talks to.

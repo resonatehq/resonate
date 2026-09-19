@@ -704,7 +704,7 @@ impl MysqlEngine {
             .await
     }
 
-    async fn op_promise_search(&self, req: &RequestEnvelope, _now: i64) -> Output {
+    async fn op_promise_search(&self, req: &RequestEnvelope, now: i64) -> Output {
         let data = req.data.clone();
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
@@ -747,6 +747,7 @@ impl MysqlEngine {
                 tags_json.as_deref(),
                 r.cursor.as_deref(),
                 limit + 1,
+                now,
             )?;
             let has_more = results.len() as i64 > limit;
             let promises: Vec<_> = results.into_iter().take(limit as usize).collect();
@@ -3151,30 +3152,42 @@ impl MysqlDb<'_> {
         self.promise_get(awaited_id)
     }
 
+    /// Search by effective state at `now`: the filter is
+    /// `resonate_sql::effective_state_sql`, and every record comes back
+    /// projected, so a pending row past its deadline neither fills a
+    /// "pending" page nor reads as pending on any other.
     fn promise_search(
         &self,
         state: Option<&str>,
         tags: Option<&str>,
         cursor: Option<&str>,
         limit: i64,
+        now: i64,
     ) -> StorageResult<Vec<PromiseRecord>> {
         let rows = rt_block_on(
-            sqlx::query(
+            sqlx::query(&format!(
                 "SELECT id, state, param_headers, param_data, value_headers, value_data, tags, timeout_at, created_at, settled_at
                  FROM promises
-                 WHERE (? IS NULL OR state = ?)
+                 WHERE {}
                    AND (? IS NULL OR JSON_CONTAINS(tags, ?))
                    AND (? IS NULL OR id > ?)
                  ORDER BY id ASC
                  LIMIT ?",
-            )
-            .bind(state).bind(state)
+                resonate_sql::effective_state_sql(state, now)
+            ))
             .bind(tags).bind(tags)
             .bind(cursor).bind(cursor)
             .bind(limit)
             .fetch_all(self.tx().as_mut()),
         )?;
-        Ok(rows.iter().map(row_to_promise).collect())
+        Ok(rows
+            .iter()
+            .map(|row| {
+                let mut p = row_to_promise(row);
+                p.project(now);
+                p
+            })
+            .collect())
     }
 
     fn task_get(&self, id: &str) -> StorageResult<Option<TaskRecord>> {

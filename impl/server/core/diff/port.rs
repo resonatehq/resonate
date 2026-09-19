@@ -17,9 +17,26 @@
 // per-engine checks. Time exists in one place — `head.debug_time` — and moves
 // only through `debug.tick`.
 //
+// # Compared modulo materialisation
+//
+// A pending promise whose deadline has passed *is* expired, whether or not
+// its row says so yet. The SQL engines and the oracle write that down lazily,
+// when a request next names the promise; the blob server writes it down
+// eagerly, when it next sweeps the origin. The specification declares the
+// two the same: its abstract model reads every object through `project now`
+// and materialises the projection only under a flag, and its refinement
+// theorem is stated with that flag off. So this harness compares projected
+// state — `project` below is the model's `Object.project`, applied to every
+// snapshot and every search response before they are diffed — and a backend
+// that stored the expiry and one that did not produce the same canonical
+// snapshot. What the projection cannot hide, and must not: a different
+// response to the same request, a different message, or a settlement chain
+// that did not run. An expired promise that still holds callbacks or
+// listeners is left as is, so a backend that failed to fan out shows up.
+//
 // Run:
 //   cargo test --release --test port -- --nocapture
-//   TEST_BLOB=1 TEST_SAME_ORIGIN_FENCE=1 cargo test --release --test port -- --nocapture
+//   TEST_CROSS_ORIGIN_FENCE=1 cargo test --release --test port -- --nocapture
 //   TEST_POSTGRES_URL=postgres://resonate:resonate@localhost:5432/resonate \
 //   TEST_MYSQL_URL=mysql://resonate:resonate@localhost:3306/resonate \
 //     cargo test --release --test port -- --nocapture
@@ -29,21 +46,26 @@
 //   TEST_SOFT=1               log a response divergence and carry on while the
 //                             state and routed messages still agree; report
 //                             them all at the end
-//   TEST_SAME_ORIGIN_FENCE=1  keep fence actions in the task's origin — the
-//                             blob server refuses cross-origin fences, and this
-//                             is what gets past that known deviation to the rest
+//   TEST_CROSS_ORIGIN_FENCE=1 let a fence's action name another origin (a root
+//                             create is legal there, a child create or a settle
+//                             is refused). Off by default: the blob server still
+//                             refuses every cross-origin fence before reading
+//                             state — its check-then-create issue — and with
+//                             it in the comparison the run would stop there.
+//   TEST_RAW_SNAPSHOT=1       compare stored state as is, without the
+//                             projection described below
 //   TEST_TRACE_FROM=N         print tasks, callbacks and promises per backend
 //                             after every step from step N on
 //
-// Findings so far:
+// Findings so far, in order:
 //   - The shared fence validator (resonate-core) now states the origin rule:
 //     a settle shares the task's origin; a create shares it or names a root.
-//     Strict, oracle + sqlite: 34000 steps to the coverage plateau, 424
-//     behavioural signatures, no divergence.
 //   - Blob still refuses every cross-origin fence before reading state, so a
-//     fenced root create diverges there (200 elsewhere). Tracked as the
-//     check-then-create issue; TEST_SAME_ORIGIN_FENCE=1 is the way past it
-//     until then: 48200 steps, 427 signatures, no divergence with blob in.
+//     fenced root create diverges there (200 elsewhere). Tracked as its
+//     check-then-create issue; TEST_CROSS_ORIGIN_FENCE stays off until then.
+//   - Blob sweeps a request's origin before handling it and so expires an
+//     internal promise the others expire lazily. Both are valid, and the
+//     specification says so: the comparison is modulo materialisation (above).
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -400,17 +422,7 @@ async fn port_differential_random() {
         Ok(url) => backends.push(mysql_backend(url).await),
         Err(_) => eprintln!("[port] TEST_MYSQL_URL not set — mysql skipped"),
     }
-    // Blob is opt-in, TEST_BLOB=1, until two known differences are decided:
-    // it sweeps a request's origin before handling it, so it expires an
-    // internal promise the others expire lazily, and it refuses a cross-origin
-    // root create the others apply (its check-then-create issue). With it in,
-    // the run stops at the first of those; the point of running it is to see
-    // that nothing *else* differs, so read the divergence it stops on.
-    if std::env::var("TEST_BLOB").is_ok() {
-        backends.push(blob_backend().await);
-    } else {
-        eprintln!("[port] TEST_BLOB not set — blob skipped");
-    }
+    backends.push(blob_backend().await);
 
     if let Ok(want) = std::env::var("TEST_BACKENDS") {
         let want: Vec<&str> = want
@@ -506,6 +518,9 @@ async fn port_differential_random() {
             }
             for (_, _, data) in &mut results {
                 normalize_resp(data);
+                if kind == "promise.search" && !raw_snapshots() {
+                    project_search(data, now);
+                }
             }
 
             let status = results[0].1;
@@ -693,6 +708,94 @@ async fn send_all(
     (out, routed)
 }
 
+/// The specification's `Object.project`, over a snapshot.
+///
+/// A pending promise past its deadline reads as expired — resolved if it is a
+/// timer, otherwise rejected as timed out — with `settledAt` the deadline,
+/// which is what a sweep writes too. Its task, if any, takes the settled
+/// promise's view (`TaskObject.view`): fulfilled, with no holder and nothing
+/// to resume. A task that became fulfilled waits on nothing, so its own
+/// callbacks and its deadlines go; the promise's own deadline goes with the
+/// promise. Callbacks and listeners *on* the expired promise are deliberately
+/// kept: fanning them out is a sweep's job on every backend, and a backend
+/// that has not done it should differ.
+fn project(snap: &mut Value, now: i64) {
+    let Some(obj) = snap.as_object_mut() else {
+        return;
+    };
+    let mut settled: HashSet<String> = HashSet::new();
+    if let Some(promises) = obj.get_mut("promises").and_then(|v| v.as_array_mut()) {
+        for p in promises.iter_mut() {
+            if expire(p, now) {
+                settled.insert(p["id"].as_str().unwrap_or("").to_string());
+            }
+        }
+    }
+    if settled.is_empty() {
+        return;
+    }
+    let mut fulfilled: HashSet<String> = HashSet::new();
+    if let Some(tasks) = obj.get_mut("tasks").and_then(|v| v.as_array_mut()) {
+        for t in tasks.iter_mut() {
+            let id = t["id"].as_str().unwrap_or("").to_string();
+            if settled.contains(&id) && t["state"].as_str() != Some("fulfilled") {
+                t["state"] = json!("fulfilled");
+                t["resumes"] = json!(0);
+                if let Some(o) = t.as_object_mut() {
+                    o.remove("pid");
+                    o.remove("ttl");
+                }
+                fulfilled.insert(id);
+            }
+        }
+    }
+    if let Some(rows) = obj
+        .get_mut("promiseTimeouts")
+        .and_then(|v| v.as_array_mut())
+    {
+        rows.retain(|r| !settled.contains(r["id"].as_str().unwrap_or("")));
+    }
+    if let Some(rows) = obj.get_mut("taskTimeouts").and_then(|v| v.as_array_mut()) {
+        rows.retain(|r| !fulfilled.contains(r["id"].as_str().unwrap_or("")));
+    }
+    if let Some(rows) = obj.get_mut("callbacks").and_then(|v| v.as_array_mut()) {
+        rows.retain(|r| !fulfilled.contains(r["awaiter"].as_str().unwrap_or("")));
+    }
+}
+
+/// `PromiseObject.project`: expire one record in place if it is due. True if
+/// it changed.
+fn expire(p: &mut Value, now: i64) -> bool {
+    let pending = p["state"].as_str() == Some("pending");
+    let due = p["timeoutAt"].as_i64().is_some_and(|t| t <= now);
+    if !(pending && due) {
+        return false;
+    }
+    let timer = p["tags"]["resonate:timer"].as_str() == Some("true");
+    let timeout_at = p["timeoutAt"].clone();
+    p["state"] = json!(if timer {
+        "resolved"
+    } else {
+        "rejected_timedout"
+    });
+    p["settledAt"] = timeout_at;
+    true
+}
+
+/// The same projection over a `promise.search` response, which reads stored
+/// state on every backend.
+fn project_search(data: &mut Value, now: i64) {
+    if let Some(promises) = data.get_mut("promises").and_then(|v| v.as_array_mut()) {
+        for p in promises.iter_mut() {
+            expire(p, now);
+        }
+    }
+}
+
+fn raw_snapshots() -> bool {
+    std::env::var("TEST_RAW_SNAPSHOT").is_ok()
+}
+
 /// The durable state, without the message queue.
 ///
 /// `messages` is dropped: a backend that routes has nothing queued, one that
@@ -709,6 +812,9 @@ async fn snap_all(backends: &[Backend], now: i64) -> Vec<(String, Value)> {
         normalize_snap(&mut data);
         if let Some(o) = data.as_object_mut() {
             o.remove("messages");
+        }
+        if !raw_snapshots() {
+            project(&mut data, now);
         }
         state.push((b.name.clone(), data));
     }
@@ -1195,14 +1301,14 @@ fn gen_task_fence(rng: &mut fastrand::Rng, oracle: &Oracle, now: i64) -> Request
     let acquired = oracle.tasks_by_state(TaskState::Acquired);
     let (task_id, version) = pick(rng, &acquired).unwrap_or_else(|| (random_task_id(rng), 1));
     let task_origin = task_id.split(':').next().unwrap_or("").to_string();
-    // TEST_SAME_ORIGIN_FENCE=1 keeps every fence action inside the task's
-    // origin. The rule is: a settle must share the origin; a create may share
+    // The rule is: a settle must share the task's origin; a create may share
     // it or name a root (an id with no ':'), which is a detached computation.
-    // The blob server still refuses every cross-origin fence before reading
-    // state, so with that backend in the comparison this is what gets past
-    // the first cross-origin root create to whatever else may differ. Off,
-    // the divergence is reported like any other.
-    let same_origin = std::env::var("TEST_SAME_ORIGIN_FENCE").is_ok();
+    // The cross-origin flavours are behind TEST_CROSS_ORIGIN_FENCE=1 for now:
+    // the blob server still refuses every cross-origin fence before reading
+    // state (its check-then-create issue), and with it in the comparison the
+    // run would stop at the first root create. When that lands, this default
+    // flips.
+    let same_origin = std::env::var("TEST_CROSS_ORIGIN_FENCE").is_err();
     let pending_p: Vec<String> = oracle
         .pending_promise_ids()
         .into_iter()

@@ -262,7 +262,7 @@ impl Server {
             }
             "promise.search" => {
                 let r: PromiseSearchData = parsed!(data);
-                self.scan.search_promises(&r).await
+                self.scan.search_promises(&r, now).await
             }
 
             // --- tasks ------------------------------------------------------

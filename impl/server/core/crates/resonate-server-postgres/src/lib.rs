@@ -770,7 +770,7 @@ impl PostgresEngine {
             .await
     }
 
-    async fn op_promise_search(&self, req: &RequestEnvelope, _now: i64) -> Output {
+    async fn op_promise_search(&self, req: &RequestEnvelope, now: i64) -> Output {
         let data = req.data.clone();
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
@@ -813,6 +813,7 @@ impl PostgresEngine {
                 tags_json.as_deref(),
                 r.cursor.as_deref(),
                 limit + 1,
+                now,
             )?;
             let has_more = results.len() as i64 > limit;
             let promises: Vec<_> = results.into_iter().take(limit as usize).collect();
@@ -3218,28 +3219,40 @@ impl PostgresDb<'_> {
     }
 
     // P-06: promise.search
+    /// Search by effective state at `now`: the filter is
+    /// `resonate_sql::effective_state_sql`, and every record comes back
+    /// projected, so a pending row past its deadline neither fills a
+    /// "pending" page nor reads as pending on any other.
     fn promise_search(
         &self,
         state: Option<&str>,
         tags: Option<&str>,
         cursor: Option<&str>,
         limit: i64,
+        now: i64,
     ) -> StorageResult<Vec<PromiseRecord>> {
         let rows = rt_block_on(
             sqlx::query(&format!(
                 "SELECT {P_COLS} FROM promises
-                 WHERE ($1::text IS NULL OR state = $1)
-                   AND ($2::jsonb IS NULL OR tags @> $2::jsonb)
-                   AND ($3::text IS NULL OR id > $3)
-                 ORDER BY id ASC LIMIT $4"
+                 WHERE {}
+                   AND ($1::jsonb IS NULL OR tags @> $1::jsonb)
+                   AND ($2::text IS NULL OR id > $2)
+                 ORDER BY id ASC LIMIT $3",
+                resonate_sql::effective_state_sql(state, now)
             ))
-            .bind(state)
             .bind(tags)
             .bind(cursor)
             .bind(limit)
             .fetch_all(self.tx().as_mut()),
         )?;
-        Ok(rows.iter().map(row_to_promise).collect())
+        Ok(rows
+            .iter()
+            .map(|row| {
+                let mut p = row_to_promise(row);
+                p.project(now);
+                p
+            })
+            .collect())
     }
 
     // T-01: task.get — `resumes` is a local array now, not a COUNT over a join

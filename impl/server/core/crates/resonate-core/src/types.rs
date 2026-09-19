@@ -252,6 +252,28 @@ pub struct PromiseRecord {
     pub settled_at: Option<i64>,
 }
 
+impl PromiseRecord {
+    /// The record as it *is* at `now`, whatever the row says: a pending
+    /// promise whose deadline has passed is expired — resolved if it is a
+    /// timer, otherwise rejected as timed out — settled at that deadline.
+    ///
+    /// The specification's `PromiseObject.project`. Whether a backend has
+    /// written the expiry down yet (eagerly, at a sweep, or lazily, when a
+    /// request next names the promise) is materialisation, which no
+    /// observation may depend on; anything that returns records to a caller
+    /// projects them first.
+    pub fn project(&mut self, now: i64) {
+        if self.state == PromiseState::Pending && self.timeout_at <= now {
+            self.state = if is_timer(&self.tags) {
+                PromiseState::Resolved
+            } else {
+                PromiseState::RejectedTimedout
+            };
+            self.settled_at = Some(self.timeout_at);
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskRecord {
     pub id: String,

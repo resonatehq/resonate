@@ -14,12 +14,12 @@
 //! that, so a scan racing a write cannot leave a stale entry behind for the
 //! writer to trip over.
 //!
-//! Searches see stored state, not effective state: a promise whose deadline has
-//! passed but whose origin has not been swept since — by its timer or by a
-//! request on it — still reads as pending. A search does not sweep: it reads
-//! every origin, and sweeping each would be a write per origin. The SQL
-//! backends behave the same way — a row changes when the timeout sweep
-//! touches it, not when someone looks at it.
+//! A search does not sweep — it reads every origin, and sweeping each would
+//! be a write per origin — but it answers in effective state: a promise whose
+//! deadline has passed in an origin nothing has swept since is projected
+//! before it is filtered or returned, so what a search says never depends on
+//! whether an expiry has been written down yet. The SQL backends answer the
+//! same way, through the same rule (`PromiseRecord::project`).
 //!
 //! # Dependencies
 //!
@@ -126,7 +126,15 @@ impl ScanService {
     // Searches
     // -----------------------------------------------------------------------
 
-    pub async fn search_promises(&self, q: &PromiseSearchData) -> Result<Reply, Unavailable> {
+    /// Search by effective state at `now`: every record is projected before
+    /// it is filtered, so a pending promise past its deadline in an origin
+    /// nothing has swept yet neither fills a "pending" page nor reads as
+    /// pending on any other.
+    pub async fn search_promises(
+        &self,
+        q: &PromiseSearchData,
+        now: i64,
+    ) -> Result<Reply, Unavailable> {
         let limit = match resolve_limit(q.limit, 100) {
             Ok(l) => l,
             Err(reply) => return Ok(reply),
@@ -135,7 +143,10 @@ impl ScanService {
             .promises()
             .await?
             .into_iter()
-            .map(|(_, p)| p)
+            .map(|(_, mut p)| {
+                p.project(now);
+                p
+            })
             .filter(|p| q.state.map(|s| p.state == s).unwrap_or(true))
             .filter(|p| match &q.tags {
                 Some(want) => want
@@ -462,7 +473,7 @@ mod tests {
         with_promises(&r).await;
         let reply = r
             .scan
-            .search_promises(&parse(json!({ "state": "resolved", "limit": 10 })))
+            .search_promises(&parse(json!({ "state": "resolved", "limit": 10 })), 0)
             .await
             .unwrap();
         assert_eq!(reply.status, 200);
@@ -481,15 +492,16 @@ mod tests {
         with_promises(&r).await;
         let reply = r
             .scan
-            .search_promises(&parse(json!({ "tags": { "k": "v" }, "limit": 10 })))
+            .search_promises(&parse(json!({ "tags": { "k": "v" }, "limit": 10 })), 0)
             .await
             .unwrap();
         assert_eq!(reply.data["promises"].as_array().unwrap().len(), 1);
         let reply = r
             .scan
-            .search_promises(&parse(
-                json!({ "tags": { "k": "v", "other": "x" }, "limit": 10 }),
-            ))
+            .search_promises(
+                &parse(json!({ "tags": { "k": "v", "other": "x" }, "limit": 10 })),
+                0,
+            )
             .await
             .unwrap();
         assert!(reply.data["promises"].as_array().unwrap().is_empty());
@@ -501,7 +513,7 @@ mod tests {
         with_promises(&r).await;
         let first = r
             .scan
-            .search_promises(&parse(json!({ "limit": 2 })))
+            .search_promises(&parse(json!({ "limit": 2 })), 0)
             .await
             .unwrap();
         assert_eq!(
@@ -517,7 +529,7 @@ mod tests {
 
         let second = r
             .scan
-            .search_promises(&parse(json!({ "limit": 2, "cursor": "o:p1" })))
+            .search_promises(&parse(json!({ "limit": 2, "cursor": "o:p1" })), 0)
             .await
             .unwrap();
         assert_eq!(
@@ -541,7 +553,7 @@ mod tests {
         with_promises(&r).await;
         let reply = r
             .scan
-            .search_promises(&parse(json!({ "limit": 10, "cursor": "zzz" })))
+            .search_promises(&parse(json!({ "limit": 10, "cursor": "zzz" })), 0)
             .await
             .unwrap();
         assert!(reply.data["promises"].as_array().unwrap().is_empty());
@@ -552,7 +564,7 @@ mod tests {
         let r = rig();
         for reply in [
             r.scan
-                .search_promises(&parse(json!({ "limit": 1_001 })))
+                .search_promises(&parse(json!({ "limit": 1_001 })), 0)
                 .await
                 .unwrap(),
             r.scan
@@ -688,7 +700,7 @@ mod tests {
         .await;
         let reply = r
             .scan
-            .search_promises(&parse(json!({ "state": "pending", "limit": 10 })))
+            .search_promises(&parse(json!({ "state": "pending", "limit": 10 })), 0)
             .await
             .unwrap();
         assert_eq!(reply.data["promises"].as_array().unwrap().len(), 1);

@@ -28,8 +28,9 @@
 //!
 //! `check` is exactly the Check job's four steps. `differential` is one leg of
 //! the Differential matrix: the engine differential (`diff/differential.rs`)
-//! and the port differential (`diff/port.rs`) over SQLite, the oracle and the
-//! named backend, each on its own database. `porcupine` is one leg of the
+//! and the port differential (`diff/port.rs`) over SQLite, the oracle, blob
+//! and the named backend, each on its own database; the blob leg is blob's
+//! own differential and the port differential. `porcupine` is one leg of the
 //! Linearizability matrix: build the server and the recorder, start the server
 //! in debug mode on a free port, record a concurrent history, and check it with
 //! the specification's `conccheck`. That checker is Go, from the
@@ -334,10 +335,9 @@ fn url_var(backend: Backend) -> Option<&'static str> {
 async fn differential(backend: Backend, db: &DbArgs) -> Result<()> {
     if backend == Backend::Blob {
         // The engine port is the SQL family's; blob has its own differential,
-        // against its in-crate model. Its place in the port differential is
-        // opt-in (TEST_BLOB=1) until its two known differences from the
-        // reference model are decided — see diff/port.rs.
-        return run(
+        // against its in-crate model, and is in every port differential —
+        // the one below is the oracle, SQLite and blob.
+        run(
             "cargo test --release -p resonate-server-blob --test differential",
             cargo().args([
                 "test",
@@ -349,6 +349,10 @@ async fn differential(backend: Backend, db: &DbArgs) -> Result<()> {
                 "--",
                 "--nocapture",
             ]),
+        )?;
+        return run(
+            "port differential",
+            cargo().args(["test", "--release", "--test", "port", "--", "--nocapture"]),
         );
     }
     // The engine differential, on its own database.

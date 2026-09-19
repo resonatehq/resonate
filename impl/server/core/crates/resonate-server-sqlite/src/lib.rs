@@ -664,7 +664,7 @@ impl SqliteEngine {
             .await
     }
 
-    async fn op_promise_search(&self, req: &RequestEnvelope, _now: i64) -> Output {
+    async fn op_promise_search(&self, req: &RequestEnvelope, now: i64) -> Output {
         let data = req.data.clone();
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
@@ -707,6 +707,7 @@ impl SqliteEngine {
                 tags_json.as_deref(),
                 r.cursor.as_deref(),
                 limit + 1,
+                now,
             )?;
             let has_more = results.len() as i64 > limit;
             let promises: Vec<_> = results.into_iter().take(limit as usize).collect();
@@ -2839,27 +2840,35 @@ impl<'a> SqliteDb<'a> {
         Ok(promise)
     }
 
+    /// Search by effective state at `now`: the filter is
+    /// `resonate_sql::effective_state_sql`, and every record comes back
+    /// projected, so a pending row past its deadline neither fills a
+    /// "pending" page nor reads as pending on any other.
     fn promise_search(
         &self,
         state: Option<&str>,
         tags: Option<&str>,
         cursor: Option<&str>,
         limit: i64,
+        now: i64,
     ) -> StorageResult<Vec<PromiseRecord>> {
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare(&format!(
             "SELECT id, state, param_headers, param_data, value_headers, value_data, tags, timeout_at, created_at, settled_at
              FROM promises
-             WHERE (?1 IS NULL OR state = ?1)
-               AND (?2 IS NULL OR NOT EXISTS (
-                 SELECT key, value FROM json_each(?2) EXCEPT SELECT key, value FROM json_each(tags)
+             WHERE {}
+               AND (?1 IS NULL OR NOT EXISTS (
+                 SELECT key, value FROM json_each(?1) EXCEPT SELECT key, value FROM json_each(tags)
                ))
-               AND (?3 IS NULL OR id > ?3)
-             ORDER BY id ASC LIMIT ?4",
-        )?;
-        let mut rows = stmt.query(params![state, tags, cursor, limit])?;
+               AND (?2 IS NULL OR id > ?2)
+             ORDER BY id ASC LIMIT ?3",
+            resonate_sql::effective_state_sql(state, now)
+        ))?;
+        let mut rows = stmt.query(params![tags, cursor, limit])?;
         let mut results = Vec::new();
         while let Some(row) = rows.next()? {
-            results.push(row_to_promise(row)?);
+            let mut p = row_to_promise(row)?;
+            p.project(now);
+            results.push(p);
         }
         Ok(results)
     }

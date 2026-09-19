@@ -274,7 +274,7 @@ impl Oracle {
             "promise.settle" => self.op_promise_settle(req, now),
             "promise.register_callback" => self.op_promise_register_callback(req, now),
             "promise.register_listener" => self.op_promise_register_listener(req, now),
-            "promise.search" => self.op_promise_search(req),
+            "promise.search" => self.op_promise_search(req, now),
             "task.get" => self.op_task_get(req, now),
             "task.create" => self.op_task_create(req, now),
             "task.acquire" => self.op_task_acquire(req, now),
@@ -672,7 +672,7 @@ impl Oracle {
         )
     }
 
-    fn op_promise_search(&self, req: &RequestEnvelope) -> ResponseEnvelope {
+    fn op_promise_search(&self, req: &RequestEnvelope, now: i64) -> ResponseEnvelope {
         let r: PromiseSearchData = match serde_json::from_value(req.data.clone()) {
             Ok(r) => r,
             Err(e) => {
@@ -704,20 +704,23 @@ impl Oracle {
             Some(n) => n as usize,
             None => 100,
         };
+        // The effective state at `now`, not the stored one: a search asks what
+        // a promise *is*, and whether its expiry has been written down yet is
+        // materialisation, which no observation may depend on.
         let mut promises: Vec<PromiseRecord> = self
             .promises
             .iter()
             .filter(|(_, p)| {
-                r.state.map(|s| p.state == s).unwrap_or(true)
-                    && r.tags
-                        .as_ref()
-                        .map(|ft| {
-                            ft.iter()
-                                .all(|(k, v)| p.tags.get(k).map(|pv| pv == v).unwrap_or(false))
-                        })
-                        .unwrap_or(true)
+                r.tags
+                    .as_ref()
+                    .map(|ft| {
+                        ft.iter()
+                            .all(|(k, v)| p.tags.get(k).map(|pv| pv == v).unwrap_or(false))
+                    })
+                    .unwrap_or(true)
             })
-            .map(|(id, p)| Self::to_promise_record(0, id, p))
+            .map(|(id, p)| Self::to_promise_record(now, id, p))
+            .filter(|p| r.state.map(|s| p.state == s).unwrap_or(true))
             .collect();
         promises.sort_by(|a, b| a.id.cmp(&b.id));
         let start = r
