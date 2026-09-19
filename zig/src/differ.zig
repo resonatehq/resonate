@@ -237,11 +237,12 @@ const Differ = struct {
     loop: io_mod.Loop,
     client: net.Client,
     random: stdx.Random,
+    /// The trajectory, and the clock. The workload owns the instant every request
+    /// carries and only a sweep moves it, so both servers are asked the same
+    /// question at the same time.
     workload: workload_mod.Workload,
     differences: u64 = 0,
 
-    /// The instant every request carries. The workload owns it, and only a tick
-    /// moves it, so both servers see the same clock.
     fn create(allocator: std.mem.Allocator, options: Options) !*Differ {
         const self = try allocator.create(Differ);
         errdefer allocator.destroy(self);

@@ -2,8 +2,8 @@
 
 A complete Resonate server — the whole protocol, one endpoint, one process —
 whose only durable state is objects in a bucket. No database, no log, no
-consensus, no locks, no leases, no background compaction. Twenty thousand lines
-of Zig and nothing outside the standard library.
+consensus, no locks, no leases, no background compaction. Twenty-two thousand
+lines of Zig and nothing outside the standard library.
 
 ```
 zig build -Doptimize=ReleaseSafe
