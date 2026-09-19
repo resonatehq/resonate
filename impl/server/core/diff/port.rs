@@ -532,9 +532,9 @@ async fn port_differential_random() {
     let mut divergences: Vec<String> = Vec::new();
 
     'outer: loop {
-        // An episode is a path: a prefix of segments replayed from their own
-        // seeds, then one fresh segment. An empty prefix is the old behaviour,
-        // a run that starts from nothing.
+        // Every episode starts from nothing. The generator draws from one
+        // stream across all of them, so the whole run replays from its seed,
+        // but no episode can start where another ended.
         reset_all(&backends, now).await;
         if let Some(p) = &planner {
             reset_all(std::slice::from_ref(p), now).await;
