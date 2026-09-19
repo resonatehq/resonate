@@ -125,6 +125,14 @@ what `--max-steps` trades: lower it and more seeds get looked at, less deeply. A
 step that mostly gives up is a step that mostly says nothing, so CI runs ten seeds
 to the full depth and three thousand with the search off.
 
+The way to make more of them provable, if that is ever wanted, is to check each
+origin's operations as a history of its own, with the sweeps as barriers in all of
+them — every operation the protocol admits is single-origin, so the partitions are
+real. It is not done here because it is also weaker: a partitioned check cannot
+see a violation that involves two origins, and the machinery two origins share —
+the cache, the deadline queue, the outbox — is exactly where such a violation
+would come from.
+
 A failing run prints the command that reproduces it, with every knob. `--dump
 <file>` writes the history, and `--verbose` prints the crashes, the coverage,
 and — when every answer is explicable but the state is not — the state the order
