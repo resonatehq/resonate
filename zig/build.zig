@@ -32,6 +32,20 @@ pub fn build(b: *std.Build) void {
     if (b.args) |args| run_sim.addArgs(args);
     b.step("simulate", "Run one deterministic simulation").dependOn(&run_sim.step);
 
+    // ── The differential ──────────────────────────────────────────────────────
+    const differ = b.addExecutable(.{
+        .name = "differ",
+        .root_source_file = b.path("src/differ.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    b.installArtifact(differ);
+
+    const run_differ = b.addRunArtifact(differ);
+    run_differ.step.dependOn(b.getInstallStep());
+    if (b.args) |args| run_differ.addArgs(args);
+    b.step("differ", "Compare this server with another one").dependOn(&run_differ.step);
+
     // ── Unit tests ────────────────────────────────────────────────────────────
     const unit = b.addTest(.{
         .root_source_file = b.path("src/tests.zig"),

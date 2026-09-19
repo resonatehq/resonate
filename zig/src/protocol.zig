@@ -23,6 +23,21 @@ pub const supported_versions = [_][]const u8{"2026-04-01"};
 /// How long a task stays pending before the server offers it again.
 pub const pending_retry_ttl: i64 = 30_000;
 
+/// The sections of `debug.snap`, in the order it writes them.
+///
+/// Named here rather than left implicit in `scan`, because the differential
+/// compares them one at a time: a snapshot is long, and "these two differ" is
+/// not a useful thing to be told about two thousand characters.
+pub const snapshot_sections = [_][]const u8{
+    "promises",
+    "promiseTimeouts",
+    "callbacks",
+    "listeners",
+    "tasks",
+    "taskTimeouts",
+    "messages",
+};
+
 /// How many branch siblings a task response carries.
 pub const preload_limit_default: u32 = 10;
 
