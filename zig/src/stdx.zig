@@ -48,6 +48,12 @@ pub const Random = struct {
         return self.inner.random();
     }
 
+    /// A whole word, uniform. What a caller wants when it needs a value nothing
+    /// else will produce again rather than a number in a range.
+    pub fn word(self: *Random) u64 {
+        return self.random().int(u64);
+    }
+
     /// Uniform in [0, n). `n == 0` is a programming error.
     pub fn below(self: *Random, n: u64) u64 {
         assert(n > 0);

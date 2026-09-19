@@ -471,13 +471,16 @@ const Actor = struct {
 
         // Whether the deadline has to be armed again: only if it moved. When it
         // did not, the object already on the store is still the right one, and it
-        // keeps the generation that wrote it.
+        // keeps the token that armed it.
         const deadline_moved = blk: {
             if (self.old_timer_at == null) break :blk d.timer_at != null;
             if (d.timer_at == null) break :blk true;
             break :blk self.old_timer_at.? != d.timer_at.?;
         };
-        d.timer_generation = if (deadline_moved) loaded_generation + 1 else self.old_timer_generation;
+        d.timer_generation = if (deadline_moved)
+            self.applier.fresh_arm(loaded_generation)
+        else
+            self.old_timer_generation;
 
         // The write law: put the header fields back as they were read and see
         // whether the bytes moved at all.
@@ -863,6 +866,36 @@ pub const Applier = struct {
 
     /// Doubling with jitter, to a ceiling. Two writers that backed off by the
     /// same amount would collide again on the same schedule forever.
+    /// The token that names the timer object a commit is about to arm.
+    ///
+    /// It has to be unique to the **arm**, not to the commit. An attempt that
+    /// armed its object and then failed to commit leaves that object behind, and
+    /// a retry that loads the same document version computes the same deadline —
+    /// so a token derived from the document's own counter gives the retry the
+    /// same *name*. Two arms, one name. The orphan then fires into a sweep with
+    /// nothing due, which collects it by name, and the name it deletes is the
+    /// live object the retry wrote. That is a deadline lost for good: a promise
+    /// that never times out and a task that is never offered again, with nothing
+    /// anywhere to say so.
+    ///
+    /// Without a random source the token *is* the document's next counter, which
+    /// is a pure function of the state. That is what the sequential specification
+    /// wants — it has no failed commits and no second writer, so no name can
+    /// repeat there — and it is why the source is optional rather than required.
+    /// Every server that writes to a shared bucket sets one.
+    pub fn fresh_arm(self: *Applier, loaded_generation: u64) u64 {
+        const rng = self.random orelse return loaded_generation + 1;
+        while (true) {
+            // 63 bits: a document is JSON, and a JSON integer here is read back as
+            // an i64. A token that does not survive its own round trip would read
+            // as zero, and a document whose bytes change when nothing happened is
+            // a write on every read.
+            const token = rng.word() & std.math.maxInt(i64);
+            // Zero is "no deadline armed", so it is not a token.
+            if (token != 0) return token;
+        }
+    }
+
     fn backoff_ms(self: *Applier, attempt: u32) i64 {
         const base: i64 = @as(i64, 5) * (@as(i64, 1) << @intCast(@min(attempt, 6)));
         const jitter: i64 = if (self.random) |rng|

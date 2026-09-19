@@ -326,13 +326,14 @@ pub const Service = struct {
     /// Write the deadline's object before the schedule that takes it on.
     fn encode_and_arm(self: *Service, req: *Request) void {
         const sched = &req.sched.?;
-        // Every write is a new generation, and the timer object is named by the
-        // generation that armed it — so a writer only ever removes the object its
-        // own predecessor put there.
+        // The timer object is named by the arm that wrote it, so a writer only
+        // ever removes the object its own predecessor put there — and an attempt
+        // that armed and then failed to commit cannot hand its name to the retry
+        // that follows it. See `Applier.fresh_arm`, which this mirrors.
         req.old_timer_generation = sched.timer_generation;
         sched.generation += 1;
         const moved = req.new_next_run_at != req.old_next_run_at or req.old_next_run_at == 0;
-        if (moved) sched.timer_generation = sched.generation;
+        if (moved) sched.timer_generation = self.applier.fresh_arm(sched.generation);
 
         const a = req.arena.allocator();
         var body = std.ArrayList(u8).init(a);

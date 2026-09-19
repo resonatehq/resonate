@@ -703,6 +703,16 @@ pub const MemoryStore = struct {
     pub fn count(self: *const MemoryStore) usize {
         return self.objects.count();
     }
+
+    /// Every key, in order. A diagnostic: what the bucket holds is the answer to
+    /// "why did nothing fire", and a deadline that is not there is invisible in
+    /// any projection of the documents.
+    pub fn keys(self: *const MemoryStore, out: *std.ArrayList([]const u8)) !void {
+        out.clearRetainingCapacity();
+        var it = self.objects.keyIterator();
+        while (it.next()) |k| try out.append(k.*);
+        std.mem.sort([]const u8, out.items, {}, stdx.less_than_bytes);
+    }
 };
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

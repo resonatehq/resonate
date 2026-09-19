@@ -38,6 +38,7 @@ const stdx = @import("../stdx.zig");
 const json = @import("../json.zig");
 const protocol = @import("../protocol.zig");
 const store_mod = @import("../store.zig");
+const doc_mod = @import("../doc.zig");
 const env = @import("../env.zig");
 const bus_mod = @import("../bus.zig");
 const server_mod = @import("../server.zig");
@@ -116,6 +117,15 @@ pub const Report = struct {
     status_5xx: usize = 0,
     /// Whether the run injected anything that legitimately produces a 503.
     faults_injected: bool = false,
+    /// A deadline a document records with no object to fire it, if one was ever
+    /// seen, and how many operations had been issued by then.
+    ///
+    /// Held in the report itself rather than allocated: a report outlives the
+    /// simulation that produced it, and everything it carries has to outlive the
+    /// arenas too.
+    unarmed_buf: [512]u8 = undefined,
+    unarmed_len: usize = 0,
+    unarmed_after: usize = 0,
     /// How many sweeps had to be sent again because they did not finish.
     sweep_resends: u64 = 0,
     /// Set when a sweep never finished, however many attempts it was given. Its
@@ -123,7 +133,12 @@ pub const Report = struct {
     /// run is not checked rather than checked against something it cannot be.
     sweep_unfinished: bool = false,
 
+    pub fn unarmed(self: *const Report) []const u8 {
+        return self.unarmed_buf[0..self.unarmed_len];
+    }
+
     pub fn ok(self: Report) bool {
+        if (self.unarmed_len > 0) return false;
         if (self.verdict == .violation) return false;
         if (self.status_5xx > 0) return false;
         if (self.status_503 > 0 and !self.faults_injected) return false;
@@ -174,6 +189,12 @@ pub const Report = struct {
         });
         if (self.blocked_kind.len > 0) {
             try writer.print("  blocked on     {s} after {d} operations\n", .{ self.blocked_kind, self.prefix_length });
+        }
+        if (self.unarmed_len > 0) {
+            try writer.print(
+                "  BROKEN         no object for an armed deadline after {d} operations: {s}\n",
+                .{ self.unarmed_after, self.unarmed() },
+            );
         }
         if (self.sweep_unfinished) {
             try writer.print(
@@ -352,6 +373,33 @@ pub const Simulation = struct {
 
             if (exclusive_in_flight and self.outstanding == 0) exclusive_in_flight = false;
 
+            // Quiet: nothing in flight and nothing held back, so the bucket is
+            // what it will be until something else is asked of it.
+            if (self.report.unarmed_len == 0 and self.outstanding == 0 and
+                self.mem.delayed_count() == 0)
+            {
+                var scratch = std.heap.ArenaAllocator.init(self.allocator);
+                defer scratch.deinit();
+                if (try self.unarmed_deadline(scratch.allocator())) |key| {
+                    const n = @min(key.len, self.report.unarmed_buf.len);
+                    @memcpy(self.report.unarmed_buf[0..n], key[0..n]);
+                    self.report.unarmed_len = n;
+                    self.report.unarmed_after = self.history.items.len;
+                    if (self.options.verbose) {
+                        std.debug.print("no object for {s}; the bucket holds:\n", .{key});
+                        var all = std.ArrayList([]const u8).init(scratch.allocator());
+                        self.mem.keys(&all) catch {};
+                        for (all.items) |k| {
+                            const body = self.mem.objects.get(k).?.body;
+                            std.debug.print("  {s}\n", .{k});
+                            if (std.mem.indexOf(u8, k, "/wf/") != null) {
+                                std.debug.print("    {s}\n", .{body[0..@min(body.len, 300)]});
+                            }
+                        }
+                    }
+                }
+            }
+
             if (self.options.crash_percent > 0 and self.random.chance(self.options.crash_percent)) {
                 try self.crash(@intCast(self.random.below(self.instances.len)));
             }
@@ -434,6 +482,48 @@ pub const Simulation = struct {
             .context = pending,
         };
         self.instances[pending.server].runtime.server.process(&pending.request);
+    }
+
+    /// Every deadline a document records must have its object.
+    ///
+    /// The keys *are* the schedule: a document that says it has a deadline armed
+    /// at an instant, under the generation that armed it, and no object of that
+    /// name, is a deadline nothing will ever fire. No projection of the documents
+    /// shows it — the document looks right, and the promise simply never times
+    /// out — so it is checked here, against the bucket, wherever the store is
+    /// quiet enough for the answer to mean something.
+    ///
+    /// Quiet matters: a deadline's object is written *before* the document that
+    /// records it, so between the two writes the bucket has an object nothing
+    /// points at, which is fine, and never the other way round.
+    fn unarmed_deadline(self: *Simulation, scratch: std.mem.Allocator) !?[]const u8 {
+        var keys = std.ArrayList([]const u8).init(scratch);
+        defer keys.deinit();
+        try self.mem.keys(&keys);
+        const space = store_mod.KeySpace.init("sim/", store_mod.KeySpace.default_timer_shards);
+        var buf = std.ArrayList(u8).init(scratch);
+
+        for (keys.items) |key| {
+            if (try space.origin_of_doc_key(scratch, key)) |origin| {
+                const body = self.mem.objects.get(key).?.body;
+                var d = doc_mod.Doc.decode(scratch, body, origin) catch continue;
+                defer d.deinit();
+                const at = d.timer_at orelse continue;
+                const want = try space.timer_key(&buf, origin, at, d.timer_generation);
+                if (self.mem.objects.get(want) == null) return try scratch.dupe(u8, want);
+                continue;
+            }
+            if (try space.id_of_sched_key(scratch, key)) |id| {
+                const body = self.mem.objects.get(key).?.body;
+                var sd = doc_mod.ScheduleDoc.decode(scratch, body, id) catch continue;
+                defer sd.deinit();
+                // A tombstone keeps its counter and owes no deadline.
+                if (sd.deleted) continue;
+                const want = try space.sched_timer_key(&buf, id, sd.next_run_at, sd.timer_generation);
+                if (self.mem.objects.get(want) == null) return try scratch.dupe(u8, want);
+            }
+        }
+        return null;
     }
 
     fn on_answered(request: *server_mod.Request) void {
@@ -635,6 +725,13 @@ pub const Simulation = struct {
                             "the state the bucket holds:\n{s}\n",
                         .{ violation.final_data, if (final) |f| f.expected_data else "" },
                     );
+                    // And the keys, because a deadline that is not in the bucket
+                    // is in none of the projections above.
+                    var keys = std.ArrayList([]const u8).init(self.allocator);
+                    defer keys.deinit();
+                    self.mem.keys(&keys) catch {};
+                    std.debug.print("the keys the bucket holds:\n", .{});
+                    for (keys.items) |k| std.debug.print("  {s}\n", .{k});
                 }
             },
             .exhausted => report.verdict = .exhausted,
