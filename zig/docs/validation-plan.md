@@ -5,7 +5,7 @@ another.
 
 | | asks | answers with |
 |---|---|---|
-| `zig build test` | does each part do what it says | 207 unit tests |
+| `zig build test` | does each part do what it says | 209 unit tests |
 | `simulator run` / `soak` | is the concurrency sound | a linearizability search over a simulated run |
 | `differ` | is this the protocol everybody else implements | another server, request for request |
 | `simulator check` | was *that* run sound | a recorded history from a real server |
@@ -73,6 +73,14 @@ things about how it treats a real run:
   them is sound because they change nothing; including them would refute a
   correct server. `debug.tick` is included, and issued as a barrier — nothing
   else in flight — which is what makes it one step in the recorded history.
+
+One thing is checked against the bucket rather than against the answers: every
+deadline a document records has an object of that name. No projection of the
+documents shows the difference — the document looks right, and the promise simply
+never settles — so it is checked after every operation, wherever the store is
+quiet enough for the answer to mean something. A run that breaks it fails
+whatever the search says, naming the key and the operation it was first missing
+after.
 
 Every report says how much overlap there actually was (`concurrency 34 at once,
 323 overlapping pairs`) and which operation kinds never succeeded, because a
@@ -144,11 +152,17 @@ decided to send, which is not a comparison of anything.
 
 ### What it found, and the two places it disagrees on purpose
 
-It found a real bug here: the outbox keys an `unblock` on the promise and the
-address, and the effect the state machine emitted never carried the promise id —
-so one address listening on two promises was told about whichever settled last.
-The simulator could not have found it. A server that loses the same message on
-both sides of a comparison with itself is still linearizable.
+It found two real bugs here, neither of which the simulator could have found: a
+server that loses the same message on both sides of a comparison with itself is
+still linearizable.
+
+* The outbox keys an `unblock` on the promise and the address, and the effect the
+  state machine emitted never carried the promise id — so one address listening
+  on two promises was told about whichever settled last.
+* A schedule's occurrence reached after its own deadline had passed was created
+  pending and offered to a worker, for work that was already over. Three thousand
+  requests in, the only thing the two servers disagreed about was one `execute`
+  message this one had no business sending.
 
 Two differences remain, and this server is deliberately on the side it is on:
 

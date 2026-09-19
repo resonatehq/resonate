@@ -115,7 +115,7 @@ Three ideas hold it together, all of them TigerBeetle's:
 Four checks, described in [docs/validation-plan.md](docs/validation-plan.md):
 
 ```
-zig build test                                   # 207 unit tests
+zig build test                                   # 209 unit tests
 zig-out/bin/simulator run  --seed 1 --servers 3 --clients 4 --operations 200 \
     --conflict 15 --reorder 30 --unavailable 3 --lost-ack 3
 zig-out/bin/simulator soak --runs 200 --crash 2 --unavailable 5 --lost-ack 5
@@ -140,11 +140,20 @@ Found by the checker, in the order they turned up:
 6. A delete that purged a schedule restarted the counter its deadlines are named
    by.
 7. A schedule advanced past a run that was never stored.
+8. An arm that failed to commit left an object behind under the name the retry
+   would use, so collecting the orphan took the live deadline with it — a promise
+   that never times out, with nothing anywhere to say so. The simulation now
+   checks the invariant that broke, after every operation: every deadline a
+   document records has an object of that name.
 
-And one the checker could not have found, which the differential did: the outbox
-keyed every `unblock` to one address the same way, so an address listening on two
-promises was told about whichever settled last. A server that loses the same
-message on both sides of a comparison with itself is still linearizable.
+And two the checker could not have found, which the differential did:
+
+* The outbox keyed every `unblock` to one address the same way, so an address
+  listening on two promises was told about whichever settled last. A server that
+  loses the same message on both sides of a comparison with itself is still
+  linearizable.
+* An occurrence reached after its own deadline had passed was offered to a worker
+  for work that was already over.
 
 ## What is not here
 
