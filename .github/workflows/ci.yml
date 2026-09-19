@@ -213,6 +213,24 @@ jobs:
             sleep 1
           done
 
+      # `--store memory` and `--store s3` are the same server over two
+      # implementations of one port, and the memory one is not the one that
+      # ships. `fakes3` answers the six operations the port has, with real
+      # conditional writes, so the S3 path can be run without an S3.
+      - name: Start the Zig server over a stand-in S3
+        run: |
+          ./zig/zig-out/bin/fakes3 --port 9100 &
+          for _ in $(seq 1 40); do
+            curl -sf -o /dev/null "http://127.0.0.1:9100/b?list-type=2&prefix=" && break
+            sleep 1
+          done
+          ./zig/zig-out/bin/resonate serve --debug --store s3 \
+            --endpoint http://127.0.0.1:9100 --bucket b --port 8031 &
+          for _ in $(seq 1 40); do
+            curl -sf -o /dev/null http://127.0.0.1:8031/ready && break
+            sleep 1
+          done
+
       # Printed, never failed on, and for the same reason as the oracle drift
       # ledger above: the two known differences are ones the Zig server is
       # deliberately on the other side of — `task.create` on an already
@@ -222,9 +240,14 @@ jobs:
       # difference has to be visible, and a difference is not a build break.
       - name: Differential ledger
         run: |
+          echo "── over the memory store ──"
           ./zig/zig-out/bin/differ --a http://127.0.0.1:8021/ --label-a zig \
             --b http://127.0.0.1:8022/ --label-b blob \
             --seed 1 --operations 1000 --keep-going || true
+          echo "── over the S3 path ──"
+          ./zig/zig-out/bin/differ --a http://127.0.0.1:8031/ --label-a zig-s3 \
+            --b http://127.0.0.1:8022/ --label-b blob \
+            --seed 5 --operations 400 --keep-going || true
 
       # This one is a check: the producer refuses a history with no successes or
       # no overlap, and the checker asks whether *any* order consistent with the
@@ -234,6 +257,13 @@ jobs:
           ./target/release/examples/conctrace \
             --url http://127.0.0.1:8021/ --out trace --clients 8 --ops 600
           ./zig/zig-out/bin/simulator check trace.history
+
+      # The same question of the path that talks to an object store.
+      - name: Record and check a real history over the S3 path
+        run: |
+          ./target/release/examples/conctrace \
+            --url http://127.0.0.1:8031/ --out trace-s3 --clients 8 --ops 600
+          ./zig/zig-out/bin/simulator check trace-s3.history
 
   # Porcupine, from the specification repository, against a live server under
   # real concurrency.
