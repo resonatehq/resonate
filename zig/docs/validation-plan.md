@@ -121,8 +121,9 @@ zig-out/bin/simulator soak --runs 200 --servers 3 --clients 4 --operations 200 \
 ```
 
 A search that runs out of steps says so and proves nothing either way, which is
-what `--max-steps` trades: lower it and more seeds get looked at, less deeply. CI
-runs tens of seeds at two million steps and three thousand with the search off.
+what `--max-steps` trades: lower it and more seeds get looked at, less deeply. A
+step that mostly gives up is a step that mostly says nothing, so CI runs ten seeds
+to the full depth and three thousand with the search off.
 
 A failing run prints the command that reproduces it, with every knob. `--dump
 <file>` writes the history, and `--verbose` prints the crashes, the coverage,
