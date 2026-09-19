@@ -444,14 +444,14 @@ pub const Runtime = struct {
         self.allocator.destroy(self);
     }
 
-    fn on_origin_deadline(context: ?*anyopaque, origin: []const u8, at: i64) void {
+    fn on_origin_deadline(context: ?*anyopaque, origin: []const u8, at: i64, generation: u64) void {
         const self: *Runtime = @ptrCast(@alignCast(context.?));
-        self.timerd.arm_origin(origin, at);
+        self.timerd.arm_origin(origin, at, generation);
     }
 
-    fn on_schedule_deadline(context: ?*anyopaque, id: []const u8, at: i64) void {
+    fn on_schedule_deadline(context: ?*anyopaque, id: []const u8, at: i64, generation: u64) void {
         const self: *Runtime = @ptrCast(@alignCast(context.?));
-        self.timerd.arm_schedule(id, at);
+        self.timerd.arm_schedule(id, at, generation);
     }
 
     fn on_reset(context: ?*anyopaque) void {

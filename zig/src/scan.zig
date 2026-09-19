@@ -746,6 +746,22 @@ const Fixture = struct {
     }
 
     fn seed_schedule(self: *Fixture, id: []const u8, cron: []const u8, next_run_at: i64, tags_json: []const u8) !void {
+        return self.seed_schedule_state(id, cron, next_run_at, tags_json, false);
+    }
+
+    /// A tombstone: the object a delete leaves behind.
+    fn seed_tombstone(self: *Fixture, id: []const u8) !void {
+        return self.seed_schedule_state(id, "* * * * *", 60_000, "{}", true);
+    }
+
+    fn seed_schedule_state(
+        self: *Fixture,
+        id: []const u8,
+        cron: []const u8,
+        next_run_at: i64,
+        tags_json: []const u8,
+        deleted: bool,
+    ) !void {
         var arena = std.heap.ArenaAllocator.init(self.allocator);
         defer arena.deinit();
         const a = arena.allocator();
@@ -759,6 +775,7 @@ const Fixture = struct {
         sched.created_at = 1_000;
         sched.next_run_at = next_run_at;
         sched.promise_tags = try protocol.StringMap.from_json(owned, try json.parse(a, tags_json));
+        sched.deleted = deleted;
 
         var body = std.ArrayList(u8).init(a);
         try sched.encode(&body);
@@ -1002,6 +1019,13 @@ test "a schedule search reads the schedule objects" {
     // Schedules default to ten a page, not a hundred.
     const page = try f.call(&arena, "schedule.search", "{\"limit\":1}");
     try testing.expect(std.mem.indexOf(u8, page.data, "\"cursor\":\"s0\"") != null);
+
+    // A deleted schedule still has an object — it carries the write counter that
+    // names its timer objects — and a search must not report it.
+    try f.seed_tombstone("s2");
+    const after = try f.call(&arena, "schedule.search", "{}");
+    try testing.expect(std.mem.indexOf(u8, after.data, "s2") == null);
+    try testing.expect(std.mem.indexOf(u8, after.data, "s1") != null);
 }
 
 test "reset empties every prefix and clears what was held" {
@@ -1015,7 +1039,7 @@ test "reset empties every prefix and clears what was held" {
     try f.seed_schedule("s0", "* * * * *", 1, "{\"resonate:target\":\"http://w\"}");
     {
         var key_buf = std.ArrayList(u8).init(a);
-        const key = try f.keys.timer_key(&key_buf, "o", 500);
+        const key = try f.keys.timer_key(&key_buf, "o", 500, 1);
         var op = store_mod.Operation{
             .kind = .put,
             .key = key,

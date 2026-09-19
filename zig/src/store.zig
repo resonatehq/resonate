@@ -234,22 +234,46 @@ pub const KeySpace = struct {
         return out.items;
     }
 
-    /// `<prefix>t/<NN>/<20-digit deadline>_<escaped origin>`
+    /// `<prefix>t/<NN>/<20-digit deadline>_<escaped origin>@<generation>`
     ///
     /// The deadline is zero-padded so that lexicographic order *is* time order:
     /// that is what makes a capped ascending listing return the nearest
     /// deadlines. A negative deadline cannot occur — every deadline derives from
     /// a validated non-negative `timeoutAt` or from `now` plus a positive TTL —
     /// so clamping at zero is an honest floor rather than a reinterpretation.
-    pub fn timer_key(self: KeySpace, out: *std.ArrayList(u8), origin: []const u8, at: i64) ![]const u8 {
-        return self.timer_key_inner(out, origin, at, false);
+    ///
+    /// The generation is the commit that armed this deadline, and it is what
+    /// makes disarming safe. Without it the key names only (target, deadline),
+    /// and a writer removing the deadline it replaced can delete a key some other
+    /// writer has just written for the *same* deadline — a schedule deleted and
+    /// recreated in the same minute, or a promise timeout that becomes the
+    /// nearest deadline again after a shorter one goes away. With it, the key a
+    /// writer removes is the one its own predecessor wrote and nobody else can
+    /// produce, because a generation belongs to exactly one commit.
+    ///
+    /// `@` is escaped by `encode_key`, so a raw one is unambiguously the
+    /// separator.
+    pub fn timer_key(
+        self: KeySpace,
+        out: *std.ArrayList(u8),
+        origin: []const u8,
+        at: i64,
+        generation: u64,
+    ) ![]const u8 {
+        return self.timer_key_inner(out, origin, at, generation, false);
     }
 
     /// A schedule's timer key. A schedule id may not contain `':'` and an
     /// escaped origin cannot either, so the raw `sched:` marker is unambiguous
     /// even for an origin literally called `sched:evil`.
-    pub fn sched_timer_key(self: KeySpace, out: *std.ArrayList(u8), id: []const u8, at: i64) ![]const u8 {
-        return self.timer_key_inner(out, id, at, true);
+    pub fn sched_timer_key(
+        self: KeySpace,
+        out: *std.ArrayList(u8),
+        id: []const u8,
+        at: i64,
+        generation: u64,
+    ) ![]const u8 {
+        return self.timer_key_inner(out, id, at, generation, true);
     }
 
     fn timer_key_inner(
@@ -257,6 +281,7 @@ pub const KeySpace = struct {
         out: *std.ArrayList(u8),
         target: []const u8,
         at: i64,
+        generation: u64,
         schedule: bool,
     ) ![]const u8 {
         out.clearRetainingCapacity();
@@ -266,6 +291,7 @@ pub const KeySpace = struct {
         try out.writer().print("{d:0>20}_", .{@max(at, 0)});
         if (schedule) try out.appendSlice("sched:");
         try encode_key(out, target);
+        try out.writer().print("@{d}", .{generation});
         return out.items;
     }
 
@@ -288,8 +314,8 @@ pub const KeySpace = struct {
 
     /// What a timer key points at.
     pub const TimerEntry = union(enum) {
-        origin: struct { deadline: i64, name: []const u8 },
-        schedule: struct { deadline: i64, id: []const u8 },
+        origin: struct { deadline: i64, name: []const u8, generation: u64 },
+        schedule: struct { deadline: i64, id: []const u8, generation: u64 },
 
         pub fn deadline(self: TimerEntry) i64 {
             return switch (self) {
@@ -310,17 +336,24 @@ pub const KeySpace = struct {
         _ = self;
         const slash = std.mem.lastIndexOfScalar(u8, key, '/') orelse return null;
         const name = key[slash + 1 ..];
-        // 20 digits, an underscore, and at least one character of target.
-        if (name.len < deadline_width + 2) return null;
+        // 20 digits, an underscore, at least one character of target, an `@` and
+        // at least one digit of generation.
+        if (name.len < deadline_width + 4) return null;
         const deadline = std.fmt.parseInt(i64, name[0..deadline_width], 10) catch return null;
         if (name[deadline_width] != '_') return null;
-        const target = name[deadline_width + 1 ..];
+        var target = name[deadline_width + 1 ..];
+        // The generation, if the key carries one. A key without it is not one
+        // this build wrote.
+        const at_sign = std.mem.lastIndexOfScalar(u8, target, '@') orelse return null;
+        const generation = std.fmt.parseInt(u64, target[at_sign + 1 ..], 10) catch return null;
+        target = target[0..at_sign];
+        if (target.len == 0) return null;
         if (std.mem.startsWith(u8, target, "sched:")) {
             const id = try decode_key(arena, target["sched:".len ..]) orelse return null;
-            return .{ .schedule = .{ .deadline = deadline, .id = id } };
+            return .{ .schedule = .{ .deadline = deadline, .id = id, .generation = generation } };
         }
         const origin = try decode_key(arena, target) orelse return null;
-        return .{ .origin = .{ .deadline = deadline, .name = origin } };
+        return .{ .origin = .{ .deadline = deadline, .name = origin, .generation = generation } };
     }
 
     /// The origin a document key names, or null if the key is not one.
@@ -783,33 +816,54 @@ test "a timer key sorts by time and says what it points at" {
     var buf = std.ArrayList(u8).init(a);
     const keys = KeySpace.init("p/", 4);
 
-    const k1 = try a.dupe(u8, try keys.timer_key(&buf, "diff", 30_000));
-    try testing.expect(std.mem.endsWith(u8, k1, "/00000000000000030000_diff"));
-    const k2 = try a.dupe(u8, try keys.timer_key(&buf, "diff", 60_000));
+    const k1 = try a.dupe(u8, try keys.timer_key(&buf, "diff", 30_000, 7));
+    try testing.expect(std.mem.endsWith(u8, k1, "/00000000000000030000_diff@7"));
+    const k2 = try a.dupe(u8, try keys.timer_key(&buf, "diff", 60_000, 7));
     // Same origin, so the same shard, and lexicographic order is time order.
     try testing.expect(std.mem.lessThan(u8, k1, k2));
 
     const entry = (try keys.parse_timer_key(a, k1)).?;
     try testing.expectEqual(@as(i64, 30_000), entry.deadline());
     try testing.expectEqualStrings("diff", entry.origin.name);
+    try testing.expectEqual(@as(u64, 7), entry.origin.generation);
 
-    const sk = try a.dupe(u8, try keys.sched_timer_key(&buf, "s0", 60_000));
+    // The same deadline armed by two different commits is two different keys, so
+    // removing one cannot remove the other.
+    const k3 = try a.dupe(u8, try keys.timer_key(&buf, "diff", 30_000, 8));
+    try testing.expect(!std.mem.eql(u8, k1, k3));
+
+    const sk = try a.dupe(u8, try keys.sched_timer_key(&buf, "s0", 60_000, 3));
     const sentry = (try keys.parse_timer_key(a, sk)).?;
     try testing.expectEqualStrings("s0", sentry.schedule.id);
+    try testing.expectEqual(@as(u64, 3), sentry.schedule.generation);
 
     // An origin literally called `sched:evil` is still told apart from a
     // schedule, because an escaped origin can never contain a raw colon.
-    const evil = try a.dupe(u8, try keys.timer_key(&buf, "sched:evil", 1));
+    const evil = try a.dupe(u8, try keys.timer_key(&buf, "sched:evil", 1, 1));
     const eentry = (try keys.parse_timer_key(a, evil)).?;
     try testing.expect(eentry == .origin);
     try testing.expectEqualStrings("sched:evil", eentry.origin.name);
 
+    // An origin containing an `@` is escaped, so the last raw one is the marker.
+    const at_origin = try a.dupe(u8, try keys.timer_key(&buf, "a@b", 1, 2));
+    const at_entry = (try keys.parse_timer_key(a, at_origin)).?;
+    try testing.expectEqualStrings("a@b", at_entry.origin.name);
+    try testing.expectEqual(@as(u64, 2), at_entry.origin.generation);
+
     // A negative deadline clamps rather than breaking the padding.
-    const neg = try a.dupe(u8, try keys.timer_key(&buf, "o", -5));
+    const neg = try a.dupe(u8, try keys.timer_key(&buf, "o", -5, 1));
     try testing.expectEqual(@as(i64, 0), (try keys.parse_timer_key(a, neg)).?.deadline());
 
     // Unparseable keys are ignored, not fatal.
-    for ([_][]const u8{ "p/t/00/short", "p/t/00/xxxxxxxxxxxxxxxxxxxx_o", "p/t/00/00000000000000000001o", "nope" }) |bad| {
+    for ([_][]const u8{
+        "p/t/00/short",
+        "p/t/00/xxxxxxxxxxxxxxxxxxxx_o@1",
+        "p/t/00/00000000000000000001o@1",
+        "p/t/00/00000000000000000001_o",
+        "p/t/00/00000000000000000001_o@x",
+        "p/t/00/00000000000000000001_@1",
+        "nope",
+    }) |bad| {
         try testing.expect((try keys.parse_timer_key(a, bad)) == null);
     }
 }
@@ -823,7 +877,7 @@ test "timer keys spread across shards" {
     var seen = std.StringHashMap(void).init(a);
     for (0..40) |i| {
         const origin = try std.fmt.allocPrint(a, "origin-{d}", .{i});
-        const key = try a.dupe(u8, try keys.timer_key(&buf, origin, 1));
+        const key = try a.dupe(u8, try keys.timer_key(&buf, origin, 1, 1));
         // `t/NN/`
         try seen.put(key[2..4], {});
     }

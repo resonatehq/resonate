@@ -136,13 +136,13 @@ pub const Timerd = struct {
     }
 
     /// Arm the deadline an origin's document now carries.
-    pub fn arm_origin(self: *Timerd, origin: []const u8, at: i64) void {
-        const key = self.keys.timer_key(&self.key_buf, origin, at) catch return;
+    pub fn arm_origin(self: *Timerd, origin: []const u8, at: i64, generation: u64) void {
+        const key = self.keys.timer_key(&self.key_buf, origin, at, generation) catch return;
         self.arm(at, key);
     }
 
-    pub fn arm_schedule(self: *Timerd, id: []const u8, at: i64) void {
-        const key = self.keys.sched_timer_key(&self.key_buf, id, at) catch return;
+    pub fn arm_schedule(self: *Timerd, id: []const u8, at: i64, generation: u64) void {
+        const key = self.keys.sched_timer_key(&self.key_buf, id, at, generation) catch return;
         self.arm(at, key);
     }
 
@@ -252,10 +252,12 @@ pub const Timerd = struct {
                 .origin => |o| KeySpace.TimerEntry{ .origin = .{
                     .deadline = o.deadline,
                     .name = self.allocator.dupe(u8, o.name) catch break :blk null,
+                    .generation = o.generation,
                 } },
                 .schedule => |sc| KeySpace.TimerEntry{ .schedule = .{
                     .deadline = sc.deadline,
                     .id = self.allocator.dupe(u8, sc.id) catch break :blk null,
+                    .generation = sc.generation,
                 } },
             };
         };
@@ -642,14 +644,14 @@ const Fixture = struct {
         return self;
     }
 
-    fn on_origin_deadline(context: ?*anyopaque, origin: []const u8, at: i64) void {
+    fn on_origin_deadline(context: ?*anyopaque, origin: []const u8, at: i64, generation: u64) void {
         const self: *Fixture = @ptrCast(@alignCast(context.?));
-        self.timerd.arm_origin(origin, at);
+        self.timerd.arm_origin(origin, at, generation);
     }
 
-    fn on_schedule_deadline(context: ?*anyopaque, id: []const u8, at: i64) void {
+    fn on_schedule_deadline(context: ?*anyopaque, id: []const u8, at: i64, generation: u64) void {
         const self: *Fixture = @ptrCast(@alignCast(context.?));
-        self.timerd.arm_schedule(id, at);
+        self.timerd.arm_schedule(id, at, generation);
     }
 
     fn destroy(self: *Fixture) void {
@@ -875,7 +877,7 @@ test "an orphan key fires into a sweep with nothing due and is collected" {
 
     // Exactly what a crash between arming and committing leaves behind.
     var key_buf = std.ArrayList(u8).init(a);
-    const key = try a.dupe(u8, try f.keys.timer_key(&key_buf, "ghost", 1_000_001_000));
+    const key = try a.dupe(u8, try f.keys.timer_key(&key_buf, "ghost", 1_000_001_000, 1));
     var op = store_mod.Operation{
         .kind = .put,
         .key = key,

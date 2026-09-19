@@ -275,7 +275,10 @@ const Actor = struct {
     cached_bytes: []const u8 = &.{},
     etag: ?Etag = null,
     old_timer_at: ?i64 = null,
+    /// Which commit's key the old deadline is on the store under.
+    old_timer_generation: u64 = 0,
     new_timer_at: ?i64 = null,
+    new_timer_generation: u64 = 0,
     effects: std.ArrayListUnmanaged(handle.Effect) = .{},
     attempt: u32 = 0,
     /// True when the commit failed with a conflict rather than a refused
@@ -447,6 +450,7 @@ const Actor = struct {
         const d = &self.doc.?;
 
         self.old_timer_at = d.timer_at;
+        self.old_timer_generation = d.timer_generation;
         const loaded_clock = d.clock;
         const loaded_generation = d.generation;
         var latest: i64 = loaded_clock;
@@ -465,6 +469,16 @@ const Actor = struct {
         }
         d.reseat_timer();
 
+        // Whether the deadline has to be armed again: only if it moved. When it
+        // did not, the object already on the store is still the right one, and it
+        // keeps the generation that wrote it.
+        const deadline_moved = blk: {
+            if (self.old_timer_at == null) break :blk d.timer_at != null;
+            if (d.timer_at == null) break :blk true;
+            break :blk self.old_timer_at.? != d.timer_at.?;
+        };
+        d.timer_generation = if (deadline_moved) loaded_generation + 1 else self.old_timer_generation;
+
         // The write law: put the header fields back as they were read and see
         // whether the bytes moved at all.
         d.clock = loaded_clock;
@@ -476,6 +490,7 @@ const Actor = struct {
             // a batch that writes nothing is the read it decided against, which
             // is sound because it *is* read-only.
             self.new_timer_at = self.old_timer_at;
+            self.new_timer_generation = self.old_timer_generation;
             self.post_commit();
             return;
         }
@@ -486,6 +501,7 @@ const Actor = struct {
         d.encode(&body, self.origin) catch return self.fail_batch(503, "out of memory encoding");
         self.body = body.items;
         self.new_timer_at = d.timer_at;
+        self.new_timer_generation = d.timer_generation;
         self.arm();
     }
 
@@ -530,9 +546,10 @@ const Actor = struct {
     /// one is a different object. Nothing a racing writer does can lose it.
     fn arm(self: *Actor) void {
         const at = self.new_timer_at orelse return self.commit();
-        if (self.old_timer_at != null and self.old_timer_at.? == at) return self.commit();
+        // The deadline did not move, so the object already there is the right one.
+        if (self.new_timer_generation == self.old_timer_generation) return self.commit();
 
-        const key = self.applier.keys.timer_key(&self.key, self.origin, at) catch
+        const key = self.applier.keys.timer_key(&self.key, self.origin, at, self.new_timer_generation) catch
             return self.fail_batch(503, "out of memory");
         self.phase = .arming;
         self.op = .{
@@ -636,9 +653,14 @@ const Actor = struct {
 
     fn disarm(self: *Actor) void {
         const old = self.old_timer_at orelse return self.post_commit();
-        if (self.new_timer_at != null and self.new_timer_at.? == old) return self.post_commit();
+        // Nothing to remove when the object was not rewritten.
+        if (self.new_timer_generation == self.old_timer_generation) return self.post_commit();
 
-        const key = self.applier.keys.timer_key(&self.old_key, self.origin, old) catch
+        // Keyed by the commit that wrote it, so this removes the object this
+        // writer's own predecessor put there and nothing else. Without the
+        // generation it would remove whatever is at that deadline, which another
+        // writer may have just armed for a state this one knows nothing about.
+        const key = self.applier.keys.timer_key(&self.old_key, self.origin, old, self.old_timer_generation) catch
             return self.post_commit();
         self.phase = .disarming;
         self.op = .{
@@ -660,7 +682,9 @@ const Actor = struct {
     fn post_commit(self: *Actor) void {
         // The deadline is durable and the document is committed, so the timer
         // can go into memory where the firing loop reads it.
-        if (self.new_timer_at) |at| self.applier.on_deadline_armed(self.origin, at);
+        if (self.new_timer_at) |at| {
+            self.applier.on_deadline_armed(self.origin, at, self.new_timer_generation);
+        }
 
         // Sends first, replies second. A caller that gets its answer and then
         // races the worker is a caller that can observe the effect before the
@@ -725,7 +749,7 @@ pub const Applier = struct {
 
     /// Called after a commit whose document carries a deadline, so whatever
     /// fires deadlines can hold it in memory instead of listing for it.
-    deadline_hook: ?*const fn (context: ?*anyopaque, origin: []const u8, at: i64) void = null,
+    deadline_hook: ?*const fn (context: ?*anyopaque, origin: []const u8, at: i64, generation: u64) void = null,
     deadline_context: ?*anyopaque = null,
 
     commits: u64 = 0,
@@ -833,8 +857,8 @@ pub const Applier = struct {
         }
     }
 
-    fn on_deadline_armed(self: *Applier, origin: []const u8, at: i64) void {
-        if (self.deadline_hook) |hook| hook(self.deadline_context, origin, at);
+    fn on_deadline_armed(self: *Applier, origin: []const u8, at: i64, generation: u64) void {
+        if (self.deadline_hook) |hook| hook(self.deadline_context, origin, at, generation);
     }
 
     /// Doubling with jitter, to a ceiling. Two writers that backed off by the

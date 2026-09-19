@@ -357,8 +357,20 @@ pub const Doc = struct {
     /// every read a write.
     clock: i64 = 0,
 
-    /// How many times this document has been committed. Diagnostics only.
+    /// How many times this document has been committed.
+    ///
+    /// Not diagnostics: it names the timer object this document's deadline is
+    /// armed under, which is what makes disarming safe when several writers share
+    /// the bucket. A generation belongs to exactly one commit, so the key a
+    /// writer removes is one nobody else can have written.
     generation: u64 = 0,
+
+    /// The generation whose commit wrote the timer object now on the store.
+    ///
+    /// Equal to `generation` when this commit moved the deadline, and to whatever
+    /// it was before when the deadline did not move — because then the object did
+    /// not have to be rewritten.
+    timer_generation: u64 = 0,
 
     pub fn init(child: std.mem.Allocator) Doc {
         return .{ .arena = std.heap.ArenaAllocator.init(child) };
@@ -488,6 +500,7 @@ pub const Doc = struct {
         if (before.promises.items.len != after.promises.items.len) return true;
         if (before.tasks.items.len != after.tasks.items.len) return true;
         if (!eql_opt_i64(before.timer_at, after.timer_at)) return true;
+        if (before.timer_generation != after.timer_generation) return true;
         for (before.promises.items, after.promises.items) |a, b| {
             if (!a.eql(b)) return true;
         }
@@ -537,6 +550,8 @@ pub const Doc = struct {
         if (self.timer_at) |at| {
             try out.appendSlice(",\"ta\":");
             try out.writer().print("{d}", .{at});
+            try out.appendSlice(",\"tgn\":");
+            try out.writer().print("{d}", .{self.timer_generation});
         }
         try out.append('}');
 
@@ -677,6 +692,10 @@ pub const Doc = struct {
                 const gn = v.get_i64("gn") orelse 0;
                 doc.generation = if (gn < 0) 0 else @intCast(gn);
                 doc.timer_at = v.get_i64("ta");
+                doc.timer_generation = blk: {
+                    const tg = v.get_i64("tgn") orelse break :blk 0;
+                    break :blk if (tg < 0) 0 else @intCast(tg);
+                };
                 seen_header = true;
                 continue;
             }
@@ -804,6 +823,7 @@ pub const Doc = struct {
         fresh.clock = self.clock;
         fresh.generation = self.generation;
         fresh.timer_at = self.timer_at;
+        fresh.timer_generation = self.timer_generation;
         self.deinit();
         self.* = fresh;
     }
@@ -825,6 +845,14 @@ pub const ScheduleDoc = struct {
     created_at: i64 = 0,
     next_run_at: i64 = 0,
     last_run_at: ?i64 = null,
+
+    /// How many times this schedule has been written, and which of those writes
+    /// armed the timer object now on the store. The same mechanism the origin
+    /// documents use, and for the same reason: a schedule deleted and created
+    /// again inside one minute would otherwise have one writer remove the other's
+    /// deadline.
+    generation: u64 = 0,
+    timer_generation: u64 = 0,
 
     /// A schedule that has been deleted, but whose object has not gone yet.
     ///
@@ -864,6 +892,10 @@ pub const ScheduleDoc = struct {
         try out.writer().print("{d}", .{self.created_at});
         try out.appendSlice(",\"nr\":");
         try out.writer().print("{d}", .{self.next_run_at});
+        try out.appendSlice(",\"gn\":");
+        try out.writer().print("{d}", .{self.generation});
+        try out.appendSlice(",\"tgn\":");
+        try out.writer().print("{d}", .{self.timer_generation});
         if (self.last_run_at) |lr| {
             try out.appendSlice(",\"lr\":");
             try out.writer().print("{d}", .{lr});
@@ -895,6 +927,14 @@ pub const ScheduleDoc = struct {
         sched.promise_timeout = v.get_i64("pto") orelse return error.Corrupt;
         sched.created_at = v.get_i64("ca") orelse return error.Corrupt;
         sched.next_run_at = v.get_i64("nr") orelse return error.Corrupt;
+        sched.generation = blk: {
+            const g = v.get_i64("gn") orelse break :blk 0;
+            break :blk if (g < 0) 0 else @intCast(g);
+        };
+        sched.timer_generation = blk: {
+            const g = v.get_i64("tgn") orelse break :blk 0;
+            break :blk if (g < 0) 0 else @intCast(g);
+        };
         sched.last_run_at = v.get_i64("lr");
         sched.deleted = blk: {
             const del = v.get("del") orelse break :blk false;
@@ -1099,4 +1139,25 @@ test "a schedule document round trips" {
     try testing.expect(back.last_run_at == null);
     try testing.expectEqualStrings("poll://any@g", back.promise_tags.get("resonate:target").?);
     try testing.expectError(error.WrongOrigin, ScheduleDoc.decode(testing.allocator, buf.items, "s1"));
+}
+
+test "the timer generation is part of the document and part of the write law" {
+    var a = try test_doc();
+    defer a.deinit();
+    var b = try test_doc();
+    defer b.deinit();
+    a.timer_generation = 3;
+    b.timer_generation = 3;
+    try testing.expect(!Doc.changed(&a, &b));
+    // Re-arming under a new commit is a change, even at the same instant: it is a
+    // different object on the store.
+    b.timer_generation = 4;
+    try testing.expect(Doc.changed(&a, &b));
+
+    var buf = std.ArrayList(u8).init(testing.allocator);
+    defer buf.deinit();
+    try b.encode(&buf, "o");
+    var back = try Doc.decode(testing.allocator, buf.items, "o");
+    defer back.deinit();
+    try testing.expectEqual(@as(u64, 4), back.timer_generation);
 }

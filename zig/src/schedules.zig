@@ -82,17 +82,17 @@ pub const Request = struct {
         arming,
         committing,
         disarming,
-        purging_doc,
-        purging_timer,
         firing,
         done,
     } = .start,
     service: *Service = undefined,
     sched: ?ScheduleDoc = null,
     etag: ?store_mod.Etag = null,
-    /// What the schedule pointed at when this round started, so the old timer
-    /// object can be removed once the new one is in place.
+    /// What the schedule pointed at when this round started, and which write
+    /// armed it, so the old timer object can be removed once the new one is in
+    /// place — and only that one.
     old_next_run_at: i64 = 0,
+    old_timer_generation: u64 = 0,
     new_next_run_at: i64 = 0,
     body: []const u8 = &.{},
     op: store_mod.Operation = undefined,
@@ -127,7 +127,7 @@ pub const Service = struct {
     applier: *applier_mod.Applier,
     /// Called when a schedule's next deadline has been written, so whatever
     /// fires deadlines can hold it in memory instead of listing for it.
-    deadline_hook: ?*const fn (context: ?*anyopaque, id: []const u8, at: i64) void = null,
+    deadline_hook: ?*const fn (context: ?*anyopaque, id: []const u8, at: i64, generation: u64) void = null,
     deadline_context: ?*anyopaque = null,
 
     pub fn init(
@@ -188,8 +188,7 @@ pub const Service = struct {
             .arming => self.on_armed(req, op.result),
             .committing => self.on_committed(req, op.result),
             .disarming => self.finish_ok(req),
-            .purging_doc => self.on_purged_doc(req),
-            .purging_timer => self.finish_empty(req),
+
             else => unreachable,
         }
     }
@@ -323,13 +322,22 @@ pub const Service = struct {
 
     /// Write the deadline's object before the schedule that takes it on.
     fn encode_and_arm(self: *Service, req: *Request) void {
+        const sched = &req.sched.?;
+        // Every write is a new generation, and the timer object is named by the
+        // generation that armed it — so a writer only ever removes the object its
+        // own predecessor put there.
+        req.old_timer_generation = sched.timer_generation;
+        sched.generation += 1;
+        const moved = req.new_next_run_at != req.old_next_run_at or req.old_next_run_at == 0;
+        if (moved) sched.timer_generation = sched.generation;
+
         const a = req.arena.allocator();
         var body = std.ArrayList(u8).init(a);
-        req.sched.?.encode(&body) catch return fail(req, 503, "out of memory");
+        sched.encode(&body) catch return fail(req, 503, "out of memory");
         req.body = body.items;
 
-        if (req.new_next_run_at == req.old_next_run_at) return self.commit(req);
-        const key = self.keys.sched_timer_key(&req.key_buf, req.id, req.new_next_run_at) catch
+        if (!moved) return self.commit(req);
+        const key = self.keys.sched_timer_key(&req.key_buf, req.id, req.new_next_run_at, sched.timer_generation) catch
             return fail(req, 503, "out of memory");
         req.phase = .arming;
         req.op = .{
@@ -373,11 +381,17 @@ pub const Service = struct {
             .written => {
                 if (req.kind == .delete) {
                     // The tombstone landed, so this caller is the one that deleted
-                    // it. Now the object itself can go.
-                    return self.purge(req);
+                    // it — and that is the whole of a delete. The object stays: it
+                    // carries the write counter that names this schedule's timer
+                    // objects, and a counter that restarted would let one
+                    // incarnation remove another's deadline. The timer object it
+                    // leaves behind is collected when it fires into a schedule that
+                    // is not there, which is the same repair the origin documents
+                    // rely on.
+                    return self.finish_empty(req);
                 }
                 if (self.deadline_hook) |hook| {
-                    hook(self.deadline_context, req.id, req.new_next_run_at);
+                    hook(self.deadline_context, req.id, req.new_next_run_at, req.sched.?.timer_generation);
                 }
                 self.disarm(req);
             },
@@ -393,14 +407,18 @@ pub const Service = struct {
                     // found the schedule deleted in between still has a schedule
                     // to create, and answering "not found" to a create is an
                     // answer no sequential execution could give.
-                    .create, .delete => {
+                    // A fire is no different. "Whoever moved it did this round's
+                    // work" is only true if they moved it *past* this instant, and
+                    // the only way to know is to read again — the promises are
+                    // already created, and creating them again is a no-op, so
+                    // redoing the round is free and leaving the schedule
+                    // un-advanced is not: a tick that answered would have fired a
+                    // run nothing recorded.
+                    .create, .delete, .fire => {
                         req.sched = null;
                         req.etag = null;
                         self.load(req);
                     },
-                    // The schedule moved under us. Whoever moved it did this
-                    // round's work; there is nothing to redo.
-                    .fire => self.finish_empty(req),
                     else => fail(req, 409, "the schedule changed while it was being written"),
                 }
             },
@@ -411,10 +429,10 @@ pub const Service = struct {
     }
 
     fn disarm(self: *Service, req: *Request) void {
-        if (req.old_next_run_at == 0 or req.old_next_run_at == req.new_next_run_at) {
+        if (req.old_next_run_at == 0 or req.old_timer_generation == req.sched.?.timer_generation) {
             return self.finish_ok(req);
         }
-        const key = self.keys.sched_timer_key(&req.old_key_buf, req.id, req.old_next_run_at) catch
+        const key = self.keys.sched_timer_key(&req.old_key_buf, req.id, req.old_next_run_at, req.old_timer_generation) catch
             return self.finish_ok(req);
         req.phase = .disarming;
         req.op = .{
@@ -447,47 +465,15 @@ pub const Service = struct {
         const sched = &req.sched.?;
         sched.deleted = true;
         req.old_next_run_at = sched.next_run_at;
+        req.old_timer_generation = sched.timer_generation;
         req.new_next_run_at = sched.next_run_at;
+        sched.generation += 1;
 
         const a = req.arena.allocator();
         var body = std.ArrayList(u8).init(a);
         sched.encode(&body) catch return fail(req, 503, "out of memory");
         req.body = body.items;
         self.commit(req);
-    }
-
-    /// The object, and then the deadline it armed.
-    ///
-    /// Both unconditional and both idempotent: the tombstone is the record that
-    /// this caller won, so everything after it is cleanup that can be repeated. A
-    /// crash in the middle leaves a tombstone, which reads as absent and is
-    /// reclaimed by the next create.
-    fn purge(self: *Service, req: *Request) void {
-        const key = self.keys.sched_key(&req.key_buf, req.id) catch
-            return self.finish_empty(req);
-        req.phase = .purging_doc;
-        req.op = .{
-            .kind = .delete,
-            .key = key,
-            .arena = req.arena.allocator(),
-            .callback = on_complete,
-            .context = req,
-        };
-        self.store.submit(&req.op);
-    }
-
-    fn on_purged_doc(self: *Service, req: *Request) void {
-        const key = self.keys.sched_timer_key(&req.key_buf, req.id, req.old_next_run_at) catch
-            return self.finish_empty(req);
-        req.phase = .purging_timer;
-        req.op = .{
-            .kind = .delete,
-            .key = key,
-            .arena = req.arena.allocator(),
-            .callback = on_complete,
-            .context = req,
-        };
-        self.store.submit(&req.op);
     }
 
     // ── Firing ────────────────────────────────────────────────────────────────
@@ -902,8 +888,15 @@ test "a schedule is created once, read back, and deleted" {
     const deleted = try f.call(&arena, "schedule.delete", "{\"id\":\"s0\"}");
     try testing.expectEqual(@as(i32, 200), deleted.status);
     try testing.expectEqualStrings("{}", deleted.data);
-    try testing.expectEqual(@as(usize, 0), f.mem.count());
+    // The tombstone stays, and so does the timer object until it fires into a
+    // schedule that is not there: the object carries the write counter that names
+    // this schedule's timer objects, and a counter that restarted would let one
+    // incarnation remove another's deadline. What matters is that the schedule
+    // reads as gone, and that only one caller can delete it.
+    try testing.expectEqual(@as(usize, 2), f.mem.count());
+    try testing.expectEqual(@as(i32, 404), (try f.call(&arena, "schedule.get", "{\"id\":\"s0\"}")).status);
     try testing.expectEqual(@as(i32, 404), (try f.call(&arena, "schedule.delete", "{\"id\":\"s0\"}")).status);
+    // A search skips the tombstone; that is `scan`'s to prove.
 }
 
 test "a schedule is refused when it does not say what it would run" {
@@ -1100,14 +1093,14 @@ test "two callers deleting one schedule: exactly one of them deleted it" {
     try testing.expectEqual(@as(i32, 404), got.status);
 }
 
-test "a tombstone left by a crash reads as absent and is reclaimed by a create" {
+test "a deleted schedule reads as absent and its id is reclaimed by a create" {
     const f = try Fixture.create(testing.allocator);
     defer f.destroy();
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
 
-    // Exactly what a process that died between the tombstone and the purge leaves.
+    // A tombstone, which is what a deleted schedule is.
     var sched = doc_mod.ScheduleDoc.init(testing.allocator);
     defer sched.deinit();
     const owned = sched.allocator();
@@ -1144,4 +1137,67 @@ test "a tombstone left by a crash reads as absent and is reclaimed by a create" 
     try testing.expect(std.mem.indexOf(u8, created.data, "\"cron\":\"0 * * * *\"") != null);
     const got = try f.call(&arena, "schedule.get", "{\"id\":\"s0\"}");
     try testing.expect(std.mem.indexOf(u8, got.data, "\"cron\":\"0 * * * *\"") != null);
+}
+
+test "a fire that loses its race reads again and still advances the schedule" {
+    const f = try Fixture.create(testing.allocator);
+    defer f.destroy();
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    _ = try f.call(&arena, "schedule.create",
+        \\{"id":"s0","cron":"* * * * *","promiseId":"{{.id}}.{{.timestamp}}","promiseTimeout":60000,"promiseTags":{"resonate:target":"http://w"}}
+    );
+    f.sim.now = 1_000_020_000;
+
+    // Another writer touches the schedule object while the fire is deciding, so
+    // the fire's conditional write is refused. It must read again and finish the
+    // round rather than leaving the schedule pointing at an instant it has
+    // already fired.
+    var reply = Fixture.Reply{};
+    var req = Request{
+        .kind = .fire,
+        .id = "s0",
+        .now = f.sim.now,
+        .arena = &arena,
+        .callback = Fixture.Reply.callback,
+        .context = &reply,
+    };
+    var rng = stdx.Random.init(3);
+    f.mem.random = &rng;
+    // The first conditional write is refused, the retry is not.
+    f.mem.faults.conflict_percent = 0;
+    f.service.submit(&req);
+    // Let the fire read and decide, then move the object under it.
+    f.applier.drain();
+    {
+        var key_buf = std.ArrayList(u8).init(a);
+        const key = try f.keys.sched_key(&key_buf, "s0");
+        const existing = f.mem.objects.get(key).?;
+        var op = store_mod.Operation{
+            .kind = .put,
+            .key = key,
+            .body = existing.body,
+            .precondition = .none,
+            .arena = a,
+            .callback = struct {
+                fn cb(_: *store_mod.Operation) void {}
+            }.cb,
+        };
+        f.mem.store().submit(&op);
+    }
+    var guard: usize = 0;
+    while (!reply.done) {
+        guard += 1;
+        if (guard > 1_000) return error.NeverAnswered;
+        f.mem.drain_delayed();
+        f.applier.drain();
+    }
+    try testing.expectEqual(@as(i32, 200), reply.status);
+
+    // The run happened and the schedule says so.
+    const got = try f.call(&arena, "schedule.get", "{\"id\":\"s0\"}");
+    try testing.expect(std.mem.indexOf(u8, got.data, "\"lastRunAt\":1000020000") != null);
+    try testing.expect(std.mem.indexOf(u8, got.data, "\"nextRunAt\":1000080000") != null);
 }
