@@ -404,7 +404,14 @@ pub fn scheme_of(address: []const u8) ?[]const u8 {
 /// whether `data` holds what that operation needs, are the state machine's
 /// questions — it is the only party that knows.
 pub const Invalid = union(enum) {
+    /// The bytes are not JSON at all.
     unparseable,
+    /// An envelope with a part missing, named. The reference server's own message
+    /// says which field it was, and a client that has to guess between four is a
+    /// client debugging by bisection.
+    missing: []const u8,
+    /// A part that is there and is the wrong shape, named.
+    wrong_type: struct { field: []const u8, want: []const u8 },
     empty_kind,
     data_not_object,
     unsupported_version: []const u8,
@@ -429,15 +436,19 @@ pub fn parse_envelope(arena: std.mem.Allocator, body: []const u8) union(enum) {
     invalid: Invalid,
 } {
     const root = json.parse(arena, body) catch return .{ .invalid = .unparseable };
-    const kind_v = root.get("kind") orelse return .{ .invalid = .unparseable };
-    const kind = kind_v.as_string() orelse return .{ .invalid = .unparseable };
-    const head = root.get("head") orelse return .{ .invalid = .unparseable };
-    if (!head.is_object()) return .{ .invalid = .unparseable };
-    const corr_id_v = head.get("corrId") orelse return .{ .invalid = .unparseable };
-    const corr_id = corr_id_v.as_string() orelse return .{ .invalid = .unparseable };
-    const version_v = head.get("version") orelse return .{ .invalid = .unparseable };
-    const version = version_v.as_string() orelse return .{ .invalid = .unparseable };
-    const data = root.get("data") orelse return .{ .invalid = .unparseable };
+    if (!root.is_object()) return .{ .invalid = .{ .wrong_type = .{ .field = "", .want = "an object" } } };
+    const kind_v = root.get("kind") orelse return .{ .invalid = .{ .missing = "kind" } };
+    const kind = kind_v.as_string() orelse
+        return .{ .invalid = .{ .wrong_type = .{ .field = "kind", .want = "a string" } } };
+    const head = root.get("head") orelse return .{ .invalid = .{ .missing = "head" } };
+    if (!head.is_object()) return .{ .invalid = .{ .wrong_type = .{ .field = "head", .want = "an object" } } };
+    const corr_id_v = head.get("corrId") orelse return .{ .invalid = .{ .missing = "corrId" } };
+    const corr_id = corr_id_v.as_string() orelse
+        return .{ .invalid = .{ .wrong_type = .{ .field = "corrId", .want = "a string" } } };
+    const version_v = head.get("version") orelse return .{ .invalid = .{ .missing = "version" } };
+    const version = version_v.as_string() orelse
+        return .{ .invalid = .{ .wrong_type = .{ .field = "version", .want = "a string" } } };
+    const data = root.get("data") orelse return .{ .invalid = .{ .missing = "data" } };
 
     if (kind.len == 0) return .{ .invalid = .empty_kind };
     if (!data.is_object()) return .{ .invalid = .data_not_object };
@@ -494,6 +505,23 @@ pub fn invalid_message(out: *std.ArrayList(u8), invalid: Invalid) ![]const u8 {
         // The parser's own complaint is not reproduced: it is a different
         // parser's wording and no client keys off it.
         .unparseable => return "Invalid request envelope: not a valid request",
+        .missing => |field| {
+            out.clearRetainingCapacity();
+            try out.writer().print("Invalid request envelope: missing field `{s}`", .{field});
+            return out.items;
+        },
+        .wrong_type => |w| {
+            out.clearRetainingCapacity();
+            if (w.field.len == 0) {
+                try out.writer().print("Invalid request envelope: expected {s}", .{w.want});
+            } else {
+                try out.writer().print(
+                    "Invalid request envelope: invalid type for field `{s}`, expected {s}",
+                    .{ w.field, w.want },
+                );
+            }
+            return out.items;
+        },
         .empty_kind => return "Missing or invalid 'kind' field — must be a non-empty string",
         .data_not_object => return "Invalid 'data' field — must be an object",
         .unsupported_version => |got| {
@@ -601,5 +629,56 @@ test "an envelope is admitted only with a known version, a kind and an object" {
     switch (parse_envelope(a, "{\"kind\":\"k\",\"head\":{\"corrId\":\"c\",\"version\":\"2026-04-01\",\"resonate:debug_time\":1234},\"data\":{}}")) {
         .ok => |e| try testing.expectEqual(@as(i64, 1234), e.debug_time.?),
         .invalid => return error.TestUnexpectedResult,
+    }
+}
+
+test "a missing or mistyped part of an envelope is named in the rejection" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var out = std.ArrayList(u8).init(a);
+
+    const cases = [_]struct { body: []const u8, message: []const u8 }{
+        .{
+            .body = "{\"head\":{\"corrId\":\"c\",\"version\":\"2026-04-01\"},\"data\":{}}",
+            .message = "Invalid request envelope: missing field `kind`",
+        },
+        .{
+            .body = "{\"kind\":\"k\",\"data\":{}}",
+            .message = "Invalid request envelope: missing field `head`",
+        },
+        .{
+            .body = "{\"kind\":\"k\",\"head\":{\"corrId\":\"c\",\"version\":\"2026-04-01\"}}",
+            .message = "Invalid request envelope: missing field `data`",
+        },
+        .{
+            .body = "{\"kind\":\"k\",\"head\":{\"corrId\":\"c\"},\"data\":{}}",
+            .message = "Invalid request envelope: missing field `version`",
+        },
+        .{
+            .body = "{\"kind\":\"k\",\"head\":{\"version\":\"2026-04-01\"},\"data\":{}}",
+            .message = "Invalid request envelope: missing field `corrId`",
+        },
+        .{
+            .body = "{\"kind\":42,\"head\":{\"corrId\":\"c\",\"version\":\"2026-04-01\"},\"data\":{}}",
+            .message = "Invalid request envelope: invalid type for field `kind`, expected a string",
+        },
+        .{
+            .body = "{\"kind\":\"k\",\"head\":[],\"data\":{}}",
+            .message = "Invalid request envelope: invalid type for field `head`, expected an object",
+        },
+        .{
+            .body = "[]",
+            .message = "Invalid request envelope: expected an object",
+        },
+        // The parser's own complaint is nobody else's to reproduce.
+        .{ .body = "{", .message = "Invalid request envelope: not a valid request" },
+    };
+
+    for (cases) |case| {
+        switch (parse_envelope(a, case.body)) {
+            .invalid => |i| try testing.expectEqualStrings(case.message, try invalid_message(&out, i)),
+            .ok => return error.TestUnexpectedResult,
+        }
     }
 }

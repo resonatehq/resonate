@@ -148,6 +148,79 @@ const Options = struct {
     verbose: bool = false,
 };
 
+/// One request that is not a request.
+const Edge = struct {
+    body: []const u8,
+    /// Whether the two servers owe each other the same *words*.
+    ///
+    /// `.answer` is the normal case: the rejection is the protocol's, so its
+    /// message is part of the protocol. `.status` is for a rejection the
+    /// *parsers* write — "expected ident at line 1 column 2", "invalid type:
+    /// string, expected i64", a byte offset — which is one library's prose,
+    /// not something another implementation can reproduce or a client can key
+    /// off. There the status is the whole of what is owed, and comparing the
+    /// words would only ever report that two parsers are two parsers.
+    compare: enum { answer, status } = .answer,
+};
+
+/// Requests that are not requests.
+///
+/// Sent verbatim, so a body that is not JSON is a case rather than an
+/// impossibility. These belong to the *edge*: whether a message is a request at
+/// all is settled before any operation sees it, and the trajectory only ever
+/// sends envelopes the protocol admits — so without this, the part of the surface
+/// a client is most likely to reach by accident is the part nothing compares.
+const edges = [_]Edge{
+    // Not JSON. Every parser has its own words for this.
+    .{ .body = "nonsense", .compare = .status },
+    .{ .body = "", .compare = .status },
+    .{ .body = "{", .compare = .status },
+    // JSON, but not an envelope.
+    .{ .body = "[]", .compare = .status },
+    .{ .body = "\"a string\"", .compare = .status },
+    .{ .body = "{}", .compare = .status },
+    // An envelope missing each of its parts in turn. A parser that deserializes
+    // into a struct says which field and where in the input, which is the same
+    // prose problem.
+    .{ .body = "{\"head\":{\"corrId\":\"e\",\"version\":\"2026-04-01\"},\"data\":{}}", .compare = .status },
+    .{ .body = "{\"kind\":\"promise.get\",\"data\":{\"id\":\"o:a\"}}", .compare = .status },
+    .{ .body = "{\"kind\":\"promise.get\",\"head\":{\"corrId\":\"e\",\"version\":\"2026-04-01\"}}", .compare = .status },
+    .{ .body = "{\"kind\":\"promise.get\",\"head\":{\"corrId\":\"e\"},\"data\":{\"id\":\"o:a\"}}", .compare = .status },
+    // An empty kind, a version nobody speaks, and a `data` that is not an object
+    // are the protocol's own rejections, worded by the protocol.
+    .{ .body = "{\"kind\":\"\",\"head\":{\"corrId\":\"e\",\"version\":\"2026-04-01\"},\"data\":{}}" },
+    .{ .body = "{\"kind\":\"promise.get\",\"head\":{\"corrId\":\"e\",\"version\":\"1999-01-01\"},\"data\":{\"id\":\"o:a\"}}" },
+    .{ .body = "{\"kind\":\"promise.get\",\"head\":{\"corrId\":\"e\",\"version\":\"2026-04-01\"},\"data\":[]}" },
+    .{ .body = "{\"kind\":\"promise.get\",\"head\":{\"corrId\":\"e\",\"version\":\"2026-04-01\"},\"data\":null}" },
+    // An operation nobody has.
+    .{ .body = "{\"kind\":\"promise.explode\",\"head\":{\"corrId\":\"e\",\"version\":\"2026-04-01\"},\"data\":{}}" },
+    // Operations the protocol has, asked for wrongly: the state machine's
+    // rejections, and every word of them the protocol's.
+    .{ .body = "{\"kind\":\"promise.get\",\"head\":{\"corrId\":\"e\",\"version\":\"2026-04-01\"},\"data\":{}}" },
+    .{ .body = "{\"kind\":\"promise.create\",\"head\":{\"corrId\":\"e\",\"version\":\"2026-04-01\"},\"data\":{}}" },
+    .{
+        .body = "{\"kind\":\"promise.create\",\"head\":{\"corrId\":\"e\",\"version\":\"2026-04-01\"}," ++
+            "\"data\":{\"id\":\"o:a\",\"timeoutAt\":\"soon\"}}",
+        // A type error inside `data` is the deserializer's prose again.
+        .compare = .status,
+    },
+    .{ .body = "{\"kind\":\"promise.create\",\"head\":{\"corrId\":\"e\",\"version\":\"2026-04-01\"}," ++
+        "\"data\":{\"id\":\"\",\"timeoutAt\":1}}" },
+    .{ .body = "{\"kind\":\"promise.settle\",\"head\":{\"corrId\":\"e\",\"version\":\"2026-04-01\"}," ++
+        "\"data\":{\"id\":\"o:a\",\"state\":\"sideways\"}}" },
+    .{ .body = "{\"kind\":\"task.acquire\",\"head\":{\"corrId\":\"e\",\"version\":\"2026-04-01\"}," ++
+        "\"data\":{\"id\":\"o:a\",\"version\":0,\"pid\":\"w\",\"ttl\":0}}" },
+    .{ .body = "{\"kind\":\"promise.register_listener\",\"head\":{\"corrId\":\"e\",\"version\":\"2026-04-01\"}," ++
+        "\"data\":{\"awaited\":\"o:a\",\"address\":\"not a url\"}}" },
+    .{ .body = "{\"kind\":\"schedule.create\",\"head\":{\"corrId\":\"e\",\"version\":\"2026-04-01\"}," ++
+        "\"data\":{\"id\":\"s\",\"cron\":\"not a cron\",\"promiseId\":\"p\"," ++
+        "\"promiseTimeout\":1,\"promiseTags\":{}}}" },
+    .{ .body = "{\"kind\":\"promise.search\",\"head\":{\"corrId\":\"e\",\"version\":\"2026-04-01\"},\"data\":{\"limit\":0}}" },
+    .{ .body = "{\"kind\":\"promise.search\",\"head\":{\"corrId\":\"e\",\"version\":\"2026-04-01\"},\"data\":{\"limit\":9999}}" },
+    // The console's read model, which is not served here.
+    .{ .body = "{\"kind\":\"ui.promises\",\"head\":{\"corrId\":\"e\",\"version\":\"2026-04-01\"},\"data\":{}}" },
+};
+
 /// One answer, as the caller saw it.
 const Answer = struct {
     /// Zero when the exchange did not complete at all.
@@ -218,6 +291,41 @@ const Differ = struct {
             }
         }
 
+        // The edge first: see `edges`.
+        for (edges, 0..) |edge, i| {
+            const body = edge.body;
+            var arena = std.heap.ArenaAllocator.init(self.allocator);
+            defer arena.deinit();
+            const scratch = arena.allocator();
+            const a = try self.post(scratch, self.options.a, body);
+            const b = try self.post(scratch, self.options.b, body);
+            if (self.options.verbose) {
+                try stdout.print("edge {d} {d} {d} {s}\n", .{ i, a.status, b.status, body });
+            }
+            const words_too = edge.compare == .answer;
+            if (a.status == b.status and
+                (!words_too or json.equal_text(scratch, a.data, b.data))) continue;
+            self.differences += 1;
+            try stdout.print(
+                \\
+                \\DIFFERENT ANSWER at the edge, case {d}
+                \\  request  {s}
+                \\  {s: <8} {d} {s}
+                \\  {s: <8} {d} {s}
+                \\
+            , .{
+                i,
+                body,
+                self.options.a.label,
+                a.status,
+                a.data,
+                self.options.b.label,
+                b.status,
+                b.data,
+            });
+            if (!self.options.keep_going) return self.differences;
+        }
+
         var step: u64 = 0;
         while (step < self.options.operations) : (step += 1) {
             var arena = std.heap.ArenaAllocator.init(self.allocator);
@@ -284,8 +392,9 @@ const Differ = struct {
         var uncovered = std.ArrayList(workload_mod.Kind).init(self.allocator);
         defer uncovered.deinit();
         try self.workload.uncovered(&uncovered);
-        try stdout.print("\n  requests        {d}\n  differences     {d}\n", .{
+        try stdout.print("\n  requests        {d} and {d} at the edge\n  differences     {d}\n", .{
             self.options.operations,
+            edges.len,
             self.differences,
         });
         if (self.options.ignore_messages) {

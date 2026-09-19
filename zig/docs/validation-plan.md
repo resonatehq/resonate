@@ -5,7 +5,7 @@ another.
 
 | | asks | answers with |
 |---|---|---|
-| `zig build test` | does each part do what it says | 209 unit tests |
+| `zig build test` | does each part do what it says | 210 unit tests |
 | `simulator run` / `soak` | is the concurrency sound | a linearizability search over a simulated run |
 | `differ` | is this the protocol everybody else implements | another server, request for request |
 | `simulator check` | was *that* run sound | a recorded history from a real server |
@@ -191,6 +191,20 @@ zig-out/bin/differ --a http://127.0.0.1:8031/ --b http://127.0.0.1:8022/ --seed 
 
 The same trajectory, the same answers, the same state: the S3 path is not a
 second implementation of anything, and this is what says so.
+
+### The edge, before the trajectory
+
+Every run starts with two dozen requests that are not requests: a body that is
+not JSON, an envelope with each of its parts missing in turn, a version nobody
+speaks, a `data` that is not an object, an operation nobody has, and operations
+the protocol has asked for wrongly. The trajectory only ever sends envelopes the
+protocol admits, so without this the part of the surface a client is most likely
+to reach by accident is the part nothing compares.
+
+Where the rejection is the protocol's, the words are compared too. Where it is a
+*parser's* — "expected ident at line 1 column 2", "invalid type: string, expected
+i64", a byte offset — only the status is, because that prose is one library's and
+no other implementation can reproduce it or client key off it.
 
 ### What it found, and the two places it disagrees on purpose
 
