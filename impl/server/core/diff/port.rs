@@ -26,13 +26,21 @@
 // two the same: its abstract model reads every object through `project now`
 // and materialises the projection only under a flag, and its refinement
 // theorem is stated with that flag off. So this harness compares projected
-// state — `project` below is the model's `Object.project`, applied to every
-// snapshot and every search response before they are diffed — and a backend
-// that stored the expiry and one that did not produce the same canonical
-// snapshot. What the projection cannot hide, and must not: a different
-// response to the same request, a different message, or a settlement chain
-// that did not run. An expired promise that still holds callbacks or
-// listeners is left as is, so a backend that failed to fan out shows up.
+// snapshots — `project` below is the model's `Object.project` — and a
+// backend that stored the expiry and one that did not produce the same
+// canonical snapshot.
+//
+// The projection is as narrow as that argument allows: it expires internal
+// promises and nothing else. Every other promise arms its deadline, so the
+// tick that moves the clock fires it on the lazy backends exactly as the
+// sweep does on the eager one, and there is nothing left to hide. An
+// internal promise arms nothing, owns no task, and can hold neither callback
+// nor listener, so erasing the difference costs no coverage — and `project`
+// checks that emptiness instead of trusting it. Tasks, leases, deadlines and
+// callbacks are compared as stored, so a sweep that forgets to fulfil a
+// task, drop a lease or fan a callback out still shows up, as does a
+// different response, a different routed message, or a settlement chain that
+// did not run.
 //
 // Run:
 //   cargo test --release --test port -- --nocapture
@@ -40,6 +48,10 @@
 //   TEST_POSTGRES_URL=postgres://resonate:resonate@localhost:5432/resonate \
 //   TEST_MYSQL_URL=mysql://resonate:resonate@localhost:3306/resonate \
 //     cargo test --release --test port -- --nocapture
+//
+// One seed is one trajectory, and it stops at its own coverage plateau, so a
+// change is convinced by several. `cargo xtask differential --backend X
+// --seed 1 --seed 2` walks them in turn, each on databases of its own.
 //
 // Knobs, all environment variables:
 //   TEST_MAX_STEPS=N          stop after N steps (default 200000)
@@ -53,7 +65,8 @@
 //                             state — its check-then-create issue — and with
 //                             it in the comparison the run would stop there.
 //   TEST_RAW_SNAPSHOT=1       compare stored state as is, without the
-//                             projection described below
+//                             projection described above
+//   TEST_SEED=N               seed the generator (default 0xc0ffeedeadbeef)
 //   TEST_TRACE_FROM=N         print tasks, callbacks and promises per backend
 //                             after every step from step N on
 //
@@ -66,6 +79,9 @@
 //   - Blob sweeps a request's origin before handling it and so expires an
 //     internal promise the others expire lazily. Both are valid, and the
 //     specification says so: the comparison is modulo materialisation (above).
+//   - `promise.search` reads effective state on every backend, so its pages
+//     are compared as they come. A page that filters on the deadline but
+//     returns the stale record is a divergence.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -516,11 +532,11 @@ async fn port_differential_random() {
                 let _ = send(p, &envelope).await;
                 let _ = p.router.take();
             }
+            // Responses are compared as they come: `promise.search` reads
+            // effective state on every backend, so a stale record in a page is
+            // a divergence, not a materialisation difference.
             for (_, _, data) in &mut results {
                 normalize_resp(data);
-                if kind == "promise.search" && !raw_snapshots() {
-                    project_search(data, now);
-                }
             }
 
             let status = results[0].1;
@@ -708,59 +724,79 @@ async fn send_all(
     (out, routed)
 }
 
-/// The specification's `Object.project`, over a snapshot.
+/// The specification's `Object.project`, over a snapshot — narrowed to the
+/// promises whose expiry nothing else can observe.
 ///
-/// A pending promise past its deadline reads as expired — resolved if it is a
-/// timer, otherwise rejected as timed out — with `settledAt` the deadline,
-/// which is what a sweep writes too. Its task, if any, takes the settled
-/// promise's view (`TaskObject.view`): fulfilled, with no holder and nothing
-/// to resume. A task that became fulfilled waits on nothing, so its own
-/// callbacks and its deadlines go; the promise's own deadline goes with the
-/// promise. Callbacks and listeners *on* the expired promise are deliberately
-/// kept: fanning them out is a sweep's job on every backend, and a backend
-/// that has not done it should differ.
+/// A pending promise past its deadline *is* expired — resolved if it is a
+/// timer, otherwise rejected as timed out, with `settledAt` the deadline —
+/// and a backend may write that down whenever it likes. But only an internal
+/// promise can still differ here. Every other promise arms its deadline, so
+/// the tick that moves the clock fires it on the lazy backends exactly as
+/// the sweep does on the eager one, and all of them have written it down by
+/// the time the snapshot is taken. An internal promise arms nothing: the
+/// eager backend expires it when it next sweeps the origin, the lazy ones
+/// when a request next names it. That is the whole of the difference, and
+/// that is all this projection erases.
+///
+/// It is also the only case the specification's argument licenses without
+/// further ado. An internal promise carries no target, so it owns no task;
+/// callbacks and listeners may only be registered on an external promise;
+/// and it arms no deadline. Its expiry therefore touches its own three
+/// fields and nothing else, which is exactly what happens below. Everything
+/// a sweep must *do* when it expires a promise — fulfil the task, drop the
+/// lease, fan the callbacks out, disarm the deadlines — happens on promises
+/// this projection leaves alone, so a backend that forgets one still shows a
+/// different snapshot.
+///
+/// The emptiness is checked, not assumed: if a projected promise turns out
+/// to own a task, a callback, a listener or an armed deadline, then either a
+/// backend or the arming rule is wrong, and the run stops on it.
 fn project(snap: &mut Value, now: i64) {
     let Some(obj) = snap.as_object_mut() else {
         return;
     };
-    let mut settled: HashSet<String> = HashSet::new();
+    let mut expired: HashSet<String> = HashSet::new();
     if let Some(promises) = obj.get_mut("promises").and_then(|v| v.as_array_mut()) {
         for p in promises.iter_mut() {
-            if expire(p, now) {
-                settled.insert(p["id"].as_str().unwrap_or("").to_string());
+            if internal(p) && expire(p, now) {
+                expired.insert(p["id"].as_str().unwrap_or("").to_string());
             }
         }
     }
-    if settled.is_empty() {
+    if expired.is_empty() {
         return;
     }
-    let mut fulfilled: HashSet<String> = HashSet::new();
-    if let Some(tasks) = obj.get_mut("tasks").and_then(|v| v.as_array_mut()) {
-        for t in tasks.iter_mut() {
-            let id = t["id"].as_str().unwrap_or("").to_string();
-            if settled.contains(&id) && t["state"].as_str() != Some("fulfilled") {
-                t["state"] = json!("fulfilled");
-                t["resumes"] = json!(0);
-                if let Some(o) = t.as_object_mut() {
-                    o.remove("pid");
-                    o.remove("ttl");
-                }
-                fulfilled.insert(id);
-            }
+    for (key, field) in [
+        ("tasks", "id"),
+        ("promiseTimeouts", "id"),
+        ("callbacks", "awaiter"),
+        ("listeners", "id"),
+    ] {
+        let held = obj.get(key).and_then(|v| v.as_array()).and_then(|rows| {
+            rows.iter().find_map(|r| {
+                let id = r[field].as_str()?;
+                expired.contains(id).then(|| id.to_string())
+            })
+        });
+        if let Some(id) = held {
+            panic!(
+                "internal promise {id} is past its deadline, yet `{key}` still holds \
+                 a row for it: an internal promise has no task, no callbacks, no \
+                 listeners and no armed deadline"
+            );
         }
     }
-    if let Some(rows) = obj
-        .get_mut("promiseTimeouts")
-        .and_then(|v| v.as_array_mut())
-    {
-        rows.retain(|r| !settled.contains(r["id"].as_str().unwrap_or("")));
-    }
-    if let Some(rows) = obj.get_mut("taskTimeouts").and_then(|v| v.as_array_mut()) {
-        rows.retain(|r| !fulfilled.contains(r["id"].as_str().unwrap_or("")));
-    }
-    if let Some(rows) = obj.get_mut("callbacks").and_then(|v| v.as_array_mut()) {
-        rows.retain(|r| !fulfilled.contains(r["awaiter"].as_str().unwrap_or("")));
-    }
+}
+
+/// `otype(tags) == Internal`, over a snapshot record: no target, not marked
+/// external or global, not a timer. An internal promise is the one kind
+/// nothing can await and nothing can run, so nothing arms its deadline.
+fn internal(p: &Value) -> bool {
+    let tags = &p["tags"];
+    tags["resonate:target"].is_null()
+        && tags["resonate:external"].as_str() != Some("true")
+        && tags["resonate:scope"].as_str() != Some("global")
+        && tags["resonate:timer"].as_str() != Some("true")
 }
 
 /// `PromiseObject.project`: expire one record in place if it is due. True if
@@ -780,16 +816,6 @@ fn expire(p: &mut Value, now: i64) -> bool {
     });
     p["settledAt"] = timeout_at;
     true
-}
-
-/// The same projection over a `promise.search` response, which reads stored
-/// state on every backend.
-fn project_search(data: &mut Value, now: i64) {
-    if let Some(promises) = data.get_mut("promises").and_then(|v| v.as_array_mut()) {
-        for p in promises.iter_mut() {
-            expire(p, now);
-        }
-    }
 }
 
 fn raw_snapshots() -> bool {

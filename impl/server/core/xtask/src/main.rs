@@ -6,6 +6,7 @@
 //! ```text
 //! cargo xtask check                       fmt, check, clippy, test — the Check job
 //! cargo xtask differential --backend X    the engine and port differentials over X
+//! cargo xtask differential --backend X --seed 1 --seed 2   … once per trajectory
 //! cargo xtask porcupine --backend X       a live server under load, linearizability-checked
 //! cargo xtask all                         every job, for every backend reachable
 //! ```
@@ -63,6 +64,12 @@ enum Job {
     Differential {
         #[arg(long)]
         backend: Backend,
+        /// Trajectories to walk, as generator seeds: `--seed 1 --seed 2` or
+        /// `--seed 1,2`. Each seed is a full run of both differentials, on
+        /// databases of its own. Omitted, the run is the single trajectory CI
+        /// walks.
+        #[arg(long = "seed", value_delimiter = ',')]
+        seeds: Vec<u64>,
         #[command(flatten)]
         db: DbArgs,
     },
@@ -125,7 +132,7 @@ async fn main() {
     let cli = Cli::parse();
     let result = match cli.job {
         Job::Check => check(),
-        Job::Differential { backend, db } => differential(backend, &db).await,
+        Job::Differential { backend, seeds, db } => differential(backend, &seeds, &db).await,
         Job::Porcupine { backend, db, porc } => porcupine(backend, &db, &porc).await,
         Job::All { db, porc } => all(&db, &porc).await,
     };
@@ -332,27 +339,62 @@ fn url_var(backend: Backend) -> Option<&'static str> {
 // differential
 // ---------------------------------------------------------------------------
 
-async fn differential(backend: Backend, db: &DbArgs) -> Result<()> {
+/// One run of both differentials per seed, each on databases of its own.
+///
+/// A seed is a trajectory: the generator is deterministic, so one seed walks
+/// one path through the state space and stops at its own coverage plateau.
+/// One is what CI walks; several is how a change is convinced, and every one
+/// of them gets vanilla databases.
+async fn differential(backend: Backend, seeds: &[u64], db: &DbArgs) -> Result<()> {
+    let trajectories: Vec<Option<u64>> = if seeds.is_empty() {
+        vec![None]
+    } else {
+        seeds.iter().copied().map(Some).collect()
+    };
+    for seed in trajectories {
+        if let Some(seed) = seed {
+            eprintln!("\n=== seed {seed} ===");
+        }
+        one_differential(backend, seed, db).await?;
+    }
+    Ok(())
+}
+
+/// `TEST_SEED` for a named trajectory, nothing for the default one.
+fn with_seed(cmd: &mut Command, seed: Option<u64>) -> &mut Command {
+    if let Some(seed) = seed {
+        cmd.env("TEST_SEED", seed.to_string());
+    }
+    cmd
+}
+
+async fn one_differential(backend: Backend, seed: Option<u64>, db: &DbArgs) -> Result<()> {
     if backend == Backend::Blob {
         // The engine port is the SQL family's; blob has its own differential,
         // against its in-crate model, and is in every port differential —
         // the one below is the oracle, SQLite and blob.
         run(
             "cargo test --release -p resonate-server-blob --test differential",
-            cargo().args([
-                "test",
-                "--release",
-                "-p",
-                "resonate-server-blob",
-                "--test",
-                "differential",
-                "--",
-                "--nocapture",
-            ]),
+            with_seed(
+                cargo().args([
+                    "test",
+                    "--release",
+                    "-p",
+                    "resonate-server-blob",
+                    "--test",
+                    "differential",
+                    "--",
+                    "--nocapture",
+                ]),
+                seed,
+            ),
         )?;
         return run(
             "port differential",
-            cargo().args(["test", "--release", "--test", "port", "--", "--nocapture"]),
+            with_seed(
+                cargo().args(["test", "--release", "--test", "port", "--", "--nocapture"]),
+                seed,
+            ),
         );
     }
     // The engine differential, on its own database.
@@ -370,7 +412,7 @@ async fn differential(backend: Backend, db: &DbArgs) -> Result<()> {
         if let (Some(var), Some(url)) = (url_var(backend), url) {
             cmd.env(var, url);
         }
-        run("engine differential", &mut cmd)
+        run("engine differential", with_seed(&mut cmd, seed))
     })
     .await?;
     // The port differential, on another.
@@ -380,7 +422,7 @@ async fn differential(backend: Backend, db: &DbArgs) -> Result<()> {
         if let (Some(var), Some(url)) = (url_var(backend), url) {
             cmd.env(var, url);
         }
-        run("port differential", &mut cmd)
+        run("port differential", with_seed(&mut cmd, seed))
     })
     .await
 }
@@ -578,7 +620,7 @@ async fn all(db: &DbArgs, porc: &PorcArgs) -> Result<()> {
         eprintln!("==> no mysql admin url: mysql skipped");
     }
     for b in sql.iter().copied().chain([Backend::Blob]) {
-        differential(b, db).await?;
+        differential(b, &[], db).await?;
     }
     for b in sql.iter().copied().chain([Backend::Blob]) {
         porcupine(b, db, porc).await?;
