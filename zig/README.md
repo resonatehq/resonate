@@ -106,8 +106,9 @@ Three ideas hold it together, all of them TigerBeetle's:
 
 * **Everything I/O is a port.** `store.Store`, `env.Clock`, `env.Timer`,
   `env.MessageBus`. Production is io_uring plus HTTP; the simulator is an
-  in-memory store, a clock it owns and a bus that goes nowhere. The server cannot
-  tell, which is what makes a simulated run a real run.
+  in-memory store, a clock it owns, and a bus that takes every message and checks
+  it against the bucket. The server cannot tell, which is what makes a simulated
+  run a real run.
 * **No hidden control flow.** No threads, no locks, no async. Every I/O path is
   an explicit callback state machine on one ring, so what can interleave is
   visible in the code.
@@ -133,9 +134,9 @@ store — no answer, a write that lands and reports failure, two writes it could
 not order, completions out of order, servers killed mid-decision — and then asks
 a linearizability checker whether the recorded history has a sequential
 explanation *in this same state machine*, ending in the state the bucket
-actually holds. Every bug listed below was found that way.
+actually holds. Everything in the first list below was found that way.
 
-Found by the checker, in the order they turned up:
+Found by the simulator, in the order they turned up:
 
 1. A cached read served state a concurrent writer had already replaced.
 2. Two deletes of one schedule both reported that they had deleted it.
