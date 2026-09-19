@@ -100,6 +100,8 @@ src/
   differ.zig      this server against another one
   fakes3.zig      a stand-in S3, as a library and as a process
   simulator.zig   run, soak, check
+docs/             the design argument, and how it is validated
+tools/            the checks that need two processes
 ```
 
 Three ideas hold it together, all of them TigerBeetle's:
