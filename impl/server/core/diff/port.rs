@@ -80,11 +80,9 @@
 //   TEST_RAW_SNAPSHOT=1       compare stored state as is, without the
 //                             projection described above
 //   TEST_SEED=N               seed the generator (default 0xc0ffeedeadbeef)
-//   TEST_FORK=1               carry state across episodes: replay a previous
-//                             episode's path, then explore on from where it
-//                             ended, instead of always starting from an empty
-//                             store. Off by default, and measured: see
-//                             `Search` below
+//   TEST_EPISODE=N            steps before everything is reset (default 200).
+//                             It is the plateau's granularity and the only
+//                             thing capping how deep a state the run reaches
 //   TEST_TRACE_FROM=N         print tasks, callbacks and promises per backend
 //                             after every step from step N on
 //
@@ -101,8 +99,12 @@
 //     are compared as they come. A page that filters on the deadline but
 //     returns the stale record is a divergence.
 //   - The run resets every backend and the clock every 200 steps, so it is a
-//     sequence of independent short episodes and no state deeper than one
-//     episode is ever reached. TEST_FORK lifts that cap: see `Search`.
+//     sequence of independent short episodes, and no state deeper than one
+//     episode is ever reached. TEST_EPISODE raises that cap. Measured on the
+//     default seed: 600-step episodes find 4039 signatures in 85200 steps and
+//     1000-step ones 4119 in 154000, against 3828 in 24400 at the default.
+//     Depth is real but expensive, and another seed still buys more per step,
+//     which is why the default stays where it is.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -500,7 +502,13 @@ async fn port_differential_random() {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(200_000);
-    const BATCH_SIZE: usize = 200;
+    // How long an episode runs before everything is reset. It is the plateau's
+    // granularity, and it is also the only thing capping how deep a state the
+    // run ever reaches, which is what TEST_EPISODE exists to measure.
+    let batch_size: usize = std::env::var("TEST_EPISODE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(200);
     const PLATEAU_BATCHES: usize = 20;
 
     // TEST_SEED=<u64> picks the trajectory; the default is the one CI walks.
@@ -509,27 +517,16 @@ async fn port_differential_random() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(0x00c0_ffee_dead_beef);
     eprintln!("[port] seed: {seed:#x}");
-    // One stream picks each segment's seed and each fork; the segments
-    // themselves get streams of their own, so a segment replays in isolation.
-    let forking = std::env::var("TEST_FORK").is_ok();
-    let mut meta = fastrand::Rng::with_seed(seed);
-    // Without forking the generator keeps one stream for the whole run, which
-    // is the trajectory CI walks. Forking needs a stream per segment, so that
-    // a segment can be replayed on its own.
-    let mut stream = fastrand::Rng::with_seed(seed);
+    let mut rng = fastrand::Rng::with_seed(seed);
     let mut now = T0;
     let mut covered: HashMap<String, usize> = HashMap::new();
     let mut total_steps = 0usize;
-    let mut replayed_steps = 0usize;
     let mut seen_sigs: HashSet<(String, u16, u32)> = HashSet::new();
     // The plateau counts on the coarse class, the report on the rich one:
     // two questions, two scales.
     let mut plateau_sigs: HashSet<(String, u16, u8)> = HashSet::new();
-    let mut sig_depth: HashMap<(String, u16, u32), usize> = HashMap::new();
     let mut plateau_count = 0usize;
-    let mut search = Search::new(forking);
     let mut episodes = 0usize;
-    let mut deepest = 1usize;
     let mut timings: HashMap<(String, String), Vec<u64>> = HashMap::new();
     let soft = std::env::var("TEST_SOFT").is_ok();
     let mut divergences: Vec<String> = Vec::new();
@@ -538,129 +535,85 @@ async fn port_differential_random() {
         // An episode is a path: a prefix of segments replayed from their own
         // seeds, then one fresh segment. An empty prefix is the old behaviour,
         // a run that starts from nothing.
-        // Only an episode that runs wholly under full operation coverage is
-        // replayable: before that, `pick_op` steers by the covered set, so the
-        // same seed walks a different path once coverage has moved on.
-        let covered_all = covered.len() == ALL_OPS.len();
-        let plan = search.plan(&mut meta, covered_all);
-        episodes += 1;
-        deepest = deepest.max(plan.path.len());
-        eprintln!(
-            "[port] episode {episodes} depth={} replay={} path={:?}",
-            plan.path.len(),
-            plan.prefix_len,
-            plan.path
-        );
-
         reset_all(&backends, now).await;
         if let Some(p) = &planner {
             reset_all(std::slice::from_ref(p), now).await;
         }
         now = T0;
+        episodes += 1;
 
         let sigs_before = plateau_sigs.len();
 
-        for (seg_idx, seg_seed) in plan.path.iter().enumerate() {
-            let depth = seg_idx + 1;
-            let replaying = seg_idx < plan.prefix_len;
-            let mut segment = forking.then(|| fastrand::Rng::with_seed(*seg_seed));
-            let rng = segment.as_mut().unwrap_or(&mut stream);
-            for _ in 0..BATCH_SIZE {
-                if total_steps >= max_steps {
-                    break 'outer;
-                }
+        for _ in 0..batch_size {
+            if total_steps >= max_steps {
+                break 'outer;
+            }
 
-                let (envelope, now_after) = {
-                    let o = oracle.lock();
-                    let op = pick_op(rng, &o, &covered);
-                    build_envelope(op, rng, &o, now)
-                };
-                now = now_after;
-                total_steps += 1;
-                if replaying {
-                    replayed_steps += 1;
-                }
+            let (envelope, now_after) = {
+                let o = oracle.lock();
+                let op = pick_op(&mut rng, &o, &covered);
+                build_envelope(op, &mut rng, &o, now)
+            };
+            now = now_after;
+            total_steps += 1;
 
-                let kind = envelope.kind.clone();
-                let ctx = format!("step={total_steps} op={kind}");
-                eprintln!("[port] {ctx} now={now} data={}", envelope.data);
+            let kind = envelope.kind.clone();
+            let ctx = format!("step={total_steps} op={kind}");
+            eprintln!("[port] {ctx} now={now} data={}", envelope.data);
 
-                let pre_snaps = snap_all(&backends, now).await;
-                assert_agree(&pre_snaps, "snapshot", &format!("BEFORE {ctx}"));
+            let pre_snaps = snap_all(&backends, now).await;
+            assert_agree(&pre_snaps, "snapshot", &format!("BEFORE {ctx}"));
 
-                let (mut results, routed) = send_all(&backends, &envelope, &mut timings).await;
-                if let Some(p) = &planner {
-                    let _ = send(p, &envelope).await;
-                    let _ = p.router.take();
-                }
-                // Responses are compared as they come: `promise.search` reads
-                // effective state on every backend, so a stale record in a page is
-                // a divergence, not a materialisation difference.
-                for (_, _, data) in &mut results {
-                    normalize_resp(data);
-                }
+            let (mut results, routed) = send_all(&backends, &envelope, &mut timings).await;
+            if let Some(p) = &planner {
+                let _ = send(p, &envelope).await;
+                let _ = p.router.take();
+            }
+            // Responses are compared as they come: `promise.search` reads
+            // effective state on every backend, so a stale record in a page is
+            // a divergence, not a materialisation difference.
+            for (_, _, data) in &mut results {
+                normalize_resp(data);
+            }
 
-                let status = results[0].1;
-                if status < 300 {
-                    covered.entry(kind.clone()).or_insert(total_steps);
-                }
-                let sc = state_class(&pre_snaps[0].1);
-                let sig = (kind.clone(), status as u16, sc);
-                if seen_sigs.insert(sig.clone()) {
-                    sig_depth.insert(sig, depth);
-                }
-                plateau_sigs.insert((kind.clone(), status as u16, plateau_class(&pre_snaps[0].1)));
+            let status = results[0].1;
+            if status < 300 {
+                covered.entry(kind.clone()).or_insert(total_steps);
+            }
+            let sc = state_class(&pre_snaps[0].1);
+            seen_sigs.insert((kind.clone(), status as u16, sc));
+            plateau_sigs.insert((kind.clone(), status as u16, plateau_class(&pre_snaps[0].1)));
 
-                // TEST_SOFT=1 records a response divergence and carries on, as long
-                // as the state and the routed messages still agree — a validation
-                // order that differs leaves the store the same, and stopping at
-                // the first one hides the second. State divergence always stops.
-                if soft {
-                    if let Some(detail) = resps_disagree(&results) {
-                        eprintln!("[diverge] {ctx} data={}\n{detail}", envelope.data);
-                        divergences.push(format!("{kind}: {detail}"));
-                    }
-                } else {
-                    assert_resps_agree(&results, &ctx);
+            // TEST_SOFT=1 records a response divergence and carries on, as long
+            // as the state and the routed messages still agree — a validation
+            // order that differs leaves the store the same, and stopping at
+            // the first one hides the second. State divergence always stops.
+            if soft {
+                if let Some(detail) = resps_disagree(&results) {
+                    eprintln!("[diverge] {ctx} data={}\n{detail}", envelope.data);
+                    divergences.push(format!("{kind}: {detail}"));
                 }
-                assert_agree(&routed, "routed messages", &format!("ROUTE {ctx}"));
+            } else {
+                assert_resps_agree(&results, &ctx);
+            }
+            assert_agree(&routed, "routed messages", &format!("ROUTE {ctx}"));
 
-                let post_snaps = snap_all(&backends, now).await;
-                if let Some(from) = std::env::var("TEST_TRACE_FROM")
-                    .ok()
-                    .and_then(|s| s.parse::<usize>().ok())
-                {
-                    if total_steps >= from {
-                        for (name, snap) in &post_snaps {
-                            eprintln!(
+            let post_snaps = snap_all(&backends, now).await;
+            if let Some(from) = std::env::var("TEST_TRACE_FROM")
+                .ok()
+                .and_then(|s| s.parse::<usize>().ok())
+            {
+                if total_steps >= from {
+                    for (name, snap) in &post_snaps {
+                        eprintln!(
                             "[trace] {ctx} {name} status={status} tasks={} callbacks={} promises={}",
                             snap["tasks"], snap["callbacks"],
                             snap["promises"].as_array().map(|a| a.iter().map(|p| json!({"id": p["id"], "state": p["state"], "timeoutAt": p["timeoutAt"]})).collect::<Vec<_>>()).map(Value::Array).unwrap_or(Value::Null)
                         );
-                        }
                     }
                 }
-                assert_agree(&post_snaps, "snapshot", &format!("AFTER {ctx}"));
             }
-
-            // The state the segment ends in, as a class to score by and a
-            // fingerprint to replay against.
-            let snap = snap_all(&backends, now).await;
-            let class = state_class(&snap[0].1);
-            let print = fingerprint(&snap[0].1);
-            if seg_idx + 1 == plan.prefix_len {
-                // Replay is the whole premise: if the prefix did not land where it
-                // landed before, every fork from it is meaningless.
-                assert_eq!(
-                    Some(print),
-                    plan.prefix_print,
-                    "replay diverged from its own recording at depth {depth}, path {:?}",
-                    plan.path
-                );
-            }
-            if seg_idx + 1 == plan.path.len() {
-                search.record(plan.path.clone(), class, print, covered_all);
-            }
+            assert_agree(&post_snaps, "snapshot", &format!("AFTER {ctx}"));
         }
 
         let new_sigs = plateau_sigs.len().saturating_sub(sigs_before);
@@ -724,30 +677,14 @@ async fn port_differential_random() {
         panic!("response divergences under TEST_SOFT — see [diverge] lines");
     }
 
-    let mut by_depth: Vec<(usize, usize)> = Vec::new();
-    for d in sig_depth.values() {
-        match by_depth.iter_mut().find(|(k, _)| k == d) {
-            Some((_, n)) => *n += 1,
-            None => by_depth.push((*d, 1)),
-        }
-    }
-    by_depth.sort();
-    let deep: usize = by_depth
-        .iter()
-        .filter(|(d, _)| *d > 1)
-        .map(|(_, n)| n)
-        .sum();
-    eprintln!(
-        "[port] search — {episodes} episodes, deepest {deepest} segments, {replayed_steps} of {total_steps} steps replayed, {deep} signatures first seen past the first segment"
-    );
-    eprintln!("[port] signatures by the depth they first appeared at: {by_depth:?}");
+    eprintln!("[port] {episodes} episodes of {batch_size} steps");
     // TEST_SIGS_OUT=<path> writes the signatures themselves, so two runs can
     // be compared as sets rather than as counts. A run that finds as many
     // signatures as another has not necessarily found the same ones.
     if let Ok(path) = std::env::var("TEST_SIGS_OUT") {
-        let mut lines: Vec<String> = sig_depth
+        let mut lines: Vec<String> = seen_sigs
             .iter()
-            .map(|((kind, status, class), depth)| format!("{kind} {status} {class} {depth}"))
+            .map(|(kind, status, class)| format!("{kind} {status} {class}"))
             .collect();
         lines.sort();
         std::fs::write(&path, lines.join("\n")).expect("signature dump");
@@ -1181,194 +1118,6 @@ fn state_class(snap: &Value) -> u32 {
         }
     }
     c
-}
-
-// ---------------------------------------------------------------------------
-// Search
-// ---------------------------------------------------------------------------
-
-/// A finished episode, kept as somewhere to start the next one.
-///
-/// Every backend is deterministic under the debug clock, and the generator
-/// draws from a stream the segment owns, so replaying `seeds` in order lands
-/// in the same state every time; `print` is what proves it. `class` is the
-/// state the episode ends in, which is what a fork continues from and so what
-/// the search scores.
-struct Node {
-    seeds: Vec<u64>,
-    class: u32,
-    print: u64,
-    branches: usize,
-}
-
-/// One episode: segments to replay, then a segment that has never run.
-struct Plan {
-    path: Vec<u64>,
-    prefix_len: usize,
-    prefix_print: Option<u64>,
-}
-
-/// Where to start each episode.
-///
-/// Without it the harness resets to an empty store every 200 steps, so no
-/// state deeper than one segment is ever reached and the coverage plateau
-/// only ever says "nothing new within 200 steps of nothing". With it, an
-/// episode may replay a previous episode's path and carry on from where it
-/// ended, and depth grows a segment per generation.
-///
-/// # What it is worth, measured
-///
-/// Six seeds, oracle against SQLite against blob, the same stopping rule on
-/// both arms, scored on the rich class. Forking reached depth five or six
-/// every time and found situations the shallow arm never reaches. It still
-/// lost on every seed:
-///
-/// ```text
-///   seed     off: signatures / steps     on: signatures / steps / replayed
-///   default       3828 / 24400                2186 /  59000 / 33200
-///   1             4545 / 39400                2655 / 140200 / 85000
-///   2             4895 / 40400                2481 / 110000 / 65800
-///   3             3694 / 23800                2276 /  85800 / 50600
-///   7             4292 / 31000                2048 /  91600 / 46000
-///   11            5101 / 48800                2803 / 120000 / 72000
-/// ```
-///
-/// Counting is not the whole story, so compare the sets. Per seed, forking
-/// finds 443 to 605 signatures the plain run never finds, and misses 1977 to
-/// 2881 that it does. The unique ones are real: callbacks and listeners
-/// registered in stores that already hold tasks, callbacks and both kinds of
-/// deadline, and acquires, fences, halts and releases that lose a race in a
-/// store that deep.
-///
-/// The number that decides it is the marginal one. On top of the default
-/// seed, another seed adds about 1900 to 2200 signatures for 40000 steps;
-/// forking that same seed adds 605 for 59000. Across all six seeds together
-/// the plain runs find 8975 signatures in 208000 steps, and adding all six
-/// fork runs, 607000 further steps, adds 575 more.
-///
-/// So enriching the class multiplied the visible worth of depth roughly
-/// fortyfold, from 13 unique signatures to around 575, which means the
-/// coarse class really was hiding it. It did not change the decision.
-/// Another trajectory is still worth about forty times more per step than
-/// more depth on an existing one.
-///
-/// It stays off, then, and it is worth having: when the question is
-/// specifically about deep states, this is the only thing here that reaches
-/// them. With it off the generator draws from one stream and walks exactly
-/// the trajectory it always has.
-struct Search {
-    on: bool,
-    frontier: Vec<Node>,
-    counts: HashMap<u32, usize>,
-}
-
-impl Search {
-    /// Six segments is 1200 steps of state, and the replay to reach it costs
-    /// five times what the new segment costs. Past that the retracing is most
-    /// of the run.
-    const MAX_DEPTH: usize = 6;
-    /// Forking the same state forever narrows the search to its neighbourhood.
-    const MAX_BRANCHES: usize = 4;
-    const FRONTIER_CAP: usize = 64;
-    /// Episodes that start from nothing regardless, so forking narrows the
-    /// distribution without replacing it.
-    const FRESH_PERCENT: u32 = 25;
-
-    fn new(on: bool) -> Self {
-        Search {
-            on,
-            frontier: Vec::new(),
-            counts: HashMap::new(),
-        }
-    }
-
-    /// Weighted towards the terminal states seen least often: a rare state is
-    /// the one whose continuations nothing has looked at.
-    fn plan(&mut self, meta: &mut fastrand::Rng, covered_all: bool) -> Plan {
-        let fresh = meta.u64(..);
-        let from_scratch = Plan {
-            path: vec![fresh],
-            prefix_len: 0,
-            prefix_print: None,
-        };
-        // Forking waits for full operation coverage, because until then
-        // `pick_op` consults the covered set and the same seed would not
-        // replay to the same trajectory.
-        if !self.on
-            || !covered_all
-            || self.frontier.is_empty()
-            || meta.u32(0..100) < Self::FRESH_PERCENT
-        {
-            return from_scratch;
-        }
-        let eligible: Vec<usize> = (0..self.frontier.len())
-            .filter(|&i| {
-                self.frontier[i].branches < Self::MAX_BRANCHES
-                    && self.frontier[i].seeds.len() < Self::MAX_DEPTH
-            })
-            .collect();
-        if eligible.is_empty() {
-            return from_scratch;
-        }
-        let weight =
-            |i: usize| 1.0 / *self.counts.get(&self.frontier[i].class).unwrap_or(&1) as f64;
-        let total: f64 = eligible.iter().map(|&i| weight(i)).sum();
-        let mut pick = meta.f64() * total;
-        let mut chosen = eligible[0];
-        for &i in &eligible {
-            pick -= weight(i);
-            if pick <= 0.0 {
-                chosen = i;
-                break;
-            }
-        }
-        let node = &mut self.frontier[chosen];
-        node.branches += 1;
-        let mut path = node.seeds.clone();
-        let prefix_len = path.len();
-        let prefix_print = Some(node.print);
-        path.push(fresh);
-        Plan {
-            path,
-            prefix_len,
-            prefix_print,
-        }
-    }
-
-    fn record(&mut self, seeds: Vec<u64>, class: u32, print: u64, replayable: bool) {
-        *self.counts.entry(class).or_insert(0) += 1;
-        if !self.on || !replayable || seeds.len() >= Self::MAX_DEPTH {
-            return;
-        }
-        self.frontier.push(Node {
-            seeds,
-            class,
-            print,
-            branches: 0,
-        });
-        if self.frontier.len() > Self::FRONTIER_CAP {
-            // Drop the commonest terminal state: its neighbourhood is the best
-            // covered already, so it is the least worth returning to.
-            let counts = &self.counts;
-            let worst = self
-                .frontier
-                .iter()
-                .enumerate()
-                .max_by_key(|(_, n)| counts.get(&n.class).copied().unwrap_or(0))
-                .map(|(i, _)| i)
-                .expect("the frontier is over its cap, so it is not empty");
-            self.frontier.remove(worst);
-        }
-    }
-}
-
-/// A canonical snapshot as one number, so a replay can prove it landed where
-/// it landed before.
-fn fingerprint(snap: &Value) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    snap.to_string().hash(&mut h);
-    h.finish()
 }
 
 // ---------------------------------------------------------------------------
