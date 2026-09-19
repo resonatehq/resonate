@@ -42,8 +42,9 @@ const usage =
     \\  --dump <file>          write the recorded history for `simulator check`
     \\  --verbose
     \\
-    \\Options for check:
-    \\  --max-steps <n>        the search's budget         [default: 20000000]
+    \\Options for the search, which all three commands run:
+    \\  --max-steps <n>        its budget. A search that runs out says so and
+    \\                         proves nothing either way    [default: 20000000]
     \\  --no-time-order        allow orders in which the instants go backwards
     \\                         [the default for `check`: a recorder stamps an
     \\                         instant before it sends, and the server does not
