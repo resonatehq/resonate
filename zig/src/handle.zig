@@ -174,6 +174,10 @@ const Ctx = struct {
         try self.effects.append(self.scratch, .{
             .kind = .unblock,
             .address = try self.scratch.dupe(u8, address),
+            // The outbox keys on this with the address. Leaving it out made every
+            // unblock to one address the same message, so a listener waiting on
+            // two promises at one address heard about one of them.
+            .promise_id = try self.scratch.dupe(u8, promise.id),
             .promise_json = try body.toOwnedSlice(),
         });
     }
@@ -2158,6 +2162,31 @@ test "a listener is told when the promise settles" {
     try testing.expect(std.mem.indexOf(u8, f.last_effects[0].promise_json, "\"state\":\"rejected\"") != null);
     // Consumed: a listener is told once.
     try testing.expectEqual(@as(usize, 0), f.doc.promise("o:a").?.listeners.len());
+}
+
+test "one address listening on two promises is told about both" {
+    var f = Fixture.init();
+    defer f.deinit();
+    _ = try f.call("promise.create",
+        \\{"id":"o:a","timeoutAt":9000000000000,"tags":{"resonate:scope":"global"}}
+    );
+    _ = try f.call("promise.create",
+        \\{"id":"o:b","timeoutAt":9000000000000,"tags":{"resonate:scope":"global"}}
+    );
+    _ = try f.call("promise.register_listener", "{\"awaited\":\"o:a\",\"address\":\"http://w:1/cb\"}");
+    _ = try f.call("promise.register_listener", "{\"awaited\":\"o:b\",\"address\":\"http://w:1/cb\"}");
+
+    // The outbox keys an unblock on the promise *and* the address, so the effect
+    // has to say which promise it is about. It did not, and one message then
+    // stood in for the other: the same listener waiting on two promises heard
+    // about whichever settled last.
+    _ = try f.call("promise.settle", "{\"id\":\"o:a\",\"state\":\"resolved\"}");
+    try testing.expectEqual(@as(usize, 1), f.last_effects.len);
+    try testing.expectEqualStrings("o:a", f.last_effects[0].promise_id);
+
+    _ = try f.call("promise.settle", "{\"id\":\"o:b\",\"state\":\"resolved\"}");
+    try testing.expectEqual(@as(usize, 1), f.last_effects.len);
+    try testing.expectEqualStrings("o:b", f.last_effects[0].promise_id);
 }
 
 test "task.create claims work and never offers it to anyone else" {

@@ -47,6 +47,8 @@ const usage =
     \\  --operations <n>       how many requests                        [default: 500]
     \\  --snap-every <n>       compare the whole state every n requests [default: 1]
     \\  --keep-going           report every difference instead of the first
+    \\  --ignore-messages      do not compare the outbox — for a peer that
+    \\                         delivers its messages rather than holding them
     \\  --verbose              print every request
     \\
     \\Both servers must be running in debug mode. This sends `debug.reset` first.
@@ -89,6 +91,8 @@ pub fn main() u8 {
             options.snap_every = parse(next(argv, &i) orelse return missing(arg)) orelse return 1;
         } else if (std.mem.eql(u8, arg, "--keep-going")) {
             options.keep_going = true;
+        } else if (std.mem.eql(u8, arg, "--ignore-messages")) {
+            options.ignore_messages = true;
         } else if (std.mem.eql(u8, arg, "--verbose")) {
             options.verbose = true;
         } else {
@@ -134,6 +138,13 @@ const Options = struct {
     operations: u64 = 500,
     snap_every: u64 = 1,
     keep_going: bool = false,
+    /// Leave the outbox out of the comparison.
+    ///
+    /// Only for a peer that *delivers* its messages instead of holding them for
+    /// the snapshot, where the section says how far delivery got rather than what
+    /// the server decided to send. It narrows what the run proves, so the report
+    /// says it was used.
+    ignore_messages: bool = false,
     verbose: bool = false,
 };
 
@@ -220,14 +231,20 @@ const Differ = struct {
             const a = try self.post(scratch, self.options.a, request.envelope);
             const b = try self.post(scratch, self.options.b, request.envelope);
             if (self.options.verbose) {
-                try stdout.print("{d:>5} {s:<24} {d} {d}\n", .{ step, kind.wire(), a.status, b.status });
+                try stdout.print("{d:>5} {d} {d} {s}\n", .{ step, a.status, b.status, request.envelope });
             }
 
             // The generator follows the server under test: it is the one whose
             // reachable states this is trying to cover.
             self.workload.observe(kind, @intCast(a.status), a.data, scratch);
 
-            if (a.status != b.status or !json.equal_text(scratch, a.data, b.data)) {
+            // A `debug.snap` answer is the state, so the outbox has to be left out
+            // of it too where it is being left out of the comparison.
+            const answers_agree = a.status == b.status and
+                (json.equal_text(scratch, a.data, b.data) or
+                (self.options.ignore_messages and kind == .debug_snap and
+                try self.same_but_messages(scratch, a.data, b.data)));
+            if (!answers_agree) {
                 self.differences += 1;
                 try stdout.print(
                     \\
@@ -271,6 +288,9 @@ const Differ = struct {
             self.options.operations,
             self.differences,
         });
+        if (self.options.ignore_messages) {
+            try stdout.print("  not compared    the outbox\n", .{});
+        }
         if (uncovered.items.len > 0) {
             // Not a failure, but it bounds what the run proved.
             try stdout.print("  never succeeded ", .{});
@@ -305,6 +325,9 @@ const Differ = struct {
             return true;
         }
         if (json.equal_text(scratch, a.data, b.data)) return false;
+        if (self.options.ignore_messages and try self.same_but_messages(scratch, a.data, b.data)) {
+            return false;
+        }
 
         self.differences += 1;
         try stdout.print("\nDIFFERENT STATE after step {d}", .{step});
@@ -321,6 +344,7 @@ const Differ = struct {
             return true;
         }
         for (protocol.snapshot_sections) |section| {
+            if (self.options.ignore_messages and std.mem.eql(u8, section, "messages")) continue;
             const va = parsed_a.?.get(section);
             const vb = parsed_b.?.get(section);
             if (va == null and vb == null) continue;
@@ -341,6 +365,28 @@ const Differ = struct {
     }
 
     /// One envelope, with the instant in it.
+    /// Whether two snapshots agree everywhere except the outbox.
+    fn same_but_messages(
+        self: *Differ,
+        scratch: std.mem.Allocator,
+        a: []const u8,
+        b: []const u8,
+    ) !bool {
+        _ = self;
+        const parsed_a = json.parse(scratch, a) catch return false;
+        const parsed_b = json.parse(scratch, b) catch return false;
+        if (parsed_a != .object or parsed_b != .object) return false;
+        for (protocol.snapshot_sections) |section| {
+            if (std.mem.eql(u8, section, "messages")) continue;
+            var ta = std.ArrayList(u8).init(scratch);
+            var tb = std.ArrayList(u8).init(scratch);
+            try json.write_value(&ta, parsed_a.get(section) orelse json.Value.null_value);
+            try json.write_value(&tb, parsed_b.get(section) orelse json.Value.null_value);
+            if (!json.equal_text(scratch, ta.items, tb.items)) return false;
+        }
+        return true;
+    }
+
     fn wrap(
         self: *Differ,
         scratch: std.mem.Allocator,
