@@ -41,7 +41,6 @@ const store_mod = @import("../store.zig");
 const doc_mod = @import("../doc.zig");
 const handle = @import("../handle.zig");
 const env = @import("../env.zig");
-const bus_mod = @import("../bus.zig");
 const server_mod = @import("../server.zig");
 const checker = @import("checker.zig");
 const workload_mod = @import("workload.zig");
@@ -127,6 +126,10 @@ pub const Report = struct {
     unarmed_buf: [512]u8 = undefined,
     unarmed_len: usize = 0,
     unarmed_after: usize = 0,
+    /// What went out to workers and listeners. A run that sent nothing exercised
+    /// none of the path that renders a message, and says so here.
+    executes: u64 = 0,
+    unblocks: u64 = 0,
     /// How many sweeps had to be sent again because they did not finish.
     sweep_resends: u64 = 0,
     /// Set when a sweep never finished, however many attempts it was given. Its
@@ -156,6 +159,7 @@ pub const Report = struct {
             \\  crashes         {d}
             \\  commits         {d} ({d} lost races, {d} unordered conflicts)
             \\  objects         {d}
+            \\  messages        {d} executes, {d} unblocks
             \\  checked         {d} operations -> {s}
             \\  final state     {s}
             \\  coverage        {d} operation kinds never succeeded
@@ -177,6 +181,8 @@ pub const Report = struct {
             self.contentions,
             self.conflicts,
             self.store_objects,
+            self.executes,
+            self.unblocks,
             self.checked,
             @tagName(self.verdict),
             if (self.state_unexplained)
@@ -233,6 +239,90 @@ const max_sweep_attempts: u32 = 16;
 /// invariant below builds keys the servers are supposed to have written.
 const prefix = "sim";
 
+/// The message bus a run uses.
+///
+/// Not `bus.Nowhere`: a bus that serves no scheme means the sender never renders
+/// a message, and a simulated run would then never exercise the one path that
+/// turns a committed transition into something a worker can read.
+///
+/// What it checks is the property a message has to have — that it describes state
+/// which is really there. An `execute` names a task the bucket holds and a
+/// version it is really at; an `unblock` names a promise the bucket has settled.
+/// A message about state that does not exist is a worker sent to do nothing, or a
+/// caller told something untrue, and neither is visible in any answer: the
+/// messages are the one effect a linearizability search says nothing about.
+const Recording = struct {
+    simulation: *Simulation,
+    executes: u64 = 0,
+    unblocks: u64 = 0,
+
+    fn message_bus(self: *Recording) env.MessageBus {
+        return .{ .ptr = self, .vtable = &vtable };
+    }
+
+    const vtable: env.MessageBus.VTable = .{ .send = send_erased, .serves = serves_erased };
+
+    fn serves_erased(_: *anyopaque, _: []const u8) bool {
+        return true;
+    }
+
+    fn send_erased(ptr: *anyopaque, delivery: *env.Delivery) void {
+        const self: *Recording = @ptrCast(@alignCast(ptr));
+        self.check(delivery.body);
+        delivery.complete(.delivered, "");
+    }
+
+    fn check(self: *Recording, body: []const u8) void {
+        var arena = std.heap.ArenaAllocator.init(self.simulation.allocator);
+        defer arena.deinit();
+        const a = arena.allocator();
+        const parsed = json.parse(a, body) catch return self.complain("a message that is not JSON", body);
+        const kind = parsed.get_string("kind") orelse
+            return self.complain("a message with no kind", body);
+        const data = parsed.get("data") orelse
+            return self.complain("a message with no data", body);
+
+        if (std.mem.eql(u8, kind, "execute")) {
+            self.executes += 1;
+            const task = data.get("task") orelse return self.complain("an execute with no task", body);
+            const id = task.get_string("id") orelse return self.complain("an execute with no id", body);
+            if (task.get_i64("version") == null) return self.complain("an execute with no version", body);
+            var d = self.simulation.document(a, id) orelse
+                return self.complain("an execute for an origin the bucket does not have", body);
+            defer d.deinit();
+            if (d.task_const(id) == null) {
+                return self.complain("an execute for a task the bucket does not have", body);
+            }
+            // Not the version: an offer says "this task is available at this
+            // version", and it is true when the offer is made. By the time it is
+            // read the task may have been acquired by somebody else, which is
+            // exactly what the version is *for* — the holder finds out by being
+            // refused. Only what a message says about state that cannot change
+            // back is checkable here, which is that the state is there at all.
+            return;
+        }
+        if (std.mem.eql(u8, kind, "unblock")) {
+            self.unblocks += 1;
+            const promise = data.get("promise") orelse
+                return self.complain("an unblock with no promise", body);
+            const id = promise.get_string("id") orelse
+                return self.complain("an unblock with no id", body);
+            var d = self.simulation.document(a, id) orelse
+                return self.complain("an unblock for an origin the bucket does not have", body);
+            defer d.deinit();
+            const p = d.promise_const(id) orelse
+                return self.complain("an unblock for a promise the bucket does not have", body);
+            if (!p.state.is_settled()) self.complain("an unblock for a promise that is not settled", body);
+            return;
+        }
+        self.complain("a message of a kind the protocol does not have", body);
+    }
+
+    fn complain(self: *Recording, what: []const u8, body: []const u8) void {
+        self.simulation.record_broken(what, body);
+    }
+};
+
 const Instance = struct {
     runtime: *server_mod.Runtime,
     random: stdx.Random,
@@ -244,7 +334,7 @@ pub const Simulation = struct {
     random: stdx.Random,
     sim: env.Simulated,
     mem: store_mod.MemoryStore,
-    nowhere: bus_mod.Nowhere = .{},
+    bus: Recording = undefined,
     instances: []Instance,
     /// One slot per client: the request it is waiting on, if any.
     in_flight: []?*Pending,
@@ -277,6 +367,7 @@ pub const Simulation = struct {
             .workload = undefined,
             .report = .{ .seed = options.seed },
         };
+        self.bus = .{ .simulation = self };
         self.workload = workload_mod.Workload.init(allocator, &self.random, 1_000_000_000);
         self.mem.random = &self.random;
         self.mem.faults = options.faults;
@@ -301,7 +392,7 @@ pub const Simulation = struct {
             self.mem.store(),
             self.sim.clock(),
             self.sim.timer(),
-            self.nowhere.message_bus(),
+            self.bus.message_bus(),
         );
         // Messages are not what this checks, and a growing outbox would show up
         // as a state difference between two equivalent runs.
@@ -508,6 +599,27 @@ pub const Simulation = struct {
     /// The two things that have to be true of the bucket for work to keep moving.
     ///
     /// Returns what is wrong, as a line, or null.
+    /// The document an id belongs to, as the bucket holds it, or null.
+    fn document(self: *Simulation, scratch: std.mem.Allocator, id: []const u8) ?doc_mod.Doc {
+        const space = store_mod.KeySpace.init(prefix ++ "/", store_mod.KeySpace.default_timer_shards);
+        var buf = std.ArrayList(u8).init(scratch);
+        const origin = protocol.origin(id);
+        const key = space.doc_key(&buf, origin) catch return null;
+        const entry = self.mem.objects.get(key) orelse return null;
+        return doc_mod.Doc.decode(scratch, entry.body, origin) catch null;
+    }
+
+    /// Record the first thing found wrong that no answer would have shown.
+    fn record_broken(self: *Simulation, what: []const u8, detail: []const u8) void {
+        if (self.report.unarmed_len > 0) return;
+        var buf: [512]u8 = undefined;
+        const line = std.fmt.bufPrint(&buf, "{s}: {s}", .{ what, detail }) catch what;
+        const n = @min(line.len, self.report.unarmed_buf.len);
+        @memcpy(self.report.unarmed_buf[0..n], line[0..n]);
+        self.report.unarmed_len = n;
+        self.report.unarmed_after = self.history.items.len;
+    }
+
     fn broken_invariant(self: *Simulation, scratch: std.mem.Allocator) !?[]const u8 {
         var keys = std.ArrayList([]const u8).init(scratch);
         defer keys.deinit();
@@ -678,6 +790,8 @@ pub const Simulation = struct {
             self.options.faults.conflict_percent > 0;
         report.operations = self.history.items.len;
         report.store_objects = self.mem.count();
+        report.executes = self.bus.executes;
+        report.unblocks = self.bus.unblocks;
         for (self.instances) |instance| {
             report.commits += instance.runtime.applier.commits;
             report.contentions += instance.runtime.applier.contentions;

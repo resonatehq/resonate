@@ -38,9 +38,15 @@ The simulator owns the environment through the same ports production uses:
 * **the servers** — several against one bucket, and `--crash` kills one at an
   arbitrary point, taking its cache, its deadline queue, its actors and every
   decision in flight with it;
-* **the message bus** — nowhere, because a message is not part of what a caller
-  observes. Under debug the server holds them and `debug.snap` shows them, which
-  is where they are compared.
+* **the message bus** — a recording one. Not a bus that serves nothing: that
+  would mean the sender never renders a message, and the run would never
+  exercise the one path that turns a committed transition into something a
+  worker can read. Every message is checked against the bucket for the property
+  it has to have — an `execute` names a task that is really there, an `unblock` a
+  promise that is really settled — and counted, so a run that sent none says so.
+  Not the version an offer carries: an offer is true when it is made, and by the
+  time it is read the task may have been acquired by somebody else, which is what
+  the version is for.
 
 ### What the search checks
 
