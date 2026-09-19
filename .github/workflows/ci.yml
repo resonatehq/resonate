@@ -124,7 +124,7 @@ jobs:
   zig:
     name: Zig (tests and simulation)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     defaults:
       run:
@@ -153,15 +153,21 @@ jobs:
       # answers, and a store that stops answering while servers are killed
       # mid-decision. Both also check, after every operation, that every
       # deadline a document records still has an object to fire it.
+      # `--max-steps` down from twenty million: a search is the whole cost of a
+      # run, a hard history can spend the default for minutes, and a seed that
+      # gives up says so rather than passing. Tens of seeds here; the sweep below
+      # is where the thousands are.
       - name: Simulate (races)
         run: |
-          zig-out/bin/simulator soak --runs 40 --servers 3 --clients 4 \
-            --operations 200 --conflict 15 --reorder 30 --unavailable 3 --lost-ack 3
+          zig-out/bin/simulator soak --runs 15 --servers 3 --clients 4 \
+            --operations 200 --conflict 15 --reorder 30 --unavailable 3 --lost-ack 3 \
+            --max-steps 2000000
 
       - name: Simulate (faults and crashes)
         run: |
-          zig-out/bin/simulator soak --runs 40 --servers 3 --clients 4 \
-            --operations 200 --unavailable 5 --lost-ack 5 --crash 2
+          zig-out/bin/simulator soak --runs 15 --servers 3 --clients 4 \
+            --operations 200 --unavailable 5 --lost-ack 5 --crash 2 \
+            --max-steps 2000000
 
       # The one path debug mode cannot reach: a server that comes up, reads the
       # deadlines out of the bucket, and fires one on wall time with nobody
