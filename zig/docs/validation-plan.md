@@ -1,6 +1,6 @@
 # How this implementation is validated
 
-Four checks. They answer different questions, and none of them substitutes for
+Five checks. They answer different questions, and none of them substitutes for
 another.
 
 | | asks | answers with |
@@ -9,6 +9,7 @@ another.
 | `simulator run` / `soak` | is the concurrency sound | a linearizability search over a simulated run |
 | `differ` | is this the protocol everybody else implements | another server, request for request |
 | `simulator check` | was *that* run sound | a recorded history from a real server |
+| `tools/deadline-survives-a-restart.sh` | does a deadline outlive the process | a server stopped before one and started again |
 
 ## 1. Unit tests — `zig build test`
 

@@ -117,7 +117,7 @@ Three ideas hold it together, all of them TigerBeetle's:
 
 ## Is it right?
 
-Four checks, described in [docs/validation-plan.md](docs/validation-plan.md):
+Five checks, described in [docs/validation-plan.md](docs/validation-plan.md):
 
 ```
 zig build test                                   # 210 unit tests
@@ -125,6 +125,7 @@ zig-out/bin/simulator run  --seed 1 --servers 3 --clients 4 --operations 200 \
     --conflict 15 --reorder 30 --unavailable 3 --lost-ack 3
 zig-out/bin/simulator soak --runs 200 --crash 2 --unavailable 5 --lost-ack 5
 zig-out/bin/differ --a http://127.0.0.1:8021/ --b http://127.0.0.1:8022/
+tools/deadline-survives-a-restart.sh
 ```
 
 The simulator runs several servers over one bucket with faults injected into the
