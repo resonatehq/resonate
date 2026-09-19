@@ -58,6 +58,15 @@ pub const retry_after_ms: i64 = 1_000;
 /// gets before the answer is "as far as that".
 pub const tick_max_rounds: u32 = 64;
 
+/// How many times a sweep's listing is retried before the sweep gives up.
+///
+/// A sweep fires everything due at one instant, and a listing that fails halfway
+/// through leaves it having fired some of it. Retrying is what keeps that from
+/// being the outcome: a caller that is told nothing cannot tell a sweep that did
+/// nothing from one that did half, and half a sweep is not something any single
+/// operation can mean.
+pub const tick_max_list_attempts: u32 = 16;
+
 pub const Timerd = struct {
     const Entry = struct {
         at: i64,
@@ -488,6 +497,7 @@ pub const Timerd = struct {
         outstanding: usize = 0,
         op: store_mod.Operation = undefined,
         fired_any: bool = false,
+        list_attempts: u32 = 0,
 
         fn on_fire_done(self: *Tick) void {
             assert(self.outstanding > 0);
@@ -499,7 +509,15 @@ pub const Timerd = struct {
 
         fn next_round(self: *Tick) void {
             self.round += 1;
-            if (self.round > tick_max_rounds or !self.fired_any) return self.finish();
+            // Nothing was due, so there is nothing left to be due: this is the
+            // sweep finishing.
+            if (!self.fired_any) return self.finish();
+            // Still firing after this many rounds means the deadlines are not
+            // draining. Whatever the reason, the sweep did not finish, and
+            // saying it did would be a lie a caller acts on.
+            if (self.round > tick_max_rounds) {
+                return self.give_up("the sweep did not drain its deadlines");
+            }
             self.list();
         }
 
@@ -523,12 +541,12 @@ pub const Timerd = struct {
             const keys = switch (op.result) {
                 .keys => |k| k,
                 .unavailable => |detail| {
-                    var buf = std.ArrayList(u8).init(self.arena.allocator());
-                    json.write_string(&buf, detail) catch {};
-                    self.status = 503;
-                    self.reply_data = buf.items;
-                    self.callback(self);
-                    return;
+                    // Try again rather than stop: rounds after the first have
+                    // already fired something, and a sweep that stops there is
+                    // one nobody can describe.
+                    self.list_attempts += 1;
+                    if (self.list_attempts < tick_max_list_attempts) return self.list();
+                    return self.give_up(detail);
                 },
                 else => return self.finish(),
             };
@@ -564,6 +582,14 @@ pub const Timerd = struct {
             self.status = 200;
             // An empty array, which is what this operation has always answered.
             self.reply_data = "[]";
+            self.callback(self);
+        }
+
+        fn give_up(self: *Tick, detail: []const u8) void {
+            var buf = std.ArrayList(u8).init(self.arena.allocator());
+            json.write_string(&buf, detail) catch {};
+            self.status = 503;
+            self.reply_data = buf.items;
             self.callback(self);
         }
     };

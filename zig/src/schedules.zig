@@ -101,6 +101,9 @@ pub const Request = struct {
     /// `fire` only: the outstanding promise creations.
     fires: []applier_mod.Work = &.{},
     fires_outstanding: usize = 0,
+    /// `fire` only: whether a run could not be created because there was no
+    /// answer. See `on_fired`.
+    fires_lost: bool = false,
     /// `create` only: what the request asked for, held between the validation
     /// and the read that decides whether there is anything to create.
     create_fields: ?CreateFields = null,
@@ -539,7 +542,22 @@ pub const Service = struct {
         const req: *Request = @ptrCast(@alignCast(work.context.?));
         assert(req.fires_outstanding > 0);
         req.fires_outstanding -= 1;
+        // A run nobody could store is a run that did not happen, and the schedule
+        // must not move past it: advancing would retire the deadline and the
+        // occurrence would be lost for good, with the answer still 200 and
+        // nothing anywhere to say a run was owed. So the deadline stays, this
+        // request fails, and whoever fired it tries again — creating a promise
+        // that exists is a no-op, so a retry costs nothing and losing a run costs
+        // the run.
+        //
+        // Only where there was no answer. A request the state machine *refused*
+        // is refused however often it is retried: a promise id this schedule
+        // wants and something else already holds under different terms will not
+        // become creatable, and a schedule that never advances again is worse
+        // than an occurrence that could not run.
+        if (work.status == 0 or work.status >= 500) req.fires_lost = true;
         if (req.fires_outstanding > 0) return;
+        if (req.fires_lost) return fail(req, 503, "a run of this schedule could not be created");
         // The promises are durable. Now the schedule can move forward: if this
         // crashes, the schedule refires and creating a promise that exists is a
         // no-op, so one run stays one run.
@@ -1023,6 +1041,41 @@ test "firing before the schedule is due does nothing" {
     const r = try f.fire(&arena, "s0");
     try testing.expectEqual(@as(i32, 200), r.status);
     try testing.expectEqual(writes, f.mem.puts);
+}
+
+test "a run nobody could store leaves the schedule where it is" {
+    const f = try Fixture.create(testing.allocator);
+    defer f.destroy();
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    const created = try f.call(&arena, "schedule.create",
+        \\{"id":"s0","cron":"* * * * *","promiseId":"{{.id}}.{{.timestamp}}","promiseTimeout":60000,"promiseTags":{"resonate:target":"http://w"}}
+    );
+    try testing.expectEqual(@as(i32, 200), created.status);
+    // Past the first occurrence, so a fire has something to do.
+    f.sim.now = 1_000_020_000;
+
+    // The schedule's own read is served and the promise's write is not.
+    f.mem.faults.unavailable_after = f.mem.gets + f.mem.puts + f.mem.deletes + f.mem.lists + 1;
+    const fired = try f.fire(&arena, "s0");
+    try testing.expectEqual(@as(i32, 503), fired.status);
+    f.mem.faults.unavailable_after = null;
+
+    // The occurrence is still owed: the schedule has not moved, so the deadline
+    // its key names is still the one it is waiting for, and whoever fired it
+    // retries. Advancing here would have answered 200 and lost the run.
+    const after = try f.call(&arena, "schedule.get", "{\"id\":\"s0\"}");
+    try testing.expectEqual(@as(i32, 200), after.status);
+    try testing.expect(std.mem.indexOf(u8, after.data, "lastRunAt") == null);
+    try testing.expect(std.mem.indexOf(u8, after.data, "\"nextRunAt\":1000020000") != null);
+    try testing.expect((try f.promise_state(&arena, "s0.1000020000")) == null);
+
+    // And the retry runs it.
+    const again = try f.fire(&arena, "s0");
+    try testing.expectEqual(@as(i32, 200), again.status);
+    const run = (try f.promise_state(&arena, "s0.1000020000")).?;
+    try testing.expect(std.mem.indexOf(u8, run, "\"state\":\"pending\"") != null);
 }
 
 test "the promise id template substitutes only what it documents" {

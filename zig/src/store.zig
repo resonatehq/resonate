@@ -449,6 +449,10 @@ pub const MemoryStore = struct {
         /// everything inline makes a concurrent workload sequential, and a
         /// linearizability check over a sequential history says nothing.
         defer_percent: u64 = 0,
+        /// Serve this many operations and answer `unavailable` to every one
+        /// after. Deterministic where a percentage is not, which is what a test
+        /// that has to fail one *particular* operation needs.
+        unavailable_after: ?u64 = null,
         /// Percent of held-back operations completed out of submission order.
         ///
         /// This one *is* a fault: a caller that depends on its own operations
@@ -545,6 +549,12 @@ pub const MemoryStore = struct {
     }
 
     fn serve(self: *MemoryStore, op: *Operation) void {
+        if (self.faults.unavailable_after) |after| {
+            if (self.gets + self.puts + self.deletes + self.lists >= after) {
+                op.complete(.{ .unavailable = "injected: the store stopped answering" });
+                return;
+            }
+        }
         if (self.random) |rng| {
             if (rng.chance(self.faults.unavailable_percent)) {
                 op.complete(.{ .unavailable = "injected: the store did not answer" });
