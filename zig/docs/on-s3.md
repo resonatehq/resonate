@@ -11,8 +11,8 @@ before the first `:` in an id, and:
 * `promise.create`, `promise.get`, `promise.settle` name one promise;
 * `task.*` name a task, whose id *is* a promise id;
 * `promise.register_callback` names an awaited and an awaiter, and the protocol
-  requires the awaiter's id to be prefixed by its `resonate:branch`, which puts
-  both in one origin;
+  refuses the pair unless they share an origin ("Awaiter and awaited must belong
+  to the same origin");
 * `promise.register_listener` names an awaited and an address, and an address is
   not state;
 * `task.create` and `task.fence` carry an action, whose id is in the origin the
