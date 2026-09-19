@@ -31,6 +31,7 @@ pub const Kind = enum {
     promise_create,
     promise_create_task,
     promise_create_timer,
+    promise_create_delayed,
     promise_get,
     promise_settle,
     promise_register_callback,
@@ -56,7 +57,11 @@ pub const Kind = enum {
 
     pub fn wire(self: Kind) []const u8 {
         return switch (self) {
-            .promise_create, .promise_create_task, .promise_create_timer => "promise.create",
+            .promise_create,
+            .promise_create_task,
+            .promise_create_timer,
+            .promise_create_delayed,
+            => "promise.create",
             .promise_get => "promise.get",
             .promise_settle => "promise.settle",
             .promise_register_callback => "promise.register_callback",
@@ -232,6 +237,7 @@ pub const Workload = struct {
             .{ .kind = .promise_create, .weight = 6 },
             .{ .kind = .promise_create_task, .weight = 8 },
             .{ .kind = .promise_create_timer, .weight = 2 },
+            .{ .kind = .promise_create_delayed, .weight = 2 },
             .{ .kind = .promise_get, .weight = 6 },
             .{ .kind = .promise_settle, .weight = 7 },
             .{ .kind = .promise_register_callback, .weight = 4 },
@@ -253,7 +259,7 @@ pub const Workload = struct {
             .{ .kind = .schedule_delete, .weight = 1 },
             .{ .kind = .schedule_search, .weight = 1 },
             .{ .kind = .debug_snap, .weight = 1 },
-            .{ .kind = .debug_tick, .weight = 8 },
+            .{ .kind = .debug_tick, .weight = 6 },
         };
         for (table) |row| {
             seen += row.weight;
@@ -299,6 +305,26 @@ pub const Workload = struct {
                 try w.print(
                     "{{\"id\":\"{s}\",\"timeoutAt\":{d},\"tags\":{{\"resonate:timer\":\"true\"}}}}",
                     .{ id, self.now + @as(i64, @intCast(self.random.between(1, 60_000))) },
+                );
+            },
+            // A task nobody may be offered yet: it is created pending, with its
+            // first deadline at the delay rather than a retry away, and no offer
+            // goes out until a sweep reaches that instant. The one shape where a
+            // pending task is deliberately not on anybody's queue, and still owes
+            // a deadline.
+            .promise_create_delayed => {
+                const id = try self.task_id(arena, og);
+                const delay = self.now + @as(i64, @intCast(self.random.between(1, 80_000)));
+                try w.print(
+                    "{{\"id\":\"{s}\",\"timeoutAt\":{d},\"tags\":{{\"resonate:target\":\"http://w/{s}\"," ++
+                        "\"resonate:branch\":\"{s}:root\",\"resonate:delay\":\"{d}\"}}}}",
+                    .{
+                        id,
+                        self.now + @as(i64, @intCast(self.random.between(80_001, 300_000))),
+                        og,
+                        og,
+                        delay,
+                    },
                 );
             },
             .promise_get => {
