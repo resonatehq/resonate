@@ -163,6 +163,12 @@ jobs:
           zig-out/bin/simulator soak --runs 40 --servers 3 --clients 4 \
             --operations 200 --unavailable 5 --lost-ack 5 --crash 2
 
+      # The one path debug mode cannot reach: a server that comes up, reads the
+      # deadlines out of the bucket, and fires one on wall time with nobody
+      # asking. Both checks above run with the clock in the caller's hands.
+      - name: A deadline survives a restart
+        run: tools/deadline-survives-a-restart.sh
+
       # With the search off a run costs milliseconds, so this is thousands of
       # seeds rather than tens — and what it still checks is everything a
       # linearizability search cannot see: a 5xx, a deadline with no object to

@@ -124,6 +124,22 @@ A failing run prints the command that reproduces it, with every knob. `--dump
 and — when every answer is explicable but the state is not — the state the order
 leaves against the state that is there.
 
+### The one path debug mode cannot reach
+
+Both checks above run with the clock in the caller's hands, which is what makes
+them reproducible — and it means neither of them ever sees a server come up, read
+the deadlines out of the bucket, and fire one on wall time with nobody asking.
+That is the whole durability promise of a timer, so it is checked on its own:
+
+```
+zig/tools/deadline-survives-a-restart.sh
+```
+
+A stand-in S3, a server with no debug mode, a promise that times out in eight
+seconds, the server stopped before the deadline and started again — and then the
+deadline fires by itself, the promise resolves at the instant it was due, and the
+deadline object is collected. It fails loudly on the first thing that is not true.
+
 ### The one thing that cannot be checked
 
 A sweep (`debug.tick`) fires everything due at one instant. A store that stops
