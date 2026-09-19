@@ -15,6 +15,9 @@
 //! * **A store that misbehaves.** Injected unavailability, conflicts the service
 //!   will not order, writes that land and are then reported as failures, and
 //!   completions out of order.
+//! * **A bus that takes the messages.** Not one that serves nothing: the sender
+//!   would then never render a message, and the run would never exercise the one
+//!   path that turns a committed transition into something a worker can read.
 //! * **Servers that die.** A crash takes the caches, the deadline queue and every
 //!   in-flight decision with it. The callers of those decisions are told nothing,
 //!   which is exactly the case a retry has to survive.
@@ -24,14 +27,20 @@
 //!
 //! What it then checks:
 //!
-//! 1. **Linearizability.** Is the recorded history equivalent to *some* sequential
-//!    execution of the specification? See `checker.zig`.
-//! 2. **Refinement of the durable state.** Replay the order the checker found
-//!    against a fresh model, and compare the model's whole state against what a
-//!    cold server reads out of the bucket. The responses agreeing is not enough:
-//!    the state left behind has to be the state that order produces.
-//! 3. **Coverage.** Every operation reached a success. A run that only exercised
-//!    failure paths has checked nothing, and it says so rather than passing.
+//! 1. **Linearizability, including what it left behind.** Is the recorded history
+//!    equivalent to *some* sequential execution of the specification — one that
+//!    also ends in the state a cold server reads out of the bucket? Both at once,
+//!    because two orders can explain the same answers and leave different state,
+//!    so holding one particular order to the state would fail a correct server.
+//!    See `checker.zig`.
+//! 2. **The invariants a search cannot see.** Every deadline a document records
+//!    has an object of that name; nothing runnable is stranded; every message
+//!    describes state that is really there. Each of those can be false while
+//!    every answer the server ever gave is correct, which is why they are checked
+//!    against the bucket rather than against the history.
+//! 3. **Coverage.** Every operation reached a success, and the history really
+//!    overlapped. A run that only exercised failure paths, or that turned out
+//!    sequential, has checked nothing — and says so rather than passing.
 
 const std = @import("std");
 const stdx = @import("../stdx.zig");
