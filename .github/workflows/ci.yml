@@ -115,6 +115,126 @@ jobs:
           esac
           cargo test --release --test differential --all-features -- --nocapture
 
+  # ═══════════════════════════════════════════════════════════════════════════
+  # The Zig implementation on an object store (`zig/`)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  # Hermetic: one process, one seed, no sockets and no wall clock. A failing
+  # seed is printed with the command that reproduces it byte for byte.
+  zig:
+    name: Zig (tests and simulation)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        working-directory: zig
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v1
+        with:
+          version: 0.14.1
+
+      - name: Test
+        run: zig build test
+
+      # --release: the linearizability search is the whole cost of a soak, and a
+      # debug build turns minutes into an afternoon.
+      - name: Build
+        run: zig build -Doptimize=ReleaseSafe
+
+      # Two shapes of trouble: a store that loses races and reorders its
+      # answers, and a store that stops answering while servers are killed
+      # mid-decision. Both also check, after every operation, that every
+      # deadline a document records still has an object to fire it.
+      - name: Simulate (races)
+        run: |
+          zig-out/bin/simulator soak --runs 40 --servers 3 --clients 4 \
+            --operations 200 --conflict 15 --reorder 30 --unavailable 3 --lost-ack 3
+
+      - name: Simulate (faults and crashes)
+        run: |
+          zig-out/bin/simulator soak --runs 40 --servers 3 --clients 4 \
+            --operations 200 --unavailable 5 --lost-ack 5 --crash 2
+
+  # The same two questions the Rust tree asks of itself, asked of the Zig
+  # server: does it answer what the reference answers, and is a real concurrent
+  # history over real sockets linearizable.
+  zig-differential:
+    name: Zig against the reference
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v1
+        with:
+          version: 0.14.1
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Build
+        run: |
+          cargo build --release --bin resonate --example conctrace
+          cd zig && zig build -Doptimize=ReleaseSafe
+
+      # Debug mode on both: the clock belongs to the caller, so time is an input
+      # rather than a race, `debug.snap` answers, and nothing runs on wall time.
+      # The blob server is the peer because it holds its messages for the
+      # snapshot, as the Zig server does — a backend that delivers them would
+      # make that section a report on delivery rather than on what was decided.
+      - name: Start both servers
+        run: |
+          ./zig/zig-out/bin/resonate serve --debug --store memory --port 8021 &
+          ./target/release/resonate serve --debug --server-port 8022 --level error \
+            --set servers.active=server_blob \
+            --set servers.server_blob.search_enabled=true \
+            --set servers.server_blob.retry_timeout=30000 &
+          for _ in $(seq 1 40); do
+            curl -sf -o /dev/null http://127.0.0.1:8021/ready && break
+            sleep 1
+          done
+          for _ in $(seq 1 40); do
+            curl -sf -o /dev/null -X POST http://127.0.0.1:8022/ \
+              -H 'Content-Type: application/json' \
+              -d '{"kind":"debug.snap","head":{"corrId":"r","version":"2026-04-01","resonate:debug_time":1},"data":{}}' && break
+            sleep 1
+          done
+
+      # Printed, never failed on, and for the same reason as the oracle drift
+      # ledger above: the two known differences are ones the Zig server is
+      # deliberately on the other side of — `task.create` on an already
+      # fulfilled task carries the branch preload, which is what the oracle and
+      # both SQL engines do, and a sweep catches a schedule up across every
+      # boundary it crossed, which is what the blob server does. A new
+      # difference has to be visible, and a difference is not a build break.
+      - name: Differential ledger
+        run: |
+          ./zig/zig-out/bin/differ --a http://127.0.0.1:8021/ --label-a zig \
+            --b http://127.0.0.1:8022/ --label-b blob \
+            --seed 1 --operations 1000 --keep-going || true
+
+      # This one is a check: the producer refuses a history with no successes or
+      # no overlap, and the checker asks whether *any* order consistent with the
+      # recorded instants explains every answer.
+      - name: Record and check a real history
+        run: |
+          ./target/release/examples/conctrace \
+            --url http://127.0.0.1:8021/ --out trace --clients 8 --ops 600
+          ./zig/zig-out/bin/simulator check trace.history
+
   # Porcupine, from the specification repository, against a live server under
   # real concurrency.
   #
