@@ -66,6 +66,10 @@ pub const Effect = struct {
     version: i64 = 0,
     /// `unblock` only: the promise record, already JSON.
     promise_json: []const u8 = "",
+    /// `unblock` only. Together with the address it is the outbox's key: a
+    /// promise settles once, so a second unblock for the same pair is the same
+    /// message.
+    promise_id: []const u8 = "",
 };
 
 /// What an operation answers, before the envelope is wrapped round it.
@@ -162,6 +166,7 @@ const Ctx = struct {
 
     fn emit_unblock(self: *Ctx, address: []const u8, promise: *const Promise) !void {
         var body = std.ArrayList(u8).init(self.scratch);
+        errdefer body.deinit();
         var w = json.Writer.init(&body);
         // `now = 0`: the record is the promise as it settled, and a settled
         // promise needs no deadline projection.
