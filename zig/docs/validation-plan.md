@@ -74,13 +74,31 @@ things about how it treats a real run:
   correct server. `debug.tick` is included, and issued as a barrier — nothing
   else in flight — which is what makes it one step in the recorded history.
 
-One thing is checked against the bucket rather than against the answers: every
-deadline a document records has an object of that name. No projection of the
-documents shows the difference — the document looks right, and the promise simply
-never settles — so it is checked after every operation, wherever the store is
-quiet enough for the answer to mean something. A run that breaks it fails
-whatever the search says, naming the key and the operation it was first missing
-after.
+Two things are checked against the bucket rather than against the answers, after
+every operation and wherever the store is quiet enough for the answer to mean
+something:
+
+* **Every deadline a document records has an object of that name.** No projection
+  of the documents shows the difference — the document looks right, and the
+  promise simply never settles.
+* **Nothing runnable is stranded.** A pending task owes a retry deadline and an
+  acquired one owes its lease: those are the only things that ever hand work on.
+  A task in either state without one is work nobody will be offered again, and
+  every answer about it stays correct forever. Suspended and halted are parked on
+  purpose and owe nothing.
+
+Both are invisible to a linearizability search, which is what makes them worth
+checking separately — and a run that breaks either fails whatever the search
+says, naming what was wrong and the operation it was first wrong after.
+
+With `--no-check` a run costs milliseconds instead of seconds, because the search
+is the whole cost. That buys a *wide* sweep — thousands of seeds, more servers,
+more clients, heavier faults — over exactly the properties above:
+
+```
+zig-out/bin/simulator soak --runs 3000 --servers 4 --clients 6 --operations 400 \
+    --conflict 20 --reorder 40 --unavailable 5 --lost-ack 5 --crash 2 --no-check
+```
 
 Every report says how much overlap there actually was (`concurrency 34 at once,
 323 overlapping pairs`) and which operation kinds never succeeded, because a

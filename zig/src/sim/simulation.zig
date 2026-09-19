@@ -39,6 +39,7 @@ const json = @import("../json.zig");
 const protocol = @import("../protocol.zig");
 const store_mod = @import("../store.zig");
 const doc_mod = @import("../doc.zig");
+const handle = @import("../handle.zig");
 const env = @import("../env.zig");
 const bus_mod = @import("../bus.zig");
 const server_mod = @import("../server.zig");
@@ -192,7 +193,7 @@ pub const Report = struct {
         }
         if (self.unarmed_len > 0) {
             try writer.print(
-                "  BROKEN         no object for an armed deadline after {d} operations: {s}\n",
+                "  BROKEN         after {d} operations: {s}\n",
                 .{ self.unarmed_after, self.unarmed() },
             );
         }
@@ -390,7 +391,7 @@ pub const Simulation = struct {
                     self.report.unarmed_len = n;
                     self.report.unarmed_after = self.history.items.len;
                     if (self.options.verbose) {
-                        std.debug.print("no object for {s}; the bucket holds:\n", .{key});
+                        std.debug.print("{s}; the bucket holds:\n", .{key});
                         var all = std.ArrayList([]const u8).init(scratch.allocator());
                         self.mem.keys(&all) catch {};
                         for (all.items) |k| {
@@ -501,6 +502,13 @@ pub const Simulation = struct {
     /// records it, so between the two writes the bucket has an object nothing
     /// points at, which is fine, and never the other way round.
     fn unarmed_deadline(self: *Simulation, scratch: std.mem.Allocator) !?[]const u8 {
+        return self.broken_invariant(scratch);
+    }
+
+    /// The two things that have to be true of the bucket for work to keep moving.
+    ///
+    /// Returns what is wrong, as a line, or null.
+    fn broken_invariant(self: *Simulation, scratch: std.mem.Allocator) !?[]const u8 {
         var keys = std.ArrayList([]const u8).init(scratch);
         defer keys.deinit();
         try self.mem.keys(&keys);
@@ -512,9 +520,46 @@ pub const Simulation = struct {
                 const body = self.mem.objects.get(key).?.body;
                 var d = doc_mod.Doc.decode(scratch, body, origin) catch continue;
                 defer d.deinit();
+
+                // Nothing runnable is stranded. A pending task owes a retry
+                // deadline and an acquired one owes its lease: those are the only
+                // things that ever hand the work on — to a worker that has not
+                // seen it, or back to the queue when a holder goes quiet. A task
+                // in either state with no deadline is work nobody will be offered
+                // again and no sweep will reach, and every answer about it stays
+                // correct forever, which is why the linearizability search cannot
+                // see it and this can.
+                //
+                // Suspended and halted are parked on purpose: a suspended task is
+                // waiting on a promise that has its own deadline, and a halted one
+                // is waiting to be continued. Neither owes one.
+                for (d.tasks.items) |*t| {
+                    const effective = handle.effective_task_state(&d, self.workload.now, t.id) orelse continue;
+                    const owed: ?protocol.TaskTimeoutKind = switch (effective) {
+                        .pending => .retry,
+                        .acquired => .lease,
+                        else => null,
+                    };
+                    const kind = owed orelse continue;
+                    const armed = if (t.timeout) |to| to.kind else null;
+                    if (armed == kind) continue;
+                    return try std.fmt.allocPrint(
+                        scratch,
+                        "{s} is {s} and owes a {s} deadline, not {s}",
+                        .{
+                            t.id,
+                            effective.as_str(),
+                            @tagName(kind),
+                            if (armed) |k| @tagName(k) else "none",
+                        },
+                    );
+                }
+
                 const at = d.timer_at orelse continue;
                 const want = try space.timer_key(&buf, origin, at, d.timer_generation);
-                if (self.mem.objects.get(want) == null) return try scratch.dupe(u8, want);
+                if (self.mem.objects.get(want) == null) {
+                    return try std.fmt.allocPrint(scratch, "no object for {s}", .{want});
+                }
                 continue;
             }
             if (try space.id_of_sched_key(scratch, key)) |id| {
@@ -524,7 +569,9 @@ pub const Simulation = struct {
                 // A tombstone keeps its counter and owes no deadline.
                 if (sd.deleted) continue;
                 const want = try space.sched_timer_key(&buf, id, sd.next_run_at, sd.timer_generation);
-                if (self.mem.objects.get(want) == null) return try scratch.dupe(u8, want);
+                if (self.mem.objects.get(want) == null) {
+                    return try std.fmt.allocPrint(scratch, "no object for {s}", .{want});
+                }
             }
         }
         return null;

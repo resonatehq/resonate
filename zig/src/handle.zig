@@ -384,7 +384,7 @@ fn trigger_listeners(ctx: *Ctx, promise_id: []const u8) !void {
 /// A task whose promise has settled is finished, whether or not anything has
 /// written that down. Every operation that reports or branches on a task state
 /// asks this rather than reading the field.
-fn effective_task_state(d: *const Doc, now: i64, id: []const u8) ?TaskState {
+pub fn effective_task_state(d: *const Doc, now: i64, id: []const u8) ?TaskState {
     const t = d.task_const(id) orelse return null;
     if (t.state == .fulfilled) return .fulfilled;
     const p = d.promise_const(id) orelse return t.state;
