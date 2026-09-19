@@ -81,8 +81,10 @@
 //                             projection described above
 //   TEST_SEED=N               seed the generator (default 0xc0ffeedeadbeef)
 //   TEST_EPISODE=N            steps before everything is reset (default 200).
-//                             It is the plateau's granularity and the only
-//                             thing capping how deep a state the run reaches
+//                             It is the only thing capping how deep a state
+//                             the run reaches, and is independent of the
+//                             plateau, which samples every 200 steps whatever
+//                             this is set to
 //   TEST_TRACE_FROM=N         print tasks, callbacks and promises per backend
 //                             after every step from step N on
 //
@@ -100,11 +102,33 @@
 //     returns the stale record is a divergence.
 //   - The run resets every backend and the clock every 200 steps, so it is a
 //     sequence of independent short episodes, and no state deeper than one
-//     episode is ever reached. TEST_EPISODE raises that cap. Measured on the
-//     default seed: 600-step episodes find 4039 signatures in 85200 steps and
-//     1000-step ones 4119 in 154000, against 3828 in 24400 at the default.
-//     Depth is real but expensive, and another seed still buys more per step,
-//     which is why the default stays where it is.
+//     episode is ever reached. TEST_EPISODE raises that cap, and depth was
+//     measured against it on the default seed:
+//
+//       episode   signatures   steps    per 1k   unique   missed
+//       200            3828    24400     156.8        -        -
+//       600            3147    48600      64.7      989     1670
+//       1000           2481    50200      49.4      671     2018
+//       2000           1397    32200      43.3      284     2715
+//
+//     "unique" is what that run found and the 200 run never did; "missed" is
+//     the other way round. Depth loses on every column that matters: it finds
+//     less in absolute terms, less than half as much per step, and what it
+//     adds is dwarfed by what it gives up. It does reach signatures a shallow
+//     run never reaches, but a fresh seed buys those more cheaply: seeds 1, 2,
+//     3, 7 and 11 each contributed 1333 to 2317 signatures the default seed
+//     never saw, a mean of about 1900 over about 37000 steps, or 52 unique per
+//     1000. The best showing here, 600-step episodes, manages 20 per 1000. The
+//     default stays at 200, breadth is bought with TEST_SEED, and the knob
+//     stays for diagnosis.
+//
+//     An earlier version of this note reported depth as a win (4039 signatures
+//     at 600, against 3828 at the default). That measurement was confounded:
+//     one constant was both the reset interval and the plateau's sampling
+//     granularity, so raising the episode length also made the stopping rule
+//     proportionally stricter and simply let the deeper run go on for longer.
+//     They are separate constants now, and at an equal stopping rule depth
+//     loses.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -502,14 +526,21 @@ async fn port_differential_random() {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(200_000);
-    // How long an episode runs before everything is reset. It is the plateau's
-    // granularity, and it is also the only thing capping how deep a state the
-    // run ever reaches, which is what TEST_EPISODE exists to measure.
-    let batch_size: usize = std::env::var("TEST_EPISODE")
+    // Two constants that used to be one, which was a mistake: raising the
+    // episode length also made the stopping rule that much stricter, so a
+    // deeper run looked more expensive than it was.
+    //
+    // BATCH_SIZE is how often the plateau takes a sample. It wants to be big
+    // enough that a batch finding nothing new means something.
+    const BATCH_SIZE: usize = 200;
+    const PLATEAU_BATCHES: usize = 20;
+    // TEST_EPISODE is how many steps run before everything is reset, and so
+    // the only thing capping how deep a state the run ever reaches. It is
+    // independent of the sampling above: an episode may span several batches.
+    let episode: usize = std::env::var("TEST_EPISODE")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(200);
-    const PLATEAU_BATCHES: usize = 20;
+        .unwrap_or(BATCH_SIZE);
 
     // TEST_SEED=<u64> picks the trajectory; the default is the one CI walks.
     let seed: u64 = std::env::var("TEST_SEED")
@@ -527,27 +558,34 @@ async fn port_differential_random() {
     let mut plateau_sigs: HashSet<(String, u16, u8)> = HashSet::new();
     let mut plateau_count = 0usize;
     let mut episodes = 0usize;
+    // Starting at the episode length makes the first step reset, so the run
+    // begins from a clean store without a special case for it.
+    let mut steps_this_episode = episode;
     let mut timings: HashMap<(String, String), Vec<u64>> = HashMap::new();
     let soft = std::env::var("TEST_SOFT").is_ok();
     let mut divergences: Vec<String> = Vec::new();
 
     'outer: loop {
-        // Every episode starts from nothing. The generator draws from one
-        // stream across all of them, so the whole run replays from its seed,
-        // but no episode can start where another ended.
-        reset_all(&backends, now).await;
-        if let Some(p) = &planner {
-            reset_all(std::slice::from_ref(p), now).await;
-        }
-        now = T0;
-        episodes += 1;
-
         let sigs_before = plateau_sigs.len();
 
-        for _ in 0..batch_size {
+        for _ in 0..BATCH_SIZE {
             if total_steps >= max_steps {
                 break 'outer;
             }
+
+            // Every episode starts from nothing. The generator draws from one
+            // stream across all of them, so the whole run replays from its
+            // seed, but no episode can start where another ended.
+            if steps_this_episode >= episode {
+                reset_all(&backends, now).await;
+                if let Some(p) = &planner {
+                    reset_all(std::slice::from_ref(p), now).await;
+                }
+                now = T0;
+                steps_this_episode = 0;
+                episodes += 1;
+            }
+            steps_this_episode += 1;
 
             let (envelope, now_after) = {
                 let o = oracle.lock();
@@ -677,7 +715,7 @@ async fn port_differential_random() {
         panic!("response divergences under TEST_SOFT — see [diverge] lines");
     }
 
-    eprintln!("[port] {episodes} episodes of {batch_size} steps");
+    eprintln!("[port] {episodes} episodes of {episode} steps");
     // TEST_SIGS_OUT=<path> writes the signatures themselves, so two runs can
     // be compared as sets rather than as counts. A run that finds as many
     // signatures as another has not necessarily found the same ones.
