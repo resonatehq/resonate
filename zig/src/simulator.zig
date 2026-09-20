@@ -42,6 +42,9 @@ const usage =
     \\  --cache-bytes <n>      what those documents may weigh. Small numbers make
     \\                         a server evict on nearly every commit, so a stale
     \\                         or lost document becomes a refutable answer
+    \\  --trust-cache          answer from the cache without validating it — a
+    \\                         negative control: with several servers over one
+    \\                         bucket the search should refute this
     \\  --no-check             skip the linearizability search
     \\  --dump <file>          write the recorded history for `simulator check`
     \\  --verbose
@@ -116,6 +119,10 @@ pub fn main() u8 {
         }
         if (std.mem.eql(u8, arg, "--no-check")) {
             options.check = false;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--trust-cache")) {
+            options.trust_cache = true;
             continue;
         }
         if (std.mem.eql(u8, arg, "--no-time-order")) {
@@ -205,7 +212,7 @@ pub fn main() u8 {
                     stdout.print(
                         "\nreproduce with: simulator run --seed {d} --servers {d} --clients {d}" ++
                             " --operations {d} --conflict {d} --reorder {d} --defer {d}" ++
-                            " --unavailable {d} --lost-ack {d} --crash {d} --verbose\n",
+                            " --unavailable {d} --lost-ack {d} --crash {d}",
                         .{
                             options.seed,
                             options.servers,
@@ -219,6 +226,16 @@ pub fn main() u8 {
                             options.crash_percent,
                         },
                     ) catch {};
+                    // The cache knobs only if they were set, so the line stays
+                    // the one a reader already knows — and on the same line,
+                    // because half a command is not a reproduction.
+                    if (options.cache_entries) |n|
+                        stdout.print(" --cache-entries {d}", .{n}) catch {};
+                    if (options.cache_bytes) |n|
+                        stdout.print(" --cache-bytes {d}", .{n}) catch {};
+                    if (options.trust_cache)
+                        stdout.print(" --trust-cache", .{}) catch {};
+                    stdout.print(" --verbose\n", .{}) catch {};
                     return 1;
                 }
                 if (report.verdict == .exhausted) {

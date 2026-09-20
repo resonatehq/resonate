@@ -158,6 +158,20 @@ read is the only thing standing between that and a wrong answer. Ten seeds of it
 in CI, and the same setting over real sockets is a `conctrace` history that the
 checker reads like any other.
 
+That last sentence is a claim about the checker, so there is a negative control
+for it — the one step in CI that fails when it passes:
+
+```
+simulator soak --runs 3 --servers 3 --clients 4 --operations 200 \
+    --conflict 15 --reorder 30 --trust-cache
+```
+
+`--trust-cache` answers from a cached document without asking the store whether
+anyone has moved past it. That is sound where one process writes the bucket and
+wrong where three do, and the search refutes it on seed 1 — the same seed that is
+linearizable with validation on, under the same tiny cache. A check that cannot
+be made to fail is not evidence of anything.
+
 ### The one path debug mode cannot reach
 
 Both checks above run with the clock in the caller's hands, which is what makes

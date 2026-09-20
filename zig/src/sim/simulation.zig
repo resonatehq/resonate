@@ -77,6 +77,12 @@ pub const Options = struct {
     /// search can refute. Null leaves the shipped defaults.
     cache_entries: ?u32 = null,
     cache_bytes: ?u64 = null,
+    /// A negative control. With validated reads off, a cached document is
+    /// answered from without asking the store whether anyone has moved past it,
+    /// which is sound only where this process is the only writer. Run several
+    /// servers that way and the search should refute them — and a check that
+    /// cannot be made to fail is not evidence of anything.
+    trust_cache: bool = false,
     /// Run the linearizability search. Off for a fault-heavy run whose point is
     /// that the server survives rather than what order it chose.
     check: bool = true,
@@ -413,6 +419,7 @@ pub const Simulation = struct {
                         (applier_mod.Config{}).cache_entries,
                     .cache_bytes = self.options.cache_bytes orelse
                         (applier_mod.Config{}).cache_bytes,
+                    .linearizable_reads = !self.options.trust_cache,
                 },
             },
             self.mem.store(),

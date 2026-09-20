@@ -178,6 +178,19 @@ jobs:
             --operations 200 --conflict 15 --reorder 30 \
             --cache-entries 1 --cache-bytes 64
 
+      # The negative control, and the only step here that fails when it passes.
+      # `--trust-cache` answers from a cached document without asking the store
+      # whether anyone has moved past it, which is sound for a single writer and
+      # wrong for three. If the search cannot refute that, the search is not
+      # evidence for anything it does say — so seed 1 refuting it is the check.
+      - name: The search can still fail (a cache nobody validates)
+        run: |
+          if zig-out/bin/simulator soak --runs 3 --servers 3 --clients 4 \
+               --operations 200 --conflict 15 --reorder 30 --trust-cache; then
+            echo "the search accepted a server that answers from a stale cache" >&2
+            exit 1
+          fi
+
       # The one path debug mode cannot reach: a server that comes up, reads the
       # deadlines out of the bucket, and fires one on wall time with nobody
       # asking. Both checks above run with the clock in the caller's hands.
