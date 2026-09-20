@@ -51,6 +51,7 @@ const doc_mod = @import("../doc.zig");
 const handle = @import("../handle.zig");
 const env = @import("../env.zig");
 const server_mod = @import("../server.zig");
+const applier_mod = @import("../applier.zig");
 const checker = @import("checker.zig");
 const workload_mod = @import("workload.zig");
 const Model = @import("model.zig").Model;
@@ -70,6 +71,12 @@ pub const Options = struct {
     faults: store_mod.MemoryStore.Faults = .{ .defer_percent = 80 },
     /// Chance per step that a server is killed and replaced.
     crash_percent: u64 = 0,
+    /// What each server's document cache is allowed to hold. Small numbers make
+    /// it evict on almost every commit, which is the interesting setting: an
+    /// eviction that lost a document, or kept a stale one, is a wrong answer the
+    /// search can refute. Null leaves the shipped defaults.
+    cache_entries: ?u32 = null,
+    cache_bytes: ?u64 = null,
     /// Run the linearizability search. Off for a fault-heavy run whose point is
     /// that the server survives rather than what order it chose.
     check: bool = true,
@@ -397,7 +404,17 @@ pub const Simulation = struct {
             self.allocator,
             // The clock belongs to the caller, so the trace decides when things
             // happen and the run is reproducible.
-            .{ .debug = true, .server_url = "http://sim", .prefix = prefix },
+            .{
+                .debug = true,
+                .server_url = "http://sim",
+                .prefix = prefix,
+                .applier = .{
+                    .cache_entries = self.options.cache_entries orelse
+                        (applier_mod.Config{}).cache_entries,
+                    .cache_bytes = self.options.cache_bytes orelse
+                        (applier_mod.Config{}).cache_bytes,
+                },
+            },
             self.mem.store(),
             self.sim.clock(),
             self.sim.timer(),

@@ -38,6 +38,10 @@ const usage =
     \\  --lost-ack <pct>       writes that land and report failure  [default: 0]
     \\  --defer <pct>          operations completed on a later turn [default: 80]
     \\  --reorder <pct>        held operations completed out of order [default: 0]
+    \\  --cache-entries <n>    documents a server holds in memory
+    \\  --cache-bytes <n>      what those documents may weigh. Small numbers make
+    \\                         a server evict on nearly every commit, so a stale
+    \\                         or lost document becomes a refutable answer
     \\  --no-check             skip the linearizability search
     \\  --dump <file>          write the recorded history for `simulator check`
     \\  --verbose
@@ -149,6 +153,10 @@ pub fn main() u8 {
             options.operations = @intCast(number);
         } else if (std.mem.eql(u8, arg, "--crash")) {
             options.crash_percent = number;
+        } else if (std.mem.eql(u8, arg, "--cache-entries")) {
+            options.cache_entries = @intCast(number);
+        } else if (std.mem.eql(u8, arg, "--cache-bytes")) {
+            options.cache_bytes = number;
         } else if (std.mem.eql(u8, arg, "--unavailable")) {
             options.faults.unavailable_percent = number;
         } else if (std.mem.eql(u8, arg, "--conflict")) {

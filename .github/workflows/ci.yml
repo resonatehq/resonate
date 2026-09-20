@@ -167,6 +167,17 @@ jobs:
           zig-out/bin/simulator soak --runs 10 --servers 3 --clients 4 \
             --operations 200 --unavailable 5 --lost-ack 5 --crash 2
 
+      # A cache of one document, sixty-four bytes wide: every commit evicts.
+      # What the search is being asked here is whether eviction is only ever a
+      # cost — an evicted document is read again, a kept one is still current —
+      # because an eviction that lost a document or kept a stale one is a wrong
+      # answer, and a wrong answer is what the search refutes.
+      - name: Simulate (a cache that evicts on every commit)
+        run: |
+          zig-out/bin/simulator soak --runs 10 --servers 3 --clients 4 \
+            --operations 200 --conflict 15 --reorder 30 \
+            --cache-entries 1 --cache-bytes 64
+
       # The one path debug mode cannot reach: a server that comes up, reads the
       # deadlines out of the bucket, and fires one on wall time with nobody
       # asking. Both checks above run with the clock in the caller's hands.
