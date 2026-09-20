@@ -158,8 +158,9 @@ read is the only thing standing between that and a wrong answer. Ten seeds of it
 in CI, and the same setting over real sockets is a `conctrace` history that the
 checker reads like any other.
 
-That last sentence is a claim about the checker, so there is a negative control
-for it — the one step in CI that fails when it passes:
+"Standing between that and a wrong answer" is a claim about the checker as much
+as about the server, so it has a negative control — the one step in CI that fails
+when it passes:
 
 ```
 simulator soak --runs 3 --servers 3 --clients 4 --operations 200 \
@@ -174,9 +175,9 @@ be made to fail is not evidence of anything.
 
 ### The one path debug mode cannot reach
 
-Both checks above run with the clock in the caller's hands, which is what makes
-them reproducible — and it means neither of them ever sees a server come up, read
-the deadlines out of the bucket, and fire one on wall time with nobody asking.
+Everything above runs with the clock in the caller's hands, which is what makes
+it reproducible — and it means none of it ever sees a server come up, read the
+deadlines out of the bucket, and fire one on wall time with nobody asking.
 That is the whole durability promise of a timer, so it is checked on its own:
 
 ```
