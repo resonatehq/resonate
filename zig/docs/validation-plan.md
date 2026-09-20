@@ -140,6 +140,24 @@ A failing run prints the command that reproduces it, with every knob. `--dump
 and — when every answer is explicable but the state is not — the state the order
 leaves against the state that is there.
 
+### A cache that evicts on every commit
+
+The document cache is bounded by entry count and by weight, so a busy server
+evicts, and eviction is the sort of thing that is either invisible or a
+correctness bug: a document dropped and read again is a cost, a document kept
+after another server has committed past it is a stale answer. Which of the two it
+is, is a claim about answers, so the search is what settles it:
+
+```
+zig-out/bin/simulator soak --runs 200 --servers 3 --clients 4 --operations 200 \
+    --conflict 15 --reorder 30 --cache-entries 1 --cache-bytes 64
+```
+
+One document, sixty-four bytes: nearly every commit evicts, and the validated
+read is the only thing standing between that and a wrong answer. Ten seeds of it
+in CI, and the same setting over real sockets is a `conctrace` history that the
+checker reads like any other.
+
 ### The one path debug mode cannot reach
 
 Both checks above run with the clock in the caller's hands, which is what makes
