@@ -1,0 +1,32 @@
+{
+  "data": {
+    "action": {
+      "data": {
+        "id": "wf-1",
+        "param": {
+          "data": "eyJmdW5jIjoiZ3JlZXQifQ=="
+        },
+        "tags": {
+          "resonate:branch": "wf-1",
+          "resonate:origin": "wf-1",
+          "resonate:parent": "wf-1",
+          "resonate:scope": "global",
+          "resonate:target": "poll://any@default"
+        },
+        "timeoutAt": 4611686018427387903
+      },
+      "head": {
+        "corrId": "sr-golden",
+        "version": "2026-04-01"
+      },
+      "kind": "promise.create"
+    },
+    "pid": "worker-1",
+    "ttl": 60000
+  },
+  "head": {
+    "corrId": "sr-golden",
+    "version": "2026-04-01"
+  },
+  "kind": "task.create"
+}

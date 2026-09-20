@@ -1,0 +1,35 @@
+{
+  "data": {
+    "actions": [
+      {
+        "data": {
+          "awaited": "wf-1.1",
+          "awaiter": "t1"
+        },
+        "head": {
+          "corrId": "sr-golden",
+          "version": "2026-04-01"
+        },
+        "kind": "promise.register_callback"
+      },
+      {
+        "data": {
+          "awaited": "wf-1.2",
+          "awaiter": "t1"
+        },
+        "head": {
+          "corrId": "sr-golden",
+          "version": "2026-04-01"
+        },
+        "kind": "promise.register_callback"
+      }
+    ],
+    "id": "t1",
+    "version": 3
+  },
+  "head": {
+    "corrId": "sr-golden",
+    "version": "2026-04-01"
+  },
+  "kind": "task.suspend"
+}

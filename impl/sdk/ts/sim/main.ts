@@ -1,0 +1,320 @@
+import { randomUUID } from "node:crypto";
+import { Command } from "commander";
+import { Core } from "../src/async/core.js";
+import { StepClock } from "../src/clock.js";
+import { Codec } from "../src/codec.js";
+import type { Context } from "../src/context.js";
+import type { Request } from "../src/network/types.js";
+import { Registry } from "../src/registry.js";
+import { VERSION } from "../src/util.js";
+import { ServerProcess } from "./src/server.js";
+import { Message, Random, Simulator, unicast } from "./src/simulator.js";
+import { type EngineFactory, genEngine, WorkerProcess } from "./src/worker.js";
+import { workloads } from "./src/workloads.js";
+
+const asyncEngine: EngineFactory = (deps) => new Core(deps);
+
+// Function definition
+function* fibLfi(ctx: Context, n: number): Generator<any, number, any> {
+  if (n <= 1) {
+    return n;
+  }
+  const p1 = yield ctx.beginRun(fibLfi, n - 1);
+  const p2 = yield ctx.beginRun("fibLfi", n - 2);
+
+  return (yield p1) + (yield p2);
+}
+
+function* fibRfi(ctx: Context, n: number): Generator<any, number, any> {
+  if (n <= 1) {
+    return n;
+  }
+  const p1 = yield ctx.beginRpc(fibRfi, n - 1);
+  const p2 = yield ctx.beginRpc("fibRfi", n - 2);
+
+  return (yield p1) + (yield p2);
+}
+
+function* fibLfc(ctx: Context, n: number): Generator<any, number, any> {
+  if (n <= 1) {
+    return n;
+  }
+  const v1 = yield ctx.run(fibLfc, n - 1);
+  const v2 = yield ctx.run("fibLfc", n - 2);
+  return v1 + v2;
+}
+
+function* fibRfc(ctx: Context, n: number): Generator<any, number, any> {
+  if (n <= 1) {
+    return n;
+  }
+  const v1 = yield ctx.rpc(fibRfc, n - 1);
+  const v2 = yield ctx.rpc("fibRfc", n - 2);
+  return v1 + v2;
+}
+
+function* foo(ctx: Context): Generator<any, any, any> {
+  const p1 = yield ctx.beginRun(bar);
+  const p2 = yield ctx.beginRpc("bar");
+  yield ctx.beginRun(bar);
+  yield ctx.beginRpc("bar");
+  yield ctx.run(bar);
+  yield ctx.rpc("bar");
+
+  return [yield p1, yield p2];
+}
+
+function* bar(ctx: Context): Generator<any, any, any> {
+  const p1 = yield ctx.beginRun(baz);
+  const p2 = yield ctx.beginRpc("baz");
+  yield ctx.beginRun(baz);
+  yield ctx.beginRpc("baz");
+  yield ctx.run(baz);
+  yield ctx.rpc("baz");
+
+  return [yield p1, yield p2];
+}
+
+function baz(_: Context): string {
+  return "baz";
+}
+
+const availableFuncs = { fibLfi: fibLfi, fibRfi: fibRfi, fibLfc: fibLfc, fibRfc: fibRfc, foo: foo, bar: bar, baz: baz };
+
+// CLI
+const program = new Command();
+
+program
+  .name("sim")
+  .description("Run the simulator with a given seed and steps")
+  .option(
+    "--seed <number>",
+    "Random seed",
+    (value) => {
+      const n = Number.parseInt(value, 10);
+      if (Number.isNaN(n)) {
+        throw new Error(`Invalid seed: ${value}`);
+      }
+      return n;
+    },
+    0,
+  )
+  .option(
+    "--steps <number>",
+    "Number of steps",
+    (value) => {
+      const n = Number.parseInt(value, 10);
+      if (Number.isNaN(n) || n < 0) {
+        throw new Error(`Invalid steps: ${value}`);
+      }
+      return n;
+    },
+    10_000,
+  )
+  .option(
+    "--func <name>",
+    `Function to run (optional). Choices: ${Object.keys(availableFuncs).join(", ")}`,
+    (value) => {
+      if (!Object.keys(availableFuncs).includes(value)) {
+        throw new Error(`Invalid function: ${value}. Allowed: ${Object.keys(availableFuncs).join(", ")}`);
+      }
+      return value;
+    },
+  )
+  .option("--randomDelay <number>", "Random delay probability (0-1)", (value) => {
+    const n = Number.parseFloat(value);
+    if (Number.isNaN(n) || n < 0 || n > 1) {
+      throw new Error(`Invalid randomDelay: ${value} (must be 0–1)`);
+    }
+    return n;
+  })
+  .option("--dropProb <number>", "Drop probability (0-1)", (value) => {
+    const n = Number.parseFloat(value);
+    if (Number.isNaN(n) || n < 0 || n > 1) {
+      throw new Error(`Invalid dropProb: ${value} (must be 0–1)`);
+    }
+    return n;
+  })
+  .option("--duplProb <number>", "Duplicate probability (0-1)", (value) => {
+    const n = Number.parseFloat(value);
+    if (Number.isNaN(n) || n < 0 || n > 1) {
+      throw new Error(`Invalid duplProb: ${value} (must be 0–1)`);
+    }
+    return n;
+  })
+  .option("--charFlipProb <number>", "Character flip prob (0-1)", (value) => {
+    const n = Number.parseFloat(value);
+    if (Number.isNaN(n) || n < 0 || n > 1) {
+      throw new Error(`Invalid charFlipProb: ${value} (must be 0–1)`);
+    }
+    return n;
+  })
+  .option("--deactivateProb <number>", "Deactivate probability (0-1)", (value) => {
+    const n = Number.parseFloat(value);
+    if (Number.isNaN(n) || n < 0 || n > 1) {
+      throw new Error(`Invalid deactivateProb: ${value} (must be 0–1)`);
+    }
+    return n;
+  })
+  .option("--activateProb <number>", "Activate probability (0-1)", (value) => {
+    const n = Number.parseFloat(value);
+    if (Number.isNaN(n) || n < 0 || n > 1) {
+      throw new Error(`Invalid activateProb: ${value} (must be 0–1)`);
+    }
+    return n;
+  })
+  .option("--engine <name>", "Execution engine: gen | async", (value) => {
+    if (value !== "gen" && value !== "async") throw new Error(`Invalid engine: ${value} (must be gen|async)`);
+    return value;
+  });
+
+program.parse(process.argv);
+
+type Options = {
+  seed: number;
+  steps: number;
+  func?: string;
+  engine?: "gen" | "async";
+  randomDelay?: number;
+  dropProb?: number;
+  duplProb?: number;
+  charFlipProb?: number;
+  deactivateProb?: number;
+  activateProb?: number;
+};
+
+const options = program.opts<Options>();
+
+export async function run(options: Options) {
+  // effectively disable queueMicrotask
+
+  const rnd = new Random(options.seed);
+
+  // Resolve the full fault configuration up front (unspecified probabilities are
+  // drawn from the seeded RNG) and print it: a seed-randomized fault like
+  // charFlipProb silently being nonzero is otherwise invisible in a failing run.
+  const faults = {
+    randomDelay: options.randomDelay ?? rnd.random(0.5),
+    dropProb: options.dropProb ?? rnd.random(0.5),
+    duplProb: options.duplProb ?? rnd.random(0.5),
+    deactivateProb: options.deactivateProb ?? rnd.random(0.01),
+    activateProb: options.activateProb ?? rnd.random(0.5),
+    charFlipProb: options.charFlipProb ?? rnd.random(0.15),
+  };
+  console.log(`[faults] seed=${options.seed}`, JSON.stringify(faults));
+
+  const sim = new Simulator(rnd, {
+    randomDelay: faults.randomDelay,
+    dropProb: faults.dropProb,
+    duplProb: faults.duplProb,
+    deactivateProb: faults.deactivateProb,
+    activateProb: faults.activateProb,
+  });
+
+  const clock = new StepClock();
+  const codec = new Codec();
+  const registry = new Registry();
+
+  // Choose the engine and its matching workload set. The async engine only has
+  // the call-and-await forms (fibLfc/fibRfc); the begin* forms stay generator-only.
+  const engine = options.engine ?? "gen";
+  const funcs = engine === "async" ? workloads.async : availableFuncs;
+  const factory: EngineFactory = engine === "async" ? asyncEngine : genEngine;
+
+  for (const [name, func] of Object.entries(funcs)) {
+    registry.add(func, name);
+  }
+
+  // server
+  sim.register(new ServerProcess(clock, "server"));
+
+  sim.repeat(1, () => {
+    sim.send(
+      new Message(
+        unicast("environment"),
+        unicast("server"),
+        {
+          kind: "debug.tick",
+          head: { corrId: randomUUID(), version: VERSION },
+          data: { time: clock.time },
+        },
+        { requ: true },
+      ),
+    );
+  });
+
+  // workers
+  for (let i = 1; i <= 3; i++) {
+    sim.register(
+      new WorkerProcess(rnd, clock, registry, { charFlipProb: faults.charFlipProb }, `worker-${i}`, "default", factory),
+    );
+  }
+
+  sim.repeat(1, () => {
+    const i = sim.step - 1;
+    const useExplicit = options.func && i === 0;
+
+    const funcName = useExplicit ? options.func : Object.keys(funcs)[rnd.randint(0, Object.keys(funcs).length - 1)];
+
+    if (!options.func || i === 0) {
+      const id = `${funcName}-${i}`;
+      const timeoutAt = rnd.randint(0, options.steps);
+      let msg: Message<Request>;
+      switch (funcName) {
+        case "fibLfi":
+        case "fibLfc":
+        case "fibRfi":
+        case "fibRfc": {
+          msg = new Message<Request>(
+            unicast("environment"),
+            unicast("server"),
+            {
+              kind: "promise.create",
+              head: { corrId: randomUUID(), version: VERSION },
+              data: {
+                id,
+                timeoutAt,
+                tags: { "resonate:target": "sim://any@default" },
+                param: codec.encode({ func: funcName, args: [rnd.randint(0, 20)], version: 1 }),
+              },
+            },
+            { requ: true },
+          );
+          break;
+        }
+        case "foo":
+        case "bar":
+        case "baz": {
+          msg = new Message<Request>(
+            unicast("environment"),
+            unicast("server"),
+            {
+              kind: "promise.create",
+              head: { corrId: randomUUID(), version: VERSION },
+              data: {
+                id,
+                timeoutAt,
+                tags: { "resonate:target": "sim://any@default" },
+                param: codec.encode({ func: funcName, args: [], version: 1 }),
+              },
+            },
+            { requ: true },
+          );
+          break;
+        }
+        default:
+          throw new Error(`unknown function name: ${funcName}`);
+      }
+
+      sim.send(msg);
+    }
+  });
+
+  await sim.exec(options.steps);
+  console.log("[outbox]: ", sim.outbox);
+}
+
+run(options).catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

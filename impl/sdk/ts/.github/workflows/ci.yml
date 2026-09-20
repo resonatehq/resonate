@@ -1,0 +1,112 @@
+name: ci
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths-ignore:
+      - README.md
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - README.md
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node-version: ["22", "24"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: set up node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      # npm ci enforces the lockfile (errors if package-lock.json is out of
+      # sync), so it doubles as py's `uv lock --check`.
+      - name: install
+        run: npm ci
+
+      - name: check linting
+        run: npm run check
+
+      - name: check types
+        run: npm run type-check
+
+      - name: run tests with coverage
+        run: npm test
+
+      - name: upload coverage reports to codecov
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.node-version == '22' && github.ref == 'refs/heads/main' }}
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: set up node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: install
+        run: npm ci
+
+      # Build core first — shims resolve it via dist/ — then the shims via each
+      # package's own build script (tsc emit type-checks them too).
+      - name: build
+        run: |
+          npm run build
+          npm run build --workspaces --if-present
+
+      - name: verify sdk bundles for browser
+        run: npx esbuild src/index.ts src/async/index.ts --bundle --format=esm --outdir=/tmp/browser-check
+
+  examples:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: set up node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: install
+        run: npm ci
+
+      - name: install just
+        uses: extractions/setup-just@v3
+
+      - name: install resonate server
+        run: |
+          curl -sSL https://github.com/resonatehq/resonate/releases/latest/download/resonate_linux_x86_64.tar.gz | tar -xz
+          sudo mv resonate /usr/local/bin/resonate
+
+      - name: start resonate server
+        run: |
+          resonate serve --server-port 8080 &
+          until curl -s -o /dev/null http://localhost:8080/api/v1/promises; do sleep 0.5; done
+
+      - name: run examples
+        run: just examples
+        env:
+          RESONATE_URL: http://localhost:8080

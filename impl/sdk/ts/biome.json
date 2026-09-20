@@ -1,0 +1,56 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.4.10/schema.json",
+  "vcs": {
+    "enabled": false,
+    "clientKind": "git",
+    "useIgnoreFile": false
+  },
+  "files": {
+    "ignoreUnknown": true,
+    "includes": ["**/*.ts", "**/*.js", "!**/dist/*", "!**/node_modules/*", "!**/coverage/*", "!**/.wrangler/*"]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 120
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "suspicious": {
+        "noExplicitAny": "off"
+      },
+      "correctness": {
+        "useYield": "off",
+        "noUnusedImports": "error",
+        "noUnusedFunctionParameters": "off",
+        "noUnusedVariables": "off",
+        "noUnusedPrivateClassMembers": "off"
+      },
+      "style": {
+        "noNonNullAssertion": "off"
+      },
+      "complexity": {
+        "noBannedTypes": "off"
+      }
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double"
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["packages/**"],
+      "linter": {
+        "rules": {
+          "suspicious": { "useAwait": "error" },
+          "complexity": { "useOptionalChain": "error" }
+        }
+      }
+    }
+  ]
+}

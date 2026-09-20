@@ -1,0 +1,7 @@
+# Zig's build outputs.
+zig-out/
+.zig-cache/
+
+# Histories a trace producer or a refuted check leaves behind.
+*.history
+*.ndjson
