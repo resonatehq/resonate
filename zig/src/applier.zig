@@ -66,8 +66,14 @@ pub const Config = struct {
     /// How many times a contended origin is re-decided before the caller is
     /// told the truth: this did not happen, try again.
     max_cas_retries: u32 = 8,
-    /// Documents held in memory.
+    /// Documents held in memory, and what they are allowed to weigh.
+    ///
+    /// Two bounds rather than one, because a count alone does not bound the
+    /// memory: an origin's document grows with every promise in it, so 4096 of
+    /// them is a number of bytes nobody chose. Whichever bound binds first
+    /// evicts, oldest read out.
     cache_entries: u32 = 4096,
+    cache_bytes: u64 = 64 << 20,
     /// Validate a cached document against the store before deciding against it.
     ///
     /// On by default, and it has to be for reads to be linearizable when more than
@@ -171,12 +177,27 @@ const Cache = struct {
     /// seeded simulation unreproducible.
     order: std.ArrayListUnmanaged([]const u8) = .{},
     capacity: u32,
+    /// What the documents and their keys weigh, and the most they may.
+    ///
+    /// One entry is always kept however heavy it is: an origin whose document
+    /// is larger than the whole budget still has to be decided against, and a
+    /// cache that refused it would read it again for every request in a batch.
+    bytes: u64 = 0,
+    byte_budget: u64,
 
     hits: u64 = 0,
     misses: u64 = 0,
 
-    fn init(allocator: std.mem.Allocator, capacity: u32) Cache {
-        return .{ .allocator = allocator, .capacity = @max(capacity, 1) };
+    fn init(allocator: std.mem.Allocator, capacity: u32, byte_budget: u64) Cache {
+        return .{
+            .allocator = allocator,
+            .capacity = @max(capacity, 1),
+            .byte_budget = @max(byte_budget, 1),
+        };
+    }
+
+    fn weigh(key: []const u8, bytes: []const u8) u64 {
+        return key.len + bytes.len;
     }
 
     fn deinit(self: *Cache) void {
@@ -201,9 +222,13 @@ const Cache = struct {
     fn put(self: *Cache, origin: []const u8, bytes: []const u8, etag: Etag) void {
         const copy = self.allocator.dupe(u8, bytes) catch return;
         if (self.map.getPtr(origin)) |e| {
+            // The stored key is this origin, so its weight is unchanged.
+            self.bytes -= e.bytes.len;
             self.allocator.free(e.bytes);
             e.bytes = copy;
             e.etag = etag;
+            self.bytes += copy.len;
+            self.evict();
             return;
         }
         const key = self.allocator.dupe(u8, origin) catch {
@@ -216,7 +241,16 @@ const Cache = struct {
             return;
         };
         self.order.append(self.allocator, key) catch {};
-        while (self.order.items.len > self.capacity) {
+        self.bytes += weigh(key, copy);
+        self.evict();
+    }
+
+    /// Oldest read out until both bounds hold, never down to nothing: the entry
+    /// just put is the one a batch is about to decide against.
+    fn evict(self: *Cache) void {
+        while (self.order.items.len > 1 and
+            (self.order.items.len > self.capacity or self.bytes > self.byte_budget))
+        {
             const oldest = self.order.orderedRemove(0);
             self.invalidate(oldest);
         }
@@ -230,6 +264,7 @@ const Cache = struct {
                     break;
                 }
             }
+            self.bytes -= weigh(kv.key, kv.value.bytes);
             self.allocator.free(kv.key);
             self.allocator.free(kv.value.bytes);
         }
@@ -243,6 +278,7 @@ const Cache = struct {
         }
         self.map.clearRetainingCapacity();
         self.order.clearRetainingCapacity();
+        self.bytes = 0;
     }
 };
 
@@ -776,7 +812,7 @@ pub const Applier = struct {
             .timer = timer,
             .sender = sender,
             .cfg = cfg,
-            .cache = Cache.init(allocator, cfg.cache_entries),
+            .cache = Cache.init(allocator, cfg.cache_entries, cfg.cache_bytes),
         };
     }
 
@@ -1062,6 +1098,49 @@ test "a request is committed, cached, and answered" {
     const trusted = try h.call("promise.get", "{\"id\":\"o:a\"}");
     try testing.expectEqual(@as(i32, 200), trusted.status);
     try testing.expectEqual(gets_before + 1, h.mem.gets);
+}
+
+test "the documents in memory are bounded by weight, not only by number" {
+    const h = try Harness.create(testing.allocator);
+    defer h.destroy();
+
+    // Room for every origin, and room for one document: the count never binds,
+    // so anything evicted was evicted for its weight.
+    h.applier.cache.capacity = 1024;
+    h.applier.cache.byte_budget = 256;
+
+    for (0..8) |n| {
+        var id: [16]u8 = undefined;
+        const body = try std.fmt.allocPrint(
+            testing.allocator,
+            "{{\"id\":\"{s}:a\",\"timeoutAt\":9000000000000}}",
+            .{std.fmt.bufPrint(&id, "o{d}", .{n}) catch unreachable},
+        );
+        defer testing.allocator.free(body);
+        const r = try h.call("promise.create", body);
+        try testing.expectEqual(@as(i32, 200), r.status);
+    }
+
+    // The budget holds, the weight is what is actually held, and the origin
+    // decided against last is still there however tight the budget is.
+    try testing.expect(h.applier.cache.bytes <= h.applier.cache.byte_budget);
+    try testing.expect(h.applier.cache.map.count() < 8);
+    var weighed: u64 = 0;
+    var it = h.applier.cache.map.iterator();
+    while (it.next()) |e| weighed += e.key_ptr.len + e.value_ptr.bytes.len;
+    try testing.expectEqual(weighed, h.applier.cache.bytes);
+    try testing.expect(h.applier.cache.get("o7") != null);
+
+    // An entry heavier than the whole budget is still kept, because the batch
+    // that just committed it is what reads it next.
+    h.applier.cache.byte_budget = 1;
+    _ = try h.call("promise.create", "{\"id\":\"big:a\",\"timeoutAt\":9000000000000}");
+    try testing.expectEqual(@as(u32, 1), h.applier.cache.map.count());
+    try testing.expect(h.applier.cache.get("big") != null);
+
+    // And clearing it puts the weight back to nothing.
+    h.applier.cache.clear();
+    try testing.expectEqual(@as(u64, 0), h.applier.cache.bytes);
 }
 
 test "a read that changes nothing writes nothing" {

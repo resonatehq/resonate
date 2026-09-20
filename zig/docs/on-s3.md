@@ -76,6 +76,13 @@ A read is validated with `If-None-Match: <etag>`, so a cached document costs one
 round trip and no body. Without that, two servers over one bucket serve stale
 reads — the first thing the checker found.
 
+The cache holds the canonical bytes rather than a decoded document, because a
+re-decide after a lost race has to start from what the store says. It is bounded
+by document count *and* by total weight, since one origin's document grows with
+every promise in it and a count alone would leave the memory unbounded; whichever
+bound binds first evicts the oldest read. One entry is always kept, however heavy,
+because the batch that just committed it is what reads it next.
+
 ## The order effects go in
 
 **Arm the deadline → commit the document → disarm the old deadline → send the

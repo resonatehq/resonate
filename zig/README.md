@@ -51,7 +51,10 @@ Concurrency control is what S3 already offers: `If-None-Match: *` to create,
 `If-Match: <etag>` to replace what was read. A failed precondition means the
 decision was made against state that no longer exists, so it is **re-decided**,
 never replayed. A read is validated with `If-None-Match: <etag>`, so a cache hit
-costs a round trip and no body.
+costs a round trip and no body. What is held in memory is bounded twice, by
+document count and by weight (`--cache-entries`, `--cache-bytes`): a count alone
+does not bound the memory, because an origin's document grows with every promise
+in it.
 
 Deadlines are keys. A zero-padded deadline sorts lexicographically into time
 order, so the nearest deadlines are a capped ascending listing; the shard prefix

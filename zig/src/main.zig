@@ -51,6 +51,8 @@ const usage =
     \\                           nothing on wall time
     \\  --preload-limit <n>      branch siblings carried in a task response [default: 10]
     \\  --cas-retries <n>        re-decides before a contended origin gives up [default: 8]
+    \\  --cache-entries <n>      documents held in memory                     [default: 4096]
+    \\  --cache-bytes <n>        what those documents may weigh, in bytes      [default: 67108864]
     \\  --shutdown-timeout <ms>  how long SIGTERM waits for work in flight
     \\                           [default: 2000]
     \\
@@ -72,6 +74,8 @@ const Args = struct {
     debug: bool = false,
     preload_limit: u32 = protocol.preload_limit_default,
     cas_retries: u32 = 8,
+    cache_entries: u32 = 4096,
+    cache_bytes: u64 = 64 << 20,
     shutdown_timeout: i64 = 2_000,
 };
 
@@ -150,6 +154,16 @@ pub fn main() u8 {
             const v = value orelse return fail("--cas-retries needs a value");
             i += 1;
             args.cas_retries = std.fmt.parseInt(u32, v, 10) catch return fail("--cas-retries is not a number");
+        } else if (std.mem.eql(u8, arg, "--cache-entries")) {
+            const v = value orelse return fail("--cache-entries needs a value");
+            i += 1;
+            args.cache_entries = std.fmt.parseInt(u32, v, 10) catch return fail("--cache-entries is not a number");
+            if (args.cache_entries == 0) return fail("--cache-entries must be at least 1");
+        } else if (std.mem.eql(u8, arg, "--cache-bytes")) {
+            const v = value orelse return fail("--cache-bytes needs a value");
+            i += 1;
+            args.cache_bytes = std.fmt.parseInt(u64, v, 10) catch return fail("--cache-bytes is not a number");
+            if (args.cache_bytes == 0) return fail("--cache-bytes must be at least 1");
         } else if (std.mem.eql(u8, arg, "--shutdown-timeout")) {
             const v = value orelse return fail("--shutdown-timeout needs a value");
             i += 1;
@@ -342,6 +356,7 @@ const Process = struct {
         }
         w.print("# HELP resonate_deadlines_armed Deadlines held in memory\n# TYPE resonate_deadlines_armed gauge\nresonate_deadlines_armed {d}\n", .{runtime.timerd.armed_count()}) catch {};
         w.print("# TYPE resonate_messages_pending gauge\nresonate_messages_pending {d}\n", .{runtime.sender.pending()}) catch {};
+        w.print("# HELP resonate_cache_bytes What the documents in memory weigh\n# TYPE resonate_cache_bytes gauge\nresonate_cache_bytes {d}\n", .{runtime.applier.cache.bytes}) catch {};
         exchange.respond(200, "text/plain; version=0.0.4", out.items);
     }
 
@@ -509,6 +524,8 @@ fn run(allocator: std.mem.Allocator, args: Args) !void {
             .applier = .{
                 .machine = .{ .preload_limit = args.preload_limit },
                 .max_cas_retries = args.cas_retries,
+                .cache_entries = args.cache_entries,
+                .cache_bytes = args.cache_bytes,
             },
         },
         store,
