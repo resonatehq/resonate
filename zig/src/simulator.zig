@@ -45,8 +45,13 @@ const usage =
     \\  --trust-cache          answer from the cache without validating it — a
     \\                         negative control: with several servers over one
     \\                         bucket the search should refute this
+    \\  --no-schedules         leave schedule.* out, so a dumped history is one
+    \\                         the specification repository's checker will read
     \\  --no-check             skip the linearizability search
     \\  --dump <file>          write the recorded history for `simulator check`
+    \\  --dump-spec <file>     write it again without the kinds the specification
+    \\                         repository's Go checker cannot read. Use with
+    \\                         --no-schedules
     \\  --verbose
     \\
     \\Options for the search, which all three commands run:
@@ -60,6 +65,23 @@ const usage =
     \\                         [the default for `run` and `soak`: the simulator's
     \\                         clock moves only on a sweep, and a sweep is a
     \\                         barrier]
+    \\
+;
+
+/// Why `--dump-spec` refuses a run whose outcome anybody is in doubt about.
+const outcome_nobody_knows =
+    \\--dump-spec: this run left a caller in doubt, so there is no history to write.
+    \\
+    \\A 503, or no answer at all, means the request may or may not have taken
+    \\effect. The specification has no such answer — the Go model never produces
+    \\one and its harness pairs every operation with a definite response — so a
+    \\file containing one is refuted for that reason alone, which says nothing
+    \\about this server.
+    \\
+    \\Faults that only make writers race are fine here: --conflict, --reorder and
+    \\--defer. The ones that leave a caller in doubt are not: --unavailable,
+    \\--lost-ack and --crash. Those runs are for `simulator check`, whose own
+    \\search does model an outcome nobody knows.
     \\
 ;
 
@@ -125,6 +147,10 @@ pub fn main() u8 {
             options.trust_cache = true;
             continue;
         }
+        if (std.mem.eql(u8, arg, "--no-schedules")) {
+            options.no_schedules = true;
+            continue;
+        }
         if (std.mem.eql(u8, arg, "--no-time-order")) {
             enforce_time_order = false;
             continue;
@@ -141,6 +167,10 @@ pub fn main() u8 {
         const value = argv[i];
         if (std.mem.eql(u8, arg, "--dump")) {
             options.dump = value;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--dump-spec")) {
+            options.dump_spec = value;
             continue;
         }
         const number = std.fmt.parseInt(u64, value, 10) catch {
@@ -188,6 +218,10 @@ pub fn main() u8 {
         .run => {
             if (!seed_given) options.seed = @bitCast(std.time.milliTimestamp());
             const report = simulation.run(allocator, options) catch |e| {
+                if (e == error.OutcomeNobodyKnows) {
+                    stdout.print("{s}", .{outcome_nobody_knows}) catch {};
+                    return 1;
+                }
                 stdout.print("seed {d}: {s}\n", .{ options.seed, @errorName(e) }) catch {};
                 return 1;
             };
@@ -201,6 +235,10 @@ pub fn main() u8 {
             while (run_index < runs) : (run_index += 1) {
                 options.seed = first + run_index;
                 const report = simulation.run(allocator, options) catch |e| {
+                    if (e == error.OutcomeNobodyKnows) {
+                        stdout.print("{s}", .{outcome_nobody_knows}) catch {};
+                        return 1;
+                    }
                     stdout.print("seed {d}: {s}\n", .{ options.seed, @errorName(e) }) catch {};
                     return 1;
                 };

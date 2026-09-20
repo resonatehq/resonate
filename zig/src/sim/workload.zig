@@ -147,12 +147,34 @@ pub const Workload = struct {
     /// Which kinds have produced a 2xx. Reported at the end, because a run that
     /// only ever reached failure paths has checked nothing.
     covered: std.EnumSet(Kind) = std.EnumSet(Kind).initEmpty(),
+    /// Leave `schedule.*` out of the trajectory; see `without_schedules`.
+    skip_schedules: bool = false,
     /// How many requests have been built, and which generation of ids they use.
     built: u64 = 0,
     epoch: u32 = 0,
 
     pub fn init(allocator: std.mem.Allocator, random: *stdx.Random, start_ms: i64) Workload {
         return .{ .random = random, .now = start_ms, .allocator = allocator };
+    }
+
+    /// Leave `schedule.*` out of the trajectory.
+    ///
+    /// Not because schedules are less worth checking, but because the third-party
+    /// checker in the specification repository refuses a history that mentions
+    /// them: `occurrences` and `nextCron` are opaque there, so it has no calendar
+    /// to check an answer against. Filtering them out of a recorded history would
+    /// be unsound — the promises a schedule fired would then appear from nowhere —
+    /// so they have to be absent from the run instead.
+    pub fn without_schedules(self: *Workload) void {
+        self.skip_schedules = true;
+    }
+
+    fn weight_of(self: *const Workload, kind: Kind, weight: u64) u64 {
+        if (!self.skip_schedules) return weight;
+        return switch (kind) {
+            .schedule_create, .schedule_get, .schedule_delete, .schedule_search => 0,
+            else => weight,
+        };
     }
 
     pub fn deinit(self: *Workload) void {
@@ -231,8 +253,6 @@ pub const Workload = struct {
     /// ones that read it, and so the clock moves often enough for deadlines to
     /// fall but not so often that nothing survives to be contended.
     pub fn pick(self: *Workload) Kind {
-        const roll = self.random.below(100);
-        var seen: u64 = 0;
         const table = [_]struct { kind: Kind, weight: u64 }{
             .{ .kind = .promise_create, .weight = 6 },
             .{ .kind = .promise_create_task, .weight = 8 },
@@ -261,8 +281,15 @@ pub const Workload = struct {
             .{ .kind = .debug_snap, .weight = 1 },
             .{ .kind = .debug_tick, .weight = 6 },
         };
+        // The total rather than a literal 100, so leaving a kind out reweights the
+        // rest in proportion instead of handing its share to the last row. With
+        // every kind in it the total *is* 100, so a seed picks what it always did.
+        var total: u64 = 0;
+        for (table) |row| total += self.weight_of(row.kind, row.weight);
+        const roll = self.random.below(total);
+        var seen: u64 = 0;
         for (table) |row| {
-            seen += row.weight;
+            seen += self.weight_of(row.kind, row.weight);
             if (roll < seen) return row.kind;
         }
         return .debug_tick;

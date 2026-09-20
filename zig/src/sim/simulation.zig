@@ -83,6 +83,10 @@ pub const Options = struct {
     /// servers that way and the search should refute them — and a check that
     /// cannot be made to fail is not evidence of anything.
     trust_cache: bool = false,
+    /// Leave `schedule.*` out of the trajectory, so the recorded history is one
+    /// the specification repository's checker will read. See
+    /// `Workload.without_schedules`.
+    no_schedules: bool = false,
     /// Run the linearizability search. Off for a fault-heavy run whose point is
     /// that the server survives rather than what order it chose.
     check: bool = true,
@@ -92,6 +96,10 @@ pub const Options = struct {
     /// Where to write the recorded history, in the same format a recording from a
     /// real server over a real network uses — so the same checker reads both.
     dump: ?[]const u8 = null,
+    /// Where to write the same history with the kinds the specification
+    /// repository's checker cannot read left out. See `unread_by_spec_checker`.
+    /// Pair it with `no_schedules`, or the file will still mention schedules.
+    dump_spec: ?[]const u8 = null,
 };
 
 pub const Verdict = enum { linearizable, violation, exhausted, not_checked };
@@ -391,6 +399,7 @@ pub const Simulation = struct {
         };
         self.bus = .{ .simulation = self };
         self.workload = workload_mod.Workload.init(allocator, &self.random, 1_000_000_000);
+        if (options.no_schedules) self.workload.without_schedules();
         self.mem.random = &self.random;
         self.mem.faults = options.faults;
         for (self.in_flight) |*slot| slot.* = null;
@@ -861,7 +870,21 @@ pub const Simulation = struct {
             std.debug.print("\n", .{});
         }
 
-        if (self.options.dump) |path| try self.write_history(path);
+        if (self.options.dump) |path| try self.write_history(path, false);
+        if (self.options.dump_spec) |path| {
+            // A 503 is "this may or may not have happened", and the specification
+            // has no such answer: the Go model can never produce one, and its
+            // harness gives every operation a definite response, so there is no
+            // way to write down an outcome nobody knows. A file with a 503 in it
+            // would be refuted for that reason alone, which is a fact about the
+            // model rather than about this server — so it does not get written.
+            // Faults that only make writers race are fine; the ones that leave a
+            // caller in doubt are not.
+            if (report.status_503 > 0 or report.unanswered > 0) {
+                return error.OutcomeNobodyKnows;
+            }
+            try self.write_history(path, true);
+        }
         if (!self.options.check) return report;
         // A sweep that fired part of what was due and then stopped is not an
         // operation any sequential execution has, so there is nothing to check
@@ -1011,7 +1034,34 @@ pub const Simulation = struct {
     /// The same shape a recording from a real server has, so `simulator check`
     /// reads a simulated history and a real one with the same code — and a
     /// simulated failure can be handed to someone as a file.
-    fn write_history(self: *Simulation, path: []const u8) !void {
+    /// Kinds a history written for the specification repository's Go checker
+    /// leaves out, and why leaving each one out is sound rather than convenient.
+    ///
+    /// * The searches and `debug.snap` are the same set `Kind.checkable` excludes
+    ///   here: each is a listing followed by a read of every object it named, at
+    ///   its own instant, and nothing in the protocol promises that is a snapshot.
+    ///   The Go model *will* read them and holds them to being atomic, which this
+    ///   server has never claimed they are, so including them refutes the file for
+    ///   a reason that is not a defect. They change nothing, so the operations
+    ///   that remain are constrained exactly as they were.
+    /// * `debug.tick` moves the clock, and the model applies a timeout lazily from
+    ///   the `now` each request carries rather than from a tick of its own
+    ///   (`state.go`: `if p.State == Pending && p.TimeoutAt <= now`). The trace
+    ///   producer in the Rust tree emits no ticks either, and its histories still
+    ///   move through a hundred and fifty instants.
+    ///
+    /// `schedule.create`, `schedule.get` and `schedule.delete` are *not* in here,
+    /// because leaving those out of a history would not be sound: a schedule's
+    /// runs are promises, and the model would see them appear from nowhere. Those
+    /// have to be absent from the run instead, which is what `--no-schedules` is
+    /// for.
+    fn unread_by_spec_checker(kind: []const u8) bool {
+        if (std.mem.eql(u8, kind, "debug.tick")) return true;
+        const k = kind_of(kind) orelse return false;
+        return !workload_mod.Kind.checkable(k);
+    }
+
+    fn write_history(self: *Simulation, path: []const u8, for_spec_checker: bool) !void {
         const file = try std.fs.cwd().createFile(path, .{ .truncate = true });
         defer file.close();
         var buffered = std.io.bufferedWriter(file.writer());
@@ -1019,6 +1069,7 @@ pub const Simulation = struct {
         var arena = std.heap.ArenaAllocator.init(self.allocator);
         defer arena.deinit();
         for (self.history.items) |op| {
+            if (for_spec_checker and unread_by_spec_checker(op.kind)) continue;
             _ = arena.reset(.retain_capacity);
             const a = arena.allocator();
             const envelope = json.parse(a, op.envelope) catch continue;

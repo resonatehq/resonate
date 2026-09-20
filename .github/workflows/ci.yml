@@ -236,6 +236,14 @@ jobs:
       - name: Setup Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
 
+      # For the Go checker below. Its version comes from the specification
+      # repository, which the script clones, so this only needs a toolchain new
+      # enough to read that go.mod.
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
       - name: Build
         run: |
           cargo build --release --bin resonate --example conctrace
@@ -299,6 +307,15 @@ jobs:
           ./zig/zig-out/bin/differ --a http://127.0.0.1:8031/ --label-a zig-s3 \
             --b http://127.0.0.1:8022/ --label-b blob \
             --seed 5 --operations 400 --keep-going || true
+
+      # Somebody else's checker, on this server's histories. Every other check in
+      # `zig/` grades this server against a specification written in this
+      # repository; this one hands a recorded history to Porcupine driven by the
+      # model in `resonatehq/resonate-specification`, which nobody here wrote. The
+      # script clones it, builds `conccheck`, runs the server over the stand-in S3,
+      # and first proves the checker refuses a history with one answer altered.
+      - name: Against the Go checker
+        run: zig/tools/against-the-go-checker.sh 10
 
       # This one is a check: the producer refuses a history with no successes or
       # no overlap, and the checker asks whether *any* order consistent with the

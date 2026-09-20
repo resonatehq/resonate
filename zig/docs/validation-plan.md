@@ -353,3 +353,83 @@ instant is routinely applied after one carrying a later instant. The server does
 not order by it. Insisting on it refutes a correct server, which is what it did
 here at 1500 operations and twelve clients before the default was changed.
 `--time-order` asks for it anyway, for a recorder that can promise it.
+
+## 5. Somebody else's checker — `tools/against-the-go-checker.sh`
+
+Everything above grades this server against a specification written in this
+repository. The simulator's search replays the same state machine the server runs,
+and the differential compares against the Rust tree. Agreement there is agreement
+with ourselves, which is worth a great deal and is not the same as being right.
+
+So a recorded history also goes to Porcupine, driven by the model in
+`resonatehq/resonate-specification`, which nobody here wrote:
+
+```
+cargo build --release --example conctrace
+zig/tools/against-the-go-checker.sh 10
+```
+
+The script clones that repository, builds its `conccheck`, starts this server over
+`fakes3` so no bucket is needed, records ten histories of a thousand operations at
+twelve clients, and checks each. Before any of them it takes a real history,
+changes one field of one answer, and requires the checker to refuse it — a checker
+that cannot be made to fail is not evidence for anything it accepts.
+
+`conccheck` rather than `lincheck`: `lincheck` asks whether the one order the
+recorder wrote down satisfies the model, which on a concurrent run refutes almost
+anything, because return order is one legal linearization out of many.
+`conccheck` reads the real instants and asks whether *any* consistent order works.
+`-partition=false` because upstream's `originOf` splits an id on `.`, so it reads
+every `:`-id as its own partition; unpartitioned replays against whole state,
+which is the stronger question.
+
+### What this checker cannot be asked
+
+* **Schedules.** It refuses a history that mentions them: `occurrences` and
+  `nextCron` are opaque in the specification, so there is no calendar to check an
+  answer against.
+* **An outcome nobody knows.** Its model never produces a 503 and its harness
+  pairs every operation with a definite response, so there is no way to write down
+  "this may or may not have taken effect". A history containing one is refuted for
+  that reason alone. `simulator --dump-spec` therefore refuses to write a file
+  from a run that used `--unavailable`, `--lost-ack` or `--crash`, and says why.
+  Those runs are for `simulator check`, whose own search does model indeterminacy.
+* **The surveys.** `promise.search`, `task.search` and `debug.snap` are a listing
+  followed by a read of every object it named, each at its own instant, and
+  nothing in the protocol ever promised that is a snapshot. The Go model holds
+  them to being atomic, so they are left out of a history written for it — the
+  same set `§2`'s search leaves out, and for the same reason.
+
+### A third disagreement, and this time not with the Rust tree
+
+`simulator --dump-spec` writes a simulated run in the form this checker reads, so
+a fault-injected run across three servers can be put to it as well. Fifty seeds of
+`--conflict 15 --reorder 30`: forty-four proved, six refuted. Every one of the six
+registers a callback on a promise that had **already settled**, and that turns out
+to be a disagreement between the specification and both implementations rather
+than a defect in either.
+
+Five requests, sequential, no concurrency at all:
+
+```
+promise.create hr:root.t0   (resonate:target, resonate:branch — so it is a task)
+promise.create hr:root.p0   (resonate:scope global)
+promise.settle hr:root.p0   resolved
+promise.register_callback   awaited=hr:root.p0  awaiter=hr:root.t0
+task.get       hr:root.t0
+```
+
+This server answers `state pending, version 0, resumes 1`. So does
+`resonate-server-blob`, byte for byte. The Go model answers `resumes 0` and
+refutes the file, from either server: its `ProcessCallback` fires only for
+callbacks recorded in `Promise.Callbacks`, and registering on a promise that has
+already settled records none — the awaiter is told the outcome in the response
+instead, so on that reading there is nothing left to resume it for.
+
+Two implementations agreeing against a model is not proof the model is wrong, and
+it is not recorded here as one. It is recorded because it is the whole reason to
+run somebody else's checker, and because the check that would have found it
+earlier does not exist upstream either: `conctrace` emits nine kinds and none of
+them is `register_callback`, so no backend's Porcupine run has ever reached this
+state. The live check above is unaffected, since the producer never builds that
+request.

@@ -141,7 +141,7 @@ Three ideas hold it together, all of them TigerBeetle's:
 
 ## Is it right?
 
-Six checks, described in [docs/validation-plan.md](docs/validation-plan.md):
+Seven checks, described in [docs/validation-plan.md](docs/validation-plan.md):
 
 ```
 zig build test                                   # 211 unit tests
@@ -151,7 +151,15 @@ zig-out/bin/simulator soak --runs 200 --crash 2 --unavailable 5 --lost-ack 5
 zig-out/bin/differ --a http://127.0.0.1:8021/ --b http://127.0.0.1:8022/
 tools/deadline-survives-a-restart.sh
 tools/memory-stays-flat.sh
+tools/against-the-go-checker.sh                  # Porcupine, from the spec repo
 ```
+
+The last one matters out of proportion to its size. The other six grade this
+server against a specification written in this repository — the simulator's search
+replays the same state machine the server runs, and the differential compares
+against the Rust tree — so agreement there is agreement with ourselves. That one
+hands a recorded history to a checker nobody here wrote, and refuses to believe it
+until it has refused a history with one answer altered.
 
 The simulator runs several servers over one bucket with faults injected into the
 store — no answer, a write that lands and reports failure, two writes it could
