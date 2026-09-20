@@ -74,7 +74,10 @@ gives, which is exactly what the linearizability search refutes.
 
 A read is validated with `If-None-Match: <etag>`, so a cached document costs one
 round trip and no body. Without that, two servers over one bucket serve stale
-reads — the first thing the checker found.
+reads — the first thing the checker found, and still the thing `--trust-cache`
+makes it find again on demand. A deployment where one process owns a bucket can
+have the round trip back with `--sole-writer`, and nothing but the operator can
+know that is true.
 
 The cache holds the canonical bytes rather than a decoded document, because a
 re-decide after a lost race has to start from what the store says. It is bounded

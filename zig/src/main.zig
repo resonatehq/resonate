@@ -53,6 +53,10 @@ const usage =
     \\  --cas-retries <n>        re-decides before a contended origin gives up [default: 8]
     \\  --cache-entries <n>      documents held in memory                     [default: 4096]
     \\  --cache-bytes <n>        what those documents may weigh, in bytes      [default: 67108864]
+    \\  --sole-writer            no other process writes this bucket, so a cached
+    \\                           document is answered from without revalidating it.
+    \\                           Wrong if anything else writes the bucket, and
+    \\                           nothing can check that for you
     \\  --shutdown-timeout <ms>  how long SIGTERM waits for work in flight
     \\                           [default: 2000]
     \\
@@ -76,6 +80,7 @@ const Args = struct {
     cas_retries: u32 = 8,
     cache_entries: u32 = 4096,
     cache_bytes: u64 = 64 << 20,
+    sole_writer: bool = false,
     shutdown_timeout: i64 = 2_000,
 };
 
@@ -107,7 +112,9 @@ pub fn main() u8 {
             if (i + 1 < argv.len) break :blk argv[i + 1];
             break :blk null;
         };
-        if (std.mem.eql(u8, arg, "--debug")) {
+        if (std.mem.eql(u8, arg, "--sole-writer")) {
+            args.sole_writer = true;
+        } else if (std.mem.eql(u8, arg, "--debug")) {
             args.debug = true;
         } else if (std.mem.eql(u8, arg, "--store")) {
             const v = value orelse return fail("--store needs a value");
@@ -526,6 +533,7 @@ fn run(allocator: std.mem.Allocator, args: Args) !void {
                 .max_cas_retries = args.cas_retries,
                 .cache_entries = args.cache_entries,
                 .cache_bytes = args.cache_bytes,
+                .linearizable_reads = !args.sole_writer,
             },
         },
         store,
@@ -567,6 +575,10 @@ fn run(allocator: std.mem.Allocator, args: Args) !void {
         process.seed();
     }
 
+    if (args.sole_writer) {
+        log("sole writer: cached documents are answered from without revalidating. " ++
+            "Reads are stale if anything else writes this bucket", .{});
+    }
     log("listening on {s}:{d}, workers answer {s}", .{ args.bind, port, server_url });
     try loop.run();
 }
