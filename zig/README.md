@@ -141,7 +141,7 @@ Three ideas hold it together, all of them TigerBeetle's:
 
 ## Is it right?
 
-Seven checks, described in [docs/validation-plan.md](docs/validation-plan.md):
+Eight checks, described in [docs/validation-plan.md](docs/validation-plan.md):
 
 ```
 zig build test                                   # 211 unit tests
@@ -152,9 +152,10 @@ zig-out/bin/differ --a http://127.0.0.1:8021/ --b http://127.0.0.1:8022/
 tools/deadline-survives-a-restart.sh
 tools/memory-stays-flat.sh
 tools/against-the-go-checker.sh                  # Porcupine, from the spec repo
+tools/two-servers-one-bucket.sh                  # two processes, one bucket
 ```
 
-The last one matters out of proportion to its size. The other six grade this
+The seventh matters out of proportion to its size. The other six grade this
 server against a specification written in this repository — the simulator's search
 replays the same state machine the server runs, and the differential compares
 against the Rust tree — so agreement there is agreement with ourselves. That one
@@ -212,6 +213,14 @@ request. `tools/memory-stays-flat.sh` is that check.
   flag for them.
 * Anything on wall time under `--debug`: the clock belongs to the caller, which
   is what makes a differential and a recorded history comparable at all.
+* A real bucket. Every check runs against `fakes3`, which implements the six
+  operations the store port needs with real conditional writes — and which is in
+  this repository, written from the same reading of the same documentation as the
+  client. If that reading is wrong about S3, both sides are wrong together and
+  nothing here notices. The Rust tree's `tests/live.rs` is the test this needs and
+  its comment says why: a store that accepts `If-Match` and ignores it "would pass
+  every other test in the repository and lose writes in production". Until someone
+  points this server at a bucket, "it works on S3" rests on the documentation.
 * Retrying the *store*. A bucket that answers 503 SlowDown is a caller told 503,
   which is the honest answer — the request may or may not have been applied, and
   the protocol says so. Backing off inside the store would hide from the caller

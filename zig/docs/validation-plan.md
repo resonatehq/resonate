@@ -433,3 +433,60 @@ earlier does not exist upstream either: `conctrace` emits nine kinds and none of
 them is `register_callback`, so no backend's Porcupine run has ever reached this
 state. The live check above is unaffected, since the producer never builds that
 request.
+
+## 6. Two servers, one bucket — `tools/two-servers-one-bucket.sh`
+
+Everything the design claims rests on one thing: several servers sharing a bucket
+need nothing but a conditional write to agree. No log, no lease, no lock, no
+coordination of any kind. §2 exercises that claim hard, and it exercises it inside
+one process, driving several server state machines over one in-memory store.
+
+Across processes the situation is materially different. Each server has its own
+document cache, its own deadline queue, its own event loop and its own clock
+handling, and the only thing joining them is the object store. Nothing above this
+section ever ran two of them.
+
+```
+cargo build --release --example conctrace
+zig/tools/two-servers-one-bucket.sh 1000 12
+```
+
+A stand-in S3, two server processes over one bucket, and a round-robin front
+(`two-servers-one-bucket.py`) so a recorded history is a history of the *system*
+rather than of a server. The script fails if either server answered nothing, since
+that would not have been two servers. Both checkers then read the file: this
+repository's search and the specification repository's Porcupine.
+
+Then the same run again with `--sole-writer` on both, which tells each server it
+is the only writer and lets it answer from its cache without revalidating. With
+two of them that is a lie, and the script requires *both* checkers to refuse the
+result. They do. That is the negative control for the whole section: a
+cross-process check that could not detect cross-process staleness would be
+evidence of nothing.
+
+```
+── two servers over one bucket, revalidating their caches
+  501 requests to one, 501 to the other
+  this repository's search: linearizable
+  the specification's Porcupine: LINEARIZABLE
+── the same two, each told it is the only writer, which is a lie
+  501 requests to one, 501 to the other
+  this repository's search: refuted
+  the specification's Porcupine: NOT LINEARIZABLE
+```
+
+### What is still not checked anywhere
+
+One thing, and it is the largest: **no bucket has ever been a real one.** Every
+check here runs against `fakes3`, which implements the six operations the store
+port needs with real conditional writes — and which I wrote, from the same reading
+of the same documentation as the client. If that reading is wrong about S3, both
+sides are wrong together and nothing here would notice.
+
+The Rust tree has the test this needs, in `crates/resonate-server-blob/tests/live.rs`,
+skipped unless `TEST_S3_BUCKET` is set, and its own comment says why it exists: a
+store that accepts `If-Match` and ignores it "would pass every other test in the
+repository and lose writes in production". It names MinIO, B2 and Spaces as stores
+that do exactly that. The equivalent for this server does not exist yet, and until
+someone points it at a real bucket the claim "this works on S3" rests on the
+documentation rather than on evidence.

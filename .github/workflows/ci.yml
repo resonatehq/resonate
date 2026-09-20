@@ -317,6 +317,16 @@ jobs:
       - name: Against the Go checker
         run: zig/tools/against-the-go-checker.sh 10
 
+      # The claim the whole design rests on, across processes rather than inside
+      # one: several servers over one bucket need nothing but a conditional write
+      # to agree. The simulator drives several server state machines over one
+      # in-memory store; this runs two real processes, each with its own cache,
+      # deadline queue and event loop, joined only by the object store. Then it
+      # tells both of them they are the only writer, which is a lie, and requires
+      # both checkers to catch it.
+      - name: Two servers, one bucket
+        run: zig/tools/two-servers-one-bucket.sh 1000 12
+
       # This one is a check: the producer refuses a history with no successes or
       # no overlap, and the checker asks whether *any* order consistent with the
       # recorded instants explains every answer.
