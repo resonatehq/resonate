@@ -245,8 +245,15 @@ const Cache = struct {
         self.evict();
     }
 
-    /// Oldest read out until both bounds hold, never down to nothing: the entry
-    /// just put is the one a batch is about to decide against.
+    /// Oldest read out until both bounds hold, never down to nothing.
+    ///
+    /// Never down to nothing because a document larger than the whole budget
+    /// still has to be decided against, and the entry just inserted is the one a
+    /// batch is about to read: it is last in the order, so it survives. An entry
+    /// *replaced* keeps its old place and can go, which costs a read and nothing
+    /// else — the order is the order documents were first cached, not the order
+    /// they were last touched, because eviction has to be a function of the run
+    /// rather than of the traffic for a seeded simulation to replay.
     fn evict(self: *Cache) void {
         while (self.order.items.len > 1 and
             (self.order.items.len > self.capacity or self.bytes > self.byte_budget))
@@ -1130,6 +1137,9 @@ test "the documents in memory are bounded by weight, not only by number" {
     while (it.next()) |e| weighed += e.key_ptr.len + e.value_ptr.bytes.len;
     try testing.expectEqual(weighed, h.applier.cache.bytes);
     try testing.expect(h.applier.cache.get("o7") != null);
+    // Last in, so last out: eviction takes the oldest, and the newest is what
+    // the batch that just committed is about to read.
+    try testing.expect(h.applier.cache.get("o0") == null);
 
     // An entry heavier than the whole budget is still kept, because the batch
     // that just committed it is what reads it next.
