@@ -2,7 +2,22 @@ const std = @import("std");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
+    // `ReleaseSafe` by default rather than `Debug`, because it is the mode that
+    // ships and the only release mode in which this program still checks itself:
+    // every `stdx.assert` is an `unreachable`, which `ReleaseFast` and
+    // `ReleaseSmall` turn from a check into a promise to the optimizer. A smaller
+    // binary from either is not a trade against size, it is a trade against every
+    // invariant in here.
+    //
+    // Spelled out rather than `standardOptimizeOption`'s `preferred_optimize_mode`,
+    // which replaces `-Doptimize=` with a `-Drelease` toggle and would break every
+    // command that names a mode.
+    const optimize_named = b.option(
+        std.builtin.OptimizeMode,
+        "optimize",
+        "Optimization mode [default: ReleaseSafe for the binaries, Debug for the tests]",
+    );
+    const optimize = optimize_named orelse .ReleaseSafe;
 
     // ── The server ────────────────────────────────────────────────────────────
     const exe = b.addExecutable(.{
@@ -61,10 +76,16 @@ pub fn build(b: *std.Build) void {
     b.step("fakes3", "Serve a stand-in S3").dependOn(&run_fakes3.step);
 
     // ── Unit tests ────────────────────────────────────────────────────────────
+    //
+    // `Debug` unless a mode is named, even though the artifacts default to
+    // `ReleaseSafe`. The two keep `unreachable` as a panic, so nothing about an
+    // assertion is lost, and `Debug` compiles in a fifth of the time — which is
+    // the whole value of a test step you run every few minutes. `zig build test
+    // -Doptimize=ReleaseSafe` runs them in the mode that ships.
     const unit = b.addTest(.{
         .root_source_file = b.path("src/tests.zig"),
         .target = target,
-        .optimize = optimize,
+        .optimize = optimize_named orelse .Debug,
     });
     const run_unit = b.addRunArtifact(unit);
     b.step("test", "Run the unit tests").dependOn(&run_unit.step);

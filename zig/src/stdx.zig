@@ -7,12 +7,21 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-/// An invariant. Compiled out in `ReleaseFast`? No — deliberately not.
+/// An invariant, kept in the build that ships.
 ///
-/// The whole point of a deterministic simulator is that it finds the state
-/// nobody thought of, and it can only find it if the program still checks.
-/// TigerBeetle keeps its assertions in release builds for the same reason, and
-/// the cost is a predictable branch against a write to an object store.
+/// `unreachable` panics in `Debug` and `ReleaseSafe` and is undefined behaviour
+/// in `ReleaseFast` and `ReleaseSmall`, where the check is not merely removed but
+/// becomes a promise to the optimizer. So this assertion holds in exactly the two
+/// modes the build uses, and that is the reason `ReleaseSafe` is what `zig build`
+/// produces and what CI and the container build: the whole point of a
+/// deterministic simulator is that it finds the state nobody thought of, and it
+/// can only find it if the program still checks. TigerBeetle ships `ReleaseSafe`
+/// for the same reason. The cost is a predictable branch against a write to an
+/// object store.
+///
+/// A smaller or faster binary is therefore not a trade against speed or size. It
+/// is a trade against every invariant in this program, and it is not one this
+/// server offers.
 pub inline fn assert(ok: bool) void {
     if (!ok) unreachable;
 }

@@ -6,10 +6,22 @@ consensus, no locks, no leases, no background compaction. Twenty-three thousand
 lines of Zig and nothing outside the standard library.
 
 ```
-zig build -Doptimize=ReleaseSafe
+zig build
 zig-out/bin/resonate serve --store s3 --endpoint http://127.0.0.1:9000 --bucket resonate
 zig-out/bin/resonate serve --store memory --debug --port 8021      # for tests
 ```
+
+`zig build` produces `ReleaseSafe`, which is the mode that ships: it is the only
+release mode in which `unreachable` still panics, and every assertion in here is
+an `unreachable`. `ReleaseFast` and `ReleaseSmall` do not merely drop those
+checks, they turn each one into a promise to the optimizer — a smaller binary from
+either is not a trade against size but against every invariant the simulator
+exists to test. The tests default to `Debug`, which keeps the same assertions and
+compiles in a fifth of the time.
+
+The server is one statically linked file with no libc: 5.6 MB as built, of which
+4.7 MB is debug information, and 933 KB stripped. For the curious, `ReleaseSmall`
+is 368 KB and is not what to run.
 
 There is no TLS and no authentication here on purpose. Put a proxy in front: it
 terminates TLS, authenticates, authorizes, and forwards what is left.
