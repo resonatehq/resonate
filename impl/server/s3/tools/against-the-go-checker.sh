@@ -69,10 +69,10 @@ if [[ ! -d "$spec/valid/porc" ]]; then
     https://github.com/resonatehq/resonate-specification "$spec" ||
     fail "no specification at $repo_root/spec and it could not be cloned"
 fi
-( cd "$spec/valid/porc" && GOFLAGS=-mod=mod go build -o "$work/conccheck" ./cmd/conccheck ) ||
+( cd "$spec/valid/porc" && GOFLAGS=-mod=readonly go build -o "$work/conccheck" ./cmd/conccheck ) ||
   fail "could not build conccheck"
 # Its workload generator too, so a run can be theirs end to end.
-( cd "$spec/valid/porc" && GOFLAGS=-mod=mod go build -o "$work/loadgen" ./cmd/loadgen ) ||
+( cd "$spec/valid/porc" && GOFLAGS=-mod=readonly go build -o "$work/loadgen" ./cmd/loadgen ) ||
   fail "could not build loadgen"
 
 # ── A server over a stand-in S3, so this needs no bucket ──────────────────────

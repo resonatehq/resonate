@@ -58,7 +58,7 @@ if [[ ! -d "$spec/valid/porc" ]]; then
     https://github.com/resonatehq/resonate-specification "$spec" ||
     fail "no specification at $repo_root/spec and it could not be cloned"
 fi
-( cd "$spec/valid/porc" && GOFLAGS=-mod=mod go build -o "$work/conccheck" ./cmd/conccheck ) ||
+( cd "$spec/valid/porc" && GOFLAGS=-mod=readonly go build -o "$work/conccheck" ./cmd/conccheck ) ||
   fail "could not build conccheck"
 
 "$bin/fakes3" --port "$store_port" > "$work/store.log" 2>&1 &
