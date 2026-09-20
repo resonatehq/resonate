@@ -2,7 +2,7 @@
 
 A complete Resonate server — the whole protocol, one endpoint, one process —
 whose only durable state is objects in a bucket. No database, no log, no
-consensus, no locks, no leases, no background compaction. Twenty-two thousand
+consensus, no locks, no leases, no background compaction. Twenty-three thousand
 lines of Zig and nothing outside the standard library.
 
 ```
@@ -22,7 +22,7 @@ One `POST /` taking one envelope:
 {"kind":"promise.create","head":{"corrId":"1","version":"2026-04-01"},"data":{...}}
 ```
 
-Twenty-eight kinds across `promise.*`, `task.*`, `schedule.*` and `debug.*`,
+Twenty-four kinds across `promise.*`, `task.*`, `schedule.*` and `debug.*`,
 `GET /ready`, `GET /metrics`, and nothing else. The protocol is the Rust tree's,
 version for version: the same validation, the same rejection messages, the same
 tags that drive the semantics (`resonate:target` makes a promise a task,
@@ -38,7 +38,7 @@ Three prefixes, and the keys *are* the schema:
 |---|---|
 | `wf/<origin>` | one document: every promise and task of one origin |
 | `sched/<id>` | one schedule |
-| `t/<NN>/<deadline>_<target>@<generation>` | a deadline, as a zero-byte object |
+| `t/<NN>/<deadline>_<target>@<token>` | a deadline, as a zero-byte object |
 
 The whole design rests on one property of the protocol: **every operation it
 admits is single-origin.** A callback names an awaiter, a fence names a task, a
@@ -59,8 +59,12 @@ in it.
 Deadlines are keys. A zero-padded deadline sorts lexicographically into time
 order, so the nearest deadlines are a capped ascending listing; the shard prefix
 spreads a monotone key space, which is the one access pattern object stores are
-worst at; and the generation names the commit that armed it, so a writer only
-ever removes the deadline its own predecessor wrote.
+worst at; and the token names the *arm* that wrote the object, so a writer only
+ever removes the deadline its own predecessor wrote. The arm rather than the
+commit, because an attempt that armed and then failed to commit leaves its object
+behind, and a retry off the same document version computes the same deadline — a
+token drawn from the document would give the two the same name, and the collect
+meant for the orphan would land on the live one.
 
 Writes go in an order every crash window survives: **arm the deadline, commit
 the document, disarm the old deadline, send the messages, answer.** A crash
@@ -126,7 +130,7 @@ Three ideas hold it together, all of them TigerBeetle's:
 Six checks, described in [docs/validation-plan.md](docs/validation-plan.md):
 
 ```
-zig build test                                   # 210 unit tests
+zig build test                                   # 211 unit tests
 zig-out/bin/simulator run  --seed 1 --servers 3 --clients 4 --operations 200 \
     --conflict 15 --reorder 30 --unavailable 3 --lost-ack 3
 zig-out/bin/simulator soak --runs 200 --crash 2 --unavailable 5 --lost-ack 5
@@ -141,6 +145,12 @@ not order, completions out of order, servers killed mid-decision — and then as
 a linearizability checker whether the recorded history has a sequential
 explanation *in this same state machine*, ending in the state the bucket
 actually holds. Everything in the first list below was found that way.
+
+`--cache-entries 1 --cache-bytes 64` is the same soak over a server that evicts
+its document cache on nearly every commit, which is how the claim that eviction
+is only ever a cost gets checked: a document lost, or one kept after another
+server moved past it, is a wrong answer, and a wrong answer is what the search
+refutes.
 
 Found by the simulator, in the order they turned up:
 
