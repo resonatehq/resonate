@@ -383,6 +383,46 @@ anything, because return order is one legal linearization out of many.
 every `:`-id as its own partition; unpartitioned replays against whole state,
 which is the stronger question.
 
+### Their generator too, not only their checker
+
+`conctrace` is this repository's. The specification repository has its own
+generator, `cmd/loadgen`, and the script runs that as well, so a run exists in
+which nothing in the loop is ours but the server.
+
+It was passed over once for two reasons that are no longer true: it opened with
+`debug.start`, which is a startup flag here and answers 400, and it built ids like
+`c0.a0` where an origin here ends at the first `:`. It now builds `c0:a0`, and its
+`post` only reports a transport failure, so the 400 costs it nothing — it falls
+back to an instant of its own and carries on.
+
+It reaches states `conctrace` never builds: callbacks, heartbeats, awaits across
+origins, sub-origins. It also aims straight at the boundary the whole design rests
+on, and is refused:
+
+| what it sends | what the protocol says |
+|---|---|
+| `resonate:origin` of `c0:sub` | origin must not contain `:` |
+| id `f0:a0` tagged `resonate:origin: c0` | id must be prefixed by the origin |
+| callback awaiting `f0:a0` from `c0:x0` | awaiter and awaited must share an origin |
+| heartbeat over two origins' tasks | all tasks must belong to one origin |
+
+Those are a third of any run, by design, and `resonate-server-blob` refuses the
+same ones. At one client the two servers' profiles are identical: 101 answered, 185
+refused as malformed, 297 not found, 17 conflicted, out of 600. Porcupine proves
+both.
+
+How much state it builds is limited by its own ids rather than by the server. The
+workflow index is `i / 6` over a counter every client shares, while the origin is
+per client, so at eight clients a given id is touched about once and nothing
+accumulates. One client gives depth and no concurrency; eight give concurrency
+across origins and little depth. The script runs 1, 2 and 8.
+
+And it requires a floor on how much succeeded, because **a history in which nothing
+worked is linearizable for free**. Filtering one of these runs down to its 297
+misses and nothing else gives a file Porcupine calls linearizable in a millisecond.
+A verdict on such a file is not evidence, so `count-successes.py` counts, and the
+check fails below forty.
+
 ### What this checker cannot be asked
 
 * **Schedules.** It refuses a history that mentions them: `occurrences` and

@@ -63,6 +63,9 @@ if [[ ! -d "$spec/valid/porc" ]]; then
 fi
 ( cd "$spec/valid/porc" && GOFLAGS=-mod=mod go build -o "$work/conccheck" ./cmd/conccheck ) ||
   fail "could not build conccheck"
+# Its workload generator too, so a run can be theirs end to end.
+( cd "$spec/valid/porc" && GOFLAGS=-mod=mod go build -o "$work/loadgen" ./cmd/loadgen ) ||
+  fail "could not build loadgen"
 
 # ── A server over a stand-in S3, so this needs no bucket ──────────────────────
 "$bin/fakes3" --port "$store_port" > "$work/store.log" 2>&1 &
@@ -130,3 +133,36 @@ done
 
 echo "$proved proved, $slow timed out, $refuted refuted, over $seeds seeds"
 [[ "$refuted" -eq 0 ]] || exit 1
+
+# -- And the same repository's own generator, so nothing in the loop is ours ----
+#
+# `conctrace` above is this repository's. `loadgen` is theirs, and it reaches
+# states `conctrace` never builds: callbacks, heartbeats, awaits across origins,
+# sub-origins. It also probes the boundary the whole design rests on -- an awaiter
+# and an awaited in different origins, a heartbeat spanning two, an origin with a
+# ':' in it -- all of which the protocol refuses, so a large share of any run is
+# refusals by design. `resonate-server-blob` refuses the same ones: at one client
+# the two servers' status profiles are identical, 101 answered, 185 refused as
+# malformed, 297 not found, 17 conflicted.
+#
+# Its ids are the limit on how much state it builds: the workflow index is
+# `i / 6` over a counter shared by every client, while the origin is per client,
+# so at eight clients a given id is touched about once and nothing accumulates.
+# One client gives depth and no concurrency; eight give concurrency across origins
+# and little depth. Both are run, and each has a floor on how much has to have
+# succeeded, because a history in which nothing worked is linearizable for free.
+for lg_clients in 1 2 8; do
+  "$work/loadgen" --url "http://127.0.0.1:$server_port/" --out "$work/lg$lg_clients" \
+    --clients "$lg_clients" --ops 600 --seed 1 > "$work/lg$lg_clients.log" 2>&1 ||
+    fail "loadgen failed at $lg_clients clients"
+  read -r events ok < <(python3 "$here/count-successes.py" "$work/lg$lg_clients.history")
+  # Floors, not targets: at one client it reaches about a hundred, at eight about
+  # sixty. Anything far below means the generator stopped building state.
+  [[ "$events" -ge 500 ]] || fail "loadgen at $lg_clients clients recorded only $events events"
+  [[ "$ok" -ge 40 ]] ||
+    fail "loadgen at $lg_clients clients: only $ok of $events succeeded, which checks nothing"
+  verdict="$("$work/conccheck" -partition=false < "$work/lg$lg_clients.history" 2>&1 |
+    grep -E '^-m' | sed -E 's/-m \(materialized\) +//; s/ +\(.*//; s/ +$//')"
+  echo "loadgen, $lg_clients clients: $events events, $ok succeeded, $verdict"
+  [[ "$verdict" == LINEARIZABLE ]] || exit 1
+done

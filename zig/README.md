@@ -159,8 +159,10 @@ The seventh matters out of proportion to its size. The other six grade this
 server against a specification written in this repository — the simulator's search
 replays the same state machine the server runs, and the differential compares
 against the Rust tree — so agreement there is agreement with ourselves. That one
-hands a recorded history to a checker nobody here wrote, and refuses to believe it
-until it has refused a history with one answer altered.
+hands a recorded history to a checker nobody here wrote, using that repository's
+own workload generator as well as ours, and refuses to believe the result until it
+has refused a history with one answer altered and until enough of the run actually
+succeeded. A history in which nothing worked is linearizable for free.
 
 The simulator runs several servers over one bucket with faults injected into the
 store — no answer, a write that lands and reports failure, two writes it could
