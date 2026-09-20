@@ -39,7 +39,3 @@ test/resonate-perf
 crates/resonate-gateway-web/ui/node_modules/
 crates/resonate-gateway-web/ui/.svelte-kit/
 crates/resonate-gateway-web/ui/build/
-
-# Histories a trace producer or a refuted check leaves behind.
-*.history
-*.ndjson
