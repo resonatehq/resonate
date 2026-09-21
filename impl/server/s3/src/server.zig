@@ -314,9 +314,8 @@ pub const Server = struct {
             .key = prefix,
             .max_keys = 1,
             .arena = probe.arena,
-            .callback = Readiness.on_listed,
-            .context = probe,
         };
+        probe.op.listen(*Readiness, probe, Readiness.on_listed);
         self.applier.store.submit(&probe.op);
     }
 
@@ -329,8 +328,7 @@ pub const Server = struct {
         server: *Server = undefined,
         op: store_mod.Operation = undefined,
 
-        fn on_listed(op: *store_mod.Operation) void {
-            const self: *Readiness = @ptrCast(@alignCast(op.context.?));
+        fn on_listed(self: *Readiness, op: *store_mod.Operation) void {
             self.ok = op.result == .keys;
             self.callback(self);
         }

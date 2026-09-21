@@ -39,12 +39,29 @@ pub const Clock = struct {
 /// asking whether it needs to.
 pub const Timeout = struct {
     at_ms: i64,
-    callback: *const fn (*Timeout) void,
+    /// Set by `listen`. Defaults to a stub so the rest can be one literal, and
+    /// `Timer.arm` refuses a timeout still holding it.
+    callback: *const fn (*Timeout) void = &no_callback,
     context: ?*anyopaque = null,
     /// Set while the timer holds it. A caller must not rearm an armed timeout.
     armed: bool = false,
     /// Intrusive link for the timer's own queue.
     next: ?*Timeout = null,
+
+    fn no_callback(_: *Timeout) void {
+        @panic("a timeout was armed without a callback: call listen");
+    }
+
+    /// Name who is waiting and what to call, together; see `stdx.erase`.
+    pub fn listen(
+        self: *Timeout,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (Context, *Timeout) void,
+    ) void {
+        self.context = context;
+        self.callback = stdx.erase(Timeout, Context, callback);
+    }
 
     pub fn fire(self: *Timeout) void {
         self.armed = false;
@@ -63,6 +80,7 @@ pub const Timer = struct {
 
     pub fn arm(self: Timer, timeout: *Timeout, at_ms: i64) void {
         stdx.assert(!timeout.armed);
+        stdx.assert(timeout.callback != &Timeout.no_callback);
         timeout.at_ms = at_ms;
         timeout.armed = true;
         self.vtable.arm(self.ptr, timeout);
@@ -92,12 +110,29 @@ pub const Delivery = struct {
     /// The message, already JSON. The bus must not retain it past completion.
     body: []const u8,
 
-    callback: *const fn (*Delivery) void,
+    /// Set by `listen`. Defaults to a stub so the rest can be one literal, and
+    /// `MessageBus.send` refuses a delivery still holding it.
+    callback: *const fn (*Delivery) void = &no_callback,
     context: ?*anyopaque = null,
     outcome: Outcome = .pending,
     /// Why it failed, for the log. Never crosses the wire.
     detail: []const u8 = "",
     next: ?*Delivery = null,
+
+    fn no_callback(_: *Delivery) void {
+        @panic("a delivery was sent without a callback: call listen");
+    }
+
+    /// Name who is waiting and what to call, together; see `stdx.erase`.
+    pub fn listen(
+        self: *Delivery,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (Context, *Delivery) void,
+    ) void {
+        self.context = context;
+        self.callback = stdx.erase(Delivery, Context, callback);
+    }
 
     pub fn complete(self: *Delivery, outcome: Outcome, detail: []const u8) void {
         stdx.assert(self.outcome == .pending);
@@ -125,6 +160,7 @@ pub const MessageBus = struct {
     };
 
     pub fn send(self: MessageBus, delivery: *Delivery) void {
+        stdx.assert(delivery.callback != &Delivery.no_callback);
         self.vtable.send(self.ptr, delivery);
     }
 

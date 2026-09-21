@@ -386,14 +386,12 @@ const Process = struct {
         log("the store did not answer the deadline listing; retrying in a second", .{});
         self.seed_timeout = .{
             .at_ms = 0,
-            .callback = on_seed_retry,
-            .context = self,
         };
+        self.seed_timeout.listen(*Process, self, on_seed_retry);
         self.loop.timer().arm(&self.seed_timeout, self.loop.clock().now_ms() + 1_000);
     }
 
-    fn on_seed_retry(timeout: *env.Timeout) void {
-        const self: *Process = @ptrCast(@alignCast(timeout.context.?));
+    fn on_seed_retry(self: *Process, _: *env.Timeout) void {
         self.seed();
     }
 

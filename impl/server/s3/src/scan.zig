@@ -133,14 +133,12 @@ pub const Scanner = struct {
             .key = prefix,
             .max_keys = list_batch,
             .arena = req.arena.allocator(),
-            .callback = on_complete,
-            .context = req,
         };
+        req.op.listen(*Request, req, on_complete);
         self.store.submit(&req.op);
     }
 
-    fn on_complete(op: *store_mod.Operation) void {
-        const req: *Request = @ptrCast(@alignCast(op.context.?));
+    fn on_complete(req: *Request, op: *store_mod.Operation) void {
         const self = req.scanner;
         switch (req.phase) {
             .listing => self.on_listed(req, op.result),
@@ -167,9 +165,8 @@ pub const Scanner = struct {
             .kind = .get,
             .key = req.keys[req.index],
             .arena = req.arena.allocator(),
-            .callback = on_complete,
-            .context = req,
         };
+        req.op.listen(*Request, req, on_complete);
         self.store.submit(&req.op);
     }
 
@@ -240,14 +237,12 @@ pub const Scanner = struct {
             .key = prefix,
             .max_keys = list_batch,
             .arena = req.arena.allocator(),
-            .callback = on_reset_listed,
-            .context = req,
         };
+        req.op.listen(*Request, req, on_reset_listed);
         self.store.submit(&req.op);
     }
 
-    fn on_reset_listed(op: *store_mod.Operation) void {
-        const req: *Request = @ptrCast(@alignCast(op.context.?));
+    fn on_reset_listed(req: *Request, op: *store_mod.Operation) void {
         const self = req.scanner;
         switch (op.result) {
             .keys => |keys| req.keys = keys,
@@ -273,9 +268,8 @@ pub const Scanner = struct {
             .kind = .delete,
             .key = req.keys[req.index],
             .arena = req.arena.allocator(),
-            .callback = on_complete,
-            .context = req,
         };
+        req.op.listen(*Request, req, on_complete);
         self.store.submit(&req.op);
     }
 

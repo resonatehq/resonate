@@ -542,8 +542,7 @@ const Rig = struct {
     const Done = struct {
         result: store_mod.Result = .pending,
         done: bool = false,
-        fn cb(op: *store_mod.Operation) void {
-            const self: *Done = @ptrCast(@alignCast(op.context.?));
+        fn cb(self: *Done, op: *store_mod.Operation) void {
             self.result = op.result;
             self.done = true;
         }
@@ -553,8 +552,7 @@ const Rig = struct {
         var done = Done{};
         var op = template;
         op.arena = arena;
-        op.callback = Done.cb;
-        op.context = &done;
+        op.listen(*Done, &done, Done.cb);
         self.s3.store().submit(&op);
         var guard: usize = 0;
         while (!done.done) {

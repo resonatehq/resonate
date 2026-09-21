@@ -195,27 +195,21 @@ pub const Sender = struct {
         const flight = try self.allocator.create(InFlight);
         errdefer self.allocator.destroy(flight);
         flight.* = .{
-            .delivery = .{
-                .address = undefined,
-                .body = undefined,
-                .callback = on_delivered,
-                .context = undefined,
-            },
+            .delivery = .{ .address = undefined, .body = undefined },
             .sender = self,
             .address = try self.allocator.dupe(u8, held.address),
             .body = try body.toOwnedSlice(),
         };
         flight.delivery.address = flight.address;
         flight.delivery.body = flight.body;
-        flight.delivery.context = flight;
+        flight.delivery.listen(*InFlight, flight, on_delivered);
 
         self.in_flight += 1;
         self.sent += 1;
         self.bus.send(&flight.delivery);
     }
 
-    fn on_delivered(delivery: *env.Delivery) void {
-        const flight: *InFlight = @ptrCast(@alignCast(delivery.context.?));
+    fn on_delivered(flight: *InFlight, delivery: *env.Delivery) void {
         const self = flight.sender;
         switch (delivery.outcome) {
             .delivered => self.delivered += 1,

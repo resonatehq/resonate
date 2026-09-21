@@ -332,7 +332,7 @@ const Actor = struct {
     /// Initialized rather than left undefined: `destroy` has to be able to ask
     /// whether it is armed, and an actor that went away leaving a deadline
     /// pointing at it is a crash on the next tick of the clock.
-    backoff: env.Timeout = .{ .at_ms = 0, .callback = on_backoff },
+    backoff: env.Timeout = .{ .at_ms = 0 },
     key: std.ArrayList(u8),
     old_key: std.ArrayList(u8),
 
@@ -429,21 +429,33 @@ const Actor = struct {
             .key = key,
             .precondition = precondition,
             .arena = a,
-            .callback = on_store_complete,
-            .context = self,
         };
+        self.op.listen(*Actor, self, on_load_complete);
         self.applier.store.submit(&self.op);
     }
 
-    fn on_store_complete(op: *store_mod.Operation) void {
-        const self: *Actor = @ptrCast(@alignCast(op.context.?));
-        switch (self.phase) {
-            .loading => self.on_loaded(op.result),
-            .arming => self.on_armed(op.result),
-            .committing => self.on_committed(op.result),
-            .disarming => self.on_disarmed(),
-            else => unreachable,
-        }
+    // One entry point per submission, named where the submission is made rather
+    // than re-derived from `phase`. `phase` is still the actor's state for
+    // `idle()` and the assertions; it is no longer how an answer finds its way
+    // back, which is what the `else => unreachable` used to be guarding.
+    fn on_load_complete(self: *Actor, op: *store_mod.Operation) void {
+        assert(self.phase == .loading);
+        self.on_loaded(op.result);
+    }
+
+    fn on_arm_complete(self: *Actor, op: *store_mod.Operation) void {
+        assert(self.phase == .arming);
+        self.on_armed(op.result);
+    }
+
+    fn on_commit_complete(self: *Actor, op: *store_mod.Operation) void {
+        assert(self.phase == .committing);
+        self.on_committed(op.result);
+    }
+
+    fn on_disarm_complete(self: *Actor, _: *store_mod.Operation) void {
+        assert(self.phase == .disarming);
+        self.on_disarmed();
     }
 
     fn on_loaded(self: *Actor, result: store_mod.Result) void {
@@ -604,9 +616,8 @@ const Actor = struct {
             .body = &.{},
             .precondition = .none,
             .arena = self.scratch.allocator(),
-            .callback = on_store_complete,
-            .context = self,
         };
+        self.op.listen(*Actor, self, on_arm_complete);
         self.applier.store.submit(&self.op);
     }
 
@@ -630,9 +641,8 @@ const Actor = struct {
             .body = self.body,
             .precondition = if (self.etag) |e| .{ .match = e } else .absent,
             .arena = self.scratch.allocator(),
-            .callback = on_store_complete,
-            .context = self,
         };
+        self.op.listen(*Actor, self, on_commit_complete);
         self.applier.store.submit(&self.op);
     }
 
@@ -678,12 +688,12 @@ const Actor = struct {
         }
         const at = self.applier.clock.now_ms() + self.applier.backoff_ms(self.attempt);
         self.phase = .waiting;
-        self.backoff = .{ .at_ms = at, .callback = on_backoff, .context = self };
+        self.backoff = .{ .at_ms = at };
+        self.backoff.listen(*Actor, self, on_backoff);
         self.applier.timer.arm(&self.backoff, at);
     }
 
-    fn on_backoff(timeout: *env.Timeout) void {
-        const self: *Actor = @ptrCast(@alignCast(timeout.context.?));
+    fn on_backoff(self: *Actor, _: *env.Timeout) void {
         // Read before the call: retrying can finish the batch and retire this
         // actor, and then `self` is freed memory. Every place that continues after
         // handing control back to the applier has to hold the applier, not the
@@ -713,9 +723,8 @@ const Actor = struct {
             .kind = .delete,
             .key = key,
             .arena = self.scratch.allocator(),
-            .callback = on_store_complete,
-            .context = self,
         };
+        self.op.listen(*Actor, self, on_disarm_complete);
         self.applier.store.submit(&self.op);
     }
 

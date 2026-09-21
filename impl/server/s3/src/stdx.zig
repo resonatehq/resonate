@@ -37,6 +37,36 @@ pub inline fn assert_msg(ok: bool, comptime fmt: []const u8, args: anytype) void
 /// oversight.
 pub inline fn maybe(_: bool) void {}
 
+/// Generate the cast that turns a callback's context back into its own type.
+///
+/// Every event in this tree — a store operation, a timeout, a delivery — carries
+/// a `callback` taking the event and a `context` that has forgotten what it is.
+/// Written by hand that is a `@ptrCast(@alignCast(...))` at the top of every
+/// callback, and each one is a place where naming the wrong type compiles and
+/// corrupts memory at run time.
+///
+/// This writes the cast once, generated per call site from the typed callback the
+/// caller actually wrote, so no subsystem casts by hand and the compiler checks
+/// the callback against the context it was given. Borrowed from TigerBeetle's
+/// `erase_types`, which does the same thing for its io_uring completions.
+///
+/// `Event` needs a `context: ?*anyopaque`, which is exactly the shape of the ones
+/// here. Prefer the `listen` method on the event over calling this directly: it
+/// sets the context and the callback together, so the two cannot disagree.
+pub fn erase(
+    comptime Event: type,
+    comptime Context: type,
+    comptime callback: fn (Context, *Event) void,
+) *const fn (*Event) void {
+    comptime assert(@typeInfo(Context) == .pointer);
+    return &struct {
+        fn erased(event: *Event) void {
+            const context: Context = @ptrCast(@alignCast(event.context.?));
+            callback(context, event);
+        }
+    }.erased;
+}
+
 /// Comparison of two byte strings, for sorting.
 pub fn less_than_bytes(_: void, a: []const u8, b: []const u8) bool {
     return std.mem.lessThan(u8, a, b);

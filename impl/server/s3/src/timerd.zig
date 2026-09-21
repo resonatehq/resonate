@@ -192,13 +192,13 @@ pub const Timerd = struct {
             if (current <= next) return;
             self.timer.cancel(&self.wake);
         }
-        self.wake = .{ .at_ms = next, .callback = on_wake, .context = self };
+        self.wake = .{ .at_ms = next };
+        self.wake.listen(*Timerd, self, on_wake);
         self.wake_at = next;
         self.timer.arm(&self.wake, next);
     }
 
-    fn on_wake(timeout: *env.Timeout) void {
-        const self: *Timerd = @ptrCast(@alignCast(timeout.context.?));
+    fn on_wake(self: *Timerd, _: *env.Timeout) void {
         self.wake_at = null;
         self.sweep();
     }
@@ -365,14 +365,12 @@ pub const Timerd = struct {
             .kind = .delete,
             .key = f.key,
             .arena = f.arena.allocator(),
-            .callback = on_collected,
-            .context = f,
         };
+        f.op.listen(*Fire, f, on_collected);
         self.store.submit(&f.op);
     }
 
-    fn on_collected(op: *store_mod.Operation) void {
-        const f: *Fire = @ptrCast(@alignCast(op.context.?));
+    fn on_collected(f: *Fire, op: *store_mod.Operation) void {
         const self = f.timerd;
         // Best effort. A failure leaves a key that fires into a sweep with
         // nothing due, which collects it next time.
@@ -428,9 +426,8 @@ pub const Timerd = struct {
             },
             .max_keys = std.math.maxInt(u32),
             .arena = seeding.arena.allocator(),
-            .callback = Seed.on_listed,
-            .context = seeding,
         };
+        seeding.op.listen(*Seed, seeding, Seed.on_listed);
         self.store.submit(&seeding.op);
     }
 
@@ -441,8 +438,7 @@ pub const Timerd = struct {
         on_done: *const fn (context: ?*anyopaque, armed: ?usize) void,
         context: ?*anyopaque,
 
-        fn on_listed(op: *store_mod.Operation) void {
-            const self: *Seed = @ptrCast(@alignCast(op.context.?));
+        fn on_listed(self: *Seed, op: *store_mod.Operation) void {
             switch (op.result) {
                 .keys => |keys| {
                     var armed: usize = 0;
@@ -530,14 +526,12 @@ pub const Timerd = struct {
                 .key = key,
                 .max_keys = std.math.maxInt(u32),
                 .arena = self.arena.allocator(),
-                .callback = on_listed,
-                .context = self,
             };
+            self.op.listen(*Tick, self, on_listed);
             self.timerd.store.submit(&self.op);
         }
 
-        fn on_listed(op: *store_mod.Operation) void {
-            const self: *Tick = @ptrCast(@alignCast(op.context.?));
+        fn on_listed(self: *Tick, op: *store_mod.Operation) void {
             const keys = switch (op.result) {
                 .keys => |k| k,
                 .unavailable => |detail| {

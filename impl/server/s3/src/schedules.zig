@@ -177,14 +177,12 @@ pub const Service = struct {
             .kind = .get,
             .key = key,
             .arena = req.arena.allocator(),
-            .callback = on_complete,
-            .context = req,
         };
+        req.op.listen(*Request, req, on_complete);
         self.store.submit(&req.op);
     }
 
-    fn on_complete(op: *store_mod.Operation) void {
-        const req: *Request = @ptrCast(@alignCast(op.context.?));
+    fn on_complete(req: *Request, op: *store_mod.Operation) void {
         const self = req.service;
         switch (req.phase) {
             .loading => self.on_loaded(req, op.result),
@@ -350,9 +348,8 @@ pub const Service = struct {
             .body = &.{},
             .precondition = .none,
             .arena = a,
-            .callback = on_complete,
-            .context = req,
         };
+        req.op.listen(*Request, req, on_complete);
         self.store.submit(&req.op);
     }
 
@@ -374,9 +371,8 @@ pub const Service = struct {
             .body = req.body,
             .precondition = if (req.etag) |e| .{ .match = e } else .absent,
             .arena = req.arena.allocator(),
-            .callback = on_complete,
-            .context = req,
         };
+        req.op.listen(*Request, req, on_complete);
         self.store.submit(&req.op);
     }
 
@@ -443,9 +439,8 @@ pub const Service = struct {
             .kind = .delete,
             .key = key,
             .arena = req.arena.allocator(),
-            .callback = on_complete,
-            .context = req,
         };
+        req.op.listen(*Request, req, on_complete);
         self.store.submit(&req.op);
     }
 

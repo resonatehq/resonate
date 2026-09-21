@@ -131,12 +131,32 @@ pub const Operation = struct {
     /// keys. The caller's, so the caller decides when it goes.
     arena: std.mem.Allocator,
 
-    callback: *const fn (*Operation) void,
+    /// Set by `listen`, which pairs it with the context. It defaults to a stub so
+    /// the rest of the operation can be written as one literal; `Store.submit`
+    /// refuses an operation still holding the stub, so forgetting `listen` fails
+    /// at the submission rather than at the completion.
+    callback: *const fn (*Operation) void = &no_callback,
     context: ?*anyopaque = null,
     result: Result = .pending,
 
     /// Intrusive link, for whatever queue the store keeps.
     next: ?*Operation = null,
+
+    fn no_callback(_: *Operation) void {
+        @panic("a store operation was submitted without a callback: call listen");
+    }
+
+    /// Name who is waiting and what to call, together, so the two cannot
+    /// disagree. The callback takes its own type; see `stdx.erase`.
+    pub fn listen(
+        self: *Operation,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (Context, *Operation) void,
+    ) void {
+        self.context = context;
+        self.callback = stdx.erase(Operation, Context, callback);
+    }
 
     pub fn complete(self: *Operation, result: Result) void {
         assert(self.result == .pending);
@@ -158,6 +178,7 @@ pub const Store = struct {
 
     pub fn submit(self: Store, op: *Operation) void {
         assert(op.result == .pending);
+        assert(op.callback != &Operation.no_callback);
         self.vtable.submit(self.ptr, op);
     }
 };
