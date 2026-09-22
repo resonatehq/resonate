@@ -629,6 +629,12 @@ async fn porcupine(backend: Backend, db: &DbArgs, porc: &PorcArgs) -> Result<()>
                 "RESONATE_GATEWAYS__GATEWAY_HTTP__BIND",
                 format!("127.0.0.1:{port}"),
             )
+            // Metrics on a free port too: its default, 9090, is whatever
+            // else on this machine is a resonate server.
+            .env(
+                "RESONATE_GATEWAYS__GATEWAY_METRICS__BIND",
+                format!("127.0.0.1:{}", free_port()?),
+            )
             .stdout(Stdio::from(
                 std::fs::File::create(dir.join("server.log")).map_err(|e| e.to_string())?,
             ))
