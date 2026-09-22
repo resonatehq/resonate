@@ -81,9 +81,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [sqlite, postgres, mysql, blob]
+        backend: [sqlite, postgres, mysql, blob, neo4j]
 
-    # Services cannot be selected per matrix leg, so both start everywhere
+    # Services cannot be selected per matrix leg, so all start everywhere
     # and the step below picks the one this leg talks to.
     services:
       postgres:
@@ -113,6 +113,17 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 15
+      neo4j:
+        image: neo4j:5
+        env:
+          NEO4J_AUTH: neo4j/resonate
+        ports:
+          - 7687:7687
+        options: >-
+          --health-cmd "cypher-shell -u neo4j -p resonate 'RETURN 1' || exit 1"
+          --health-interval 10s
+          --health-timeout 10s
+          --health-retries 20
 
     steps:
       - name: Checkout
@@ -131,6 +142,7 @@ jobs:
         env:
           XTASK_POSTGRES_ADMIN_URL: postgres://resonate:resonate@localhost:5432/postgres
           XTASK_MYSQL_ADMIN_URL: mysql://root:resonate@127.0.0.1:3306/mysql
+          XTASK_NEO4J_URI: bolt://localhost:7687
         run: cargo xtask differential --backend ${{ matrix.backend }}
 
   # Porcupine, from the specification, against a live server under real
@@ -163,7 +175,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [sqlite, postgres, mysql, blob]
+        backend: [sqlite, postgres, mysql, blob, neo4j]
 
     services:
       postgres:
@@ -193,6 +205,17 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 15
+      neo4j:
+        image: neo4j:5
+        env:
+          NEO4J_AUTH: neo4j/resonate
+        ports:
+          - 7687:7687
+        options: >-
+          --health-cmd "cypher-shell -u neo4j -p resonate 'RETURN 1' || exit 1"
+          --health-interval 10s
+          --health-timeout 10s
+          --health-retries 20
 
     steps:
       - name: Checkout
@@ -223,5 +246,6 @@ jobs:
         env:
           XTASK_POSTGRES_ADMIN_URL: postgres://resonate:resonate@localhost:5432/postgres
           XTASK_MYSQL_ADMIN_URL: mysql://root:resonate@127.0.0.1:3306/mysql
+          XTASK_NEO4J_URI: bolt://localhost:7687
           XTASK_SPEC_DIR: ${{ github.workspace }}/spec/valid/porc
         run: cargo xtask porcupine --backend ${{ matrix.backend }}

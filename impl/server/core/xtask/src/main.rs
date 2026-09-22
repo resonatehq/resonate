@@ -25,6 +25,14 @@
 //! construction. Nothing here depends on a database called `resonate`
 //! existing, and nothing here ever touches one that does.
 //!
+//! Neo4j is the exception that cannot be fresh: Community Edition has one
+//! database and no `CREATE DATABASE`. So the rule is kept by checking rather
+//! than by construction — given `--neo4j-uri` (or `XTASK_NEO4J_URI`) a job
+//! refuses to start on a database that already holds a promise or a schedule,
+//! and clears what it wrote when it is done, with the same `--keep-db`
+//! exception. It never deletes anything it did not find empty. Point it at a
+//! disposable instance, as CI's service container is.
+//!
 //! # What runs where
 //!
 //! `check` is exactly the Check job's four steps. `differential` is one leg of
@@ -98,6 +106,7 @@ enum Backend {
     Postgres,
     Mysql,
     Blob,
+    Neo4j,
 }
 
 #[derive(Args, Clone)]
@@ -109,6 +118,14 @@ struct DbArgs {
     /// Admin connection to a MySQL server; its database name is ignored.
     #[arg(long, env = "XTASK_MYSQL_ADMIN_URL")]
     mysql_admin_url: Option<String>,
+    /// Bolt URI of a disposable Neo4j, which must hold no promise or schedule
+    /// when a job starts. Cleared after the job.
+    #[arg(long, env = "XTASK_NEO4J_URI")]
+    neo4j_uri: Option<String>,
+    #[arg(long, env = "XTASK_NEO4J_USER", default_value = "neo4j")]
+    neo4j_user: String,
+    #[arg(long, env = "XTASK_NEO4J_PASSWORD", default_value = "resonate")]
+    neo4j_password: String,
     /// Leave the fresh databases in place after the run, for inspection.
     #[arg(long)]
     keep_db: bool,
@@ -208,6 +225,7 @@ fn check() -> Result<()> {
 /// A database that did not exist before this job and will not after it.
 struct FreshDb {
     kind: Backend,
+    db: DbArgs,
     admin_url: String,
     name: String,
     /// The URL the job is given: the admin connection, pointed at `name`.
@@ -216,7 +234,28 @@ struct FreshDb {
 }
 
 impl FreshDb {
-    async fn create(kind: Backend, admin_url: &str, keep: bool, purpose: &str) -> Result<Self> {
+    async fn create(kind: Backend, db: &DbArgs, admin_url: &str, purpose: &str) -> Result<Self> {
+        let keep = db.keep_db;
+        if kind == Backend::Neo4j {
+            let graph = neo4j(db, admin_url).await?;
+            let held = neo4j_resonate_nodes(&graph).await?;
+            if held > 0 {
+                return Err(format!(
+                    "neo4j at {admin_url} already holds {held} promises and schedules; \
+                     a job runs only on an empty one, so point --neo4j-uri at a \
+                     disposable instance"
+                ));
+            }
+            eprintln!("==> neo4j at {admin_url} is empty");
+            return Ok(Self {
+                kind,
+                db: db.clone(),
+                admin_url: admin_url.to_string(),
+                name: "neo4j".to_string(),
+                url: admin_url.to_string(),
+                keep,
+            });
+        }
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis())
@@ -244,11 +283,14 @@ impl FreshDb {
                     .await
                     .map_err(|e| format!("create database {name}: {e}"))?;
             }
-            Backend::Sqlite | Backend::Blob => unreachable!("no server to create a database on"),
+            Backend::Sqlite | Backend::Blob | Backend::Neo4j => {
+                unreachable!("no server to create a database on")
+            }
         }
         eprintln!("==> fresh database {name}");
         Ok(Self {
             kind,
+            db: db.clone(),
             admin_url: admin_url.to_string(),
             name,
             url,
@@ -281,6 +323,14 @@ impl FreshDb {
                     .map_err(|e| e.to_string()),
                 Err(e) => Err(e.to_string()),
             },
+            // Only what the job wrote: the database was empty when it began.
+            Backend::Neo4j => match neo4j(&self.db, &self.admin_url).await {
+                Ok(graph) => graph
+                    .run(neo4rs::query(NEO4J_CLEAR))
+                    .await
+                    .map_err(|e| e.to_string()),
+                Err(e) => Err(e),
+            },
             Backend::Sqlite | Backend::Blob => Ok(()),
         };
         match dropped {
@@ -290,6 +340,31 @@ impl FreshDb {
             Err(e) => eprintln!("==> could not drop database {}: {e}", self.name),
         }
     }
+}
+
+/// Every node the server writes; the same match as its `debug.reset`.
+const NEO4J_CLEAR: &str = "MATCH (n) WHERE n:Promise OR n:Schedule DETACH DELETE n";
+
+async fn neo4j(db: &DbArgs, uri: &str) -> Result<neo4rs::Graph> {
+    let graph = neo4rs::Graph::new(uri, db.neo4j_user.as_str(), db.neo4j_password.as_str())
+        .await
+        .map_err(|e| format!("neo4j {uri}: {e}"))?;
+    Ok(graph)
+}
+
+async fn neo4j_resonate_nodes(graph: &neo4rs::Graph) -> Result<i64> {
+    let mut rows = graph
+        .execute(neo4rs::query(
+            "MATCH (n) WHERE n:Promise OR n:Schedule RETURN count(n) AS n",
+        ))
+        .await
+        .map_err(|e| format!("neo4j: {e}"))?;
+    let row = rows
+        .next()
+        .await
+        .map_err(|e| format!("neo4j: {e}"))?
+        .ok_or("neo4j: count returned no row")?;
+    row.get::<i64>("n").map_err(|e| format!("neo4j: {e}"))
 }
 
 /// The admin URL for a backend, or the reason there is none.
@@ -305,6 +380,11 @@ fn admin_url(db: &DbArgs, backend: Backend) -> Result<Option<String>> {
                 .clone()
                 .ok_or("mysql needs --mysql-admin-url or XTASK_MYSQL_ADMIN_URL")?,
         ),
+        Backend::Neo4j => Some(
+            db.neo4j_uri
+                .clone()
+                .ok_or("neo4j needs --neo4j-uri or XTASK_NEO4J_URI")?,
+        ),
         Backend::Sqlite | Backend::Blob => None,
     })
 }
@@ -318,7 +398,7 @@ where
 {
     match admin_url(db, backend)? {
         Some(admin) => {
-            let fresh = FreshDb::create(backend, &admin, db.keep_db, purpose).await?;
+            let fresh = FreshDb::create(backend, db, &admin, purpose).await?;
             let result = job(Some(&fresh.url));
             fresh.finish().await;
             result
@@ -331,8 +411,18 @@ fn url_var(backend: Backend) -> Option<&'static str> {
     match backend {
         Backend::Postgres => Some("TEST_POSTGRES_URL"),
         Backend::Mysql => Some("TEST_MYSQL_URL"),
+        Backend::Neo4j => Some("TEST_NEO4J_URI"),
         Backend::Sqlite | Backend::Blob => None,
     }
+}
+
+/// What a backend needs besides its URL.
+fn with_credentials<'c>(cmd: &'c mut Command, backend: Backend, db: &DbArgs) -> &'c mut Command {
+    if backend == Backend::Neo4j {
+        cmd.env("TEST_NEO4J_USER", &db.neo4j_user)
+            .env("TEST_NEO4J_PASSWORD", &db.neo4j_password);
+    }
+    cmd
 }
 
 // ---------------------------------------------------------------------------
@@ -412,9 +502,21 @@ async fn one_differential(backend: Backend, seed: Option<u64>, db: &DbArgs) -> R
         if let (Some(var), Some(url)) = (url_var(backend), url) {
             cmd.env(var, url);
         }
+        with_credentials(&mut cmd, backend, db);
         run("engine differential", with_seed(&mut cmd, seed))
     })
     .await?;
+    if backend == Backend::Neo4j {
+        // Neo4j is not behind the ports yet, so its port differential is the
+        // default one: the oracle, SQLite and blob, with nothing to clear.
+        return run(
+            "port differential",
+            with_seed(
+                cargo().args(["test", "--release", "--test", "port", "--", "--nocapture"]),
+                seed,
+            ),
+        );
+    }
     // The port differential, on another.
     with_fresh_db(backend, db, "port", |url| {
         let mut cmd = cargo();
@@ -547,6 +649,16 @@ async fn porcupine(backend: Backend, db: &DbArgs, porc: &PorcArgs) -> Result<()>
                     .env("RESONATE_SERVERS__ACTIVE", "server_mysql")
                     .env("RESONATE_SERVERS__SERVER_MYSQL__URL", url.expect("fresh"));
             }
+            Backend::Neo4j => {
+                server
+                    .env("RESONATE_SERVERS__ACTIVE", "server_neo4j")
+                    .env("RESONATE_SERVERS__SERVER_NEO4J__URI", url.expect("fresh"))
+                    .env("RESONATE_SERVERS__SERVER_NEO4J__USER", &db.neo4j_user)
+                    .env(
+                        "RESONATE_SERVERS__SERVER_NEO4J__PASSWORD",
+                        &db.neo4j_password,
+                    );
+            }
             Backend::Blob => {
                 // No bucket: the in-process object store, fresh with the
                 // process, with real conditional-write semantics.
@@ -608,21 +720,26 @@ async fn porcupine(backend: Backend, db: &DbArgs, porc: &PorcArgs) -> Result<()>
 
 async fn all(db: &DbArgs, porc: &PorcArgs) -> Result<()> {
     check()?;
-    let mut sql = vec![Backend::Sqlite];
+    let mut servers = vec![Backend::Sqlite];
     if db.postgres_admin_url.is_some() {
-        sql.push(Backend::Postgres);
+        servers.push(Backend::Postgres);
     } else {
         eprintln!("==> no postgres admin url: postgres skipped");
     }
     if db.mysql_admin_url.is_some() {
-        sql.push(Backend::Mysql);
+        servers.push(Backend::Mysql);
     } else {
         eprintln!("==> no mysql admin url: mysql skipped");
     }
-    for b in sql.iter().copied().chain([Backend::Blob]) {
+    if db.neo4j_uri.is_some() {
+        servers.push(Backend::Neo4j);
+    } else {
+        eprintln!("==> no neo4j uri: neo4j skipped");
+    }
+    for b in servers.iter().copied().chain([Backend::Blob]) {
         differential(b, &[], db).await?;
     }
-    for b in sql.iter().copied().chain([Backend::Blob]) {
+    for b in servers.iter().copied().chain([Backend::Blob]) {
         porcupine(b, db, porc).await?;
     }
     Ok(())

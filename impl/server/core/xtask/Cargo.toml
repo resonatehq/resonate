@@ -7,6 +7,7 @@ description = "The one way to run what CI runs: cargo xtask <job>."
 
 [dependencies]
 clap = { workspace = true }
+neo4rs = "0.8"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "mysql"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 url = { workspace = true }
