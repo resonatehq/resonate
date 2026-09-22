@@ -1,6 +1,6 @@
 //! The sweep: everything whose deadline has passed, in one pass.
 //!
-//! `drain` is `Db::process_timeouts` (`persistence_sqlite.rs:1422-1556`) as a
+//! `sweep` is `Db::process_timeouts` (`persistence_sqlite.rs:1422-1556`) as a
 //! pure function, restricted to one origin. Its three phases run in that
 //! backend's order — armed promise deadlines, then task retry deadlines, then
 //! task lease deadlines — and each phase reads the state the previous one left,
@@ -8,7 +8,7 @@
 //! retry sweep instead of being re-dispatched.
 //!
 //! Where [`handle`](super::handle) settles only the promises a request *names*,
-//! `drain` settles every armed one. That is the whole difference between the
+//! `sweep` settles every armed one. That is the whole difference between the
 //! two, and it is why the shell needs a timer at all.
 //!
 //! # Dependencies
@@ -27,7 +27,7 @@ use super::handle::{trigger_settlement, Tx};
 use super::state::{Effect, KernelCfg, OriginDoc};
 
 /// Sweep every deadline at or before `now`.
-pub fn drain(doc: &OriginDoc, now: i64, cfg: &KernelCfg) -> Vec<Effect> {
+pub fn sweep(doc: &OriginDoc, now: i64, cfg: &KernelCfg) -> Vec<Effect> {
     let mut tx = Tx::new(doc, cfg);
 
     // Phase 1 — settle every pending promise whose deadline has passed,
@@ -98,14 +98,19 @@ pub fn drain(doc: &OriginDoc, now: i64, cfg: &KernelCfg) -> Vec<Effect> {
             || !retries.is_empty()
             || !leases.is_empty()
             || tx.doc.promises == doc.promises && tx.doc.tasks == doc.tasks,
-        "a drain that fired nothing must change nothing"
+        "a sweep that fired nothing must change nothing"
     );
     debug_assert!(
         tx.doc
             .promises
             .values()
+<<<<<<<< HEAD:impl/server/core/crates/resonate-server-blob/src/kernel/drain.rs
             .all(|p| p.state != PromiseState::Pending || now < p.timeout_at),
         "drain left a pending promise past its deadline"
+========
+            .all(|p| p.state != PromiseState::Pending || now < p.timeout_at || !p.timeout_armed()),
+        "sweep left an armed deadline in the past"
+>>>>>>>> c086bf19 (chore: rename blob kernel's drain to sweep):impl/server/core/crates/resonate-server-blob/src/kernel/sweep.rs
     );
     tx.finish(doc)
 }
@@ -140,8 +145,8 @@ mod tests {
         next
     }
 
-    fn sweep(doc: &OriginDoc, now: i64) -> (OriginDoc, Vec<(String, Message)>) {
-        let fx = drain(doc, now, &cfg());
+    fn apply_sweep(doc: &OriginDoc, now: i64) -> (OriginDoc, Vec<(String, Message)>) {
+        let fx = sweep(doc, now, &cfg());
         let mut next = doc.clone();
         apply_effects(&mut next, &fx);
         let sends = fx
@@ -179,7 +184,7 @@ mod tests {
 
     #[test]
     fn an_empty_document_drains_to_nothing() {
-        let (next, sends) = sweep(&OriginDoc::default(), 1_000_000);
+        let (next, sends) = apply_sweep(&OriginDoc::default(), 1_000_000);
         assert_eq!(next, OriginDoc::default());
         assert!(sends.is_empty());
     }
@@ -187,7 +192,7 @@ mod tests {
     #[test]
     fn a_document_with_nothing_due_is_unchanged() {
         let doc = apply(&OriginDoc::default(), targeted("o:a", 100_000), 0);
-        let (next, sends) = sweep(&doc, 1_000);
+        let (next, sends) = apply_sweep(&doc, 1_000);
         assert_eq!(next, doc);
         assert!(sends.is_empty());
     }
@@ -195,7 +200,7 @@ mod tests {
     #[test]
     fn an_expired_promise_settles_at_its_own_deadline() {
         let doc = apply(&OriginDoc::default(), targeted("o:a", 1_000), 0);
-        let (next, _) = sweep(&doc, 5_000);
+        let (next, _) = apply_sweep(&doc, 5_000);
         let p = &next.promises["o:a"];
         assert_eq!(p.state, PromiseState::RejectedTimedout);
         // The stamp is the deadline, not the sweep time.
@@ -211,7 +216,7 @@ mod tests {
             "tags": { "resonate:target": W, "resonate:timer": "true" }
         })));
         let doc = apply(&OriginDoc::default(), r, 0);
-        let (next, _) = sweep(&doc, 5_000);
+        let (next, _) = apply_sweep(&doc, 5_000);
         assert_eq!(next.promises["o:a"].state, PromiseState::Resolved);
     }
 
@@ -221,9 +226,14 @@ mod tests {
         // deadline passes, like every other pending promise. Nothing is
         // dispatched, since there is no task to notify.
         let doc = apply(&OriginDoc::default(), plain("o:a", 1_000), 0);
+<<<<<<<< HEAD:impl/server/core/crates/resonate-server-blob/src/kernel/drain.rs
         let (next, sends) = sweep(&doc, 5_000);
         assert_eq!(next.promises["o:a"].state, PromiseState::RejectedTimedout);
         assert_eq!(next.promises["o:a"].settled_at, Some(1_000));
+========
+        let (next, sends) = apply_sweep(&doc, 5_000);
+        assert_eq!(next.promises["o:a"].state, PromiseState::Pending);
+>>>>>>>> c086bf19 (chore: rename blob kernel's drain to sweep):impl/server/core/crates/resonate-server-blob/src/kernel/sweep.rs
         assert!(sends.is_empty());
         // It armed nothing before and arms nothing after.
         assert_eq!(doc.timer_at, None);
@@ -238,7 +248,7 @@ mod tests {
         }
         // Every task is fulfilled by its own promise expiring, so no dispatches
         // remain — the visible order is the settle order in the document.
-        let (next, sends) = sweep(&doc, 5_000);
+        let (next, sends) = apply_sweep(&doc, 5_000);
         assert!(sends.is_empty());
         let states: Vec<&str> = next.promises.values().map(|p| p.state.as_str()).collect();
         assert_eq!(states, vec!["rejected_timedout"; 3]);
@@ -264,7 +274,7 @@ mod tests {
                 1,
             );
         }
-        let (next, sends) = sweep(&doc, 5_000);
+        let (next, sends) = apply_sweep(&doc, 5_000);
         assert_eq!(
             executed(&sends),
             vec![("o:z".to_string(), 0), ("o:a".to_string(), 0)]
@@ -282,7 +292,7 @@ mod tests {
         // Phase 1 fulfils the task, so phase 3 has nothing to re-send.
         let doc = apply(&OriginDoc::default(), targeted("o:a", 1_000), 0);
         assert_eq!(doc.tasks["o:a"].retry_at, Some(30_000));
-        let (next, sends) = sweep(&doc, 40_000);
+        let (next, sends) = apply_sweep(&doc, 40_000);
         assert_eq!(next.tasks["o:a"].state, TaskState::Fulfilled);
         assert!(sends.is_empty(), "a finished task is not dispatched");
     }
@@ -290,7 +300,7 @@ mod tests {
     #[test]
     fn a_pending_tasks_retry_deadline_re_dispatches_it() {
         let doc = apply(&OriginDoc::default(), targeted("o:a", 1_000_000), 0);
-        let (next, sends) = sweep(&doc, 30_000);
+        let (next, sends) = apply_sweep(&doc, 30_000);
         assert_eq!(executed(&sends), vec![("o:a".to_string(), 0)]);
         let t = &next.tasks["o:a"];
         assert_eq!(t.state, TaskState::Pending);
@@ -302,7 +312,7 @@ mod tests {
     #[test]
     fn a_retry_is_re_armed_relative_to_the_sweep_not_the_old_deadline() {
         let doc = apply(&OriginDoc::default(), targeted("o:a", 1_000_000), 0);
-        let (next, _) = sweep(&doc, 100_000);
+        let (next, _) = apply_sweep(&doc, 100_000);
         assert_eq!(next.tasks["o:a"].retry_at, Some(130_000));
     }
 
@@ -317,7 +327,7 @@ mod tests {
         let doc = apply(&OriginDoc::default(), create, 0);
         assert_eq!(doc.tasks["o:t"].lease_at, Some(10_000));
 
-        let (next, sends) = sweep(&doc, 10_000);
+        let (next, sends) = apply_sweep(&doc, 10_000);
         let t = &next.tasks["o:t"];
         assert_eq!(t.state, TaskState::Pending);
         assert_eq!((t.pid.as_deref(), t.ttl), (None, None));
@@ -337,7 +347,7 @@ mod tests {
                 "tags": { "resonate:target": W } } }
         })));
         let doc = apply(&OriginDoc::default(), create, 0);
-        let (next, sends) = sweep(&doc, 9_999);
+        let (next, sends) = apply_sweep(&doc, 9_999);
         assert_eq!(next, doc);
         assert!(sends.is_empty());
     }
@@ -345,8 +355,8 @@ mod tests {
     #[test]
     fn sweeping_twice_at_the_same_instant_is_idempotent_but_for_the_retry_clock() {
         let doc = apply(&OriginDoc::default(), targeted("o:a", 1_000), 0);
-        let (once, _) = sweep(&doc, 5_000);
-        let (twice, sends) = sweep(&once, 5_000);
+        let (once, _) = apply_sweep(&doc, 5_000);
+        let (twice, sends) = apply_sweep(&once, 5_000);
         assert_eq!(twice, once);
         assert!(sends.is_empty());
     }
@@ -355,7 +365,7 @@ mod tests {
     fn a_sweep_moves_the_origins_timer_to_the_next_deadline() {
         let doc = apply(&OriginDoc::default(), targeted("o:a", 45_000), 0);
         assert_eq!(doc.timer_at, Some(30_000));
-        let fx = drain(&doc, 30_000, &cfg());
+        let fx = sweep(&doc, 30_000, &cfg());
         assert!(fx.contains(&Effect::SetTimeout { at: 45_000 }));
         assert!(fx.contains(&Effect::DelTimeout { at: 30_000 }));
         let mut next = doc.clone();
@@ -366,7 +376,7 @@ mod tests {
     #[test]
     fn a_sweep_that_fires_nothing_emits_no_timer_movement() {
         let doc = apply(&OriginDoc::default(), targeted("o:a", 45_000), 0);
-        let fx = drain(&doc, 100, &cfg());
+        let fx = sweep(&doc, 100, &cfg());
         assert!(!fx
             .iter()
             .any(|e| matches!(e, Effect::SetTimeout { .. } | Effect::DelTimeout { .. })));

@@ -26,7 +26,7 @@
 //! # Dependants
 //!
 //! The s3 applier decides every submitted request through [`handle`], and
-//! [`drain`](super::drain) reuses the settlement machinery here (`Tx`,
+//! [`sweep`](super::sweep) reuses the settlement machinery here (`Tx`,
 //! `trigger_settlement`).
 
 use std::collections::BTreeSet;

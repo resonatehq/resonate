@@ -645,7 +645,7 @@ pub fn decode(bytes: &[u8], origin: &str) -> Result<OriginDoc, CodecError> {
 mod tests {
     use super::*;
     use crate::kernel::state::{apply_effects, KernelCfg, OriginDoc, Req};
-    use crate::kernel::{drain, handle};
+    use crate::kernel::{handle, sweep};
     use serde_json::json;
 
     const W: &str = "http://worker:9999";
@@ -758,7 +758,7 @@ mod tests {
     #[test]
     fn a_drained_document_round_trips() {
         let doc = rich();
-        let fx = drain(&doc, 500_000, &cfg());
+        let fx = sweep(&doc, 500_000, &cfg());
         let mut next = doc.clone();
         apply_effects(&mut next, &fx);
         let bytes = encode(&next, ORIGIN);
