@@ -1,0 +1,6 @@
+wf (int, pending)
+├── wf.1 (int, pending)
+│   └── wf.1.1 (ext, settled)
+├── wf.2 (ext, pending)
+└── wf:dab12 (det, pending)
+    └── wf:dab12.1 (int, pending)

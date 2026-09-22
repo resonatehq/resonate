@@ -1,0 +1,27 @@
+[package]
+name = "resonate-sdk-postgres"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Postgres network for the Resonate Rust SDK (resonate-pg)"
+readme = "README.md"
+
+[dependencies]
+# Exact pin: both crates version from the workspace and release together;
+# cargo publish rejects the pin if it falls behind the local crate.
+resonate-sdk = { path = "../resonate", version = "=0.6.0" }
+tokio = { version = "1", features = ["full"] }
+tokio-postgres = { version = "0.7", features = ["with-serde_json-1"] }
+postgres-native-tls = "0.5"
+native-tls = "0.2"
+serde_json = "1"
+tracing = "0.1"
+async-trait = "0.1"
+parking_lot = "0.12"
+futures = "0.3"
+
+[dev-dependencies]
+test-with = "0.16"

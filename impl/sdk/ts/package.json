@@ -1,0 +1,102 @@
+{
+  "name": "@resonatehq/sdk",
+  "version": "0.11.5",
+  "description": "TypeScript SDK for Resonate",
+  "author": "Resonate Developers",
+  "license": "Apache-2.0",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "overrides": {
+    "@resonatehq/sdk": "file:.",
+    "uuid": "^11.1.1"
+  },
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js",
+      "default": "./dist/src/index.js"
+    },
+    "./async": {
+      "types": "./dist/src/async/index.d.ts",
+      "import": "./dist/src/async/index.js",
+      "default": "./dist/src/async/index.js"
+    },
+    "./nats": {
+      "types": "./dist/src/network/nats.d.ts",
+      "import": "./dist/src/network/nats.js",
+      "default": "./dist/src/network/nats.js"
+    },
+    "./postgres": {
+      "types": "./dist/src/network/postgres.d.ts",
+      "import": "./dist/src/network/postgres.js",
+      "default": "./dist/src/network/postgres.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/resonatehq/resonate-sdk-ts.git"
+  },
+  "publishConfig": {
+    "provenance": true
+  },
+  "files": [
+    "dist/src"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "biome check ./",
+    "check:fix": "biome check ./ --write",
+    "check:all": "npm run build && npm run check && npm run type-check && npm test",
+    "debug": "node --inspect-brk ./node_modules/.bin/jest -i",
+    "docs": "typedoc ./src --githubPages",
+    "dst": "tsx sim/main.ts",
+    "dst:diff": "tsx sim/src/differential.ts",
+    "fmt": "biome format ./ --write",
+    "prepare": "npm run build",
+    "release": "tsx scripts/release.ts",
+    "test": "jest --config jest.config.cjs",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "cron-parser": "^5.3.0",
+    "eventsource": "^4.0.0"
+  },
+  "peerDependencies": {
+    "@nats-io/transport-node": "^3.0.0",
+    "pg": "^8.11.0"
+  },
+  "peerDependenciesMeta": {
+    "@nats-io/transport-node": {
+      "optional": true
+    },
+    "pg": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.10",
+    "@jest/globals": "^30.0.0",
+    "@nats-io/nats-core": "^3.4.0",
+    "@nats-io/transport-node": "^3.4.0",
+    "@types/jest": "30.0.0",
+    "@types/node": "^25.9.5",
+    "@types/pg": "^8.11.10",
+    "commander": "^14.0.0",
+    "esbuild": "^0.28.0",
+    "pg": "^8.13.1",
+    "ts-jest": "^29.4.9",
+    "tsx": "^4.20.5",
+    "typedoc": "^0.28.18",
+    "typedoc-material-theme": "^1.4.0",
+    "typescript": "^6.0.2"
+  },
+  "engines": {
+    "node": ">= 22",
+    "npm": ">= 10"
+  }
+}

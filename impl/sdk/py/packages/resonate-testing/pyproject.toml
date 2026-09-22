@@ -1,0 +1,20 @@
+[project]
+name = "resonate-testing"
+version = "0.1.0"
+description = "Shared test doubles for the Resonate SDK's own test suites"
+readme = "README.md"
+authors = [{ name = "Resonate HQ, Inc", email = "contact@resonatehq.io" }]
+requires-python = ">=3.12"
+dependencies = ["msgspec>=0.21.1,<1", "resonate-base>=0.8.0,<0.9"]
+
+[project.urls]
+Documentation = "https://github.com/resonatehq/resonate-sdk-py#readme"
+Issues = "https://github.com/resonatehq/resonate-sdk-py/issues"
+Source = "https://github.com/resonatehq/resonate-sdk-py"
+
+[build-system]
+requires = ["uv_build>=0.11.7,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "resonate_testing"

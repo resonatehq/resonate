@@ -1,0 +1,149 @@
+name: DST
+
+permissions:
+  contents: read
+  issues: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: "seed"
+        type: number
+      steps:
+        description: "steps"
+        type: number
+  schedule:
+    - cron: "*/20 * * * *" # every 20 mins
+
+jobs:
+  values:
+    runs-on: ubuntu-22.04
+    steps:
+      - id: seed
+        name: Set random seed
+        run: echo "seed=$RANDOM" >> "$GITHUB_OUTPUT"
+    outputs:
+      seed: ${{ inputs.seed || steps.seed.outputs.seed }}
+      steps: ${{ inputs.steps || 10000 }}
+
+  dst:
+    runs-on: ${{ matrix.os }}
+    needs: [values]
+    timeout-minutes: 15
+
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node-version: ["18", "20", "22"]
+        run: [1, 2]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix['node-version'] }}
+
+      - name: Install dependencies
+        run: npm i
+
+      - name: Run DST (seed=${{ needs.values.outputs.seed }}, steps=${{ needs.values.outputs.steps }})
+        run: |
+          npm run dst -- --seed ${{ needs.values.outputs.seed }} --steps ${{ needs.values.outputs.steps }} > logs.txt
+
+      - name: Create issue if dst failed
+        if: ${{ failure() && matrix.run == 1 }}
+        uses: actions/github-script@v8
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `DST: ${{ needs.values.outputs.seed }}`,
+              labels: ['dst'],
+              body: `# DST Failed
+              DST run failed for seed=${{ needs.values.outputs.seed }}, steps=${{ needs.values.outputs.steps }}, os=${{ matrix.os }}, version=${{ matrix.node-version }}.
+
+              **Seed**
+              ~~~
+              ${{ needs.values.outputs.seed }}
+              ~~~
+
+              **Commit**
+              ~~~
+              ${ process.env.GITHUB_SHA }
+              ~~~
+
+              **Command**
+              ~~~
+              npm run dst -- --seed ${{ needs.values.outputs.seed }} --steps ${{ needs.values.outputs.steps }}
+              ~~~
+
+              [more details](${ process.env.GITHUB_SERVER_URL }/${ process.env.GITHUB_REPOSITORY }/actions/runs/${ process.env.GITHUB_RUN_ID })`,
+            })
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: ${{ matrix.os }}-${{ matrix['node-version'] }}-logs-${{ matrix.run }}
+          path: logs.txt
+
+  diff:
+    runs-on: ubuntu-22.04
+    needs: [values, dst]
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node-version: ["18", "20", "22"]
+
+    steps:
+      - name: Download logs from run 1
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.os }}-${{ matrix['node-version'] }}-logs-1
+          path: logs-1.txt
+
+      - name: Download logs from run 2
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.os }}-${{ matrix['node-version'] }}-logs-2
+          path: logs-2.txt
+
+      - name: Diff
+        run: diff logs-1.txt logs-2.txt
+
+      - name: Create issue if diff
+        if: ${{ failure() }}
+        uses: actions/github-script@v8
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `DST: ${{ needs.values.outputs.seed }}`,
+              labels: ['dst'],
+              body: `# DST Failed
+              Two DST runs produced different results for seed=${{ needs.values.outputs.seed }}, steps=${{ needs.values.outputs.steps }}, os=${{ matrix.os }}, version=${{ matrix.node-version }}.
+
+              **Seed**
+              ~~~
+              ${{ needs.values.outputs.seed }}
+              ~~~
+
+              **Commit**
+              ~~~
+              ${ process.env.GITHUB_SHA }
+              ~~~
+
+              **Command**
+              ~~~
+              npm run dst -- --seed ${{ needs.values.outputs.seed }} --steps ${{ needs.values.outputs.steps }}
+              ~~~
+
+              [more details](${ process.env.GITHUB_SERVER_URL }/${ process.env.GITHUB_REPOSITORY }/actions/runs/${ process.env.GITHUB_RUN_ID })`,
+            })
