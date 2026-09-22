@@ -187,6 +187,7 @@ const Rig = struct {
 
     fn create(allocator: std.mem.Allocator) !*Rig {
         const self = try allocator.create(Rig);
+        errdefer allocator.destroy(self);
         self.* = .{
             .allocator = allocator,
             .loop = io_mod.Loop.init(allocator) catch return error.SkipZigTest,
