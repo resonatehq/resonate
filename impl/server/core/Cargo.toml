@@ -1,0 +1,114 @@
+[workspace]
+members = [
+    "crates/resonate-auth",
+    "crates/resonate-base",
+    "crates/resonate-cli",
+    "crates/resonate-core",
+    "crates/resonate-gateway-http",
+    "crates/resonate-gateway-metrics",
+    "crates/resonate-gateway-web",
+    "crates/resonate-plugin",
+    "crates/resonate-sql",
+    "crates/resonate-server-scylladb",
+    "crates/resonate-server-blob",
+    "crates/resonate-server-sqlite",
+    "crates/resonate-server-postgres",
+    "crates/resonate-server-mysql",
+    "crates/resonate-server-neo4j",
+    "crates/resonate-oracle",
+    "crates/resonate-timer-wheel",
+    "crates/resonate-transport-gcps",
+    "crates/resonate-transport-http-poll",
+    "crates/resonate-transport-http-push",
+    "crates/resonate-worker-bash",
+    "xtask",
+]
+
+[workspace.package]
+version = "0.10.1"
+edition = "2021"
+license = "Apache-2.0"
+
+# Shared with the workspace members so a version bump happens in one place.
+[workspace.dependencies]
+async-trait = "0.1"
+clap = { version = "4", features = ["derive", "env"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = "2"
+validator = { version = "0.18", features = ["derive"] }
+
+[package]
+name = "resonate"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "resonate"
+path = "src/main.rs"
+
+[[test]]
+name = "differential"
+path = "diff/differential.rs"
+# It compares the engines against each other. They are all compiled in, so
+# there is nothing to require.
+
+# The same trajectory at the ports: `ResonateServer` in, `ResonateRouter` out.
+[[test]]
+name = "port"
+path = "diff/port.rs"
+
+[features]
+# No feature per plugin. Choosing plugins is what a *binary* does, by naming
+# them — a dependency here and a line in `registry()` — and this binary is the
+# one that carries all of them. A feature would be a second way to say the same
+# thing, and the two drifted: a `--features postgres` build still had a default
+# of `server_sqlite` and could not start.
+#
+# See "Build a server with the plugins you want" in the README for the shape a
+# smaller build takes: ten lines of `main`, and only what it names is compiled.
+concurrency-stress = [
+    "resonate-server-sqlite/concurrency-stress",
+    "resonate-server-mysql/concurrency-stress",
+]
+
+[dependencies]
+# The composition root, and the plugins this build carries. Everything that
+# makes this *this* server is the registry in `main.rs`.
+resonate-base = { path = "crates/resonate-base" }
+resonate-plugin = { path = "crates/resonate-plugin" }
+resonate-server-sqlite = { path = "crates/resonate-server-sqlite" }
+resonate-server-postgres = { path = "crates/resonate-server-postgres" }
+resonate-server-mysql = { path = "crates/resonate-server-mysql" }
+resonate-server-scylladb = { path = "crates/resonate-server-scylladb" }
+resonate-server-blob = { path = "crates/resonate-server-blob" }
+resonate-server-neo4j = { path = "crates/resonate-server-neo4j" }
+resonate-transport-http-push = { path = "crates/resonate-transport-http-push" }
+resonate-transport-http-poll = { path = "crates/resonate-transport-http-poll" }
+resonate-transport-gcps = { path = "crates/resonate-transport-gcps" }
+resonate-worker-bash = { path = "crates/resonate-worker-bash" }
+resonate-gateway-http = { path = "crates/resonate-gateway-http" }
+resonate-gateway-web = { path = "crates/resonate-gateway-web" }
+resonate-gateway-metrics = { path = "crates/resonate-gateway-metrics" }
+
+# The CLI client, which talks to a server over HTTP and shares no code with
+# one. Its own crate, so this one stays a list of plugins and a `run`.
+resonate-cli = { path = "crates/resonate-cli" }
+
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
+clap = { workspace = true }
+
+[dev-dependencies]
+# `diff/neo4j_adapter.rs` implements the SQL family's engine trait over the
+# Neo4j engine, so the harness can hold that plugin to the same comparison.
+async-trait = { workspace = true }
+# `tests/ui.rs` drives the console's read model against every engine that is
+# compiled in, so it reaches past the plugins to what they are built on.
+resonate-core = { path = "crates/resonate-core" }
+resonate-sql = { path = "crates/resonate-sql" }
+resonate-oracle = { path = "crates/resonate-oracle" }
+serde_json = { workspace = true }
+base64 = "0.22"
+reqwest = { version = "0.12", features = ["json"] }
+fastrand = "2"

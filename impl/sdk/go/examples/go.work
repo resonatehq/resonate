@@ -1,0 +1,9 @@
+go 1.22
+
+use (
+	..
+	./hello
+	./fibonacci
+	./saga
+	./pipeline
+)

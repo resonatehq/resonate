@@ -1,0 +1,72 @@
+[project]
+name = "resonate-sdk"
+version = "0.8.1"
+description = "Distributed Async Await by Resonate HQ, Inc"
+readme = "README.md"
+authors = [{ name = "Resonate HQ, Inc", email = "contact@resonatehq.io" }]
+requires-python = ">=3.12"
+dependencies = [
+    "aiohttp>=3.13.5,<4",
+    "msgspec>=0.21.1,<1",
+    "resonate-base>=0.8.0,<0.9",
+]
+
+# Connectors are NOT extras. An extra would put the connector in this
+# distribution's published dependency metadata, recreating the arrow
+# (resonate-sdk -> resonate-nats -> resonate-base) that the package split
+# exists to remove, and every future connector would want one. Install a
+# connector directly: `pip install resonate-nats`.
+[project.optional-dependencies]
+pydantic = ["pydantic>=2.0.0,<3"]
+pydantic-ai = [
+    "pydantic-ai-slim>=2.8,<3",
+    "pydantic>=2.0.0,<3",
+]
+
+[project.urls]
+Documentation = "https://github.com/resonatehq/resonate-sdk-py#readme"
+Issues = "https://github.com/resonatehq/resonate-sdk-py/issues"
+Source = "https://github.com/resonatehq/resonate-sdk-py"
+
+[build-system]
+requires = ["uv_build>=0.11.7,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "resonate"
+
+[tool.uv.workspace]
+members = ["packages/resonate-sdk-aws", "packages/resonate-base", "packages/resonate-nats", "packages/resonate-pg"]
+
+[tool.uv.sources]
+resonate-base = { workspace = true }
+resonate-nats = { workspace = true }
+resonate-pg = { workspace = true }
+resonate-testing = { path = "packages/resonate-testing", editable = true }
+resonate-sdk = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.15.14",
+    "ty>=0.0.39",
+    "attrs>=24.0.0",
+    "pydantic>=2.0.0",
+    "vulture>=2.16",
+    "pytest-cov>=7.1.0",
+    "pydantic-ai-slim[mcp]>=2.8",
+    "aws-lambda-typing>=2.20.0",
+    "resonate-testing",
+    # Dev-only so the workspace suite can exercise the connectors; deliberately
+    # not extras (see the note above [project.optional-dependencies]).
+    "resonate-nats",
+    "resonate-pg",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "strict"
+addopts = "--import-mode=importlib"
+
+[tool.coverage.run]
+source = ["resonate", "packages/*"]

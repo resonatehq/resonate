@@ -1,0 +1,19 @@
+# Ignore Gradle project-specific cache directory
+.gradle
+
+# Ignore Gradle build output directory
+build
+
+# Ignore Kotlin plugin data
+.kotlin
+
+# Ignore IDE (Eclipse/VS Code JDT) compiled output
+bin
+
+# Ignore generated Eclipse/JDT project files (run `./gradlew eclipse` to (re)generate)
+.classpath
+.project
+.settings
+
+# Ignore macOS folder metadata
+.DS_Store

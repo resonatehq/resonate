@@ -1,0 +1,25 @@
+.lake/
+
+# Build outputs. `work/go/go` — a 9 MB binary named after its own
+# directory — was committed once; that is what this line is for.
+/dist/
+/work/go/go
+/work/go/*.ndjson
+/work/go/*.history
+
+# npm artifacts (work/ts)
+node_modules/
+package-lock.json
+valid/porc/fuzz
+
+# Transient analysis scratch files (see CONTRIBUTING): never committed.
+spec/**/zz-*.lean
+
+
+# TLC scratch (state queue, fingerprints) and Apalache run output
+tlap/states/
+tlap/tmp/
+tlap/_apalache-out/
+*.st
+tlap/*_TTrace_*.tla
+tlap/*_TTrace_*.bin

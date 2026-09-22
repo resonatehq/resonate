@@ -1,0 +1,1539 @@
+use std::fmt;
+use std::str::FromStr;
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use validator::Validate;
+
+// --- State Enums ---
+// These match the Zod enums in the canonical types.ts exactly.
+
+/// Promise states: "pending" | "resolved" | "rejected" | "rejected_canceled" | "rejected_timedout"
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PromiseState {
+    Pending,
+    Resolved,
+    Rejected,
+    RejectedCanceled,
+    RejectedTimedout,
+}
+
+impl PromiseState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            PromiseState::Pending => "pending",
+            PromiseState::Resolved => "resolved",
+            PromiseState::Rejected => "rejected",
+            PromiseState::RejectedCanceled => "rejected_canceled",
+            PromiseState::RejectedTimedout => "rejected_timedout",
+        }
+    }
+}
+
+impl fmt::Display for PromiseState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for PromiseState {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "pending" => Ok(PromiseState::Pending),
+            "resolved" => Ok(PromiseState::Resolved),
+            "rejected" => Ok(PromiseState::Rejected),
+            "rejected_canceled" => Ok(PromiseState::RejectedCanceled),
+            "rejected_timedout" => Ok(PromiseState::RejectedTimedout),
+            _ => Err(format!("invalid promise state: {}", s)),
+        }
+    }
+}
+
+/// Task states: "pending" | "acquired" | "suspended" | "halted" | "fulfilled"
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskState {
+    Pending,
+    Acquired,
+    Suspended,
+    Halted,
+    Fulfilled,
+}
+
+impl TaskState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TaskState::Pending => "pending",
+            TaskState::Acquired => "acquired",
+            TaskState::Suspended => "suspended",
+            TaskState::Halted => "halted",
+            TaskState::Fulfilled => "fulfilled",
+        }
+    }
+}
+
+impl fmt::Display for TaskState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for TaskState {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "pending" => Ok(TaskState::Pending),
+            "acquired" => Ok(TaskState::Acquired),
+            "suspended" => Ok(TaskState::Suspended),
+            "halted" => Ok(TaskState::Halted),
+            "fulfilled" => Ok(TaskState::Fulfilled),
+            _ => Err(format!("invalid task state: {}", s)),
+        }
+    }
+}
+
+/// Settle states (used in promise.settle and task.fulfill): "resolved" | "rejected" | "rejected_canceled"
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SettleState {
+    Resolved,
+    Rejected,
+    RejectedCanceled,
+}
+
+impl SettleState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SettleState::Resolved => "resolved",
+            SettleState::Rejected => "rejected",
+            SettleState::RejectedCanceled => "rejected_canceled",
+        }
+    }
+
+    /// Convert to the corresponding PromiseState.
+    #[allow(dead_code)]
+    pub fn to_promise_state(self) -> PromiseState {
+        match self {
+            SettleState::Resolved => PromiseState::Resolved,
+            SettleState::Rejected => PromiseState::Rejected,
+            SettleState::RejectedCanceled => PromiseState::RejectedCanceled,
+        }
+    }
+}
+
+impl fmt::Display for SettleState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+// Protocol version used in responses
+pub const PROTOCOL_VERSION: &str = "2026-04-01";
+// Versions accepted in requests.
+pub const SUPPORTED_VERSIONS: &[&str] = &["2026-04-01"];
+
+// --- Request Envelope ---
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RequestEnvelope {
+    pub kind: String,
+    pub head: RequestHead,
+    pub data: Value,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RequestHead {
+    #[serde(rename = "corrId")]
+    pub corr_id: String,
+    #[allow(dead_code)]
+    pub version: String,
+    #[allow(dead_code)]
+    pub auth: Option<String>,
+    #[serde(rename = "resonate:debug_time")]
+    pub debug_time: Option<i64>,
+}
+
+// --- Response Envelope ---
+
+#[derive(Debug, Serialize)]
+pub struct ResponseEnvelope {
+    pub kind: String,
+    pub head: ResponseHead,
+    pub data: Value,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ResponseHead {
+    #[serde(rename = "corrId")]
+    pub corr_id: String,
+    pub status: i32,
+    pub version: String,
+}
+
+// --- Outgoing Message Types ---
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MessageHead {
+    #[serde(rename = "serverUrl")]
+    pub server_url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExecuteMsg {
+    pub kind: String,
+    pub head: MessageHead,
+    pub data: ExecuteMsgData,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExecuteMsgData {
+    pub task: ExecuteMsgTask,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ExecuteMsgTask {
+    pub id: String,
+    pub version: i64,
+}
+
+/// Head of an `unblock` message. Empty on the wire, unlike [`MessageHead`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct UnblockMsgHead {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct UnblockMsg {
+    pub kind: String,
+    pub head: UnblockMsgHead,
+    pub data: UnblockMsgData,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct UnblockMsgData {
+    pub promise: PromiseRecord,
+}
+
+/// A message the server emits toward a worker — the vocabulary of
+/// [`ResonateWorker`](super::ResonateWorker) and
+/// [`ResonateRouter`](super::ResonateRouter).
+///
+/// Untagged: each variant already carries its own `kind` field, so this
+/// serializes exactly as the hand-built JSON it replaces.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(untagged)]
+pub enum Message {
+    Execute(ExecuteMsg),
+    Unblock(UnblockMsg),
+}
+
+// --- Record Types ---
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromiseValue {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub headers: Option<std::collections::HashMap<String, String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromiseRecord {
+    pub id: String,
+    pub state: PromiseState,
+    pub param: PromiseValue,
+    pub value: PromiseValue,
+    pub tags: std::collections::HashMap<String, String>,
+    #[serde(rename = "timeoutAt")]
+    pub timeout_at: i64,
+    #[serde(rename = "createdAt")]
+    pub created_at: i64,
+    #[serde(rename = "settledAt", skip_serializing_if = "Option::is_none")]
+    pub settled_at: Option<i64>,
+}
+
+impl PromiseRecord {
+    /// The record as it *is* at `now`, whatever the row says: a pending
+    /// promise whose deadline has passed is expired — resolved if it is a
+    /// timer, otherwise rejected as timed out — settled at that deadline.
+    ///
+    /// The specification's `PromiseObject.project`. Whether a backend has
+    /// written the expiry down yet (eagerly, at a sweep, or lazily, when a
+    /// request next names the promise) is materialisation, which no
+    /// observation may depend on; anything that returns records to a caller
+    /// projects them first.
+    pub fn project(&mut self, now: i64) {
+        if self.state == PromiseState::Pending && self.timeout_at <= now {
+            self.state = if is_timer(&self.tags) {
+                PromiseState::Resolved
+            } else {
+                PromiseState::RejectedTimedout
+            };
+            self.settled_at = Some(self.timeout_at);
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskRecord {
+    pub id: String,
+    pub state: TaskState,
+    pub version: i64,
+    #[serde(default)]
+    pub resumes: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttl: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pid: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScheduleRecord {
+    pub id: String,
+    pub cron: String,
+    #[serde(rename = "promiseId")]
+    pub promise_id: String,
+    #[serde(rename = "promiseTimeout")]
+    pub promise_timeout: i64,
+    #[serde(rename = "promiseParam")]
+    pub promise_param: PromiseValue,
+    #[serde(rename = "promiseTags")]
+    pub promise_tags: std::collections::HashMap<String, String>,
+    #[serde(rename = "createdAt")]
+    pub created_at: i64,
+    #[serde(rename = "nextRunAt")]
+    pub next_run_at: i64,
+    #[serde(rename = "lastRunAt", skip_serializing_if = "Option::is_none")]
+    pub last_run_at: Option<i64>,
+}
+
+// --- Request Data Structs ---
+// These mirror the `data` field of each request kind in types.ts.
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct PromiseGetData {
+    #[validate(length(min = 1, message = "Promise ID is required"))]
+    pub id: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Validate)]
+#[validate(schema(function = "validate_promise_create_data"))]
+pub struct PromiseCreateData {
+    #[validate(length(min = 1, message = "Promise ID is required"))]
+    pub id: String,
+    #[serde(rename = "timeoutAt")]
+    #[validate(range(min = 0, message = "TimeoutAt must be a non-negative integer"))]
+    pub timeout_at: i64,
+    #[serde(default)]
+    pub param: PromiseValue,
+    #[serde(default)]
+    pub tags: std::collections::HashMap<String, String>,
+}
+
+fn validate_promise_create_data(
+    data: &PromiseCreateData,
+) -> Result<(), validator::ValidationError> {
+    if data.id.contains('\0') {
+        return Err(validator::ValidationError::new("null_bytes")
+            .with_message("Promise ID must not contain null bytes".into()));
+    }
+    if let Some(origin) = data.tags.get("resonate:origin") {
+        // '.' is deliberately *not* rejected: it separates lineage segments below
+        // the origin, which are only ever read once the origin has been split off
+        // at the first ':', so a caller-supplied dotted root id ('my.app.workflow'
+        // -> 'my.app.workflow:1' -> 'my.app.workflow:1.1') round-trips intact.
+        //
+        // The origin is everything before an id's first ':' (see `origin()`), so
+        // an origin that itself holds one is unrepresentable: no id could ever
+        // split back to it. Rejecting it here keeps ':' reserved as the
+        // origin/lineage separator in caller-supplied ids.
+        if origin.contains(':') {
+            return Err(validator::ValidationError::new("colon_in_origin")
+                .with_message("resonate:origin must not contain ':'".into()));
+        }
+        if data.id != origin.as_str() && !data.id.starts_with(&format!("{}:", origin)) {
+            return Err(validator::ValidationError::new("origin_prefix")
+                .with_message("Promise ID must be prefixed by resonate:origin".into()));
+        }
+    }
+    if let Some(branch) = data.tags.get("resonate:branch") {
+        // A bare root ancestor joins its first lineage segment with ':'; ancestors
+        // that already carry lineage join deeper segments with '.'.
+        let sep = if branch.contains(':') { '.' } else { ':' };
+        if data.id != branch.as_str() && !data.id.starts_with(&format!("{}{}", branch, sep)) {
+            return Err(validator::ValidationError::new("branch_prefix")
+                .with_message("Promise ID must be prefixed by resonate:branch".into()));
+        }
+    }
+    if let Some(parent) = data.tags.get("resonate:parent") {
+        let sep = if parent.contains(':') { '.' } else { ':' };
+        if data.id != parent.as_str() && !data.id.starts_with(&format!("{}{}", parent, sep)) {
+            return Err(validator::ValidationError::new("parent_prefix")
+                .with_message("Promise ID must be prefixed by resonate:parent".into()));
+        }
+    }
+    if let Some(prefix) = data.tags.get("resonate:prefix") {
+        if prefix.contains(':') {
+            return Err(validator::ValidationError::new("colon_in_prefix")
+                .with_message("resonate:prefix must not contain ':'".into()));
+        }
+    }
+    if let Some(delay_str) = data.tags.get("resonate:delay") {
+        let delay: i64 = delay_str
+            .parse()
+            .ok()
+            .filter(|&v: &i64| v >= 0)
+            .ok_or_else(|| {
+                validator::ValidationError::new("invalid_delay")
+                    .with_message("resonate:delay must be a non-negative integer".into())
+            })?;
+        if delay >= data.timeout_at {
+            return Err(validator::ValidationError::new("delay_exceeds_timeout")
+                .with_message("resonate:delay must be less than timeoutAt".into()));
+        }
+        if !data.tags.contains_key("resonate:target") {
+            return Err(validator::ValidationError::new("delay_without_target")
+                .with_message("resonate:delay requires a resonate:target tag".into()));
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct PromiseSettleData {
+    #[validate(length(min = 1, message = "Promise ID is required"))]
+    pub id: String,
+    pub state: SettleState,
+    #[serde(default)]
+    pub value: PromiseValue,
+}
+
+#[derive(Debug, Deserialize, Serialize, Validate)]
+#[validate(schema(function = "validate_callback_data"))]
+pub struct PromiseRegisterCallbackData {
+    #[validate(length(min = 1, message = "Awaited promise ID is required"))]
+    pub awaited: String,
+    #[validate(length(min = 1, message = "Awaiter promise ID is required"))]
+    pub awaiter: String,
+}
+
+fn origin(id: &str) -> &str {
+    // An id has the form "<promiseId>:<lineage>", so the origin is everything
+    // before the ':' (lineage segments are '.'-separated).
+    id.split_once(':').map(|(origin, _)| origin).unwrap_or(id)
+}
+
+fn validate_callback_data(
+    data: &PromiseRegisterCallbackData,
+) -> Result<(), validator::ValidationError> {
+    if data.awaited == data.awaiter {
+        return Err(validator::ValidationError::new("awaited_equals_awaiter")
+            .with_message("Awaited and awaiter must be different promises".into()));
+    }
+    if origin(&data.awaiter) != origin(&data.awaited) {
+        return Err(validator::ValidationError::new("origin_mismatch")
+            .with_message("Awaiter and awaited must belong to the same origin".into()));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct PromiseRegisterListenerData {
+    #[validate(length(min = 1, message = "Awaited promise ID is required"))]
+    pub awaited: String,
+    #[validate(length(min = 1, message = "Address is required"))]
+    pub address: String,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct PromiseSearchData {
+    pub state: Option<PromiseState>,
+    pub tags: Option<std::collections::HashMap<String, String>>,
+    #[validate(range(min = 1, message = "Limit must be a positive integer"))]
+    pub limit: Option<i64>,
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct TaskGetData {
+    #[validate(length(min = 1, message = "Task ID is required"))]
+    pub id: String,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+#[validate(schema(function = "validate_task_create_data"))]
+pub struct TaskCreateData {
+    #[validate(length(min = 1, message = "Process ID is required"))]
+    pub pid: String,
+    #[validate(range(min = 1, message = "TTL must be a positive integer"))]
+    pub ttl: i64,
+    #[validate(nested)]
+    pub action: TaskCreateAction,
+}
+
+fn validate_task_create_data(data: &TaskCreateData) -> Result<(), validator::ValidationError> {
+    if !data.action.data.tags.contains_key("resonate:target") {
+        return Err(validator::ValidationError::new("missing_target")
+            .with_message("Action must have a resonate:target tag".into()));
+    }
+    if data.action.data.tags.contains_key("resonate:delay") {
+        return Err(validator::ValidationError::new("delay_in_task_action")
+            .with_message("Action must not have a resonate:delay tag".into()));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Deserialize, Serialize, Validate)]
+pub struct TaskCreateAction {
+    #[allow(dead_code)]
+    pub kind: String,
+    #[allow(dead_code)]
+    pub head: serde_json::Value,
+    #[validate(nested)]
+    pub data: PromiseCreateData,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct TaskAcquireData {
+    #[validate(length(min = 1, message = "Task ID is required"))]
+    pub id: String,
+    #[validate(range(min = 0, message = "Version must be a non-negative integer"))]
+    pub version: i64,
+    #[validate(length(min = 1, message = "Process ID is required"))]
+    pub pid: String,
+    #[validate(range(min = 1, message = "TTL must be a positive integer"))]
+    pub ttl: i64,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct TaskReleaseData {
+    #[validate(length(min = 1, message = "Task ID is required"))]
+    pub id: String,
+    #[validate(range(min = 0, message = "Version must be a non-negative integer"))]
+    pub version: i64,
+}
+
+#[derive(Debug, Deserialize, Serialize, Validate)]
+pub struct TaskSuspendAction {
+    #[allow(dead_code)]
+    pub kind: String,
+    #[allow(dead_code)]
+    pub head: serde_json::Value,
+    #[validate(nested)]
+    pub data: PromiseRegisterCallbackData,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+#[validate(schema(function = "validate_task_suspend_data"))]
+pub struct TaskSuspendData {
+    #[validate(length(min = 1, message = "Task ID is required"))]
+    pub id: String,
+    #[validate(range(min = 0, message = "Version must be a non-negative integer"))]
+    pub version: i64,
+    #[validate(length(min = 1, message = "Actions array cannot be empty"))]
+    #[validate(nested)]
+    pub actions: Vec<TaskSuspendAction>,
+}
+
+fn validate_task_suspend_data(data: &TaskSuspendData) -> Result<(), validator::ValidationError> {
+    for action in &data.actions {
+        if action.data.awaiter != data.id {
+            return Err(validator::ValidationError::new("awaiter_mismatch")
+                .with_message("All action awaiter IDs must match the task ID".into()));
+        }
+        if action.data.awaited == data.id {
+            return Err(validator::ValidationError::new("awaited_is_self")
+                .with_message("Action awaited promise must not equal the task ID".into()));
+        }
+    }
+    // Whether the same promise is named twice is decided by the request alone,
+    // so it is decided here. Storage used to deduplicate on the way in, which
+    // turned a request the caller did not mean into a silent success — one
+    // suspend awaiting `p` twice and one awaiting `p` once are different
+    // requests, and only the second is well formed.
+    let mut seen = std::collections::HashSet::new();
+    for action in &data.actions {
+        if !seen.insert(action.data.awaited.as_str()) {
+            return Err(validator::ValidationError::new("duplicate_awaited")
+                .with_message("Awaited promise IDs must be unique".into()));
+        }
+    }
+    for action in &data.actions {
+        if origin(&action.data.awaited) != origin(&data.id) {
+            return Err(
+                validator::ValidationError::new("origin_mismatch").with_message(
+                    "Awaited promise must belong to the same origin as the task".into(),
+                ),
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Who may be blocked on a promise. Derived from its tags, never stored.
+///
+/// `External` if any one of four things is true, and they are alternatives
+/// rather than a hierarchy:
+///
+/// - `resonate:scope = global` — the form the wire actually carries, and what
+///   makes a promise a caller wrote awaitable;
+/// - `resonate:external = true` — the open-ended escape hatch, for a kind
+///   nobody enumerated;
+/// - `resonate:target` present — a dispatch target implies anyone may await
+///   the result;
+/// - `resonate:timer = true` — a sleep, which settles at its deadline, so
+///   there is something to await.
+///
+/// Two things follow, and the second follows from the first: an external
+/// promise may be awaited, and an external promise is armed. The server owes
+/// an observation exactly where someone can be blocked, so this is one rule,
+/// not two. An internal promise is neither awaitable nor armed, and costs
+/// nothing.
+///
+/// Nothing here gates settling, and nothing here decides the verdict a
+/// deadline produces — that is `is_timer` alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OType {
+    External,
+    Internal,
+}
+
+/// What causes a promise to run. Derived from its tags, never stored.
+///
+/// `Task` exactly when a dispatch target is present, which is the same
+/// condition as carrying a task — both directions hold, and the storage
+/// invariant `consistent_task_iff_targeted_promise` is the other half of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OKind {
+    Task,
+    Idle,
+}
+
+type Tags = std::collections::HashMap<String, String>;
+
+fn tag_is(tags: &Tags, key: &str, value: &str) -> bool {
+    tags.get(key).map(String::as_str) == Some(value)
+}
+
+/// `resonate:timer = true` — the one tag that decides a timed-out promise's
+/// verdict: resolved for a timer, rejected for everything else.
+pub fn is_timer(tags: &Tags) -> bool {
+    tag_is(tags, "resonate:timer", "true")
+}
+
+pub fn otype(tags: &Tags) -> OType {
+    if tag_is(tags, "resonate:scope", "global")
+        || tag_is(tags, "resonate:external", "true")
+        || tags.contains_key("resonate:target")
+        || is_timer(tags)
+    {
+        OType::External
+    } else {
+        OType::Internal
+    }
+}
+
+pub fn okind(tags: &Tags) -> OKind {
+    if tags.contains_key("resonate:target") {
+        OKind::Task
+    } else {
+        OKind::Idle
+    }
+}
+
+/// `otype(tags) == External`, as a predicate — the awaitable-and-armed test.
+pub fn is_external(tags: &Tags) -> bool {
+    otype(tags) == OType::External
+}
+
+#[derive(Debug, Deserialize, Serialize, Validate)]
+pub struct TaskFulfillActionData {
+    #[validate(length(min = 1, message = "Promise ID is required"))]
+    pub id: String,
+    pub state: SettleState,
+    #[serde(default)]
+    pub value: PromiseValue,
+}
+
+#[derive(Debug, Deserialize, Serialize, Validate)]
+pub struct TaskFulfillAction {
+    #[allow(dead_code)]
+    pub kind: String,
+    #[allow(dead_code)]
+    pub head: serde_json::Value,
+    #[validate(nested)]
+    pub data: TaskFulfillActionData,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+#[validate(schema(function = "validate_task_fulfill_data"))]
+pub struct TaskFulfillData {
+    #[validate(length(min = 1, message = "Task ID is required"))]
+    pub id: String,
+    #[validate(range(min = 0, message = "Version must be a non-negative integer"))]
+    pub version: i64,
+    #[validate(nested)]
+    pub action: TaskFulfillAction,
+}
+
+fn validate_task_fulfill_data(data: &TaskFulfillData) -> Result<(), validator::ValidationError> {
+    if data.action.data.id != data.id {
+        return Err(validator::ValidationError::new("action_id_mismatch")
+            .with_message("Action ID must match the task ID".into()));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TaskFenceActionData {
+    pub kind: String,
+    #[allow(dead_code)]
+    pub head: Option<serde_json::Value>,
+    pub data: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+#[validate(schema(function = "validate_task_fence_data"))]
+pub struct TaskFenceData {
+    #[validate(length(min = 1, message = "Task ID is required"))]
+    pub id: String,
+    #[validate(range(min = 0, message = "Version must be a non-negative integer"))]
+    pub version: i64,
+    pub action: TaskFenceActionData,
+}
+
+fn validate_task_fence_data(data: &TaskFenceData) -> Result<(), validator::ValidationError> {
+    if let Some(action_id) = data.action.data.get("id").and_then(|v| v.as_str()) {
+        if action_id == data.id {
+            return Err(validator::ValidationError::new("action_id_equals_task_id")
+                .with_message("Action ID must not equal the task ID".into()));
+        }
+        // A fence and its action belong to one origin — with one exception.
+        // Creating a root (an id with no ':', so its origin is itself) from a
+        // task in another origin is how a detached computation starts, and
+        // is allowed. Extending another origin's lineage, or settling any
+        // promise outside the task's origin, is not.
+        if origin(action_id) != origin(&data.id) {
+            let is_root_create =
+                data.action.kind == "promise.create" && origin(action_id) == action_id;
+            if !is_root_create {
+                return Err(validator::ValidationError::new("origin_mismatch")
+                    .with_message("Action must belong to the task's origin".into()));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TaskHeartbeatTask {
+    pub id: String,
+    pub version: i64,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+#[validate(schema(function = "validate_task_heartbeat_data"))]
+pub struct TaskHeartbeatData {
+    #[validate(length(min = 1, message = "Process ID is required"))]
+    pub pid: String,
+    #[validate(length(min = 1, message = "Tasks array must not be empty"))]
+    pub tasks: Vec<TaskHeartbeatTask>,
+}
+
+fn validate_task_heartbeat_data(
+    data: &TaskHeartbeatData,
+) -> Result<(), validator::ValidationError> {
+    if data.tasks.len() > 1 {
+        let first_origin = origin(&data.tasks[0].id);
+        for task in &data.tasks[1..] {
+            if origin(&task.id) != first_origin {
+                return Err(validator::ValidationError::new("origin_mismatch")
+                    .with_message("All tasks must belong to the same origin".into()));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct TaskHaltData {
+    #[validate(length(min = 1, message = "Task ID is required"))]
+    pub id: String,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct TaskContinueData {
+    #[validate(length(min = 1, message = "Task ID is required"))]
+    pub id: String,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct TaskSearchData {
+    pub state: Option<TaskState>,
+    #[validate(range(min = 1, message = "Limit must be a positive integer"))]
+    pub limit: Option<i64>,
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct ScheduleGetData {
+    #[validate(length(min = 1, message = "Schedule ID is required"))]
+    pub id: String,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+#[validate(schema(function = "validate_schedule_create_data"))]
+pub struct ScheduleCreateData {
+    #[validate(length(min = 1, message = "Schedule ID is required"))]
+    pub id: String,
+    #[validate(length(min = 1, message = "Cron expression is required"))]
+    pub cron: String,
+    #[serde(rename = "promiseId")]
+    #[validate(length(min = 1, message = "Promise ID template is required"))]
+    pub promise_id: String,
+    #[serde(rename = "promiseTimeout")]
+    #[validate(range(min = 0, message = "Promise timeout must be a non-negative integer"))]
+    pub promise_timeout: i64,
+    #[serde(rename = "promiseParam", default)]
+    pub promise_param: PromiseValue,
+    #[serde(rename = "promiseTags", default)]
+    pub promise_tags: std::collections::HashMap<String, String>,
+}
+
+fn validate_schedule_create_data(
+    data: &ScheduleCreateData,
+) -> Result<(), validator::ValidationError> {
+    // A schedule id is caller-supplied and is stamped, via the promise id
+    // template, onto the resonate:origin of every promise the schedule fires --
+    // so it is bound by exactly the rules `validate_promise_create_data` applies
+    // to an origin: '.' is not one of them, ':' is (see the comment there).
+    if data.id.contains(':') {
+        return Err(validator::ValidationError::new("colon_in_schedule_id")
+            .with_message("Schedule ID must not contain ':'".into()));
+    }
+    if let Some(origin) = data.promise_tags.get("resonate:origin") {
+        if origin.contains(':') {
+            return Err(validator::ValidationError::new("colon_in_origin")
+                .with_message("resonate:origin must not contain ':'".into()));
+        }
+    }
+    if let Some(prefix) = data.promise_tags.get("resonate:prefix") {
+        if prefix.contains(':') {
+            return Err(validator::ValidationError::new("colon_in_prefix")
+                .with_message("resonate:prefix must not contain ':'".into()));
+        }
+    }
+    if !data.promise_tags.contains_key("resonate:target") {
+        return Err(validator::ValidationError::new("missing_target")
+            .with_message("promiseTags must include a resonate:target tag".into()));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct ScheduleDeleteData {
+    #[validate(length(min = 1, message = "Schedule ID is required"))]
+    pub id: String,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct ScheduleSearchData {
+    pub tags: Option<std::collections::HashMap<String, String>>,
+    #[validate(range(min = 1, message = "Limit must be a positive integer"))]
+    pub limit: Option<i64>,
+    pub cursor: Option<String>,
+}
+
+// --- Response Data Structs ---
+// These mirror the `data` field of each successful (200) response in types.ts.
+
+#[derive(Debug, Serialize)]
+pub struct PromiseResponseData {
+    pub promise: PromiseRecord,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PromiseSearchResponseData {
+    pub promises: Vec<PromiseRecord>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TaskResponseData {
+    pub task: TaskRecord,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TaskCreateResponseData {
+    pub task: TaskRecord,
+    pub promise: PromiseRecord,
+    pub preload: Vec<PromiseRecord>,
+}
+
+// Deserialize as well as Serialize: an in-process worker reads this back off
+// its own `task.acquire` response.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TaskAcquireResponseData {
+    pub task: TaskRecord,
+    pub promise: PromiseRecord,
+    pub preload: Vec<PromiseRecord>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TaskSuspendPreloadData {
+    pub preload: Vec<PromiseRecord>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TaskFulfillResponseData {
+    pub promise: PromiseRecord,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TaskFenceResponseData {
+    pub action: Value,
+    pub preload: Vec<PromiseRecord>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TaskSearchResponseData {
+    pub tasks: Vec<TaskRecord>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ScheduleResponseData {
+    pub schedule: ScheduleRecord,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ScheduleSearchResponseData {
+    pub schedules: Vec<ScheduleRecord>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+}
+
+// --- Snapshot types (debug.snap) ---
+
+#[derive(Debug, Serialize)]
+pub struct SnapshotPromiseTimeout {
+    pub id: String,
+    pub timeout: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SnapshotCallback {
+    pub awaiter: String,
+    pub awaited: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SnapshotListener {
+    #[serde(rename = "id")]
+    pub promise_id: String,
+    pub address: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SnapshotTaskTimeout {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub timeout_type: i32,
+    pub timeout: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SnapshotMessage {
+    pub address: String,
+    pub message: Value,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Snapshot {
+    pub promises: Vec<PromiseRecord>,
+    #[serde(rename = "promiseTimeouts")]
+    pub promise_timeouts: Vec<SnapshotPromiseTimeout>,
+    pub callbacks: Vec<SnapshotCallback>,
+    pub listeners: Vec<SnapshotListener>,
+    pub tasks: Vec<TaskRecord>,
+    #[serde(rename = "taskTimeouts")]
+    pub task_timeouts: Vec<SnapshotTaskTimeout>,
+    pub messages: Vec<SnapshotMessage>,
+}
+
+// --- Validation helper ---
+
+/// Format validation errors into a single human-readable string.
+pub fn format_validation_errors(errors: &validator::ValidationErrors) -> String {
+    let mut messages = Vec::new();
+    for (field, field_errors) in errors.field_errors() {
+        for error in field_errors {
+            if let Some(msg) = &error.message {
+                messages.push(msg.to_string());
+            } else {
+                messages.push(format!("Invalid value for '{}'", field));
+            }
+        }
+    }
+    // Also check struct-level errors
+    for error in errors.errors().values() {
+        match error {
+            validator::ValidationErrorsKind::Struct(inner) => {
+                messages.push(format_validation_errors(inner));
+            }
+            validator::ValidationErrorsKind::List(map) => {
+                for inner in map.values() {
+                    messages.push(format_validation_errors(inner));
+                }
+            }
+            validator::ValidationErrorsKind::Field(field_errors) => {
+                for error in field_errors {
+                    if let Some(msg) = &error.message {
+                        messages.push(msg.to_string());
+                    }
+                }
+            }
+        }
+    }
+    messages.dedup();
+    if messages.is_empty() {
+        "Validation failed".to_string()
+    } else {
+        messages.join("; ")
+    }
+}
+
+// --- Helper to build response ---
+
+impl ResponseEnvelope {
+    pub fn new(kind: String, corr_id: String, status: i32, data: Value) -> Self {
+        Self {
+            kind,
+            head: ResponseHead {
+                corr_id,
+                status,
+                version: PROTOCOL_VERSION.to_string(),
+            },
+            data,
+        }
+    }
+
+    pub fn error(kind: String, corr_id: String, status: i32, message: &str) -> Self {
+        Self::new(kind, corr_id, status, Value::String(message.to_string()))
+    }
+
+    pub fn success<T: Serialize>(kind: String, corr_id: String, data: &T) -> Self {
+        Self::new(kind, corr_id, 200, serde_json::to_value(data).unwrap())
+    }
+}
+
+// --- Envelope validation ---
+//
+// The gateway's job, not the server's. A message that cannot be parsed, or
+// that parses into something the protocol does not admit, never reaches a
+// server: the gateway turns around on its heel and answers. So this lives
+// beside the types it judges, where every gateway can reach it and none has to
+// write its own.
+//
+// What it does *not* cover is whether `kind` names an operation. That is the
+// server's to answer — it is the only party that knows what it implements, and
+// it must handle an unknown kind regardless.
+
+/// Why an envelope is not a request.
+///
+/// An enum rather than a ready-made [`ResponseEnvelope`], because rendering is
+/// the gateway's. HTTP answers 400 with the envelope below; another transport
+/// may have its own error shape and can match on this instead.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Invalid {
+    /// The bytes were not a request envelope. Carries the parser's complaint.
+    Unparseable(String),
+    /// `kind` was absent or empty. Serde accepts `""` as a `String`, so this
+    /// cannot be expressed in the type.
+    EmptyKind,
+    /// `data` was not a JSON object. Every operation reads named fields from
+    /// it, so anything else is a request no operation could accept.
+    DataNotObject,
+    /// `head.version` is not one this build speaks.
+    UnsupportedVersion(String),
+}
+
+impl Invalid {
+    /// The message a client sees. Kept here so two gateways cannot word the
+    /// same rejection differently.
+    pub fn message(&self) -> String {
+        match self {
+            Invalid::Unparseable(e) => format!("Invalid request envelope: {e}"),
+            Invalid::EmptyKind => {
+                "Missing or invalid 'kind' field — must be a non-empty string".to_string()
+            }
+            Invalid::DataNotObject => "Invalid 'data' field — must be an object".to_string(),
+            Invalid::UnsupportedVersion(got) => format!(
+                "Unsupported protocol version '{got}', supported versions: {SUPPORTED_VERSIONS:?}"
+            ),
+        }
+    }
+
+    /// The standard rendering: a 400 carrying [`Invalid::message`].
+    ///
+    /// `kind` and `corr_id` are the caller's best guess — from the parsed
+    /// envelope when there is one, and from [`salvage_context`] when the bytes
+    /// would not parse — so a client can still correlate the rejection.
+    pub fn to_response(&self, kind: String, corr_id: String) -> ResponseEnvelope {
+        ResponseEnvelope::error(kind, corr_id, 400, &self.message())
+    }
+}
+
+impl fmt::Display for Invalid {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message())
+    }
+}
+
+/// Is this envelope one the protocol admits?
+///
+/// Structure only. Whether `kind` names an operation, and whether `data` holds
+/// the fields that operation needs, are the server's questions.
+pub fn validate_envelope(req: &RequestEnvelope) -> Result<(), Invalid> {
+    if req.kind.is_empty() {
+        return Err(Invalid::EmptyKind);
+    }
+    if !req.data.is_object() {
+        return Err(Invalid::DataNotObject);
+    }
+    if !SUPPORTED_VERSIONS.contains(&req.head.version.as_str()) {
+        return Err(Invalid::UnsupportedVersion(req.head.version.clone()));
+    }
+    Ok(())
+}
+
+/// Bytes to a request, or the reason they are not one.
+///
+/// The pairing a gateway should reach for. Parsing and validating are two
+/// failures with one answer — reject at the edge — and offering them together
+/// means there is no ergonomic path that does one and forgets the other.
+pub fn parse_and_validate(body: &[u8]) -> Result<RequestEnvelope, Invalid> {
+    let req: RequestEnvelope =
+        serde_json::from_slice(body).map_err(|e| Invalid::Unparseable(e.to_string()))?;
+    validate_envelope(&req)?;
+    Ok(req)
+}
+
+/// `kind` and `corrId` dug out of bytes that would not parse as an envelope.
+///
+/// Best effort, and only for the error path: a client that sent malformed JSON
+/// still gets a response it can correlate, when the JSON is at least an object
+/// with those fields. Falls back to `("unknown", "0")`.
+pub fn salvage_context(body: &[u8]) -> (String, String) {
+    let Ok(raw) = serde_json::from_slice::<Value>(body) else {
+        return ("unknown".to_string(), "0".to_string());
+    };
+    let kind = raw
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string();
+    let corr_id = raw
+        .get("head")
+        .and_then(|h| h.get("corrId"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("0")
+        .to_string();
+    (kind, corr_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn envelope(kind: &str, version: &str, data: Value) -> Value {
+        json!({
+            "kind": kind,
+            "head": { "corrId": "c1", "version": version },
+            "data": data,
+        })
+    }
+
+    fn suspend_action(awaited: &str, awaiter: &str) -> Value {
+        json!({
+            "kind": "promise.register_callback",
+            "head": {},
+            "data": { "awaited": awaited, "awaiter": awaiter },
+        })
+    }
+
+    /// The envelope layer only decides shape; the per-kind rules run when the
+    /// engine deserializes the `data`, which is what this exercises.
+    fn suspend(id: &str, awaited: &[&str]) -> Result<(), String> {
+        let actions: Vec<Value> = awaited.iter().map(|a| suspend_action(a, id)).collect();
+        let data = json!({ "id": id, "version": 0, "actions": actions });
+        let r: TaskSuspendData = serde_json::from_value(data).expect("shape");
+        r.validate().map_err(|e| format!("{e:?}"))
+    }
+
+    #[test]
+    fn distinct_awaited_ids_are_accepted() {
+        assert!(suspend("o:t", &["o:a", "o:b"]).is_ok());
+    }
+
+    #[test]
+    fn the_same_awaited_id_twice_is_rejected() {
+        // Storage used to deduplicate this into the one-id request, which is
+        // not the request the caller wrote.
+        let err = suspend("o:t", &["o:a", "o:a"]).expect_err("duplicate must be refused");
+        assert!(err.contains("duplicate_awaited"), "unexpected: {err}");
+    }
+
+    fn tag(k: &str, v: &str) -> Tags {
+        std::collections::HashMap::from([(k.to_string(), v.to_string())])
+    }
+
+    #[test]
+    fn a_promise_is_external_when_any_of_four_tags_says_something_else_settles_it() {
+        // `scope = global` is the form real SDK traffic carries; the other
+        // three are the escape hatch, a dispatch target, and a sleep.
+        assert_eq!(otype(&tag("resonate:scope", "global")), OType::External);
+        assert_eq!(otype(&tag("resonate:external", "true")), OType::External);
+        assert_eq!(
+            otype(&tag("resonate:target", "poll://any@w")),
+            OType::External
+        );
+        assert_eq!(otype(&tag("resonate:timer", "true")), OType::External);
+
+        assert_eq!(otype(&Tags::new()), OType::Internal);
+        assert_eq!(otype(&tag("resonate:scope", "local")), OType::Internal);
+        assert_eq!(otype(&tag("resonate:external", "false")), OType::Internal);
+        assert_eq!(otype(&tag("resonate:timer", "false")), OType::Internal);
+        // A tag that only looks like one of the four.
+        assert_eq!(otype(&tag("resonate:origin", "o")), OType::Internal);
+    }
+
+    #[test]
+    fn a_promise_runs_as_a_task_exactly_when_it_names_a_target() {
+        assert_eq!(okind(&tag("resonate:target", "poll://any@w")), OKind::Task);
+        assert_eq!(okind(&tag("resonate:scope", "global")), OKind::Idle);
+        assert_eq!(okind(&tag("resonate:timer", "true")), OKind::Idle);
+        assert_eq!(okind(&Tags::new()), OKind::Idle);
+    }
+
+    #[test]
+    fn the_verdict_a_deadline_produces_is_the_timer_tag_alone() {
+        assert!(is_timer(&tag("resonate:timer", "true")));
+        // External by another route, but still rejected on timeout.
+        assert!(!is_timer(&tag("resonate:scope", "global")));
+        assert!(!is_timer(&tag("resonate:external", "true")));
+    }
+
+    #[test]
+    fn a_well_formed_envelope_is_accepted() {
+        let body = envelope("promise.get", SUPPORTED_VERSIONS[0], json!({ "id": "p" }));
+        let req = parse_and_validate(body.to_string().as_bytes()).expect("should parse");
+        assert_eq!(req.kind, "promise.get");
+        assert_eq!(req.head.corr_id, "c1");
+    }
+
+    #[test]
+    fn bytes_that_are_not_json_are_unparseable() {
+        let err = parse_and_validate(b"not json").unwrap_err();
+        assert!(matches!(err, Invalid::Unparseable(_)));
+        assert!(err.message().starts_with("Invalid request envelope:"));
+    }
+
+    #[test]
+    fn json_missing_the_envelope_shape_is_unparseable() {
+        // Valid JSON, but no `head` — serde cannot build a RequestEnvelope.
+        let err = parse_and_validate(br#"{"kind":"promise.get"}"#).unwrap_err();
+        assert!(matches!(err, Invalid::Unparseable(_)));
+    }
+
+    #[test]
+    fn an_empty_kind_is_rejected() {
+        // Serde accepts "" as a String, so only validation can catch this.
+        let body = envelope("", SUPPORTED_VERSIONS[0], json!({}));
+        let err = parse_and_validate(body.to_string().as_bytes()).unwrap_err();
+        assert_eq!(err, Invalid::EmptyKind);
+    }
+
+    #[test]
+    fn data_that_is_not_an_object_is_rejected() {
+        for data in [json!([]), json!("s"), json!(1), json!(null)] {
+            let body = envelope("promise.get", SUPPORTED_VERSIONS[0], data.clone());
+            let err = parse_and_validate(body.to_string().as_bytes()).unwrap_err();
+            assert_eq!(err, Invalid::DataNotObject, "data was {data}");
+        }
+    }
+
+    #[test]
+    fn an_unsupported_version_is_rejected_and_names_what_is_supported() {
+        let body = envelope("promise.get", "1.0", json!({}));
+        let err = parse_and_validate(body.to_string().as_bytes()).unwrap_err();
+        assert_eq!(err, Invalid::UnsupportedVersion("1.0".to_string()));
+        assert!(err.message().contains("'1.0'"));
+        assert!(err.message().contains(SUPPORTED_VERSIONS[0]));
+    }
+
+    #[test]
+    fn kind_is_checked_before_data_and_data_before_version() {
+        // One rejection per request, and which one is not arbitrary: the
+        // outermost problem is reported, so a client fixes them in an order
+        // that terminates.
+        let body = envelope("", "1.0", json!([]));
+        assert_eq!(
+            parse_and_validate(body.to_string().as_bytes()).unwrap_err(),
+            Invalid::EmptyKind
+        );
+        let body = envelope("promise.get", "1.0", json!([]));
+        assert_eq!(
+            parse_and_validate(body.to_string().as_bytes()).unwrap_err(),
+            Invalid::DataNotObject
+        );
+    }
+
+    #[test]
+    fn a_rejection_renders_as_a_400_that_can_be_correlated() {
+        let resp = Invalid::EmptyKind.to_response("".to_string(), "c1".to_string());
+        assert_eq!(resp.head.status, 400);
+        assert_eq!(resp.head.corr_id, "c1");
+    }
+
+    #[test]
+    fn salvage_recovers_what_it_can_from_bytes_that_did_not_parse() {
+        // Enough of an object to correlate the rejection.
+        let (kind, corr_id) = salvage_context(br#"{"kind":"promise.get","head":{"corrId":"c9"}}"#);
+        assert_eq!((kind.as_str(), corr_id.as_str()), ("promise.get", "c9"));
+
+        // Nothing to go on.
+        let (kind, corr_id) = salvage_context(b"not json");
+        assert_eq!((kind.as_str(), corr_id.as_str()), ("unknown", "0"));
+
+        // An object without the fields.
+        let (kind, corr_id) = salvage_context(br#"{"a":1}"#);
+        assert_eq!((kind.as_str(), corr_id.as_str()), ("unknown", "0"));
+    }
+
+    // `Message` replaced a hand-built `serde_json::json!` for unblock and a
+    // `to_value(ExecuteMsg)` for execute. The enum is `untagged` precisely so
+    // the bytes on the wire do not change; these pin that down.
+
+    /// The poll/SSE worker sends a serialized *string*, so key order is part of
+    /// its wire format — and `Value` comparison cannot see key order, which is
+    /// why the two tests below are not enough on their own.
+    #[test]
+    fn message_serializes_with_sorted_keys_like_the_value_hop() {
+        let msg = Message::Execute(ExecuteMsg {
+            kind: "execute".to_string(),
+            head: MessageHead {
+                server_url: "http://localhost:8001".to_string(),
+            },
+            data: ExecuteMsgData {
+                task: ExecuteMsgTask {
+                    id: "t1".to_string(),
+                    version: 3,
+                },
+            },
+        });
+        let via_value = serde_json::to_string(&serde_json::to_value(&msg).unwrap()).unwrap();
+        assert_eq!(
+            via_value,
+            r#"{"data":{"task":{"id":"t1","version":3}},"head":{"serverUrl":"http://localhost:8001"},"kind":"execute"}"#,
+            "SSE consumers have always received alphabetically ordered keys"
+        );
+        // Serializing the struct directly would emit declaration order instead.
+        assert_ne!(serde_json::to_string(&msg).unwrap(), via_value);
+    }
+
+    #[test]
+    fn execute_message_wire_format() {
+        let msg = Message::Execute(ExecuteMsg {
+            kind: "execute".to_string(),
+            head: MessageHead {
+                server_url: "http://localhost:8001".to_string(),
+            },
+            data: ExecuteMsgData {
+                task: ExecuteMsgTask {
+                    id: "t1".to_string(),
+                    version: 3,
+                },
+            },
+        });
+        assert_eq!(
+            serde_json::to_value(&msg).unwrap(),
+            json!({
+                "kind": "execute",
+                "head": { "serverUrl": "http://localhost:8001" },
+                "data": { "task": { "id": "t1", "version": 3 } }
+            })
+        );
+    }
+
+    // --- Colon validation ---
+
+    fn promise(data: Value) -> Result<(), String> {
+        let r: PromiseCreateData = serde_json::from_value(data).expect("shape");
+        r.validate().map_err(|e| format!("{e:?}"))
+    }
+
+    fn schedule(data: Value) -> Result<(), String> {
+        let r: ScheduleCreateData = serde_json::from_value(data).expect("shape");
+        r.validate().map_err(|e| format!("{e:?}"))
+    }
+
+    #[test]
+    fn promise_origin_with_colon_is_rejected() {
+        let err = promise(json!({
+            "id": "myapp",
+            "timeoutAt": 1000,
+            "tags": { "resonate:origin": "bad:origin" }
+        }))
+        .expect_err("colon in resonate:origin must be rejected");
+        assert!(err.contains("colon_in_origin"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn promise_prefix_with_colon_is_rejected() {
+        let err = promise(json!({
+            "id": "myapp",
+            "timeoutAt": 1000,
+            "tags": { "resonate:prefix": "bad:prefix" }
+        }))
+        .expect_err("colon in resonate:prefix must be rejected");
+        assert!(err.contains("colon_in_prefix"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn promise_origin_and_prefix_without_colon_are_accepted() {
+        assert!(promise(json!({
+            "id": "myapp",
+            "timeoutAt": 1000,
+            "tags": {
+                "resonate:origin": "myapp",
+                "resonate:prefix": "myapp"
+            }
+        }))
+        .is_ok());
+    }
+
+    #[test]
+    fn schedule_origin_with_colon_in_promise_tags_is_rejected() {
+        let err = schedule(json!({
+            "id": "mysched",
+            "cron": "* * * * *",
+            "promiseId": "mysched",
+            "promiseTimeout": 1000,
+            "promiseTags": {
+                "resonate:target": "poll://any",
+                "resonate:origin": "bad:origin"
+            }
+        }))
+        .expect_err("colon in resonate:origin must be rejected");
+        assert!(err.contains("colon_in_origin"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn schedule_prefix_with_colon_in_promise_tags_is_rejected() {
+        let err = schedule(json!({
+            "id": "mysched",
+            "cron": "* * * * *",
+            "promiseId": "mysched",
+            "promiseTimeout": 1000,
+            "promiseTags": {
+                "resonate:target": "poll://any",
+                "resonate:prefix": "bad:prefix"
+            }
+        }))
+        .expect_err("colon in resonate:prefix must be rejected");
+        assert!(err.contains("colon_in_prefix"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn schedule_origin_and_prefix_without_colon_are_accepted() {
+        assert!(schedule(json!({
+            "id": "mysched",
+            "cron": "* * * * *",
+            "promiseId": "mysched",
+            "promiseTimeout": 1000,
+            "promiseTags": {
+                "resonate:target": "poll://any",
+                "resonate:origin": "mysched",
+                "resonate:prefix": "mysched"
+            }
+        }))
+        .is_ok());
+    }
+
+    #[test]
+    fn unblock_message_wire_format() {
+        let promise = PromiseRecord {
+            id: "p1".to_string(),
+            state: PromiseState::Resolved,
+            param: PromiseValue::default(),
+            value: PromiseValue::default(),
+            tags: std::collections::HashMap::new(),
+            timeout_at: 100,
+            created_at: 1,
+            settled_at: Some(50),
+        };
+        let expected_promise = serde_json::to_value(&promise).unwrap();
+        let msg = Message::Unblock(UnblockMsg {
+            kind: "unblock".to_string(),
+            head: UnblockMsgHead {},
+            data: UnblockMsgData { promise },
+        });
+        // Note the empty head — unblock has never carried a serverUrl.
+        assert_eq!(
+            serde_json::to_value(&msg).unwrap(),
+            json!({
+                "kind": "unblock",
+                "head": {},
+                "data": { "promise": expected_promise }
+            })
+        );
+    }
+    fn fence(task_id: &str, kind: &str, action_id: &str) -> TaskFenceData {
+        serde_json::from_value(json!({
+            "id": task_id,
+            "version": 1,
+            "action": { "kind": kind, "head": {}, "data": { "id": action_id } }
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn fence_action_in_the_task_origin_passes() {
+        assert!(fence("o:t", "promise.create", "o:p").validate().is_ok());
+        assert!(fence("o:t", "promise.settle", "o:p").validate().is_ok());
+    }
+
+    #[test]
+    fn fence_action_naming_the_task_is_refused() {
+        let err = fence("o:t", "promise.settle", "o:t")
+            .validate()
+            .unwrap_err();
+        assert!(format_validation_errors(&err).contains("must not equal the task ID"));
+    }
+
+    #[test]
+    fn fence_create_of_a_root_in_another_origin_passes() {
+        // A detached computation: the created id is its own origin.
+        assert!(fence("o:t", "promise.create", "other").validate().is_ok());
+    }
+
+    #[test]
+    fn fence_create_of_a_child_in_another_origin_is_refused() {
+        let err = fence("o:t", "promise.create", "other:p")
+            .validate()
+            .unwrap_err();
+        assert!(format_validation_errors(&err).contains("task's origin"));
+    }
+
+    #[test]
+    fn fence_settle_outside_the_task_origin_is_refused_even_for_a_root() {
+        let err = fence("o:t", "promise.settle", "other")
+            .validate()
+            .unwrap_err();
+        assert!(format_validation_errors(&err).contains("task's origin"));
+    }
+}

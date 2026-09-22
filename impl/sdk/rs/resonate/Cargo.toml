@@ -1,0 +1,28 @@
+[package]
+name = "resonate-sdk"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+
+[dependencies]
+resonate-sdk-macros = { path = "../resonate-macros", version = "0.1.0" }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.13", features = ["json", "stream"] }
+tracing = "0.1"
+thiserror = "2"
+base64 = "0.22"
+dashmap = "6"
+futures = "0.3"
+async-trait = "0.1"
+parking_lot = "0.12.5"
+seahash = "4"
+
+[dev-dependencies]
+test-with = "0.16"

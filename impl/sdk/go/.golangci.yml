@@ -1,0 +1,46 @@
+# golangci-lint configuration for resonate-sdk-go
+# Schema: golangci-lint v2 (CI pins v2.12.2)
+
+version: "2"
+
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+
+linters:
+  default: none
+  enable:
+    # gosimple was folded into staticcheck in v2, so it is covered below.
+    - errcheck # Check for unchecked errors
+    - govet # Report suspicious constructs
+    - ineffassign # Detect ineffectual assignments
+    - staticcheck # Advanced static analysis (includes the former gosimple)
+    - unused # Check for unused constants, variables, functions
+
+  settings:
+    errcheck:
+      # Left off for the initial baseline — it flags intentional single-value
+      # type assertions (v := x.(T)). Tighten once the tree is clean.
+      check-type-assertions: false
+      check-blank: false
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment # Let the compiler handle struct layout
+        - shadow # `if err := ...; err != nil` shadowing is idiomatic Go
+    staticcheck:
+      checks:
+        - all
+        - -QF1001 # De Morgan rewrites hurt readability on intent-bearing booleans
+
+  exclusions:
+    paths:
+      - vendor
+    rules:
+      # Allow unchecked errors in test helpers.
+      - path: _test\.go
+        linters:
+          - errcheck
+
+# Formatting (gofmt) is intentionally not configured here — CI already owns it
+# via the dedicated `gofmt -l` step in .github/workflows/ci.yml.
