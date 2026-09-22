@@ -1,0 +1,265 @@
+name: CI (Resonate on S3)
+
+# One workflow per component, as everything else under `impl/` does. It builds the
+# Rust tree next door only for `conctrace`, the trace producer two of the checks
+# record with, and reads the specification straight out of `spec/`.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    paths:
+      - 'impl/server/s3/**'
+      # The reference server and `conctrace` are built from here.
+      - 'impl/server/core/**'
+      - 'spec/valid/porc/**'
+      - '.github/workflows/server-s3-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════════════════
+  # The Zig server on an object store (`impl/server/s3/`)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  # Hermetic: one process, one seed, no sockets and no wall clock. A failing
+  # seed is printed with the command that reproduces it byte for byte.
+  zig:
+    name: Zig (tests and simulation)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    defaults:
+      run:
+        working-directory: impl/server/s3
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v1
+        with:
+          version: 0.14.1
+
+      - name: Test
+        run: zig build test
+
+      # --release: the linearizability search is the whole cost of a soak, and a
+      # debug build turns minutes into an afternoon.
+      - name: Build
+        run: zig build -Doptimize=ReleaseSafe
+
+      # Two shapes of trouble: a store that loses races and reorders its
+      # answers, and a store that stops answering while servers are killed
+      # mid-decision. Both also check, after every operation, that every
+      # deadline a document records still has an object to fire it.
+      # Ten seeds, searched to the full depth rather than more seeds searched
+      # shallowly: a run that gives up proves nothing either way, and a step that
+      # mostly gives up is a step that mostly says nothing. The thousands of seeds
+      # are in the sweep below, where there is no search to run out of.
+      - name: Simulate (races)
+        run: |
+          zig-out/bin/simulator soak --runs 10 --servers 3 --clients 4 \
+            --operations 200 --conflict 15 --reorder 30 --unavailable 3 --lost-ack 3
+
+      - name: Simulate (faults and crashes)
+        run: |
+          zig-out/bin/simulator soak --runs 10 --servers 3 --clients 4 \
+            --operations 200 --unavailable 5 --lost-ack 5 --crash 2
+
+      # A cache of one document, sixty-four bytes wide: every commit evicts.
+      # What the search is being asked here is whether eviction is only ever a
+      # cost — an evicted document is read again, a kept one is still current —
+      # because an eviction that lost a document or kept a stale one is a wrong
+      # answer, and a wrong answer is what the search refutes.
+      - name: Simulate (a cache that evicts on every commit)
+        run: |
+          zig-out/bin/simulator soak --runs 10 --servers 3 --clients 4 \
+            --operations 200 --conflict 15 --reorder 30 \
+            --cache-entries 1 --cache-bytes 64
+
+      # The negative control, and the only step here that fails when it passes.
+      # `--trust-cache` answers from a cached document without asking the store
+      # whether anyone has moved past it, which is sound for a single writer and
+      # wrong for three. If the search cannot refute that, the search is not
+      # evidence for anything it does say — so seed 1 refuting it is the check.
+      - name: The search can still fail (a cache nobody validates)
+        run: |
+          if zig-out/bin/simulator soak --runs 3 --servers 3 --clients 4 \
+               --operations 200 --conflict 15 --reorder 30 --trust-cache; then
+            echo "the search accepted a server that answers from a stale cache" >&2
+            exit 1
+          fi
+
+      # The one path debug mode cannot reach: a server that comes up, reads the
+      # deadlines out of the bucket, and fires one on wall time with nobody
+      # asking. Both checks above run with the clock in the caller's hands.
+      - name: A deadline survives a restart
+        run: tools/deadline-survives-a-restart.sh
+
+      # And the defect none of the others can see: the simulator drives the state
+      # machine in process, the tests answer a handful of requests and exit, and a
+      # differential compares answers rather than resident memory. A few kilobytes
+      # a request kills a server that is otherwise correct.
+      - name: Answering costs nothing to keep
+        run: tools/memory-stays-flat.sh
+
+      # With the search off a run costs milliseconds, so this is thousands of
+      # seeds rather than tens — and what it still checks is everything a
+      # linearizability search cannot see: a 5xx, a deadline with no object to
+      # fire it, and work that nothing will ever hand on.
+      - name: Simulate (a wide sweep, invariants only)
+        run: |
+          zig-out/bin/simulator soak --runs 3000 --servers 4 --clients 6 \
+            --operations 400 --conflict 20 --reorder 40 \
+            --unavailable 5 --lost-ack 5 --crash 2 --no-check
+
+  # The same two questions the Rust tree asks of itself, asked of the Zig
+  # server: does it answer what the reference answers, and is a real concurrent
+  # history over real sockets linearizable.
+  zig-differential:
+    name: Zig against the reference
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v1
+        with:
+          version: 0.14.1
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-workspaces: impl/server/core
+
+      # For the Go checker below. Its version comes from the specification
+      # repository, which the script clones, so this only needs a toolchain new
+      # enough to read that go.mod.
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Build
+        run: |
+          cargo build --release --bin resonate --example conctrace \
+            --manifest-path impl/server/core/Cargo.toml
+          cd impl/server/s3 && zig build -Doptimize=ReleaseSafe
+
+      # Debug mode on both: the clock belongs to the caller, so time is an input
+      # rather than a race, `debug.snap` answers, and nothing runs on wall time.
+      # The blob server is the peer because it holds its messages for the
+      # snapshot, as the Zig server does — a backend that delivers them would
+      # make that section a report on delivery rather than on what was decided.
+      - name: Start both servers
+        run: |
+          ./impl/server/s3/zig-out/bin/resonate serve --debug --store memory --port 8021 &
+          ./impl/server/core/target/release/resonate serve --debug --server-port 8022 --level error \
+            --set servers.active=server_blob \
+            --set servers.server_blob.search_enabled=true \
+            --set servers.server_blob.retry_timeout=30000 &
+          for _ in $(seq 1 40); do
+            curl -sf -o /dev/null http://127.0.0.1:8021/ready && break
+            sleep 1
+          done
+          for _ in $(seq 1 40); do
+            curl -sf -o /dev/null -X POST http://127.0.0.1:8022/ \
+              -H 'Content-Type: application/json' \
+              -d '{"kind":"debug.snap","head":{"corrId":"r","version":"2026-04-01","resonate:debug_time":1},"data":{}}' && break
+            sleep 1
+          done
+
+      # `--store memory` and `--store s3` are the same server over two
+      # implementations of one port, and the memory one is not the one that
+      # ships. `fakes3` answers the six operations the port has, with real
+      # conditional writes, so the S3 path can be run without an S3.
+      - name: Start the Zig server over a stand-in S3
+        run: |
+          ./impl/server/s3/zig-out/bin/fakes3 --port 9100 &
+          for _ in $(seq 1 40); do
+            curl -sf -o /dev/null "http://127.0.0.1:9100/b?list-type=2&prefix=" && break
+            sleep 1
+          done
+          ./impl/server/s3/zig-out/bin/resonate serve --debug --store s3 \
+            --endpoint http://127.0.0.1:9100 --bucket b --port 8031 &
+          for _ in $(seq 1 40); do
+            curl -sf -o /dev/null http://127.0.0.1:8031/ready && break
+            sleep 1
+          done
+
+      # Printed, never failed on, and for the same reason as the oracle drift
+      # ledger above: the two known differences are ones the Zig server is
+      # deliberately on the other side of — `task.create` on an already
+      # fulfilled task carries the branch preload, which is what the oracle and
+      # both SQL engines do, and a sweep catches a schedule up across every
+      # boundary it crossed, which is what the blob server does. A new
+      # difference has to be visible, and a difference is not a build break.
+      - name: Differential ledger
+        run: |
+          echo "── over the memory store ──"
+          ./impl/server/s3/zig-out/bin/differ --a http://127.0.0.1:8021/ --label-a zig \
+            --b http://127.0.0.1:8022/ --label-b blob \
+            --seed 1 --operations 1000 --keep-going || true
+          echo "── over the S3 path ──"
+          ./impl/server/s3/zig-out/bin/differ --a http://127.0.0.1:8031/ --label-a zig-s3 \
+            --b http://127.0.0.1:8022/ --label-b blob \
+            --seed 5 --operations 400 --keep-going || true
+
+      # Somebody else's checker, on this server's histories. Every other check in
+      # this directory grades this server against a specification written in this
+      # repository; this one hands a recorded history to Porcupine driven by the
+      # model in `resonatehq/resonate-specification`, which nobody here wrote. The
+      # script clones it, builds `conccheck`, runs the server over the stand-in S3,
+      # and first proves the checker refuses a history with one answer altered.
+      - name: Against the Go checker
+        run: impl/server/s3/tools/against-the-go-checker.sh 10
+
+      # The claim the whole design rests on, across processes rather than inside
+      # one: several servers over one bucket need nothing but a conditional write
+      # to agree. The simulator drives several server state machines over one
+      # in-memory store; this runs two real processes, each with its own cache,
+      # deadline queue and event loop, joined only by the object store. Then it
+      # tells both of them they are the only writer, which is a lie, and requires
+      # both checkers to catch it.
+      - name: Two servers, one bucket
+        run: impl/server/s3/tools/two-servers-one-bucket.sh 1000 12
+
+      # This one is a check: the producer refuses a history with no successes or
+      # no overlap, and the checker asks whether *any* order consistent with the
+      # recorded instants explains every answer.
+      - name: Record and check a real history
+        run: |
+          ./impl/server/core/target/release/examples/conctrace \
+            --url http://127.0.0.1:8021/ --out trace --clients 8 --ops 600
+          ./impl/server/s3/zig-out/bin/simulator check trace.history
+
+      # The same question of the path that talks to an object store.
+      - name: Record and check a real history over the S3 path
+        run: |
+          ./impl/server/core/target/release/examples/conctrace \
+            --url http://127.0.0.1:8031/ --out trace-s3 --clients 8 --ops 600
+          ./impl/server/s3/zig-out/bin/simulator check trace-s3.history
+
+  # Porcupine, from the specification repository, against a live server under
+  # real concurrency.
+  #
+  # The checker is upstream's, unmodified. Only the trace producer is ours:
+  # `loadgen` there opens with `debug.start`, which is a startup flag here and
+  # answers 400, and it builds ids like `c0.a0` where this server's origin is
+  # everything before the first ':'.
+  #
+  # `conccheck`, not `lincheck`. `lincheck` asks whether the ONE order the
+  # harness recorded satisfies the model, and on a concurrent run refutes
+  # almost anything, because return order is one legal linearization of many.
+  # `conccheck` reads the real call/return instants and asks whether ANY order
+  # consistent with them works — only its refutation is a claim about the
+  # server.
+  #
+  # `-partition=false` because upstream's `originOf` splits on '.', so it reads
+  # every ':'-id as its own partition. Unpartitioned replays against whole
+  # state, which is the stronger check anyway.

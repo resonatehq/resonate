@@ -27,6 +27,10 @@ every pull request that matters right now.
 The copies under each subproject are left in place as that project's own
 record. They are not read by anything.
 
+`server-s3-ci.yml` is the exception to "copied": `impl/server/s3/` grew up
+inside this repository, its steps were already written from the workspace
+root, and the copy only gains the paths it depends on and the cache location.
+
 ## Deliberately not moved
 
 These are outward-facing or destructive, and enabling them is a decision for
