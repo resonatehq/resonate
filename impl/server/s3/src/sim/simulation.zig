@@ -1,0 +1,1223 @@
+//! The simulator.
+//!
+//! One process, one seed, no wall clock and no sockets. The simulator owns every
+//! input the server has: the clock, the object store, the network, and when a
+//! server dies. A seed reproduces a run exactly, which is the only property that
+//! makes a failure worth anything — a bug you cannot re-run is a bug you cannot
+//! fix.
+//!
+//! What it builds:
+//!
+//! * **Several servers over one bucket.** Separate caches, separate actors,
+//!   separate backoffs. This is the case the single-writer-per-origin
+//!   optimisation must not be *needed* for: correctness comes from the
+//!   compare-and-swap, and the actors only reduce how often one is lost.
+//! * **A store that misbehaves.** Injected unavailability, conflicts the service
+//!   will not order, writes that land and are then reported as failures, and
+//!   completions out of order.
+//! * **A bus that takes the messages.** Not one that serves nothing: the sender
+//!   would then never render a message, and the run would never exercise the one
+//!   path that turns a committed transition into something a worker can read.
+//! * **Servers that die.** A crash takes the caches, the deadline queue and every
+//!   in-flight decision with it. The callers of those decisions are told nothing,
+//!   which is exactly the case a retry has to survive.
+//! * **Clients that overlap.** Each holds one request at a time and records when
+//!   it was sent and when it was answered, which is the history the
+//!   linearizability check needs.
+//!
+//! What it then checks:
+//!
+//! 1. **Linearizability, including what it left behind.** Is the recorded history
+//!    equivalent to *some* sequential execution of the specification — one that
+//!    also ends in the state a cold server reads out of the bucket? Both at once,
+//!    because two orders can explain the same answers and leave different state,
+//!    so holding one particular order to the state would fail a correct server.
+//!    See `checker.zig`.
+//! 2. **The invariants a search cannot see.** Every deadline a document records
+//!    has an object of that name; nothing runnable is stranded; every message
+//!    describes state that is really there. Each of those can be false while
+//!    every answer the server ever gave is correct, which is why they are checked
+//!    against the bucket rather than against the history.
+//! 3. **Coverage.** Every operation reached a success, and the history really
+//!    overlapped. A run that only exercised failure paths, or that turned out
+//!    sequential, has checked nothing — and says so rather than passing.
+
+const std = @import("std");
+const stdx = @import("../stdx.zig");
+const json = @import("../json.zig");
+const protocol = @import("../protocol.zig");
+const store_mod = @import("../store.zig");
+const doc_mod = @import("../doc.zig");
+const handle = @import("../handle.zig");
+const env = @import("../env.zig");
+const server_mod = @import("../server.zig");
+const applier_mod = @import("../applier.zig");
+const checker = @import("checker.zig");
+const workload_mod = @import("workload.zig");
+const Model = @import("model.zig").Model;
+
+const assert = stdx.assert;
+
+pub const Options = struct {
+    seed: u64,
+    /// How many servers share the bucket.
+    servers: u32 = 2,
+    /// How many callers are in flight at once.
+    clients: u32 = 3,
+    /// How many requests the run issues.
+    operations: u32 = 200,
+    /// How the store misbehaves. `defer_percent` is not misbehaviour: it is what
+    /// makes two requests overlap at all, so it defaults high.
+    faults: store_mod.MemoryStore.Faults = .{ .defer_percent = 80 },
+    /// Chance per step that a server is killed and replaced.
+    crash_percent: u64 = 0,
+    /// What each server's document cache is allowed to hold. Small numbers make
+    /// it evict on almost every commit, which is the interesting setting: an
+    /// eviction that lost a document, or kept a stale one, is a wrong answer the
+    /// search can refute. Null leaves the shipped defaults.
+    cache_entries: ?u32 = null,
+    cache_bytes: ?u64 = null,
+    /// A negative control. With validated reads off, a cached document is
+    /// answered from without asking the store whether anyone has moved past it,
+    /// which is sound only where this process is the only writer. Run several
+    /// servers that way and the search should refute them — and a check that
+    /// cannot be made to fail is not evidence of anything.
+    trust_cache: bool = false,
+    /// Leave `schedule.*` out of the trajectory, so the recorded history is one
+    /// the specification repository's checker will read. See
+    /// `Workload.without_schedules`.
+    no_schedules: bool = false,
+    /// Run the linearizability search. Off for a fault-heavy run whose point is
+    /// that the server survives rather than what order it chose.
+    check: bool = true,
+    /// The budget the search gets.
+    check_options: checker.Options = .{},
+    verbose: bool = false,
+    /// Where to write the recorded history, in the same format a recording from a
+    /// real server over a real network uses — so the same checker reads both.
+    dump: ?[]const u8 = null,
+    /// Where to write the same history with the kinds the specification
+    /// repository's checker cannot read left out. See `unread_by_spec_checker`.
+    /// Pair it with `no_schedules`, or the file will still mention schedules.
+    dump_spec: ?[]const u8 = null,
+};
+
+pub const Verdict = enum { linearizable, violation, exhausted, not_checked };
+
+pub const Report = struct {
+    seed: u64,
+    operations: usize = 0,
+    answered: usize = 0,
+    succeeded: usize = 0,
+    unanswered: usize = 0,
+    /// How many operations went into the check. The cross-origin reads do not.
+    checked: usize = 0,
+    concurrency: checker.Concurrency = .{ .max = 0, .overlapping_pairs = 0, .answered = 0, .succeeded = 0 },
+    verdict: Verdict = .not_checked,
+    /// Set when the verdict is a violation.
+    blocked_kind: []const u8 = "",
+    prefix_length: usize = 0,
+    crashes: u32 = 0,
+    commits: u64 = 0,
+    contentions: u64 = 0,
+    conflicts: u64 = 0,
+    store_objects: usize = 0,
+    /// Whether the order the search found also leaves the state a cold server
+    /// reads out of the bucket. Part of the search rather than a second pass:
+    /// two orders can explain the same answers and leave different state, so
+    /// checking one particular order would fail a correct server.
+    refined: bool = false,
+    refinement_checked: bool = false,
+    /// Set when every answer is explicable and no such order leaves the state
+    /// that is there. A different shape of bug from an answer nothing explains,
+    /// and worth saying apart: the concurrency is fine and something was lost.
+    state_unexplained: bool = false,
+    /// Operation kinds that never succeeded.
+    uncovered: usize = 0,
+    /// Statuses seen, so a run that only ever got 400s is visible.
+    status_2xx: usize = 0,
+    status_3xx: usize = 0,
+    status_4xx: usize = 0,
+    /// "The store did not answer", which is the honest answer when the store did
+    /// not answer — so it is a failure only when nothing was injected that could
+    /// stop it answering.
+    status_503: usize = 0,
+    /// Any other 5xx. Never acceptable: it means the server could not make sense
+    /// of its own state.
+    status_5xx: usize = 0,
+    /// Whether the run injected anything that legitimately produces a 503.
+    faults_injected: bool = false,
+    /// A deadline a document records with no object to fire it, if one was ever
+    /// seen, and how many operations had been issued by then.
+    ///
+    /// Held in the report itself rather than allocated: a report outlives the
+    /// simulation that produced it, and everything it carries has to outlive the
+    /// arenas too.
+    unarmed_buf: [512]u8 = undefined,
+    unarmed_len: usize = 0,
+    unarmed_after: usize = 0,
+    /// What went out to workers and listeners. A run that sent nothing exercised
+    /// none of the path that renders a message, and says so here.
+    executes: u64 = 0,
+    unblocks: u64 = 0,
+    /// How many sweeps had to be sent again because they did not finish.
+    sweep_resends: u64 = 0,
+    /// Set when a sweep never finished, however many attempts it was given. Its
+    /// effects are then partial, which no sequential operation can mean — so the
+    /// run is not checked rather than checked against something it cannot be.
+    sweep_unfinished: bool = false,
+
+    pub fn unarmed(self: *const Report) []const u8 {
+        return self.unarmed_buf[0..self.unarmed_len];
+    }
+
+    pub fn ok(self: Report) bool {
+        if (self.unarmed_len > 0) return false;
+        if (self.verdict == .violation) return false;
+        if (self.status_5xx > 0) return false;
+        if (self.status_503 > 0 and !self.faults_injected) return false;
+        if (self.refinement_checked and !self.refined) return false;
+        return true;
+    }
+
+    pub fn write(self: Report, writer: anytype) !void {
+        try writer.print(
+            \\seed {d}
+            \\  operations      {d} ({d} answered, {d} never answered)
+            \\  statuses        {d} 2xx, {d} 3xx, {d} 4xx, {d} 503, {d} other 5xx
+            \\  concurrency     {d} at once, {d} overlapping pairs
+            \\  crashes         {d}
+            \\  commits         {d} ({d} lost races, {d} unordered conflicts)
+            \\  objects         {d}
+            \\  messages        {d} executes, {d} unblocks
+            \\  checked         {d} operations -> {s}
+            \\  final state     {s}
+            \\  coverage        {d} operation kinds never succeeded
+            \\
+        , .{
+            self.seed,
+            self.operations,
+            self.answered,
+            self.unanswered,
+            self.status_2xx,
+            self.status_3xx,
+            self.status_4xx,
+            self.status_503,
+            self.status_5xx,
+            self.concurrency.max,
+            self.concurrency.overlapping_pairs,
+            self.crashes,
+            self.commits,
+            self.contentions,
+            self.conflicts,
+            self.store_objects,
+            self.executes,
+            self.unblocks,
+            self.checked,
+            @tagName(self.verdict),
+            if (self.state_unexplained)
+                "BROKEN: every answer explained, no order leaves this state"
+            else if (self.verdict != .linearizable)
+                "not reached"
+            else if (!self.refinement_checked)
+                "not checked"
+            else if (self.refined) "matches the order found" else "BROKEN",
+            self.uncovered,
+        });
+        if (self.blocked_kind.len > 0) {
+            try writer.print("  blocked on     {s} after {d} operations\n", .{ self.blocked_kind, self.prefix_length });
+        }
+        if (self.unarmed_len > 0) {
+            try writer.print(
+                "  BROKEN         after {d} operations: {s}\n",
+                .{ self.unarmed_after, self.unarmed() },
+            );
+        }
+        if (self.sweep_unfinished) {
+            try writer.print(
+                "  not checked    a sweep fired part of what was due and stopped\n",
+                .{},
+            );
+        } else if (self.sweep_resends > 0) {
+            try writer.print("  sweeps         {d} sent again to finish\n", .{self.sweep_resends});
+        }
+    }
+};
+
+/// One request in flight.
+const Pending = struct {
+    simulation: *Simulation,
+    client: u32,
+    server: u32,
+    /// Where in the history this operation's record lives.
+    index: usize,
+    kind: workload_mod.Kind,
+    request: server_mod.Request,
+    arena: std.heap.ArenaAllocator,
+    /// Set when the server it was sent to died first.
+    abandoned: bool = false,
+    /// Set when this operation is to be sent again rather than recorded as it
+    /// came back. See `on_answered`.
+    resend: bool = false,
+    attempts: u32 = 0,
+};
+
+/// How many times a sweep that did not finish is sent again.
+const max_sweep_attempts: u32 = 16;
+
+/// The key prefix every server in a run shares. Named once, because the
+/// invariant below builds keys the servers are supposed to have written.
+const prefix = "sim";
+
+/// The message bus a run uses.
+///
+/// Not `bus.Nowhere`: a bus that serves no scheme means the sender never renders
+/// a message, and a simulated run would then never exercise the one path that
+/// turns a committed transition into something a worker can read.
+///
+/// What it checks is the property a message has to have — that it describes state
+/// which is really there. An `execute` names a task the bucket holds and a
+/// version it is really at; an `unblock` names a promise the bucket has settled.
+/// A message about state that does not exist is a worker sent to do nothing, or a
+/// caller told something untrue, and neither is visible in any answer: the
+/// messages are the one effect a linearizability search says nothing about.
+const Recording = struct {
+    simulation: *Simulation,
+    executes: u64 = 0,
+    unblocks: u64 = 0,
+
+    fn message_bus(self: *Recording) env.MessageBus {
+        return .{ .ptr = self, .vtable = &vtable };
+    }
+
+    const vtable: env.MessageBus.VTable = .{ .send = send_erased, .serves = serves_erased };
+
+    fn serves_erased(_: *anyopaque, _: []const u8) bool {
+        return true;
+    }
+
+    fn send_erased(ptr: *anyopaque, delivery: *env.Delivery) void {
+        const self: *Recording = @ptrCast(@alignCast(ptr));
+        self.check(delivery.body);
+        delivery.complete(.delivered, "");
+    }
+
+    fn check(self: *Recording, body: []const u8) void {
+        var arena = std.heap.ArenaAllocator.init(self.simulation.allocator);
+        defer arena.deinit();
+        const a = arena.allocator();
+        const parsed = json.parse(a, body) catch return self.complain("a message that is not JSON", body);
+        const kind = parsed.get_string("kind") orelse
+            return self.complain("a message with no kind", body);
+        const data = parsed.get("data") orelse
+            return self.complain("a message with no data", body);
+
+        if (std.mem.eql(u8, kind, "execute")) {
+            self.executes += 1;
+            const task = data.get("task") orelse return self.complain("an execute with no task", body);
+            const id = task.get_string("id") orelse return self.complain("an execute with no id", body);
+            if (task.get_i64("version") == null) return self.complain("an execute with no version", body);
+            var d = self.simulation.document(a, id) orelse
+                return self.complain("an execute for an origin the bucket does not have", body);
+            defer d.deinit();
+            if (d.task_const(id) == null) {
+                return self.complain("an execute for a task the bucket does not have", body);
+            }
+            // Not the version: an offer says "this task is available at this
+            // version", and it is true when the offer is made. By the time it is
+            // read the task may have been acquired by somebody else, which is
+            // exactly what the version is *for* — the holder finds out by being
+            // refused. Only what a message says about state that cannot change
+            // back is checkable here, which is that the state is there at all.
+            return;
+        }
+        if (std.mem.eql(u8, kind, "unblock")) {
+            self.unblocks += 1;
+            const promise = data.get("promise") orelse
+                return self.complain("an unblock with no promise", body);
+            const id = promise.get_string("id") orelse
+                return self.complain("an unblock with no id", body);
+            var d = self.simulation.document(a, id) orelse
+                return self.complain("an unblock for an origin the bucket does not have", body);
+            defer d.deinit();
+            const p = d.promise_const(id) orelse
+                return self.complain("an unblock for a promise the bucket does not have", body);
+            if (!p.state.is_settled()) self.complain("an unblock for a promise that is not settled", body);
+            return;
+        }
+        self.complain("a message of a kind the protocol does not have", body);
+    }
+
+    fn complain(self: *Recording, what: []const u8, body: []const u8) void {
+        self.simulation.record_broken(what, body);
+    }
+};
+
+const Instance = struct {
+    runtime: *server_mod.Runtime,
+    random: stdx.Random,
+};
+
+pub const Simulation = struct {
+    allocator: std.mem.Allocator,
+    options: Options,
+    random: stdx.Random,
+    sim: env.Simulated,
+    mem: store_mod.MemoryStore,
+    bus: Recording = undefined,
+    instances: []Instance,
+    /// One slot per client: the request it is waiting on, if any.
+    in_flight: []?*Pending,
+    /// Everything the history points at lives here for the whole run.
+    arena: std.heap.ArenaAllocator,
+    history: std.ArrayListUnmanaged(checker.Operation) = .{},
+    workload: workload_mod.Workload,
+    /// The recorder's clock, in nanoseconds. Advanced by the driver, so overlap is
+    /// a property of the run rather than of how fast the machine is.
+    wall: i64 = 0,
+    outstanding: u32 = 0,
+    report: Report,
+    /// Requests whose server died while holding them. Their memory outlives the
+    /// crash because nothing can prove the dead server let go of it, so it is
+    /// released when the run ends rather than when the caller gave up.
+    abandoned: std.ArrayListUnmanaged(*Pending) = .{},
+
+    pub fn create(allocator: std.mem.Allocator, options: Options) !*Simulation {
+        const self = try allocator.create(Simulation);
+        errdefer allocator.destroy(self);
+        self.* = .{
+            .allocator = allocator,
+            .options = options,
+            .random = stdx.Random.init(options.seed),
+            .sim = env.Simulated.init(allocator, 1_000_000_000),
+            .mem = store_mod.MemoryStore.init(allocator),
+            .instances = try allocator.alloc(Instance, @max(options.servers, 1)),
+            .in_flight = try allocator.alloc(?*Pending, @max(options.clients, 1)),
+            .arena = std.heap.ArenaAllocator.init(allocator),
+            .workload = undefined,
+            .report = .{ .seed = options.seed },
+        };
+        self.bus = .{ .simulation = self };
+        self.workload = workload_mod.Workload.init(allocator, &self.random, 1_000_000_000);
+        if (options.no_schedules) self.workload.without_schedules();
+        self.mem.random = &self.random;
+        self.mem.faults = options.faults;
+        for (self.in_flight) |*slot| slot.* = null;
+        for (self.instances, 0..) |*instance, i| {
+            instance.* = .{
+                .runtime = try self.build_runtime(),
+                // A seed per server, so two servers do not back off in lockstep.
+                .random = stdx.Random.init(options.seed ^ (0x9e37_79b9 *% (i + 1))),
+            };
+            instance.runtime.applier.random = &instance.random;
+        }
+        return self;
+    }
+
+    fn build_runtime(self: *Simulation) !*server_mod.Runtime {
+        const runtime = try server_mod.Runtime.create(
+            self.allocator,
+            // The clock belongs to the caller, so the trace decides when things
+            // happen and the run is reproducible.
+            .{
+                .debug = true,
+                .server_url = "http://sim",
+                .prefix = prefix,
+                .applier = .{
+                    .cache_entries = self.options.cache_entries orelse
+                        (applier_mod.Config{}).cache_entries,
+                    .cache_bytes = self.options.cache_bytes orelse
+                        (applier_mod.Config{}).cache_bytes,
+                    .linearizable_reads = !self.options.trust_cache,
+                },
+            },
+            self.mem.store(),
+            self.sim.clock(),
+            self.sim.timer(),
+            self.bus.message_bus(),
+        );
+        // Messages are not what this checks, and a growing outbox would show up
+        // as a state difference between two equivalent runs.
+        runtime.sender.hold = false;
+        return runtime;
+    }
+
+    pub fn destroy(self: *Simulation) void {
+        for (self.instances) |instance| instance.runtime.destroy();
+        self.allocator.free(self.instances);
+        for (self.in_flight) |slot| {
+            if (slot) |pending| {
+                pending.arena.deinit();
+                self.allocator.destroy(pending);
+            }
+        }
+        self.allocator.free(self.in_flight);
+        for (self.abandoned.items) |pending| {
+            pending.arena.deinit();
+            self.allocator.destroy(pending);
+        }
+        self.abandoned.deinit(self.allocator);
+        self.history.deinit(self.allocator);
+        self.workload.deinit();
+        self.arena.deinit();
+        self.mem.deinit();
+        self.sim.deinit();
+        self.allocator.destroy(self);
+    }
+
+    pub fn run(self: *Simulation) !Report {
+        var issued: u32 = 0;
+        var exclusive_in_flight = false;
+        var guard: u64 = 0;
+
+        while (issued < self.options.operations or self.outstanding > 0) {
+            guard += 1;
+            if (guard > @as(u64, self.options.operations) * 2_000 + 100_000) return error.SimulationStuck;
+
+            // A sweep that did not finish goes again before anything else does.
+            for (self.in_flight) |slot| {
+                const pending = slot orelse continue;
+                if (pending.resend) self.resend(pending);
+            }
+
+            // Issue. An exclusive operation waits for the system to go quiet and
+            // holds everything else off while it runs, which is what makes it a
+            // barrier the recorded history can hold it to.
+            if (!exclusive_in_flight and issued < self.options.operations) {
+                for (self.in_flight, 0..) |slot, client| {
+                    if (slot != null) continue;
+                    if (issued >= self.options.operations) break;
+                    const kind = self.workload.pick();
+                    if (kind.exclusive()) {
+                        if (self.outstanding > 0) break;
+                        try self.issue(@intCast(client), kind);
+                        issued += 1;
+                        exclusive_in_flight = true;
+                        break;
+                    }
+                    try self.issue(@intCast(client), kind);
+                    issued += 1;
+                    // Not every client every step: a step that fills every slot
+                    // every time produces the same overlap pattern forever.
+                    if (self.random.chance(40)) break;
+                }
+            }
+
+            // Time moves a little, so intervals overlap and deadlines can fall.
+            self.wall += @intCast(self.random.between(1, 40));
+            _ = self.sim.advance_to(self.sim.now + @as(i64, @intCast(self.random.between(0, 3))));
+            if (self.random.chance(30)) self.mem.drain_delayed();
+            for (self.instances) |instance| instance.runtime.drain();
+
+            if (exclusive_in_flight and self.outstanding == 0) exclusive_in_flight = false;
+
+            // Quiet: nothing in flight and nothing held back, so the bucket is
+            // what it will be until something else is asked of it.
+            if (self.report.unarmed_len == 0 and self.outstanding == 0 and
+                self.mem.delayed_count() == 0)
+            {
+                var scratch = std.heap.ArenaAllocator.init(self.allocator);
+                defer scratch.deinit();
+                if (try self.unarmed_deadline(scratch.allocator())) |key| {
+                    const n = @min(key.len, self.report.unarmed_buf.len);
+                    @memcpy(self.report.unarmed_buf[0..n], key[0..n]);
+                    self.report.unarmed_len = n;
+                    self.report.unarmed_after = self.history.items.len;
+                    if (self.options.verbose) {
+                        std.debug.print("{s}; the bucket holds:\n", .{key});
+                        var all = std.ArrayList([]const u8).init(scratch.allocator());
+                        self.mem.keys(&all) catch {};
+                        for (all.items) |k| {
+                            const body = self.mem.objects.get(k).?.body;
+                            std.debug.print("  {s}\n", .{k});
+                            if (std.mem.indexOf(u8, k, "/wf/") != null) {
+                                std.debug.print("    {s}\n", .{body[0..@min(body.len, 300)]});
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (self.options.crash_percent > 0 and self.random.chance(self.options.crash_percent)) {
+                try self.crash(@intCast(self.random.below(self.instances.len)));
+            }
+
+            // Anything the store is still holding back has to land eventually, or
+            // the run cannot finish.
+            if (self.outstanding > 0 and self.mem.delayed_count() > 0 and self.random.chance(50)) {
+                self.mem.drain_delayed();
+            }
+        }
+
+        self.mem.drain_delayed();
+        for (self.instances) |instance| instance.runtime.drain();
+        return try self.finish();
+    }
+
+    fn issue(self: *Simulation, client: u32, kind: workload_mod.Kind) !void {
+        const run_arena = self.arena.allocator();
+        const corr_id = try std.fmt.allocPrint(run_arena, "c{d}-{d}", .{ client, self.history.items.len });
+        const pid = try std.fmt.allocPrint(run_arena, "w{d}", .{client});
+        const request = try self.workload.build(run_arena, kind, corr_id, pid);
+
+        const index = self.history.items.len;
+        try self.history.append(self.allocator, .{
+            .call = self.wall,
+            .ret = checker.never_returned,
+            .now = request.now,
+            .envelope = request.envelope,
+            .status = 0,
+            .data = "",
+            .answered = false,
+            .client = client,
+            .kind = kind.wire(),
+        });
+
+        const server_index: u32 = @intCast(self.random.below(self.instances.len));
+        const pending = try self.allocator.create(Pending);
+        pending.* = .{
+            .simulation = self,
+            .client = client,
+            .server = server_index,
+            .index = index,
+            .kind = kind,
+            .request = undefined,
+            .arena = std.heap.ArenaAllocator.init(self.allocator),
+        };
+        pending.request = .{
+            .body = request.envelope,
+            .arena = &pending.arena,
+            .callback = on_answered,
+            .context = pending,
+        };
+        self.in_flight[client] = pending;
+        self.outstanding += 1;
+        self.instances[server_index].runtime.server.process(&pending.request);
+    }
+
+    /// Send an operation again, as the same operation.
+    ///
+    /// Only a sweep, and only because a sweep is the one operation whose failure
+    /// can be *partial*: it fires every deadline due at one instant, and a store
+    /// that stops answering halfway through leaves it having fired some of them.
+    /// No single sequential operation means that, so a history with one in it is
+    /// a history nothing can explain — including a correct server.
+    ///
+    /// Sending it again is exact rather than a convenience. A sweep is issued as
+    /// a barrier: nothing else is in flight while it runs, so nothing can observe
+    /// the state between two attempts, and the attempts together do what one
+    /// sweep does. So the history keeps one operation, called when the first
+    /// attempt was and answered when the last one was.
+    fn resend(self: *Simulation, pending: *Pending) void {
+        pending.resend = false;
+        pending.attempts += 1;
+        _ = pending.arena.reset(.retain_capacity);
+        pending.server = @intCast(self.random.below(self.instances.len));
+        pending.request = .{
+            .body = self.history.items[pending.index].envelope,
+            .arena = &pending.arena,
+            .callback = on_answered,
+            .context = pending,
+        };
+        self.instances[pending.server].runtime.server.process(&pending.request);
+    }
+
+    /// Every deadline a document records must have its object.
+    ///
+    /// The keys *are* the schedule: a document that says it has a deadline armed
+    /// at an instant, under the generation that armed it, and no object of that
+    /// name, is a deadline nothing will ever fire. No projection of the documents
+    /// shows it — the document looks right, and the promise simply never times
+    /// out — so it is checked here, against the bucket, wherever the store is
+    /// quiet enough for the answer to mean something.
+    ///
+    /// Quiet matters: a deadline's object is written *before* the document that
+    /// records it, so between the two writes the bucket has an object nothing
+    /// points at, which is fine, and never the other way round.
+    fn unarmed_deadline(self: *Simulation, scratch: std.mem.Allocator) !?[]const u8 {
+        return self.broken_invariant(scratch);
+    }
+
+    /// The two things that have to be true of the bucket for work to keep moving.
+    ///
+    /// Returns what is wrong, as a line, or null.
+    /// The document an id belongs to, as the bucket holds it, or null.
+    fn document(self: *Simulation, scratch: std.mem.Allocator, id: []const u8) ?doc_mod.Doc {
+        const space = store_mod.KeySpace.init(prefix ++ "/", store_mod.KeySpace.default_timer_shards);
+        var buf = std.ArrayList(u8).init(scratch);
+        const origin = protocol.origin(id);
+        const key = space.doc_key(&buf, origin) catch return null;
+        const entry = self.mem.objects.get(key) orelse return null;
+        return doc_mod.Doc.decode(scratch, entry.body, origin) catch null;
+    }
+
+    /// Record the first thing found wrong that no answer would have shown.
+    fn record_broken(self: *Simulation, what: []const u8, detail: []const u8) void {
+        if (self.report.unarmed_len > 0) return;
+        var buf: [512]u8 = undefined;
+        const line = std.fmt.bufPrint(&buf, "{s}: {s}", .{ what, detail }) catch what;
+        const n = @min(line.len, self.report.unarmed_buf.len);
+        @memcpy(self.report.unarmed_buf[0..n], line[0..n]);
+        self.report.unarmed_len = n;
+        self.report.unarmed_after = self.history.items.len;
+    }
+
+    fn broken_invariant(self: *Simulation, scratch: std.mem.Allocator) !?[]const u8 {
+        var keys = std.ArrayList([]const u8).init(scratch);
+        defer keys.deinit();
+        try self.mem.keys(&keys);
+        const space = store_mod.KeySpace.init(prefix ++ "/", store_mod.KeySpace.default_timer_shards);
+        var buf = std.ArrayList(u8).init(scratch);
+
+        for (keys.items) |key| {
+            if (try space.origin_of_doc_key(scratch, key)) |origin| {
+                const body = self.mem.objects.get(key).?.body;
+                var d = doc_mod.Doc.decode(scratch, body, origin) catch continue;
+                defer d.deinit();
+
+                // Nothing runnable is stranded. A pending task owes a retry
+                // deadline and an acquired one owes its lease: those are the only
+                // things that ever hand the work on — to a worker that has not
+                // seen it, or back to the queue when a holder goes quiet. A task
+                // in either state with no deadline is work nobody will be offered
+                // again and no sweep will reach, and every answer about it stays
+                // correct forever, which is why the linearizability search cannot
+                // see it and this can.
+                //
+                // Suspended and halted are parked on purpose: a suspended task is
+                // waiting on a promise that has its own deadline, and a halted one
+                // is waiting to be continued. Neither owes one.
+                for (d.tasks.items) |*t| {
+                    const effective = handle.effective_task_state(&d, self.workload.now, t.id) orelse continue;
+                    const owed: ?protocol.TaskTimeoutKind = switch (effective) {
+                        .pending => .retry,
+                        .acquired => .lease,
+                        else => null,
+                    };
+                    const kind = owed orelse continue;
+                    const armed = if (t.timeout) |to| to.kind else null;
+                    if (armed == kind) continue;
+                    return try std.fmt.allocPrint(
+                        scratch,
+                        "{s} is {s} and owes a {s} deadline, not {s}",
+                        .{
+                            t.id,
+                            effective.as_str(),
+                            @tagName(kind),
+                            if (armed) |k| @tagName(k) else "none",
+                        },
+                    );
+                }
+
+                const at = d.timer_at orelse continue;
+                const want = try space.timer_key(&buf, origin, at, d.timer_generation);
+                if (self.mem.objects.get(want) == null) {
+                    return try std.fmt.allocPrint(scratch, "no object for {s}", .{want});
+                }
+                continue;
+            }
+            if (try space.id_of_sched_key(scratch, key)) |id| {
+                const body = self.mem.objects.get(key).?.body;
+                var sd = doc_mod.ScheduleDoc.decode(scratch, body, id) catch continue;
+                defer sd.deinit();
+                // A tombstone keeps its counter and owes no deadline.
+                if (sd.deleted) continue;
+                const want = try space.sched_timer_key(&buf, id, sd.next_run_at, sd.timer_generation);
+                if (self.mem.objects.get(want) == null) {
+                    return try std.fmt.allocPrint(scratch, "no object for {s}", .{want});
+                }
+            }
+        }
+        return null;
+    }
+
+    fn on_answered(request: *server_mod.Request) void {
+        const pending: *Pending = @ptrCast(@alignCast(request.context.?));
+        const self = pending.simulation;
+        if (pending.abandoned) return;
+
+        const run_arena = self.arena.allocator();
+        const entry = &self.history.items[pending.index];
+        entry.ret = self.wall;
+        entry.status = request.status;
+        entry.answered = true;
+        // The answer is the envelope; only its `data` is what a specification
+        // talks about.
+        const parsed = json.parse(run_arena, request.response) catch {
+            entry.data = "";
+            self.settle(pending);
+            return;
+        };
+        var out = std.ArrayList(u8).init(run_arena);
+        json.write_value(&out, parsed.get("data") orelse json.Value.null_value) catch {};
+        entry.data = out.items;
+
+        // Not finished: go again. The entry keeps the last attempt's answer, so
+        // a sweep that never finishes is still recorded as the failure it was.
+        if (pending.kind == .debug_tick and (request.status < 200 or request.status >= 300)) {
+            self.report.sweep_resends += 1;
+            if (pending.attempts < max_sweep_attempts) {
+                pending.resend = true;
+                return;
+            }
+            self.report.sweep_unfinished = true;
+        }
+
+        self.workload.observe(pending.kind, request.status, entry.data, run_arena);
+        self.settle(pending);
+    }
+
+    fn settle(self: *Simulation, pending: *Pending) void {
+        self.in_flight[pending.client] = null;
+        assert(self.outstanding > 0);
+        self.outstanding -= 1;
+        pending.arena.deinit();
+        self.allocator.destroy(pending);
+    }
+
+    /// Kill a server and put a fresh one in its place.
+    ///
+    /// Everything it held goes: the cache, the deadline queue, the actors, and
+    /// every decision in flight. The callers of those decisions are told nothing —
+    /// which is the case every operation's idempotence exists for.
+    fn crash(self: *Simulation, index: u32) !void {
+        // Quiesce the store first. Anything it is still holding points into a
+        // server that is about to go, and draining once is not enough: draining
+        // lets the servers submit more.
+        var rounds: u32 = 0;
+        while (self.mem.delayed_count() > 0) {
+            rounds += 1;
+            if (rounds > 1_000) break;
+            self.mem.drain_delayed();
+            for (self.instances) |instance| instance.runtime.drain();
+        }
+
+        var abandoned: u32 = 0;
+        for (self.in_flight, 0..) |slot, client| {
+            const pending = slot orelse continue;
+            if (pending.server != index) continue;
+            // The caller never learns what happened, which the checker reads as
+            // "this may or may not have been applied".
+            pending.abandoned = true;
+            self.history.items[pending.index].answered = false;
+            // Whatever it did, it did before now: the store was quiesced above and
+            // a destroyed server submits nothing more, so nothing this request
+            // started can land after the crash. Saying so is not a detail — an
+            // operation that may take effect at any later time constrains no
+            // other, and a history with a few of those is a search with no
+            // pruning left.
+            self.history.items[pending.index].ret = self.wall;
+            self.in_flight[client] = null;
+            assert(self.outstanding > 0);
+            self.outstanding -= 1;
+            abandoned += 1;
+            // The arena stays until the run ends: the destroyed server may still
+            // hold a pointer to the request inside it.
+            try self.abandoned.append(self.allocator, pending);
+        }
+        self.instances[index].runtime.destroy();
+        self.instances[index].runtime = try self.build_runtime();
+        self.instances[index].runtime.applier.random = &self.instances[index].random;
+        self.report.crashes += 1;
+        if (self.options.verbose) {
+            std.debug.print("crash: server {d}, {d} callers told nothing\n", .{ index, abandoned });
+        }
+    }
+
+    fn finish(self: *Simulation) !Report {
+        var report = self.report;
+        report.faults_injected = self.options.crash_percent > 0 or
+            self.options.faults.unavailable_percent > 0 or
+            self.options.faults.lost_ack_percent > 0 or
+            self.options.faults.conflict_percent > 0;
+        report.operations = self.history.items.len;
+        report.store_objects = self.mem.count();
+        report.executes = self.bus.executes;
+        report.unblocks = self.bus.unblocks;
+        for (self.instances) |instance| {
+            report.commits += instance.runtime.applier.commits;
+            report.contentions += instance.runtime.applier.contentions;
+            report.conflicts += instance.runtime.applier.conflicts;
+        }
+        for (self.history.items) |op| {
+            if (!op.answered) {
+                report.unanswered += 1;
+                continue;
+            }
+            report.answered += 1;
+            if (op.status >= 200 and op.status < 300) {
+                report.status_2xx += 1;
+                report.succeeded += 1;
+            } else if (op.status < 400) {
+                report.status_3xx += 1;
+                report.succeeded += 1;
+            } else if (op.status < 500) {
+                report.status_4xx += 1;
+            } else if (op.status == 503) {
+                report.status_503 += 1;
+            } else {
+                report.status_5xx += 1;
+            }
+        }
+
+        var missing = std.ArrayList(workload_mod.Kind).init(self.allocator);
+        defer missing.deinit();
+        try self.workload.uncovered(&missing);
+        report.uncovered = missing.items.len;
+        if (self.options.verbose and missing.items.len > 0) {
+            std.debug.print("never succeeded:", .{});
+            for (missing.items) |kind| std.debug.print(" {s}", .{@tagName(kind)});
+            std.debug.print("\n", .{});
+        }
+
+        if (self.options.dump) |path| try self.write_history(path, false);
+        if (self.options.dump_spec) |path| {
+            // A 503 is "this may or may not have happened", and the specification
+            // has no such answer: the Go model can never produce one, and its
+            // harness gives every operation a definite response, so there is no
+            // way to write down an outcome nobody knows. A file with a 503 in it
+            // would be refuted for that reason alone, which is a fact about the
+            // model rather than about this server — so it does not get written.
+            // Faults that only make writers race are fine; the ones that leave a
+            // caller in doubt are not.
+            if (report.status_503 > 0 or report.unanswered > 0) {
+                return error.OutcomeNobodyKnows;
+            }
+            try self.write_history(path, true);
+        }
+        if (!self.options.check) return report;
+        // A sweep that fired part of what was due and then stopped is not an
+        // operation any sequential execution has, so there is nothing to check
+        // this history against. Reported rather than passed over: a run that was
+        // not checked must not read like a run that was.
+        if (report.sweep_unfinished) return report;
+
+        // Only the operations a specification can speak about. The cross-origin
+        // reads are surveys, not atomic steps, and were never promised to be.
+        var checkable = std.ArrayList(checker.Operation).init(self.allocator);
+        defer checkable.deinit();
+        for (self.history.items) |op| {
+            const kind = kind_of(op.kind) orelse continue;
+            if (!kind.checkable()) continue;
+            try checkable.append(op);
+        }
+        report.checked = checkable.items.len;
+        report.concurrency = checker.Concurrency.measure(checkable.items);
+
+        // What the bucket actually holds, read by a server with no cache and no
+        // deadline queue: nothing but the objects.
+        const final = try self.read_final_state();
+        defer if (final) |f| {
+            self.allocator.free(f.envelope);
+            self.allocator.free(f.expected_data);
+        };
+
+        const model = try Model.create(self.allocator);
+        defer model.destroy();
+        var check_options = self.options.check_options;
+        if (final) |f| {
+            check_options.final = .{ .envelope = f.envelope, .expected_data = f.expected_data };
+        }
+        const result = try checker.check(self.allocator, model, checkable.items, check_options);
+        switch (result) {
+            .linearizable => |order| {
+                defer self.allocator.free(order);
+                report.verdict = .linearizable;
+                // The order explains every answer *and* leaves the state that is
+                // there, because the search would not have accepted it otherwise.
+                // A search that gave up or came back empty proves nothing about
+                // the state, which is why this is recorded only here.
+                report.refinement_checked = final != null;
+                report.refined = report.refinement_checked;
+            },
+            .violation => |violation| {
+                defer self.allocator.free(violation.prefix);
+                defer self.allocator.free(violation.abandoned);
+                defer if (violation.final_data.len > 0) self.allocator.free(violation.final_data);
+                defer if (violation.expected_data.len > 0) self.allocator.free(violation.expected_data);
+                report.verdict = .violation;
+                report.prefix_length = violation.prefix.len;
+                if (violation.blocked) |i| report.blocked_kind = checkable.items[i].kind;
+                report.state_unexplained = violation.final_mismatches > 0 and
+                    violation.prefix.len == checkable.items.len;
+                if (report.state_unexplained and self.options.verbose) {
+                    std.debug.print(
+                        "the state an order that explains every answer leaves:\n{s}\n" ++
+                            "the state the bucket holds:\n{s}\n",
+                        .{ violation.final_data, if (final) |f| f.expected_data else "" },
+                    );
+                    // And the keys, because a deadline that is not in the bucket
+                    // is in none of the projections above.
+                    var keys = std.ArrayList([]const u8).init(self.allocator);
+                    defer keys.deinit();
+                    self.mem.keys(&keys) catch {};
+                    std.debug.print("the keys the bucket holds:\n", .{});
+                    for (keys.items) |k| std.debug.print("  {s}\n", .{k});
+                }
+            },
+            .exhausted => report.verdict = .exhausted,
+        }
+        return report;
+    }
+
+    const FinalState = struct {
+        envelope: []const u8,
+        expected_data: []const u8,
+    };
+
+    /// Read the whole state out of the bucket with a cold server.
+    ///
+    /// Cold on purpose: no cache, no deadline queue, nothing in memory. What it
+    /// reads is what survived, which is the only thing a restart would have.
+    fn read_final_state(self: *Simulation) !?FinalState {
+        const at = self.workload.now;
+        const envelope = try std.fmt.allocPrint(
+            self.allocator,
+            "{{\"kind\":\"debug.snap\",\"head\":{{\"corrId\":\"r\",\"version\":\"{s}\",\"resonate:debug_time\":{d}}},\"data\":{{}}}}",
+            .{ protocol.protocol_version, at },
+        );
+        errdefer self.allocator.free(envelope);
+
+        const cold = try self.build_runtime();
+        defer cold.destroy();
+        const Answer = struct {
+            status: i32 = 0,
+            data: []const u8 = "",
+            done: bool = false,
+            fn callback(request: *server_mod.Request) void {
+                const answer: *@This() = @ptrCast(@alignCast(request.context.?));
+                answer.status = request.status;
+                answer.data = request.response;
+                answer.done = true;
+            }
+        };
+        var answer = Answer{};
+        var request_arena = std.heap.ArenaAllocator.init(self.allocator);
+        defer request_arena.deinit();
+        var request = server_mod.Request{
+            .body = envelope,
+            .arena = &request_arena,
+            .callback = Answer.callback,
+            .context = &answer,
+        };
+        cold.server.process(&request);
+        // The store holds operations back, so a cold read takes several rounds: it
+        // lists the bucket and then reads every object in it.
+        var rounds: u32 = 0;
+        while (!answer.done) {
+            rounds += 1;
+            if (rounds > 100_000) {
+                self.allocator.free(envelope);
+                return null;
+            }
+            self.mem.drain_delayed();
+            cold.drain();
+        }
+        if (answer.status != 200) {
+            self.allocator.free(envelope);
+            return null;
+        }
+
+        var arena = std.heap.ArenaAllocator.init(self.allocator);
+        defer arena.deinit();
+        const parsed = json.parse(arena.allocator(), answer.data) catch {
+            self.allocator.free(envelope);
+            return null;
+        };
+        var text = std.ArrayList(u8).init(arena.allocator());
+        try json.write_value(&text, parsed.get("data") orelse json.Value.null_value);
+        return .{ .envelope = envelope, .expected_data = try self.allocator.dupe(u8, text.items) };
+    }
+
+    /// Write the history out, one operation per line.
+    ///
+    /// The same shape a recording from a real server has, so `simulator check`
+    /// reads a simulated history and a real one with the same code — and a
+    /// simulated failure can be handed to someone as a file.
+    /// Kinds a history written for the specification repository's Go checker
+    /// leaves out, and why leaving each one out is sound rather than convenient.
+    ///
+    /// * The searches and `debug.snap` are the same set `Kind.checkable` excludes
+    ///   here: each is a listing followed by a read of every object it named, at
+    ///   its own instant, and nothing in the protocol promises that is a snapshot.
+    ///   The Go model *will* read them and holds them to being atomic, which this
+    ///   server has never claimed they are, so including them refutes the file for
+    ///   a reason that is not a defect. They change nothing, so the operations
+    ///   that remain are constrained exactly as they were.
+    /// * `debug.tick` moves the clock, and the model applies a timeout lazily from
+    ///   the `now` each request carries rather than from a tick of its own
+    ///   (`state.go`: `if p.State == Pending && p.TimeoutAt <= now`). The trace
+    ///   producer in the Rust tree emits no ticks either, and its histories still
+    ///   move through a hundred and fifty instants.
+    ///
+    /// `schedule.create`, `schedule.get` and `schedule.delete` are *not* in here,
+    /// because leaving those out of a history would not be sound: a schedule's
+    /// runs are promises, and the model would see them appear from nowhere. Those
+    /// have to be absent from the run instead, which is what `--no-schedules` is
+    /// for.
+    fn unread_by_spec_checker(kind: []const u8) bool {
+        if (std.mem.eql(u8, kind, "debug.tick")) return true;
+        const k = kind_of(kind) orelse return false;
+        return !workload_mod.Kind.checkable(k);
+    }
+
+    fn write_history(self: *Simulation, path: []const u8, for_spec_checker: bool) !void {
+        const file = try std.fs.cwd().createFile(path, .{ .truncate = true });
+        defer file.close();
+        var buffered = std.io.bufferedWriter(file.writer());
+        const w = buffered.writer();
+        var arena = std.heap.ArenaAllocator.init(self.allocator);
+        defer arena.deinit();
+        for (self.history.items) |op| {
+            if (for_spec_checker and unread_by_spec_checker(op.kind)) continue;
+            _ = arena.reset(.retain_capacity);
+            const a = arena.allocator();
+            const envelope = json.parse(a, op.envelope) catch continue;
+            var request_data = std.ArrayList(u8).init(a);
+            try json.write_value(&request_data, envelope.get("data") orelse json.Value.null_value);
+            try w.print("{{\"kind\":\"{s}\",\"now\":{d},\"call\":{d},\"return\":", .{
+                op.kind, op.now, op.call,
+            });
+            if (op.ret == checker.never_returned) {
+                try w.print("null", .{});
+            } else {
+                try w.print("{d}", .{op.ret});
+            }
+            try w.print(",\"client\":{d},\"req\":{s},\"res\":", .{ op.client, request_data.items });
+            if (op.answered) {
+                const corr_id = blk: {
+                    const head = envelope.get("head") orelse break :blk "sim";
+                    break :blk head.get_string("corrId") orelse "sim";
+                };
+                try w.print(
+                    "{{\"kind\":\"{s}\",\"head\":{{\"corrId\":\"{s}\",\"status\":{d},\"version\":\"{s}\"}},\"data\":{s}}}",
+                    .{ op.kind, corr_id, op.status, protocol.protocol_version, op.data },
+                );
+            } else {
+                try w.print("null", .{});
+            }
+            try w.print("}}\n", .{});
+        }
+        try buffered.flush();
+    }
+
+    fn kind_of(wire: []const u8) ?workload_mod.Kind {
+        var it = std.EnumSet(workload_mod.Kind).initFull().iterator();
+        while (it.next()) |kind| {
+            if (std.mem.eql(u8, kind.wire(), wire)) return kind;
+        }
+        return null;
+    }
+
+};
+
+pub fn run(allocator: std.mem.Allocator, options: Options) !Report {
+    const simulation = try Simulation.create(allocator, options);
+    defer simulation.destroy();
+    return simulation.run();
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+const testing = std.testing;
+
+test "a clean run is linearizable and refines" {
+    const report = try run(testing.allocator, .{
+        .seed = 20260919,
+        .servers = 2,
+        .clients = 3,
+        .operations = 150,
+    });
+    try testing.expectEqual(Verdict.linearizable, report.verdict);
+    try testing.expect(report.refined);
+    try testing.expectEqual(@as(usize, 0), report.status_5xx);
+    // A run where nothing overlapped would have checked nothing about concurrency.
+    try testing.expect(report.concurrency.max > 1);
+    try testing.expect(report.concurrency.overlapping_pairs > 0);
+    try testing.expect(report.succeeded > 0);
+    try testing.expect(report.ok());
+}
+
+test "the same seed produces the same run" {
+    const first = try run(testing.allocator, .{ .seed = 7, .operations = 80 });
+    const second = try run(testing.allocator, .{ .seed = 7, .operations = 80 });
+    try testing.expectEqual(first.operations, second.operations);
+    try testing.expectEqual(first.status_2xx, second.status_2xx);
+    try testing.expectEqual(first.status_4xx, second.status_4xx);
+    try testing.expectEqual(first.commits, second.commits);
+    try testing.expectEqual(first.contentions, second.contentions);
+    try testing.expectEqual(first.store_objects, second.store_objects);
+    try testing.expectEqual(first.verdict, second.verdict);
+}
+
+test "a different seed produces a different run" {
+    const a = try run(testing.allocator, .{ .seed = 1, .operations = 80 });
+    const b = try run(testing.allocator, .{ .seed = 2, .operations = 80 });
+    try testing.expect(a.status_2xx != b.status_2xx or a.commits != b.commits);
+}
+
+test "a store that loses races is survived, and nothing is lost" {
+    const report = try run(testing.allocator, .{
+        .seed = 99,
+        .servers = 3,
+        .clients = 3,
+        .operations = 120,
+        .faults = .{ .defer_percent = 80, .conflict_percent = 20, .reorder_percent = 30 },
+    });
+    // Conflicts and contention are expected; failing the callers is not.
+    try testing.expectEqual(@as(usize, 0), report.status_5xx);
+    try testing.expectEqual(@as(usize, 0), report.status_503);
+    try testing.expectEqual(Verdict.linearizable, report.verdict);
+    try testing.expect(report.refined);
+}
+
+test "a store that stops answering produces 503s and no wrong answers" {
+    const report = try run(testing.allocator, .{
+        .seed = 5,
+        .servers = 2,
+        .clients = 3,
+        .operations = 120,
+        .faults = .{ .defer_percent = 80, .unavailable_percent = 15, .lost_ack_percent = 10 },
+        // The 503s are not operations a specification can place, so the search is
+        // not what this run is about.
+        .check = false,
+    });
+    // A 503 is the honest answer to "the store did not answer"; anything else in
+    // the 500s would be the server failing to make sense of its own state.
+    try testing.expect(report.status_503 > 0);
+    try testing.expectEqual(@as(usize, 0), report.status_5xx);
+    try testing.expect(report.succeeded > 0);
+    // And a run whose faults explain its 503s is a run that passed.
+    try testing.expect(report.ok());
+}
+
+test "servers that die are replaced, and their callers survive it" {
+    const report = try run(testing.allocator, .{
+        .seed = 4242,
+        .servers = 3,
+        .clients = 3,
+        .operations = 200,
+        .crash_percent = 3,
+        // A crashed server's callers learn nothing, and an operation that may or
+        // may not have happened makes the search conservative rather than
+        // informative.
+        .check = false,
+    });
+    try testing.expect(report.crashes > 0);
+    try testing.expectEqual(@as(usize, 0), report.status_5xx);
+    try testing.expect(report.succeeded > 0);
+    try testing.expect(report.ok());
+}
+
+test "several servers over one bucket agree on what is in it" {
+    const report = try run(testing.allocator, .{
+        .seed = 31337,
+        .servers = 4,
+        .clients = 4,
+        .operations = 160,
+    });
+    try testing.expectEqual(Verdict.linearizable, report.verdict);
+    try testing.expect(report.refined);
+    // Four writers on two origins: races are the point.
+    try testing.expect(report.commits > 0);
+}

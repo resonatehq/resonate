@@ -71,6 +71,7 @@ natively support yet.
 | [`spec/`](spec) | The specification: an executable abstract machine in Lean 4, a catalogue of properties every run must satisfy, a TLA+ model, and a trace checker that holds a real server to them |
 | [`impl/server/core/`](impl/server/core) | The Resonate server, a single binary |
 | [`impl/server/postgres/`](impl/server/postgres) | The Resonate server as one SQL file on Postgres 16+ |
+| [`impl/server/s3/`](impl/server/s3) | The Resonate server in Zig, whose only durable state is objects in an S3 bucket |
 | [`impl/sdk/ts/`](impl/sdk/ts) | TypeScript SDK |
 | [`impl/sdk/py/`](impl/sdk/py) | Python SDK |
 | [`impl/sdk/go/`](impl/sdk/go) | Go SDK |
@@ -102,6 +103,7 @@ brew install resonatehq/tap/resonate
 **3. Read the docs** at [docs.resonatehq.io](https://docs.resonatehq.io/).
 
 Running on Postgres instead? See [`impl/server/postgres/`](impl/server/postgres).
+On nothing but an S3 bucket? See [`impl/server/s3/`](impl/server/s3).
 
 ---
 
