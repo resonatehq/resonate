@@ -1,10 +1,38 @@
-name: CI
+# GitHub Actions only discovers workflows in this directory, at the
+# repository root. The grafted sub-projects each kept their own
+# `.github/workflows/` when they were merged in, and those are inert: nothing
+# under `impl/` or `spec/` is ever read by Actions. This file is the server
+# core's CI, moved here so it runs again, and the copy at
+# impl/server/core/.github/workflows/ci.yml is kept only as the sub-project's
+# own record.
+#
+# Two things change in the move. Every `run:` step needs the sub-project as
+# its working directory, which `defaults` below sets once. And `paths` keeps
+# a change to one sub-project from running every other sub-project's CI —
+# the workflow itself is listed so that editing it re-runs it.
+
+name: server-core
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+    paths:
+      - "impl/server/core/**"
+      - "spec/valid/porc/**"
+      - ".github/workflows/server-core-ci.yml"
+  # Unfiltered by base branch on purpose: the monorepo restructuring is not on
+  # main yet, and a workflow that only answers to `main` would sit out every
+  # pull request that matters right now.
   pull_request:
+    paths:
+      - "impl/server/core/**"
+      - "spec/valid/porc/**"
+      - ".github/workflows/server-core-ci.yml"
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: impl/server/core
 
 jobs:
   check:
@@ -14,25 +42,31 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with:
-          ref: ${{ inputs.ref }}
 
       - name: Setup Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: rustfmt, clippy
+          cache-workspaces: impl/server/core
 
       # fmt, check, clippy, test — the same command a laptop runs. What each
       # step is, and why `--workspace`, is in xtask/src/main.rs.
       - name: Check
         run: cargo xtask check
 
-      # The blob crate's oracle is a deliberate copy of the dbms oracle, and
+      # The blob crate's oracle is a deliberate copy of the shared one, and
       # the extraction decision (plan.md, Phase 8) is read off this diff. It
       # is printed, never failed on: the drift must be visible, not forbidden.
+      #
+      # This named crates/resonate-server-dbms/src/oracle.rs, which no longer
+      # exists: that extraction has since happened, and the shared oracle is
+      # its own crate now. Against a missing file `diff` exits 2, so the
+      # ledger reported "differ" on every run whatever the sources said —
+      # invisibly, because this workflow has never run. It names the real
+      # counterpart now.
       - name: Oracle drift ledger
         run: |
-          if diff -u crates/resonate-server-dbms/src/oracle.rs \
+          if diff -u crates/resonate-oracle/src/lib.rs \
                      crates/resonate-server-blob/src/oracle.rs; then
             echo "oracle copies are identical"
           else
@@ -83,11 +117,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with:
-          ref: ${{ inputs.ref }}
 
       - name: Setup Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-workspaces: impl/server/core
 
       # The engine differential and the port differential over this leg's
       # backend, each on a database the xtask creates fresh and drops after.
@@ -99,8 +133,8 @@ jobs:
           XTASK_MYSQL_ADMIN_URL: mysql://root:resonate@127.0.0.1:3306/mysql
         run: cargo xtask differential --backend ${{ matrix.backend }}
 
-  # Porcupine, from the specification repository, against a live server under
-  # real concurrency.
+  # Porcupine, from the specification, against a live server under real
+  # concurrency.
   #
   # The checker is upstream's, unmodified. Only the trace producer is ours:
   # `loadgen` there opens with `debug.start`, which is a startup flag here and
@@ -117,6 +151,10 @@ jobs:
   # `-partition=false` because upstream's `originOf` splits on '.', so it reads
   # every ':'-id as its own partition. Unpartitioned replays against whole
   # state, which is the stronger check anyway.
+  #
+  # The specification used to be cloned from resonatehq/resonate-specification
+  # here. It is grafted into this repository at spec/ now, so the checkout is
+  # gone and the checker is the one this commit pins.
   linearizability:
     name: Linearizability (${{ matrix.backend }})
     runs-on: ubuntu-latest
@@ -159,22 +197,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with:
-          ref: ${{ inputs.ref }}
-
-      - name: Checkout resonate-specification
-        uses: actions/checkout@v5
-        with:
-          repository: resonatehq/resonate-specification
-          path: spec
 
       - name: Setup Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-workspaces: impl/server/core
 
+      # `go-version-file` is resolved from the workspace root, not from the
+      # `defaults` working directory, so this is the grafted copy.
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version-file: spec/valid/porc/go.mod
+          cache-dependency-path: spec/valid/porc/go.sum
 
       # Build the server and the recorder, start the server in debug mode on
       # a fresh database (debug mode is what makes a history checkable: the

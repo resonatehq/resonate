@@ -12,8 +12,11 @@
 //!
 //! There is no queue in production — the router is the queue's replacement,
 //! and it exists from construction. Under the debug startup flag messages are
-//! **held** instead of routed, forever: `debug.snap` reads them, `debug.reset`
-//! clears them, and nothing else touches them. The held set collapses the way
+//! routed *and* **held**, forever: `debug.snap` reads them, `debug.reset`
+//! clears them, and nothing else touches them. Routing does not stop under
+//! debug: the flag says the clock belongs to the caller, not that the router
+//! is out of the picture — a differential that observes the server through
+//! its router needs delivery to happen. The held set collapses the way
 //! the SQL backends' outgoing tables collapse — `outgoing_execute`'s primary
 //! key is the task id, so a newer dispatch supersedes an older one;
 //! `outgoing_unblock`'s is `(promise_id, address)` and the first write wins —
@@ -80,22 +83,21 @@ impl Sender {
         }
     }
 
-    /// Route one message, or hold it under the debug flag.
+    /// Route one message, and also hold it under the debug flag.
     pub async fn dispatch(&self, address: &str, msg: Message) {
         if let Some(held) = &self.held {
             let mut held = held.lock().unwrap_or_else(|e| e.into_inner());
             match &msg {
                 Message::Execute(e) => {
                     held.executes
-                        .insert(e.data.task.id.clone(), (address.to_string(), msg));
+                        .insert(e.data.task.id.clone(), (address.to_string(), msg.clone()));
                 }
                 Message::Unblock(u) => {
                     held.unblocks
                         .entry((u.data.promise.id.clone(), address.to_string()))
-                        .or_insert(msg);
+                        .or_insert_with(|| msg.clone());
                 }
             }
-            return;
         }
 
         match &msg {
@@ -286,11 +288,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn under_debug_messages_are_held_not_routed() {
+    async fn under_debug_messages_are_routed_and_held() {
         let rec = Recorder::new();
         let s = debug(Arc::clone(&rec));
         s.dispatch("http://w", execute("o:t", 0)).await;
-        assert!(rec.sent().is_empty());
+        assert_eq!(rec.sent().len(), 1);
         assert_eq!(s.snapshot().len(), 1);
     }
 
@@ -378,6 +380,7 @@ mod tests {
         s.dispatch("http://w", execute("o:t", 0)).await;
         s.clear();
         assert!(s.snapshot().is_empty());
-        assert!(rec.sent().is_empty());
+        // Clearing forgets what was held; what was already routed is routed.
+        assert_eq!(rec.sent().len(), 1);
     }
 }

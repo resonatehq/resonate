@@ -43,6 +43,12 @@ use resonate_core::util;
 use resonate_core::{ResonateServer, Unavailable};
 use std::sync::Mutex;
 
+/// Everything before the first ':' — the origin the blob server keys its
+/// documents and timer objects by.
+fn origin_of(id: &str) -> &str {
+    id.split(':').next().unwrap_or(id)
+}
+
 const PENDING_RETRY_TTL: i64 = 30_000;
 
 // ─── Internal state types ─────────────────────────────────────────────────────
@@ -164,13 +170,18 @@ impl Oracle {
 
     pub fn apply(&mut self, req: &RequestEnvelope) -> ResponseEnvelope {
         let now = util::resolve_time(req.head.debug_time);
+        // The blob server sweeps a request's origin before deciding it; this
+        // model does the same, at the same moment.
+        if let Some(origin) = Self::routed_origin(req) {
+            self.sweep_origins(now, &BTreeSet::from([origin]));
+        }
         match req.kind.as_str() {
             "promise.get" => self.op_promise_get(req, now),
             "promise.create" => self.op_promise_create(req, now),
             "promise.settle" => self.op_promise_settle(req, now),
             "promise.register_callback" => self.op_promise_register_callback(req, now),
             "promise.register_listener" => self.op_promise_register_listener(req, now),
-            "promise.search" => self.op_promise_search(req),
+            "promise.search" => self.op_promise_search(req, now),
             "task.get" => self.op_task_get(req, now),
             "task.create" => self.op_task_create(req, now),
             "task.acquire" => self.op_task_acquire(req, now),
@@ -314,7 +325,7 @@ impl Oracle {
                 );
             }
         } else {
-            if addr.is_some() {
+            if resonate_core::types::is_external(&r.tags) {
                 self.set_p_timeout(&r.id, r.timeout_at);
             }
             if let Some(ref addr) = addr {
@@ -565,7 +576,7 @@ impl Oracle {
         )
     }
 
-    fn op_promise_search(&self, req: &RequestEnvelope) -> ResponseEnvelope {
+    fn op_promise_search(&self, req: &RequestEnvelope, now: i64) -> ResponseEnvelope {
         let r: PromiseSearchData = match serde_json::from_value(req.data.clone()) {
             Ok(r) => r,
             Err(e) => {
@@ -597,20 +608,23 @@ impl Oracle {
             Some(n) => n as usize,
             None => 100,
         };
+        // The effective state at `now`, not the stored one: a search asks what
+        // a promise *is*, and whether its expiry has been written down yet is
+        // materialisation, which no observation may depend on.
         let mut promises: Vec<PromiseRecord> = self
             .promises
             .iter()
             .filter(|(_, p)| {
-                r.state.map(|s| p.state == s).unwrap_or(true)
-                    && r.tags
-                        .as_ref()
-                        .map(|ft| {
-                            ft.iter()
-                                .all(|(k, v)| p.tags.get(k).map(|pv| pv == v).unwrap_or(false))
-                        })
-                        .unwrap_or(true)
+                r.tags
+                    .as_ref()
+                    .map(|ft| {
+                        ft.iter()
+                            .all(|(k, v)| p.tags.get(k).map(|pv| pv == v).unwrap_or(false))
+                    })
+                    .unwrap_or(true)
             })
-            .map(|(id, p)| Self::to_promise_record(0, id, p))
+            .map(|(id, p)| Self::to_promise_record(now, id, p))
+            .filter(|p| r.state.map(|s| p.state == s).unwrap_or(true))
             .collect();
         promises.sort_by(|a, b| a.id.cmp(&b.id));
         let start = r
@@ -1234,7 +1248,7 @@ impl Oracle {
                             );
                         }
                     } else {
-                        if addr.is_some() {
+                        if resonate_core::types::is_external(&create_data.tags) {
                             self.set_p_timeout(&create_data.id, create_data.timeout_at);
                         }
                         if let Some(ref a) = addr {
@@ -1819,37 +1833,97 @@ impl Oracle {
         )
     }
 
-    fn op_debug_tick(&mut self, req: &RequestEnvelope) -> ResponseEnvelope {
-        let time = match req.data.get("time").and_then(|v| v.as_i64()) {
-            Some(t) => t,
-            None => {
-                return ResponseEnvelope::error(
-                    req.kind.clone(),
-                    req.head.corr_id.clone(),
-                    400,
-                    "Missing or invalid 'time' field",
-                )
+    /// The origin a request is routed to, once it has parsed and validated.
+    ///
+    /// That is the moment the blob server hands the request to the origin's
+    /// actor, and the actor sweeps the origin before deciding — so it is the
+    /// moment this model sweeps too. `None` for a request that never reaches
+    /// an origin actor: searches, schedules, `debug.*`, anything malformed,
+    /// and a cross-origin fence, which that server refuses before routing.
+    fn routed_origin(req: &RequestEnvelope) -> Option<String> {
+        fn ok<T: serde::de::DeserializeOwned + Validate>(v: &Value) -> Option<T> {
+            serde_json::from_value::<T>(v.clone())
+                .ok()
+                .filter(|d| d.validate().is_ok())
+        }
+        let d = &req.data;
+        let id = match req.kind.as_str() {
+            "promise.get" => ok::<PromiseGetData>(d)?.id,
+            "promise.create" => ok::<PromiseCreateData>(d)?.id,
+            "promise.settle" => ok::<PromiseSettleData>(d)?.id,
+            "promise.register_callback" => ok::<PromiseRegisterCallbackData>(d)?.awaiter,
+            "promise.register_listener" => ok::<PromiseRegisterListenerData>(d)?.awaited,
+            "task.get" => ok::<TaskGetData>(d)?.id,
+            "task.create" => ok::<TaskCreateData>(d)?.action.data.id,
+            "task.acquire" => ok::<TaskAcquireData>(d)?.id,
+            "task.release" => ok::<TaskReleaseData>(d)?.id,
+            "task.fulfill" => ok::<TaskFulfillData>(d)?.id,
+            "task.suspend" => ok::<TaskSuspendData>(d)?.id,
+            "task.halt" => ok::<TaskHaltData>(d)?.id,
+            "task.continue" => ok::<TaskContinueData>(d)?.id,
+            "task.fence" => {
+                let r = ok::<TaskFenceData>(d)?;
+                let action_id = r
+                    .action
+                    .data
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if origin_of(action_id) != origin_of(&r.id) {
+                    return None;
+                }
+                r.id
             }
+            "task.heartbeat" => ok::<TaskHeartbeatData>(d)?.tasks.first()?.id.clone(),
+            _ => return None,
         };
-        if let Some(debug_time) = req.head.debug_time {
-            if debug_time != time {
-                return ResponseEnvelope::error(
-                    req.kind.clone(),
-                    req.head.corr_id.clone(),
-                    400,
-                    "resonate:debug_time must equal data.time",
-                );
+        Some(origin_of(&id).to_string())
+    }
+
+    /// The origins whose timer object is due: those with a live armed
+    /// deadline at or before `time`. What a `debug.tick` sweeps — the blob
+    /// server's tick visits exactly the origins with a due timer key, and an
+    /// origin whose only expired deadline is an internal promise has none.
+    fn due_origins(&self, time: i64) -> BTreeSet<String> {
+        let mut origins = BTreeSet::new();
+        for pt in &self.p_timeouts {
+            let live = self
+                .promises
+                .get(&pt.id)
+                .is_some_and(|p| p.state == PromiseState::Pending);
+            if live && pt.timeout <= time {
+                origins.insert(origin_of(&pt.id).to_string());
             }
         }
+        for tt in &self.t_timeouts {
+            let live = self.tasks.get(&tt.id).is_some_and(|t| match tt.kind {
+                TTimeoutKind::Retry => t.state == TaskState::Pending,
+                TTimeoutKind::Lease => t.state == TaskState::Acquired,
+            });
+            if live && tt.timeout <= time {
+                origins.insert(origin_of(&tt.id).to_string());
+            }
+        }
+        origins
+    }
 
-        // Collect expired promise timeouts — after fix 1, p_timeouts only contains
-        // promises with resonate:target, and del_p_timeout is always called on settlement
-        // so all entries here are guaranteed to be Pending with a target.
+    /// Sweep the named origins at `time`: expire every pending promise past
+    /// its deadline, then run their settlement chains, then fire due leases
+    /// and retries — the blob kernel's sweep, restricted to `origins`.
+    fn sweep_origins(&mut self, time: i64, origins: &BTreeSet<String>) {
+        // Every pending promise past its deadline expires on a sweep, armed or
+        // not: `p_timeouts` holds only the external ones (what wakes the
+        // timer), but a sweep walks its whole origin.
         let expired_promise_ids: Vec<String> = self
-            .p_timeouts
+            .promises
             .iter()
-            .filter(|pt| time >= pt.timeout && self.tick_selects("promise", &pt.id))
-            .map(|pt| pt.id.clone())
+            .filter(|(id, p)| {
+                p.state == PromiseState::Pending
+                    && time >= p.timeout_at
+                    && self.tick_selects("promise", id)
+                    && origins.contains(origin_of(id))
+            })
+            .map(|(id, _)| id.clone())
             .collect();
 
         // Collect expired task lease timeouts
@@ -1860,6 +1934,7 @@ impl Oracle {
                 time >= tt.timeout
                     && matches!(tt.kind, TTimeoutKind::Lease)
                     && self.tick_selects("lease", &tt.id)
+                    && origins.contains(origin_of(&tt.id))
             })
             .filter_map(|tt| {
                 self.tasks
@@ -1877,6 +1952,7 @@ impl Oracle {
                 time >= tt.timeout
                     && matches!(tt.kind, TTimeoutKind::Retry)
                     && self.tick_selects("retry", &tt.id)
+                    && origins.contains(origin_of(&tt.id))
             })
             .filter_map(|tt| {
                 self.tasks
@@ -1953,6 +2029,34 @@ impl Oracle {
         }
 
         // Schedule timeouts
+    }
+
+    fn op_debug_tick(&mut self, req: &RequestEnvelope) -> ResponseEnvelope {
+        let time = match req.data.get("time").and_then(|v| v.as_i64()) {
+            Some(t) => t,
+            None => {
+                return ResponseEnvelope::error(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    400,
+                    "Missing or invalid 'time' field",
+                )
+            }
+        };
+        if let Some(debug_time) = req.head.debug_time {
+            if debug_time != time {
+                return ResponseEnvelope::error(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    400,
+                    "resonate:debug_time must equal data.time",
+                );
+            }
+        }
+
+        let origins = self.due_origins(time);
+        self.sweep_origins(time, &origins);
+
         let expired_schedules: Vec<(String, i64)> = self
             .s_timeouts
             .iter()
@@ -2024,7 +2128,7 @@ impl Oracle {
                             );
                         }
                     } else {
-                        if addr.is_some() {
+                        if resonate_core::types::is_external(&tags) {
                             self.set_p_timeout(&promise_id, timeout_at);
                         }
                         if let Some(ref a) = addr {

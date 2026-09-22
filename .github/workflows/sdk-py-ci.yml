@@ -1,0 +1,176 @@
+# The Python SDK's CI, moved to the repository root so Actions can find it.
+# See server-core-ci.yml for why every sub-project's own `.github/` is inert.
+#
+# uv reads the project from the working directory, so the `run:` steps need no
+# change. codecov is told where the report landed, because it searches from
+# the workspace root rather than from this job's working directory.
+
+name: sdk-py
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "impl/sdk/py/**"
+      - ".github/workflows/sdk-py-ci.yml"
+  pull_request:
+    paths:
+      - "impl/sdk/py/**"
+      - ".github/workflows/sdk-py-ci.yml"
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: impl/sdk/py
+
+jobs:
+  lockfile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: 0.11.21
+
+      - name: check the lockfile is up to date
+        run: uv lock --check
+
+  test:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.12", "3.13", "3.14"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: 0.11.21
+
+      - name: set up python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: install
+        run: uv sync --locked --all-extras --all-packages
+
+      - name: check linting
+        run: uv run ruff check
+
+      - name: check types
+        run: uv run ty check
+
+      - name: run tests with coverage
+        run: uv run pytest --cov --cov-branch --cov-report=xml
+
+      - name: upload coverage reports to codecov
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' && github.ref == 'refs/heads/main' }}
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          directory: impl/sdk/py
+
+  examples:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: 0.11.21
+
+      - name: set up python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
+
+      - name: install
+        run: uv sync --locked --all-extras --all-packages
+
+      - name: install just
+        uses: extractions/setup-just@v3
+
+      - name: install resonate server
+        run: |
+          curl -sSL https://github.com/resonatehq/resonate/releases/latest/download/resonate_linux_x86_64.tar.gz | tar -xz
+          sudo mv resonate /usr/local/bin/resonate
+
+      - name: start resonate server
+        run: |
+          resonate serve --server-port 8080 &
+          until curl -s -o /dev/null http://localhost:8080/api/v1/promises; do sleep 0.5; done
+
+      - name: run examples
+        run: just examples
+        env:
+          RESONATE_URL: http://localhost:8080
+
+  # The gated end-to-end tests against a real resonate-pg database. Ubuntu
+  # only: it is the runner with docker, and the connector is OS-agnostic (its
+  # unit tests run in the test matrix, against fakes). These are the only
+  # tests that prove the addresses and tags this connector mints are the ones
+  # the database actually delivers on -- everything else in the suite runs
+  # against in-memory fakes, and the resonate server exercises the wire
+  # differently. No pg_cron: the connector's own pump drives timers, which is
+  # exactly what we want proven.
+  integration-pg:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: resonate
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: 0.11.21
+
+      - name: set up python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
+
+      - name: install
+        run: uv sync --locked --all-extras --all-packages
+
+      # Fetches resonate-pg's schema from its main branch; the file is
+      # deliberately not vendored here. Pin by ref if upstream ever drifts.
+      - name: apply resonate.sql
+        run: |
+          curl -sSL https://raw.githubusercontent.com/resonatehq/resonate-pg/main/resonate.sql -o resonate.sql
+          psql postgresql://postgres:resonate@localhost:5433/postgres -v ON_ERROR_STOP=1 -f resonate.sql
+
+      - name: run the end-to-end tests
+        run: uv run pytest packages/resonate-pg/tests/test_integration.py -v
+        env:
+          RESONATE_PG_DSN: postgresql://postgres:resonate@localhost:5433/postgres

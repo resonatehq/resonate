@@ -704,7 +704,7 @@ impl MysqlEngine {
             .await
     }
 
-    async fn op_promise_search(&self, req: &RequestEnvelope, _now: i64) -> Output {
+    async fn op_promise_search(&self, req: &RequestEnvelope, now: i64) -> Output {
         let data = req.data.clone();
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
@@ -747,6 +747,7 @@ impl MysqlEngine {
                 tags_json.as_deref(),
                 r.cursor.as_deref(),
                 limit + 1,
+                now,
             )?;
             let has_more = results.len() as i64 > limit;
             let promises: Vec<_> = results.into_iter().take(limit as usize).collect();
@@ -2394,15 +2395,20 @@ impl<'a> MysqlDb<'a> {
         self.armed.borrow_mut().push(Scheduled { at, timeout });
     }
 
-    fn arm_promise_timeout(&self, promise_id: &str, timeout_at: i64, targeted: bool) {
-        if targeted {
-            self.arm(
-                timeout_at,
-                Timeout::PromiseTimeout {
-                    promise_id: promise_id.to_string(),
-                },
-            );
-        }
+    /// Announce a promise deadline the queue holds.
+    ///
+    /// The queue is `state = 'pending' AND external`: every pending promise
+    /// that is not internal — one a listener or an awaiter can wait on, or
+    /// whose own task is redispatched — is swept eagerly. An internal promise
+    /// arms nothing: it times out lazily, the first time a request names it.
+    /// Callers arm exactly when they created a pending, external promise.
+    fn arm_promise_timeout(&self, promise_id: &str, timeout_at: i64) {
+        self.arm(
+            timeout_at,
+            Timeout::PromiseTimeout {
+                promise_id: promise_id.to_string(),
+            },
+        );
     }
 
     fn arm_retry(&self, task_id: &str, at: i64) {
@@ -2911,9 +2917,12 @@ impl MysqlDb<'_> {
 
         let was_created = res.rows_affected() > 0;
         if was_created {
-            // No promise timeout to write: `state = 'pending' AND target IS NOT
-            // NULL` is the queue, and the INSERT above already put the row in
-            // it. Creating the task is an UPDATE of that same row, and
+            // The INSERT above put the row on the queue if it is pending and
+            // external; that is the deadline to announce, task or no task.
+            if !already_timedout && resonate_sql::external_tags(tags) {
+                self.arm_promise_timeout(id, timeout_at);
+            }
+            // Creating the task is an UPDATE of that same row, and
             // `task_state IS NULL` is the guard `INSERT IGNORE INTO tasks`
             // used to be — a promise carries at most one task.
             if let Some(addr) = address {
@@ -2936,7 +2945,6 @@ impl MysqlDb<'_> {
                 )?;
 
                 if task_res.rows_affected() > 0 && !already_timedout {
-                    self.arm_promise_timeout(id, timeout_at, true);
                     self.arm_retry(id, created_at + trt);
                     self.emit(Outgoing::Execute {
                         address: addr.to_string(),
@@ -3144,30 +3152,42 @@ impl MysqlDb<'_> {
         self.promise_get(awaited_id)
     }
 
+    /// Search by effective state at `now`: the filter is
+    /// `resonate_sql::effective_state_sql`, and every record comes back
+    /// projected, so a pending row past its deadline neither fills a
+    /// "pending" page nor reads as pending on any other.
     fn promise_search(
         &self,
         state: Option<&str>,
         tags: Option<&str>,
         cursor: Option<&str>,
         limit: i64,
+        now: i64,
     ) -> StorageResult<Vec<PromiseRecord>> {
         let rows = rt_block_on(
-            sqlx::query(
+            sqlx::query(&format!(
                 "SELECT id, state, param_headers, param_data, value_headers, value_data, tags, timeout_at, created_at, settled_at
                  FROM promises
-                 WHERE (? IS NULL OR state = ?)
+                 WHERE {}
                    AND (? IS NULL OR JSON_CONTAINS(tags, ?))
                    AND (? IS NULL OR id > ?)
                  ORDER BY id ASC
                  LIMIT ?",
-            )
-            .bind(state).bind(state)
+                resonate_sql::effective_state_sql(state, now)
+            ))
             .bind(tags).bind(tags)
             .bind(cursor).bind(cursor)
             .bind(limit)
             .fetch_all(self.tx().as_mut()),
         )?;
-        Ok(rows.iter().map(row_to_promise).collect())
+        Ok(rows
+            .iter()
+            .map(|row| {
+                let mut p = row_to_promise(row);
+                p.project(now);
+                p
+            })
+            .collect())
     }
 
     fn task_get(&self, id: &str) -> StorageResult<Option<TaskRecord>> {
@@ -3274,11 +3294,9 @@ impl MysqlDb<'_> {
 
         if task_created {
             if !already_timedout {
-                self.arm_promise_timeout(
-                    promise_id,
-                    timeout_at,
-                    promise.tags.contains_key("resonate:target"),
-                );
+                if resonate_core::types::is_external(&promise.tags) {
+                    self.arm_promise_timeout(promise_id, timeout_at);
+                }
                 self.arm_lease(promise_id, pid, created_at + ttl);
             }
             return Ok(TaskCreateResult {
@@ -3414,6 +3432,11 @@ impl MysqlDb<'_> {
             )?;
 
             if res.rows_affected() > 0 {
+                // The INSERT put the row on the queue if it is pending and
+                // external; that is the deadline to announce, task or no task.
+                if !already_timedout && resonate_sql::external_tags(tags) {
+                    self.arm_promise_timeout(promise_id, timeout_at);
+                }
                 if let Some(addr) = address {
                     let task_state = if already_timedout {
                         "fulfilled"
@@ -3433,7 +3456,6 @@ impl MysqlDb<'_> {
                         .execute(self.tx().as_mut()),
                     )?;
                     if task_res.rows_affected() > 0 && !already_timedout {
-                        self.arm_promise_timeout(promise_id, timeout_at, true);
                         self.arm_retry(promise_id, created_at + trt);
                         self.emit(Outgoing::Execute {
                             address: addr.to_string(),
@@ -3647,9 +3669,7 @@ impl MysqlDb<'_> {
                 .join(", ");
             let sql = format!(
                 "SELECT COUNT(*) AS cnt FROM promises WHERE id IN ({}) \
-                 AND NOT (COALESCE(tags->>'$.\"resonate:scope\"', '') = 'global' \
-                          OR COALESCE(tags->>'$.\"resonate:external\"', '') = 'true' \
-                          OR target IS NOT NULL OR is_timer)",
+                 AND NOT external",
                 placeholders
             );
             let mut q = sqlx::query(&sql);
@@ -4288,7 +4308,7 @@ impl MysqlDb<'_> {
                 // untyped NULL takes the one the third branch supplies.
                 "SELECT deadline, kind, id, pid FROM (
                      SELECT timeout_at AS deadline, 0 AS kind, id AS id, NULL AS pid
-                       FROM promises WHERE state = 'pending' AND target IS NOT NULL
+                       FROM promises WHERE state = 'pending' AND external
                      UNION ALL
                      SELECT retry_timeout_at, 1, id, NULL
                        FROM promises WHERE task_state = 'pending' AND retry_timeout_at IS NOT NULL
@@ -4426,6 +4446,11 @@ impl MysqlDb<'_> {
         )?;
 
         if promise_res.rows_affected() > 0 {
+            // The INSERT above put the row on the queue if it is pending and
+            // external; that is the deadline to announce, task or no task.
+            if !already_timedout && resonate_core::types::is_external(promise_tags) {
+                self.arm_promise_timeout(&computed_promise_id, computed_timeout_at);
+            }
             // 6a is gone with `promise_timeouts`: the INSERT above already put
             // a pending, targeted promise on the queue.
             if already_timedout {
@@ -4452,7 +4477,6 @@ impl MysqlDb<'_> {
                     .execute(self.tx().as_mut()),
                 )?;
                 if task_res.rows_affected() > 0 {
-                    self.arm_promise_timeout(&computed_promise_id, computed_timeout_at, true);
                     self.arm_retry(&computed_promise_id, time + trt);
                     self.emit(Outgoing::Execute {
                         address: addr.to_string(),
@@ -4503,16 +4527,16 @@ impl MysqlDb<'_> {
         // Statement 1: Expire all pending promises with timeout_at <= time
         // (with resonate:target).
         //
-        // `state = 'pending' AND target IS NOT NULL` is the whole of what
-        // `promise_timeouts` held: rows entered on create and left on settle,
-        // and only a targeted promise was ever swept eagerly. Untargeted ones
-        // still time out lazily, through `try_timeout`.
+        // `state = 'pending' AND external` is the whole of what
+        // `promise_timeouts` held: rows entered on create and left on settle.
+        // Every pending promise that is not internal is swept eagerly;
+        // internal ones still time out lazily, through `try_timeout`.
         let expired_rows = match selected("promise") {
             None => Vec::new(),
             Some(id) => rt_block_on(
                 sqlx::query(
                     "SELECT id FROM promises
-                     WHERE state = 'pending' AND target IS NOT NULL AND timeout_at <= ?
+                     WHERE state = 'pending' AND external AND timeout_at <= ?
                        AND (? IS NULL OR id = ?)
                      ORDER BY id",
                 )
@@ -4667,7 +4691,7 @@ impl MysqlDb<'_> {
         let pt_rows = rt_block_on(
             sqlx::query(
                 "SELECT id, timeout_at FROM promises
-                 WHERE state = 'pending' AND target IS NOT NULL ORDER BY id",
+                 WHERE state = 'pending' AND external ORDER BY id",
             )
             .fetch_all(self.tx().as_mut()),
         )?;

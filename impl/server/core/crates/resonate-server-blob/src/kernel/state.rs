@@ -131,13 +131,19 @@ impl PromiseDoc {
         }
     }
 
-    /// Whether this promise has a deadline the drain sweep must fire.
+    /// Whether this promise's deadline arms the origin's timer.
     ///
-    /// Mirrors the `promise_timeouts` table, which the SQL backends populate
-    /// only for promises carrying a `resonate:target` (an undispatched promise
-    /// has nothing to notify, so its expiry is applied lazily on read).
+    /// Only a promise something can wait on does: an external one (a listener
+    /// may be registered against it, a task may await it) or a runnable one
+    /// (its task is the one that gets redispatched). An internal promise
+    /// arms nothing — nothing can await it and nothing listens to it, so a
+    /// timer for its expiry would wake the process for no observer. It still
+    /// expires: the sweep settles *every* pending promise past its deadline,
+    /// armed or not, and every request and every timer on the origin sweeps
+    /// the whole document, so the expiry is applied the first time anything
+    /// looks. Arming is about who is waiting; expiring is about time.
     pub fn timeout_armed(&self) -> bool {
-        self.state == PromiseState::Pending && self.target().is_some()
+        self.state == PromiseState::Pending && self.is_external()
     }
 
     /// The protocol view of this promise.
@@ -421,6 +427,42 @@ pub fn check_invariants(doc: &OriginDoc) -> Result<(), String> {
         }
     }
 
+    // Arming is justified by observers, and stated here without going
+    // through `timeout_armed` or `min_deadline`, so a change to either rule
+    // has to answer to this one. A timer is armed for a deadline exactly when
+    // something can observe it firing: a listener or an awaiter on a
+    // non-internal promise, or the task a pending or acquired task's own
+    // deadline redispatches. An internal promise can have neither — the
+    // registration paths refuse it — so its deadline arms nothing.
+    let mut armed_by_observers: Option<i64> = None;
+    let mut arm = |at: i64| armed_by_observers = Some(armed_by_observers.map_or(at, |m| m.min(at)));
+    for (id, p) in &doc.promises {
+        let internal = !p.is_external();
+        if internal && (!p.callbacks.is_empty() || !p.listeners.is_empty()) {
+            return Err(format!(
+                "promise {id}: internal, yet something waits on it ({} callbacks, {} listeners)",
+                p.callbacks.len(),
+                p.listeners.len()
+            ));
+        }
+        if p.state == PromiseState::Pending && !internal {
+            arm(p.timeout_at);
+        }
+    }
+    for t in doc.tasks.values() {
+        if let Some(at) = t.retry_at {
+            arm(at);
+        }
+        if let Some(at) = t.lease_at {
+            arm(at);
+        }
+    }
+    if doc.timer_at != armed_by_observers {
+        return Err(format!(
+            "timer_at {:?} arms what no one can observe, or misses what someone can: observers say {:?}",
+            doc.timer_at, armed_by_observers
+        ));
+    }
     if doc.timer_at != min_deadline(doc) {
         return Err(format!(
             "timer_at {:?} != min_deadline {:?}",
@@ -490,13 +532,24 @@ mod tests {
     }
 
     #[test]
-    fn a_promise_without_a_target_arms_no_deadline() {
-        // The SQL backends only insert a promise_timeouts row when the promise
-        // carries a resonate:target; an undispatched promise expires lazily.
+    fn an_internal_promise_arms_no_deadline() {
+        // Nothing can wait on it, so no timer wakes for it. The sweep still
+        // expires it when something next looks at the origin.
         let mut doc = OriginDoc::default();
         doc.promises
             .insert("o:a".into(), promise(PromiseState::Pending, 500, false));
         assert_eq!(min_deadline(&doc), None);
+    }
+
+    #[test]
+    fn an_external_promise_without_a_target_arms_its_deadline() {
+        // No task, but a listener or an awaiter may be waiting on its expiry.
+        let mut doc = OriginDoc::default();
+        let mut p = promise(PromiseState::Pending, 500, false);
+        p.tags
+            .insert("resonate:external".to_string(), "true".to_string());
+        doc.promises.insert("o:a".into(), p);
+        assert_eq!(min_deadline(&doc), Some(500));
     }
 
     #[test]
@@ -586,6 +639,46 @@ mod tests {
             .insert("o:a".into(), promise(PromiseState::Pending, 500, true));
         doc.timer_at = Some(999);
         assert!(check_invariants(&doc).unwrap_err().contains("timer_at"));
+    }
+
+    #[test]
+    fn invariants_reject_a_timer_armed_for_an_internal_promise() {
+        // Nothing can observe an internal promise expire, so a timer for it
+        // is a wake-up with no one waiting.
+        let mut doc = OriginDoc::default();
+        doc.promises
+            .insert("o:a".into(), promise(PromiseState::Pending, 500, false));
+        doc.timer_at = Some(500);
+        assert!(check_invariants(&doc)
+            .unwrap_err()
+            .contains("no one can observe"));
+    }
+
+    #[test]
+    fn invariants_reject_an_unarmed_external_deadline() {
+        // A listener or an awaiter may be waiting, so the deadline must wake
+        // the timer.
+        let mut doc = OriginDoc::default();
+        let mut p = promise(PromiseState::Pending, 500, false);
+        p.tags
+            .insert("resonate:external".to_string(), "true".to_string());
+        doc.promises.insert("o:a".into(), p);
+        doc.timer_at = None;
+        assert!(check_invariants(&doc)
+            .unwrap_err()
+            .contains("misses what someone can"));
+    }
+
+    #[test]
+    fn invariants_reject_a_registration_on_an_internal_promise() {
+        let mut doc = OriginDoc::default();
+        let mut p = promise(PromiseState::Pending, 500, false);
+        p.listeners.push("http://w".to_string());
+        doc.promises.insert("o:a".into(), p);
+        doc.timer_at = None;
+        assert!(check_invariants(&doc)
+            .unwrap_err()
+            .contains("internal, yet something waits"));
     }
 
     #[test]

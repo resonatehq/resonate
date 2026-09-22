@@ -252,6 +252,28 @@ pub struct PromiseRecord {
     pub settled_at: Option<i64>,
 }
 
+impl PromiseRecord {
+    /// The record as it *is* at `now`, whatever the row says: a pending
+    /// promise whose deadline has passed is expired — resolved if it is a
+    /// timer, otherwise rejected as timed out — settled at that deadline.
+    ///
+    /// The specification's `PromiseObject.project`. Whether a backend has
+    /// written the expiry down yet (eagerly, at a sweep, or lazily, when a
+    /// request next names the promise) is materialisation, which no
+    /// observation may depend on; anything that returns records to a caller
+    /// projects them first.
+    pub fn project(&mut self, now: i64) {
+        if self.state == PromiseState::Pending && self.timeout_at <= now {
+            self.state = if is_timer(&self.tags) {
+                PromiseState::Resolved
+            } else {
+                PromiseState::RejectedTimedout
+            };
+            self.settled_at = Some(self.timeout_at);
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskRecord {
     pub id: String,
@@ -685,6 +707,19 @@ fn validate_task_fence_data(data: &TaskFenceData) -> Result<(), validator::Valid
         if action_id == data.id {
             return Err(validator::ValidationError::new("action_id_equals_task_id")
                 .with_message("Action ID must not equal the task ID".into()));
+        }
+        // A fence and its action belong to one origin — with one exception.
+        // Creating a root (an id with no ':', so its origin is itself) from a
+        // task in another origin is how a detached computation starts, and
+        // is allowed. Extending another origin's lineage, or settling any
+        // promise outside the task's origin, is not.
+        if origin(action_id) != origin(&data.id) {
+            let is_root_create =
+                data.action.kind == "promise.create" && origin(action_id) == action_id;
+            if !is_root_create {
+                return Err(validator::ValidationError::new("origin_mismatch")
+                    .with_message("Action must belong to the task's origin".into()));
+            }
         }
     }
     Ok(())
@@ -1456,5 +1491,49 @@ mod tests {
                 "data": { "promise": expected_promise }
             })
         );
+    }
+    fn fence(task_id: &str, kind: &str, action_id: &str) -> TaskFenceData {
+        serde_json::from_value(json!({
+            "id": task_id,
+            "version": 1,
+            "action": { "kind": kind, "head": {}, "data": { "id": action_id } }
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn fence_action_in_the_task_origin_passes() {
+        assert!(fence("o:t", "promise.create", "o:p").validate().is_ok());
+        assert!(fence("o:t", "promise.settle", "o:p").validate().is_ok());
+    }
+
+    #[test]
+    fn fence_action_naming_the_task_is_refused() {
+        let err = fence("o:t", "promise.settle", "o:t")
+            .validate()
+            .unwrap_err();
+        assert!(format_validation_errors(&err).contains("must not equal the task ID"));
+    }
+
+    #[test]
+    fn fence_create_of_a_root_in_another_origin_passes() {
+        // A detached computation: the created id is its own origin.
+        assert!(fence("o:t", "promise.create", "other").validate().is_ok());
+    }
+
+    #[test]
+    fn fence_create_of_a_child_in_another_origin_is_refused() {
+        let err = fence("o:t", "promise.create", "other:p")
+            .validate()
+            .unwrap_err();
+        assert!(format_validation_errors(&err).contains("task's origin"));
+    }
+
+    #[test]
+    fn fence_settle_outside_the_task_origin_is_refused_even_for_a_root() {
+        let err = fence("o:t", "promise.settle", "other")
+            .validate()
+            .unwrap_err();
+        assert!(format_validation_errors(&err).contains("task's origin"));
     }
 }

@@ -29,6 +29,45 @@ pub mod sweep;
 use resonate_core::types::{PromiseRecord, ResponseEnvelope, TaskState};
 use resonate_core::ui::UiError;
 
+/// The effective promise state as a SQL predicate over the row, at `now`.
+///
+/// A search asks for the state a promise *is* in, not the one its row
+/// happens to say: a pending row past its deadline is expired, resolved if
+/// it is a timer and timed out otherwise, whether or not a sweep has written
+/// that yet. `PromiseRecord::project` is the same rule over a record; this is
+/// it over the columns, so the filter and the page agree. `now` is an
+/// integer literal, and `state` is one of the protocol's five states or the
+/// predicate is `FALSE`.
+pub fn effective_state_sql(state: Option<&str>, now: i64) -> String {
+    match state {
+        None => "TRUE".to_string(),
+        Some("pending") => format!("(state = 'pending' AND timeout_at > {now})"),
+        Some("resolved") => format!(
+            "(state = 'resolved' OR (state = 'pending' AND timeout_at <= {now} AND is_timer))"
+        ),
+        Some("rejected_timedout") => format!(
+            "(state = 'rejected_timedout' OR (state = 'pending' AND timeout_at <= {now} AND NOT is_timer))"
+        ),
+        Some("rejected") => "state = 'rejected'".to_string(),
+        Some("rejected_canceled") => "state = 'rejected_canceled'".to_string(),
+        Some(_) => "FALSE".to_string(),
+    }
+}
+
+/// `resonate_core::types::is_external`, read off the JSON the row stores.
+///
+/// Whether a deadline arms the timer: a promise that is not internal — one a
+/// listener or an awaiter can wait on (`resonate:scope` global,
+/// `resonate:external`, a timer) or whose own task is redispatched (a
+/// `resonate:target`). The engines keep tags as a JSON string at the point
+/// they decide what to announce, so this is the predicate over that string;
+/// the `external` generated column is the same predicate in SQL.
+pub fn external_tags(tags_json: &str) -> bool {
+    serde_json::from_str::<std::collections::HashMap<String, String>>(tags_json)
+        .map(|tags| resonate_core::types::is_external(&tags))
+        .unwrap_or(false)
+}
+
 /// Parse and resolve a `ui.*` request's `data`, rendering either failure as
 /// the response it is.
 ///

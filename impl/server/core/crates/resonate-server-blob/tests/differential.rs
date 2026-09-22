@@ -125,7 +125,13 @@ async fn differential_random() {
     const BATCH_SIZE: usize = 200;
     const PLATEAU_BATCHES: usize = 20;
 
-    let mut rng = fastrand::Rng::with_seed(0x00c0_ffee_dead_beef);
+    // TEST_SEED=<u64> picks the trajectory; the default is the one CI walks.
+    let seed: u64 = std::env::var("TEST_SEED")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0x00c0_ffee_dead_beef);
+    eprintln!("[diff] seed: {seed:#x}");
+    let mut rng = fastrand::Rng::with_seed(seed);
     let mut now = T0;
     let mut covered: HashMap<String, usize> = HashMap::new();
     let mut total_steps = 0usize;

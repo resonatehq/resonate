@@ -4,16 +4,15 @@
 //! copy comes back as a [`Effect::SetDocument`] — so the transition *is*
 //! `apply_effects(handle(..).0)` and there is no second updater to drift.
 //!
-//! Two things happen before every operation, in this order:
-//!
-//! 1. **Ghost timeouts.** Any promise the request *names* whose deadline has
-//!    passed is settled first, with its settlement chain run in full. This
-//!    mirrors `Db::try_timeout` (`persistence_sqlite.rs:363-419`), which every
-//!    operation in `server.rs` calls before touching state. Only the named ids
-//!    are swept — a full sweep happens on [`drain`](super::drain) — because
-//!    the SQL backends behave that way and `debug.snap` must agree byte for
-//!    byte.
-//! 2. **The operation itself**, against the post-ghost state.
+//! Every operation runs on a swept document. The applier runs
+//! [`drain`](super::drain) at the request's `now` before `handle`, so by the
+//! time an operation looks at a promise, every deadline at or before `now`
+//! has fired and every settlement chain has run — the document is quiescent.
+//! There is no lazy timeout path here: the SQL backends settle the promises a
+//! request *names* on the way in (`Db::try_timeout`), and this backend used
+//! to mirror that, but a whole-origin sweep over a document already in memory
+//! costs nothing, and one rule beats two. This is the shape of the Lean
+//! model of this backend (`resonatehq/s3`): `sweep`, then `handleExternal`.
 //!
 //! Statuses and messages are `Server::dispatch`'s, verbatim: a rejection is a
 //! [`Reply`] with a status, never an `Err`.
@@ -124,20 +123,20 @@ impl Tx {
 pub fn handle(doc: &OriginDoc, req: &Req, now: i64, cfg: &KernelCfg) -> (Vec<Effect>, Reply) {
     let mut tx = Tx::new(doc, cfg);
     let reply = match req {
-        Req::PromiseGet(r) => op_promise_get(&mut tx, r, now, cfg),
+        Req::PromiseGet(r) => op_promise_get(&mut tx, r),
         Req::PromiseCreate(r) => op_promise_create(&mut tx, r, now, cfg),
         Req::PromiseSettle(r) => op_promise_settle(&mut tx, r, now, cfg),
         Req::PromiseRegisterCallback(r) => op_promise_register_callback(&mut tx, r, now, cfg),
-        Req::PromiseRegisterListener(r) => op_promise_register_listener(&mut tx, r, now, cfg),
-        Req::TaskGet(r) => op_task_get(&mut tx, r, now, cfg),
+        Req::PromiseRegisterListener(r) => op_promise_register_listener(&mut tx, r),
+        Req::TaskGet(r) => op_task_get(&mut tx, r),
         Req::TaskCreate(r) => op_task_create(&mut tx, r, now, cfg),
         Req::TaskAcquire(r) => op_task_acquire(&mut tx, r, now, cfg),
         Req::TaskRelease(r) => op_task_release(&mut tx, r, now, cfg),
         Req::TaskFulfill(r) => op_task_fulfill(&mut tx, r, now, cfg),
-        Req::TaskSuspend(r) => op_task_suspend(&mut tx, r, now, cfg),
+        Req::TaskSuspend(r) => op_task_suspend(&mut tx, r, cfg),
         Req::TaskFence { data, corr_id } => op_task_fence(&mut tx, data, corr_id, now, cfg),
         Req::TaskHeartbeat(r) => op_task_heartbeat(&mut tx, r, now),
-        Req::TaskHalt(r) => op_task_halt(&mut tx, r, now, cfg),
+        Req::TaskHalt(r) => op_task_halt(&mut tx, r),
         Req::TaskContinue(r) => op_task_continue(&mut tx, r, now, cfg),
         Req::ScheduleFire(r) => op_schedule_fire(&mut tx, r, now, cfg),
     };
@@ -148,13 +147,7 @@ pub fn handle(doc: &OriginDoc, req: &Req, now: i64, cfg: &KernelCfg) -> (Vec<Eff
 // Promise operations
 // ============================================================================
 
-fn op_promise_get(
-    tx: &mut Tx,
-    r: &resonate_core::types::PromiseGetData,
-    now: i64,
-    cfg: &KernelCfg,
-) -> Reply {
-    try_timeout(tx, &[&r.id], now, cfg);
+fn op_promise_get(tx: &mut Tx, r: &resonate_core::types::PromiseGetData) -> Reply {
     match tx.doc.promises.get(&r.id) {
         Some(p) => Reply::ok(&PromiseResponseData {
             promise: p.to_record(&r.id),
@@ -169,7 +162,6 @@ fn op_promise_create(tx: &mut Tx, r: &PromiseCreateData, now: i64, cfg: &KernelC
             return Reply::err(400, "Invalid resonate:target address");
         }
     }
-    try_timeout(tx, &[&r.id], now, cfg);
     if let Some(p) = tx.doc.promises.get(&r.id) {
         // Create is idempotent on id alone: the stored promise wins.
         return Reply::ok(&PromiseResponseData {
@@ -186,7 +178,6 @@ fn op_promise_settle(
     now: i64,
     cfg: &KernelCfg,
 ) -> Reply {
-    try_timeout(tx, &[&r.id], now, cfg);
     let pending = match tx.doc.promises.get(&r.id) {
         Some(p) => p.state == PromiseState::Pending,
         None => return Reply::err(404, "Promise not found"),
@@ -208,8 +199,6 @@ fn op_promise_register_callback(
     now: i64,
     cfg: &KernelCfg,
 ) -> Reply {
-    try_timeout(tx, &[&r.awaited, &r.awaiter], now, cfg);
-
     let awaited_record = match tx.doc.promises.get(&r.awaited) {
         Some(p) => p.to_record(&r.awaited),
         None => return Reply::err(404, "Awaited promise not found"),
@@ -244,13 +233,10 @@ fn op_promise_register_callback(
 fn op_promise_register_listener(
     tx: &mut Tx,
     r: &resonate_core::types::PromiseRegisterListenerData,
-    now: i64,
-    cfg: &KernelCfg,
 ) -> Reply {
     if !is_valid_address(&r.address) {
         return Reply::err(400, "Invalid listener address");
     }
-    try_timeout(tx, &[&r.awaited], now, cfg);
     let pending = match tx.doc.promises.get(&r.awaited) {
         Some(p) => {
             // A listener is an obligation, and the server owes an observation
@@ -278,13 +264,7 @@ fn op_promise_register_listener(
 // Task operations
 // ============================================================================
 
-fn op_task_get(
-    tx: &mut Tx,
-    r: &resonate_core::types::TaskGetData,
-    now: i64,
-    cfg: &KernelCfg,
-) -> Reply {
-    try_timeout(tx, &[&r.id], now, cfg);
+fn op_task_get(tx: &mut Tx, r: &resonate_core::types::TaskGetData) -> Reply {
     match tx.doc.tasks.get(&r.id) {
         Some(t) => Reply::ok(&TaskResponseData {
             task: t.to_record(&r.id),
@@ -313,7 +293,6 @@ fn op_task_create(
         }
     }
     let id = action.id.as_str();
-    try_timeout(tx, &[id], now, cfg);
 
     if let Some(t) = tx.doc.tasks.get(id) {
         match t.state {
@@ -380,7 +359,6 @@ fn op_task_acquire(
     now: i64,
     cfg: &KernelCfg,
 ) -> Reply {
-    try_timeout(tx, &[&r.id], now, cfg);
     let (state, version) = match tx.doc.tasks.get(&r.id) {
         Some(t) => (t.state, t.version),
         None => return Reply::err(404, "Task not found"),
@@ -405,7 +383,6 @@ fn op_task_release(
     now: i64,
     cfg: &KernelCfg,
 ) -> Reply {
-    try_timeout(tx, &[&r.id], now, cfg);
     let (state, version) = match tx.doc.tasks.get(&r.id) {
         Some(t) => (t.state, t.version),
         None => return Reply::err(404, "Task not found"),
@@ -431,7 +408,6 @@ fn op_task_fulfill(
     cfg: &KernelCfg,
 ) -> Reply {
     let action = &r.action.data;
-    try_timeout(tx, &[&action.id], now, cfg);
     let (state, version) = match tx.doc.tasks.get(&r.id) {
         Some(t) => (t.state, t.version),
         None => return Reply::err(404, "Task not found"),
@@ -461,14 +437,12 @@ fn op_task_fulfill(
 fn op_task_suspend(
     tx: &mut Tx,
     r: &resonate_core::types::TaskSuspendData,
-    now: i64,
     cfg: &KernelCfg,
 ) -> Reply {
     let mut named: Vec<&str> = vec![r.id.as_str()];
     for action in &r.actions {
         named.push(action.data.awaited.as_str());
     }
-    try_timeout(tx, &named, now, cfg);
 
     let (state, version) = match tx.doc.tasks.get(&r.id) {
         Some(t) => (t.state, t.version),
@@ -530,15 +504,6 @@ fn op_task_fence(
     now: i64,
     cfg: &KernelCfg,
 ) -> Reply {
-    let action_id = r
-        .action
-        .data
-        .get("id")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    try_timeout(tx, &[&r.id, &action_id], now, cfg);
-
     let (state, version) = match tx.doc.tasks.get(&r.id) {
         Some(t) => (t.state, t.version),
         None => return Reply::err(404, "Task not found"),
@@ -654,13 +619,7 @@ fn op_task_heartbeat(tx: &mut Tx, r: &resonate_core::types::TaskHeartbeatData, n
     Reply::status(200, serde_json::json!({}))
 }
 
-fn op_task_halt(
-    tx: &mut Tx,
-    r: &resonate_core::types::TaskHaltData,
-    now: i64,
-    cfg: &KernelCfg,
-) -> Reply {
-    try_timeout(tx, &[&r.id], now, cfg);
+fn op_task_halt(tx: &mut Tx, r: &resonate_core::types::TaskHaltData) -> Reply {
     let state = match tx.doc.tasks.get(&r.id) {
         Some(t) => t.state,
         None => return Reply::err(404, "Task not found"),
@@ -685,7 +644,6 @@ fn op_task_continue(
     now: i64,
     cfg: &KernelCfg,
 ) -> Reply {
-    try_timeout(tx, &[&r.id], now, cfg);
     let (state, version) = match tx.doc.tasks.get(&r.id) {
         Some(t) => (t.state, t.version),
         None => return Reply::err(404, "Task not found"),
@@ -912,31 +870,6 @@ pub(crate) fn settle(
     record
 }
 
-/// Settle every named promise whose deadline has passed.
-///
-/// `Db::try_timeout`: a timer resolves, everything else becomes
-/// `rejected_timedout`, and `settled_at` is the *deadline*, not `now` — so the
-/// record is identical whenever the expiry is noticed.
-pub(crate) fn try_timeout(tx: &mut Tx, ids: &[&str], now: i64, cfg: &KernelCfg) {
-    let expired: Vec<(String, PromiseState, i64)> = ids
-        .iter()
-        .filter_map(|id| {
-            tx.doc
-                .promises
-                .get(*id)
-                .filter(|p| p.state == PromiseState::Pending && now >= p.timeout_at)
-                .map(|p| (id.to_string(), p.timeout_state(), p.timeout_at))
-        })
-        .collect();
-    for (id, state, timeout_at) in expired {
-        if let Some(p) = tx.doc.promises.get_mut(&id) {
-            p.state = state;
-            p.settled_at = Some(timeout_at);
-        }
-        trigger_settlement(tx, &id, now, cfg);
-    }
-}
-
 /// The settlement chain: fulfil the promise's own task, wake its awaiters,
 /// notify its listeners.
 ///
@@ -985,10 +918,12 @@ pub(crate) fn trigger_callbacks(tx: &mut Tx, awaited: &str, now: i64, cfg: &Kern
             .doc
             .promises
             .get(&awaiter)
-            .is_some_and(|p| p.state == PromiseState::Pending && now < p.timeout_at);
+            .is_some_and(|p| p.state == PromiseState::Pending);
         if !live {
-            // The awaiter is itself settled or already past its deadline; this
-            // sweep will fulfil it rather than resume it.
+            // The awaiter is itself settled: its task is fulfilled and waits
+            // on nothing. A pending awaiter is never past its own deadline
+            // here — the sweep settles every expired promise before any
+            // chain fans out, and the handler runs on a swept document.
             continue;
         }
         resume_awaiter(tx, &awaiter, awaited, now, cfg, Wake::Fanout);
@@ -1178,6 +1113,17 @@ mod tests {
         (next, sends, reply)
     }
 
+    /// What the applier does for a request: sweep at `now`, then handle.
+    fn swept_step(
+        doc: &OriginDoc,
+        req: Req,
+        now: i64,
+    ) -> (OriginDoc, Vec<(String, Message)>, Reply) {
+        let mut swept = doc.clone();
+        apply_effects(&mut swept, &crate::kernel::drain(doc, now, &cfg()));
+        step(&swept, req, now)
+    }
+
     fn create(id: &str, timeout_at: i64, tags: serde_json::Value) -> Req {
         Req::PromiseCreate(parse(
             json!({ "id": id, "timeoutAt": timeout_at, "param": {}, "tags": tags }),
@@ -1223,12 +1169,30 @@ mod tests {
     // --- create ------------------------------------------------------------
 
     #[test]
-    fn creating_an_untargeted_promise_makes_no_task_and_arms_no_timer() {
+    fn creating_an_internal_promise_makes_no_task_and_arms_no_timer() {
+        // Nothing can wait on an internal promise, so its deadline wakes no
+        // timer. The sweep still expires it the next time the origin is
+        // looked at.
         let (doc, sends, reply) = step(&OriginDoc::default(), create("o:a", 100, json!({})), 0);
         assert_eq!(reply.status, 200);
         assert_eq!(doc.promises["o:a"].state, PromiseState::Pending);
         assert!(doc.tasks.is_empty());
         assert_eq!(doc.timer_at, None);
+        assert!(sends.is_empty());
+    }
+
+    #[test]
+    fn creating_an_external_promise_arms_its_deadline_without_a_task() {
+        // No target means no task and nothing to dispatch, but a listener or
+        // an awaiter may wait on it, so its deadline arms the origin's timer.
+        let (doc, sends, reply) = step(
+            &OriginDoc::default(),
+            create("o:a", 100, json!({ "resonate:external": "true" })),
+            0,
+        );
+        assert_eq!(reply.status, 200);
+        assert!(doc.tasks.is_empty());
+        assert_eq!(doc.timer_at, Some(100));
         assert!(sends.is_empty());
     }
 
@@ -1347,16 +1311,28 @@ mod tests {
     }
 
     #[test]
-    fn getting_an_expired_promise_settles_it_first() {
+    fn getting_an_expired_promise_sees_it_settled_by_the_sweep() {
+        // The handler does not expire anything itself; the sweep that runs
+        // before it does, so the read sees the settled promise and the
+        // request as a whole is a real transition: the task is fulfilled and
+        // the origin's timer disarmed.
         let doc = with_targeted("o:a", 1_000);
-        let (next, _, reply) = step(&doc, get("o:a"), 1_500);
+        let (next, _, reply) = swept_step(&doc, get("o:a"), 1_500);
         assert_eq!(reply.data["promise"]["state"], "rejected_timedout");
         assert_eq!(reply.data["promise"]["settledAt"], 1_000);
-        // The read is a real transition: the task is fulfilled and the origin's
-        // timer disarmed.
         assert_eq!(next.promises["o:a"].state, PromiseState::RejectedTimedout);
         assert_eq!(next.tasks["o:a"].state, TaskState::Fulfilled);
         assert_eq!(next.timer_at, None);
+    }
+
+    #[test]
+    fn the_handler_alone_does_not_expire_what_it_reads() {
+        // The contract of `handle` is a swept document. Given an unswept one
+        // it reports stored state — there is no lazy path to fall back on.
+        let doc = with_targeted("o:a", 1_000);
+        let (next, _, reply) = step(&doc, get("o:a"), 1_500);
+        assert_eq!(reply.data["promise"]["state"], "pending");
+        assert_eq!(next, doc);
     }
 
     #[test]
@@ -1746,7 +1722,7 @@ mod tests {
     #[test]
     fn getting_a_task_whose_promise_expired_reports_it_fulfilled() {
         let doc = with_acquired("o:t");
-        let (next, _, reply) = step(&doc, task_get("o:t"), 200_000);
+        let (next, _, reply) = swept_step(&doc, task_get("o:t"), 200_000);
         assert_eq!(reply.data["task"]["state"], "fulfilled");
         assert_eq!(reply.data["task"].get("pid"), None);
         assert_eq!(reply.data["task"].get("ttl"), None);
