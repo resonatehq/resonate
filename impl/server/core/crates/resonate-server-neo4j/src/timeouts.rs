@@ -4,7 +4,7 @@
 //!
 //! Every queue here is a predicate over the promise node, as it is a partial
 //! index in Postgres: a promise deadline is live exactly while the promise is
-//! pending and targeted, a retry deadline while its task is pending, a lease
+//! pending and external, a retry deadline while its task is pending, a lease
 //! while acquired, and a schedule's `next_run_at` is the queue itself.
 
 use std::collections::HashMap;
@@ -60,12 +60,12 @@ pub(crate) async fn process_timeouts(
         Some(_) => None,
     };
 
-    // Expired promises. Pending and targeted is the whole of what
-    // promise_timeouts held; an untargeted promise times out lazily.
+    // Expired promises. Pending and external is the whole of what
+    // promise_timeouts held; an internal promise times out lazily.
     if let Some(id) = selected("promise") {
         let ids = due_ids(
             tx,
-            "p.state = 'pending' AND p.target IS NOT NULL AND p.timeout_at <= $time",
+            "p.state = 'pending' AND p.external AND p.timeout_at <= $time",
             time,
             id,
         )
@@ -74,7 +74,7 @@ pub(crate) async fn process_timeouts(
             .lock_many(&ids)
             .await?
             .into_iter()
-            .filter(|r| r.is_pending() && r.target.is_some() && r.timeout_at <= time)
+            .filter(|r| r.is_pending() && r.external && r.timeout_at <= time)
             .collect();
         if !rows.is_empty() {
             tx.expire_batch(&rows, time).await?;
@@ -261,9 +261,11 @@ async fn create_scheduled_promise(
     if let Some(at) = retry_at {
         tx.emit_execute(address, &d.id, 0);
         tx.arm_retry(&d.id, at);
-        // The promise joins the eager sweep under exactly the condition its
-        // task gets a retry deadline.
-        tx.arm_promise_timeout(&d.id, d.timeout_at, true);
+    }
+    // The promise joins the eager sweep when it is pending and external,
+    // task or no task.
+    if !already_timedout && resonate_core::types::is_external(&d.tags) {
+        tx.arm_promise_timeout(&d.id, d.timeout_at);
     }
     Ok(true)
 }
@@ -288,7 +290,7 @@ pub(crate) async fn upcoming(tx: &mut Tx<'_>, limit: usize) -> StorageResult<Vec
     let promises = tx
         .promise_rows(
             query(&format!(
-                "MATCH (p:Promise) WHERE p.state = 'pending' AND p.target IS NOT NULL \
+                "MATCH (p:Promise) WHERE p.state = 'pending' AND p.external \
                  RETURN {} ORDER BY p.timeout_at ASC, p.id ASC LIMIT $n",
                 p_cols("p")
             ))

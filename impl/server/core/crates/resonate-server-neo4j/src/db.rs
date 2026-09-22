@@ -364,22 +364,20 @@ impl<'c> Tx<'c> {
         self.armed.push(Scheduled { at, timeout });
     }
 
-    /// A promise deadline is announced only for a targeted promise — the one
-    /// the sweep watches. An internal one times out lazily, on first touch.
-    pub(crate) fn arm_promise_timeout(
-        &mut self,
-        promise_id: &str,
-        timeout_at: i64,
-        targeted: bool,
-    ) {
-        if targeted {
-            self.arm(
-                timeout_at,
-                Timeout::PromiseTimeout {
-                    promise_id: promise_id.to_string(),
-                },
-            );
-        }
+    /// Announce a promise deadline the sweep watches.
+    ///
+    /// The queue is `state = 'pending' AND external`: every pending promise
+    /// that is not internal — one a listener or an awaiter can wait on, or
+    /// whose own task is redispatched — is swept eagerly. An internal promise
+    /// arms nothing: it times out lazily, the first time a request names it.
+    /// Callers arm exactly when they created a pending, external promise.
+    pub(crate) fn arm_promise_timeout(&mut self, promise_id: &str, timeout_at: i64) {
+        self.arm(
+            timeout_at,
+            Timeout::PromiseTimeout {
+                promise_id: promise_id.to_string(),
+            },
+        );
     }
 
     pub(crate) fn arm_retry(&mut self, task_id: &str, at: i64) {

@@ -177,7 +177,9 @@ impl Neo4jEngine {
                         })
                         .await?;
                         if !already_timedout {
-                            tx.arm_promise_timeout(id, action.timeout_at, true);
+                            if resonate_core::types::is_external(&action.tags) {
+                                tx.arm_promise_timeout(id, action.timeout_at);
+                            }
                             tx.arm_lease(id, &r.pid, created_at + r.ttl);
                         }
                         let row = tx.read(id).await?.expect("just created");

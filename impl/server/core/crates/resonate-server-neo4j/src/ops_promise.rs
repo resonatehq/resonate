@@ -140,8 +140,8 @@ pub(crate) async fn create_promise(
         tx.emit_execute(address, &d.id, 0);
         tx.arm_retry(&d.id, at);
     }
-    if !already_timedout {
-        tx.arm_promise_timeout(&d.id, d.timeout_at, address.is_some());
+    if !already_timedout && resonate_core::types::is_external(&d.tags) {
+        tx.arm_promise_timeout(&d.id, d.timeout_at);
     }
     let row = tx
         .read(&d.id)
@@ -361,7 +361,11 @@ impl Neo4jEngine {
         .await
     }
 
-    pub(crate) async fn op_promise_search(&self, req: &RequestEnvelope, _now: i64) -> Output {
+    /// Search by effective state at `now`, as the SQL engines do: the filter
+    /// is `effective_state`, and every record comes back projected, so a
+    /// pending node past its deadline neither fills a "pending" page nor
+    /// reads as pending on any other.
+    pub(crate) async fn op_promise_search(&self, req: &RequestEnvelope, now: i64) -> Output {
         let r: PromiseSearchData = match parse(req) {
             Ok(r) => r,
             Err(resp) => return Output::response(resp),
@@ -381,13 +385,14 @@ impl Neo4jEngine {
             Box::pin(async move {
                 let q = query(&format!(
                     "MATCH (p:Promise) \
-                     WHERE ($state IS NULL OR p.state = $state) \
+                     WHERE {} \
                        AND ($cursor IS NULL OR p.id > $cursor) \
                        AND ALL(kv IN $pairs WHERE kv IN p.tag_kv) \
                      RETURN {} ORDER BY p.id ASC LIMIT $limit",
+                    effective_state(r.state.map(|s| s.as_str())),
                     p_cols("p")
                 ))
-                .param("state", r.state.map(|s| s.as_str().to_string()))
+                .param("now", now)
                 .param("cursor", r.cursor.clone())
                 .param("pairs", pairs.clone())
                 .param("limit", limit + 1);
@@ -396,7 +401,11 @@ impl Neo4jEngine {
                 let promises: Vec<PromiseRecord> = rows
                     .iter()
                     .take(limit as usize)
-                    .map(PromiseRow::to_promise_record)
+                    .map(|row| {
+                        let mut p = row.to_promise_record();
+                        p.project(now);
+                        p
+                    })
                     .collect();
                 let cursor = if has_more {
                     promises.last().map(|p| p.id.clone())
@@ -408,5 +417,28 @@ impl Neo4jEngine {
             })
         })
         .await
+    }
+}
+
+/// The effective promise state as a Cypher predicate over `p`, at `$now`.
+///
+/// `resonate_sql::effective_state_sql` over the node's properties: a pending
+/// node past its deadline is expired — resolved if a timer, timed out
+/// otherwise — whether or not a sweep has written that yet. `state` is one of
+/// the protocol's five states, or the predicate is `false`.
+fn effective_state(state: Option<&str>) -> &'static str {
+    match state {
+        None => "true",
+        Some("pending") => "(p.state = 'pending' AND p.timeout_at > $now)",
+        Some("resolved") => {
+            "(p.state = 'resolved' OR (p.state = 'pending' AND p.timeout_at <= $now AND p.is_timer))"
+        }
+        Some("rejected_timedout") => {
+            "(p.state = 'rejected_timedout' \
+             OR (p.state = 'pending' AND p.timeout_at <= $now AND NOT p.is_timer))"
+        }
+        Some("rejected") => "p.state = 'rejected'",
+        Some("rejected_canceled") => "p.state = 'rejected_canceled'",
+        Some(_) => "false",
     }
 }

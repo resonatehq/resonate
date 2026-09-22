@@ -41,7 +41,7 @@ Cypher predicate. The well-known tags are projected into scalar properties —
 the Postgres schema projects them into generated columns.
 
 The deadline queues are predicates over the node, not separate nodes: a
-promise deadline is a pending targeted promise, a retry deadline a pending
+promise deadline is a pending external promise, a retry deadline a pending
 task, a lease an acquired task. That is the Postgres layout, and it is why the
 snapshot this engine reports is byte-identical to the relational engines'.
 

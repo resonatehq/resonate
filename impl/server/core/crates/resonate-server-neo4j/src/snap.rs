@@ -2,7 +2,7 @@
 //!
 //! Every snapshot section is a projection of the graph with the membership
 //! rules every engine's snapshot carries: a promise deadline is a pending,
-//! targeted promise; a callback is an unready `AWAITS` edge; a task deadline is
+//! external promise; a callback is an unready `AWAITS` edge; a task deadline is
 //! the retry or lease column of a task in the matching state. Nothing is
 //! queued, so `messages` is empty — the transitions returned them.
 
@@ -69,7 +69,7 @@ impl Neo4jEngine {
 
                     let promise_timeouts: Vec<SnapshotPromiseTimeout> = all
                         .iter()
-                        .filter(|p| p.is_pending() && p.target.is_some())
+                        .filter(|p| p.is_pending() && p.external)
                         .map(|p| SnapshotPromiseTimeout {
                             id: p.id.clone(),
                             timeout: p.timeout_at,

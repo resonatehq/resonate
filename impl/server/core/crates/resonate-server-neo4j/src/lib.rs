@@ -7,7 +7,7 @@
 //! the call tree. See `schema.cypher`.
 //!
 //! The semantics are the Postgres engine's, transition for transition: lazy
-//! expiry for internal promises, eager deadlines for targeted ones, the same
+//! expiry for internal promises, eager deadlines for external ones, the same
 //! deadline projections, the same messages. Where Postgres writes one CTE this
 //! engine reads the nodes a transition touches under Neo4j's write locks,
 //! decides in Rust, and writes back — every operation is one Bolt transaction,
