@@ -104,13 +104,8 @@ pub fn sweep(doc: &OriginDoc, now: i64, cfg: &KernelCfg) -> Vec<Effect> {
         tx.doc
             .promises
             .values()
-<<<<<<<< HEAD:impl/server/core/crates/resonate-server-blob/src/kernel/drain.rs
             .all(|p| p.state != PromiseState::Pending || now < p.timeout_at),
-        "drain left a pending promise past its deadline"
-========
-            .all(|p| p.state != PromiseState::Pending || now < p.timeout_at || !p.timeout_armed()),
         "sweep left an armed deadline in the past"
->>>>>>>> c086bf19 (chore: rename blob kernel's drain to sweep):impl/server/core/crates/resonate-server-blob/src/kernel/sweep.rs
     );
     tx.finish(doc)
 }
@@ -226,14 +221,9 @@ mod tests {
         // deadline passes, like every other pending promise. Nothing is
         // dispatched, since there is no task to notify.
         let doc = apply(&OriginDoc::default(), plain("o:a", 1_000), 0);
-<<<<<<<< HEAD:impl/server/core/crates/resonate-server-blob/src/kernel/drain.rs
-        let (next, sends) = sweep(&doc, 5_000);
+        let (next, sends) = apply_sweep(&doc, 5_000);
         assert_eq!(next.promises["o:a"].state, PromiseState::RejectedTimedout);
         assert_eq!(next.promises["o:a"].settled_at, Some(1_000));
-========
-        let (next, sends) = apply_sweep(&doc, 5_000);
-        assert_eq!(next.promises["o:a"].state, PromiseState::Pending);
->>>>>>>> c086bf19 (chore: rename blob kernel's drain to sweep):impl/server/core/crates/resonate-server-blob/src/kernel/sweep.rs
         assert!(sends.is_empty());
         // It armed nothing before and arms nothing after.
         assert_eq!(doc.timer_at, None);
