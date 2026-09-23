@@ -178,7 +178,7 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_document_drains_to_nothing() {
+    fn an_empty_document_sweeps_to_nothing() {
         let (next, sends) = apply_sweep(&OriginDoc::default(), 1_000_000);
         assert_eq!(next, OriginDoc::default());
         assert!(sends.is_empty());

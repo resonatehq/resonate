@@ -629,7 +629,7 @@ fn decide(loaded: &OriginDoc, batch: &[Work], shared: &Arc<Shared>) -> Decision 
                 // in memory, the sweep's changes ride the same CAS, and an
                 // idle sweep emits nothing — so this costs no store operation
                 // the request was not going to make.
-                let mut fx = drain(&doc, now, &shared.cfg.kernel);
+                let mut fx = sweep(&doc, now, &shared.cfg.kernel);
                 apply_effects(&mut doc, &fx);
                 let (mut hfx, reply) = handle(&doc, req, now, &shared.cfg.kernel);
                 replies.push(reply);
@@ -1310,7 +1310,7 @@ mod tests {
     // --- crash windows ----------------------------------------------------
 
     #[tokio::test]
-    async fn dying_after_the_timer_put_leaves_a_key_the_drain_ignores() {
+    async fn dying_after_the_timer_put_leaves_a_key_the_sweep_ignores() {
         let inner = shared_store();
         let faulty = Arc::new(FaultStore::new(Arc::clone(&inner)));
         // Let the timer PUT through and kill the document CAS.

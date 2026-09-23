@@ -756,7 +756,7 @@ mod tests {
     }
 
     #[test]
-    fn a_drained_document_round_trips() {
+    fn a_swept_document_round_trips() {
         let doc = rich();
         let fx = sweep(&doc, 500_000, &cfg());
         let mut next = doc.clone();
