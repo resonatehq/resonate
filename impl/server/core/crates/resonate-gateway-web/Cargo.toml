@@ -10,9 +10,9 @@ name = "resonate_gateway_web"
 path = "src/lib.rs"
 
 [dependencies]
-resonate-auth = { path = "../resonate-auth" }
-resonate-core = { path = "../resonate-core" }
-resonate-plugin = { path = "../resonate-plugin" }
+resonate-auth = { version = "0.10.1", path = "../resonate-auth" }
+resonate-core = { version = "0.10.1", path = "../resonate-core" }
+resonate-plugin = { version = "0.10.1", path = "../resonate-plugin" }
 async-trait = { workspace = true }
 tokio = { version = "1", features = ["rt", "net", "sync", "macros"] }
 serde = { workspace = true }
@@ -28,8 +28,8 @@ rust-embed = { version = "8", features = ["debug-embed"] }
 # The composition test merges the console into the gateway's router, the way
 # the binary does. The dependency runs one way only: the gateway knows nothing
 # about a console.
-resonate-gateway-http = { path = "../resonate-gateway-http" }
-resonate-oracle = { path = "../resonate-oracle" }
+resonate-gateway-http = { version = "0.10.1", path = "../resonate-gateway-http" }
+resonate-oracle = { version = "0.10.1", path = "../resonate-oracle" }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

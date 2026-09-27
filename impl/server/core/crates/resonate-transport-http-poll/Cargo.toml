@@ -6,8 +6,8 @@ license.workspace = true
 description = "Resonate transport: deliver messages to a worker that holds an open SSE connection, for workers that cannot be dialled."
 
 [dependencies]
-resonate-plugin = { path = "../resonate-plugin" }
-resonate-auth = { path = "../resonate-auth" }
+resonate-plugin = { version = "0.10.1", path = "../resonate-plugin" }
+resonate-auth = { version = "0.10.1", path = "../resonate-auth" }
 async-stream = "0.3"
 async-trait = { workspace = true }
 serde = { workspace = true }

@@ -10,9 +10,9 @@ name = "resonate_gateway_http"
 path = "src/lib.rs"
 
 [dependencies]
-resonate-auth = { path = "../resonate-auth" }
-resonate-core = { path = "../resonate-core" }
-resonate-plugin = { path = "../resonate-plugin" }
+resonate-auth = { version = "0.10.1", path = "../resonate-auth" }
+resonate-core = { version = "0.10.1", path = "../resonate-core" }
+resonate-plugin = { version = "0.10.1", path = "../resonate-plugin" }
 async-trait = { workspace = true }
 serde = { workspace = true }
 tower-http = { version = "0.6", features = ["trace", "catch-panic", "cors"] }
