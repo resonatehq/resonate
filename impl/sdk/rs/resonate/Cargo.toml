@@ -14,7 +14,7 @@ resonate-sdk-macros = { path = "../resonate-macros", version = "0.1.0" }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-reqwest = { version = "0.13", features = ["json", "stream"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "stream"] }
 tracing = "0.1"
 thiserror = "2"
 base64 = "0.22"
@@ -23,6 +23,14 @@ futures = "0.3"
 async-trait = "0.1"
 parking_lot = "0.12.5"
 seahash = "4"
+
+[features]
+default = ["reqwest-default"]
+# reqwest's own defaults (its default TLS, charset, HTTP/2, the system proxy),
+# for HttpNetwork against an https:// server. An embedder that talks to the
+# server in process, or over plain http on loopback, turns the SDK's defaults
+# off and keeps them out of its own reqwest's feature unification.
+reqwest-default = ["reqwest/default"]
 
 [dev-dependencies]
 test-with = "0.16"
