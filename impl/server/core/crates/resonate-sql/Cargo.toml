@@ -14,6 +14,9 @@ description = "Shared internals for Resonate's SQL server plugins: the engine co
 # Only for the rusqlite error conversion and the rusqlite migration path, which
 # the SQLite engine needs and the others must not compile.
 sqlite = ["dep:rusqlite"]
+# Classify MySQL errors by server error number, which SQLSTATE alone cannot
+# do: a lock wait timeout (1205) reports SQLSTATE HY000.
+mysql = ["sqlx/mysql"]
 
 [dependencies]
 resonate-core = { path = "../resonate-core" }

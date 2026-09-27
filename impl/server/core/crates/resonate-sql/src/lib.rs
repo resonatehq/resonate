@@ -123,16 +123,43 @@ impl From<rusqlite::Error> for StorageError {
 
 impl From<sqlx::Error> for StorageError {
     fn from(e: sqlx::Error) -> Self {
-        // Detect serialization failures (40001) and deadlocks (40P01) from within queries.
-        // Both mean nothing was committed and the transaction can be safely retried.
-        if let Some(db_err) = e.as_database_error() {
-            let code = db_err.code().map(|c| c.to_string());
-            if code.as_deref() == Some("40001") || code.as_deref() == Some("40P01") {
-                return StorageError::Serialization;
-            }
+        if is_retryable(&e) {
+            return StorageError::Serialization;
         }
         StorageError::Backend(e.to_string())
     }
+}
+
+/// MySQL-family server error numbers that mean the transaction can be run
+/// again from the start.
+///
+/// Matched by number, not SQLSTATE: sqlx's `DatabaseError::code()` is the
+/// SQLSTATE, and while a deadlock carries `40001`, everything else here
+/// carries the catch-all `HY000`.
+///
+/// - 1213 deadlock, 1205 lock wait timeout (MySQL, and TiDB pessimistic mode)
+/// - 9007 write conflict (TiDB: optimistic commit, or pessimistic fallback)
+/// - 8002 `SELECT ... FOR UPDATE` write conflict (TiDB optimistic)
+/// - 8022 transaction retryable (TiDB)
+/// - 8028 information schema changed during the transaction (TiDB DDL)
+pub const MYSQL_RETRYABLE_ERRNOS: &[u16] = &[1213, 1205, 9007, 8002, 8022, 8028];
+
+/// Whether `e` is a failure the whole transaction can be retried from:
+/// a serialization failure (`40001`) or deadlock (`40P01`) by SQLSTATE, for
+/// every engine, and with the `mysql` feature the server error numbers in
+/// [`MYSQL_RETRYABLE_ERRNOS`].
+pub fn is_retryable(e: &sqlx::Error) -> bool {
+    let Some(db_err) = e.as_database_error() else {
+        return false;
+    };
+    if matches!(db_err.code().as_deref(), Some("40001") | Some("40P01")) {
+        return true;
+    }
+    #[cfg(feature = "mysql")]
+    if let Some(m) = db_err.try_downcast_ref::<sqlx::mysql::MySqlDatabaseError>() {
+        return MYSQL_RETRYABLE_ERRNOS.contains(&m.number());
+    }
+    false
 }
 
 // === Result types for CTE-based operations ===
