@@ -9,16 +9,16 @@ description = "Resonate server: durable state in PostgreSQL."
 concurrency-stress = []
 
 [dependencies]
-resonate-sql = { path = "../resonate-sql" }
-resonate-core = { path = "../resonate-core" }
-resonate-plugin = { path = "../resonate-plugin" }
+resonate-sql = { version = "0.10.1", path = "../resonate-sql" }
+resonate-core = { version = "0.10.1", path = "../resonate-core" }
+resonate-plugin = { version = "0.10.1", path = "../resonate-plugin" }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 validator = { workspace = true }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros"] }
 tracing = "0.1"
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "macros", "migrate", "postgres"] }
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio-rustls", "macros", "migrate", "postgres"] }
 
 [dev-dependencies]
 base64 = "0.22"

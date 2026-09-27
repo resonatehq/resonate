@@ -11,9 +11,9 @@ description = "Resonate server: durable state in ScyllaDB — origin-partitioned
 # ones there without either asking the other.
 
 [dependencies]
-resonate-core = { path = "../resonate-core" }
-resonate-plugin = { path = "../resonate-plugin" }
-resonate-timer-wheel = { path = "../resonate-timer-wheel" }
+resonate-core = { version = "0.10.1", path = "../resonate-core" }
+resonate-plugin = { version = "0.10.1", path = "../resonate-plugin" }
+resonate-timer-wheel = { version = "0.10.1", path = "../resonate-timer-wheel" }
 scylla = { version = "1.8", features = ["rustls-023"] }
 async-trait = { workspace = true }
 serde = { workspace = true }

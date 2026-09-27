@@ -10,8 +10,8 @@ name = "resonate_gateway_metrics"
 path = "src/lib.rs"
 
 [dependencies]
-resonate-core = { path = "../resonate-core" }
-resonate-plugin = { path = "../resonate-plugin" }
+resonate-core = { version = "0.10.1", path = "../resonate-core" }
+resonate-plugin = { version = "0.10.1", path = "../resonate-plugin" }
 async-trait = { workspace = true }
 serde = { workspace = true }
 tokio = { version = "1", features = ["rt", "net", "sync", "macros"] }

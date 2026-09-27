@@ -11,8 +11,8 @@ description = "Resonate's reference model, in memory: what the differential comp
 # ResonateServer so the comparison can run through the port, and that is all.
 
 [dependencies]
-resonate-sql = { path = "../resonate-sql" }
-resonate-core = { path = "../resonate-core" }
+resonate-sql = { version = "0.10.1", path = "../resonate-sql" }
+resonate-core = { version = "0.10.1", path = "../resonate-core" }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

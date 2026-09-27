@@ -6,7 +6,7 @@ license.workspace = true
 description = "Resonate transport: deliver messages by publishing to a Google Cloud Pub/Sub topic."
 
 [dependencies]
-resonate-plugin = { path = "../resonate-plugin" }
+resonate-plugin = { version = "0.10.1", path = "../resonate-plugin" }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
