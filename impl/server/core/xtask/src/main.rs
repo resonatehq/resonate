@@ -14,7 +14,7 @@
 //! # Every database is vanilla
 //!
 //! A job that needs a database never reuses one. Given an admin connection
-//! (`--postgres-admin-url`, `--mysql-admin-url`, or the matching
+//! (`--postgres-admin-url`, `--mysql-admin-url`, `--tidb-admin-url`, or the matching
 //! `XTASK_*_ADMIN_URL` variables — `XTASK_`, not `RESONATE_`, because the
 //! server reads every `RESONATE_*` variable as configuration and refuses
 //! keys it does not know) it creates a database with a fresh,
@@ -105,6 +105,9 @@ enum Backend {
     Sqlite,
     Postgres,
     Mysql,
+    /// TiDB, through the MySQL server plugin: the same engine, a different
+    /// database behind the wire protocol.
+    Tidb,
     Blob,
     Neo4j,
 }
@@ -118,6 +121,9 @@ struct DbArgs {
     /// Admin connection to a MySQL server; its database name is ignored.
     #[arg(long, env = "XTASK_MYSQL_ADMIN_URL")]
     mysql_admin_url: Option<String>,
+    /// Admin connection to a TiDB server (MySQL protocol, port 4000).
+    #[arg(long, env = "XTASK_TIDB_ADMIN_URL")]
+    tidb_admin_url: Option<String>,
     /// Bolt URI of a disposable Neo4j, which must hold no promise or schedule
     /// when a job starts. Cleared after the job.
     #[arg(long, env = "XTASK_NEO4J_URI")]
@@ -274,7 +280,7 @@ impl FreshDb {
                     .await
                     .map_err(|e| format!("create database {name}: {e}"))?;
             }
-            Backend::Mysql => {
+            Backend::Mysql | Backend::Tidb => {
                 let mut conn = sqlx::MySqlConnection::connect(admin_url)
                     .await
                     .map_err(|e| format!("mysql admin: {e}"))?;
@@ -315,14 +321,16 @@ impl FreshDb {
                 }
                 Err(e) => Err(e.to_string()),
             },
-            Backend::Mysql => match sqlx::MySqlConnection::connect(&self.admin_url).await {
-                Ok(mut conn) => sqlx::query(&format!("DROP DATABASE `{}`", self.name))
-                    .execute(&mut conn)
-                    .await
-                    .map(|_| ())
-                    .map_err(|e| e.to_string()),
-                Err(e) => Err(e.to_string()),
-            },
+            Backend::Mysql | Backend::Tidb => {
+                match sqlx::MySqlConnection::connect(&self.admin_url).await {
+                    Ok(mut conn) => sqlx::query(&format!("DROP DATABASE `{}`", self.name))
+                        .execute(&mut conn)
+                        .await
+                        .map(|_| ())
+                        .map_err(|e| e.to_string()),
+                    Err(e) => Err(e.to_string()),
+                }
+            }
             // Only what the job wrote: the database was empty when it began.
             Backend::Neo4j => match neo4j(&self.db, &self.admin_url).await {
                 Ok(graph) => graph
@@ -380,6 +388,11 @@ fn admin_url(db: &DbArgs, backend: Backend) -> Result<Option<String>> {
                 .clone()
                 .ok_or("mysql needs --mysql-admin-url or XTASK_MYSQL_ADMIN_URL")?,
         ),
+        Backend::Tidb => Some(
+            db.tidb_admin_url
+                .clone()
+                .ok_or("tidb needs --tidb-admin-url or XTASK_TIDB_ADMIN_URL")?,
+        ),
         Backend::Neo4j => Some(
             db.neo4j_uri
                 .clone()
@@ -410,7 +423,7 @@ where
 fn url_var(backend: Backend) -> Option<&'static str> {
     match backend {
         Backend::Postgres => Some("TEST_POSTGRES_URL"),
-        Backend::Mysql => Some("TEST_MYSQL_URL"),
+        Backend::Mysql | Backend::Tidb => Some("TEST_MYSQL_URL"),
         Backend::Neo4j => Some("TEST_NEO4J_URI"),
         Backend::Sqlite | Backend::Blob => None,
     }
@@ -650,7 +663,7 @@ async fn porcupine(backend: Backend, db: &DbArgs, porc: &PorcArgs) -> Result<()>
                         url.expect("fresh"),
                     );
             }
-            Backend::Mysql => {
+            Backend::Mysql | Backend::Tidb => {
                 server
                     .env("RESONATE_SERVERS__ACTIVE", "server_mysql")
                     .env("RESONATE_SERVERS__SERVER_MYSQL__URL", url.expect("fresh"));
@@ -736,6 +749,11 @@ async fn all(db: &DbArgs, porc: &PorcArgs) -> Result<()> {
         servers.push(Backend::Mysql);
     } else {
         eprintln!("==> no mysql admin url: mysql skipped");
+    }
+    if db.tidb_admin_url.is_some() {
+        servers.push(Backend::Tidb);
+    } else {
+        eprintln!("==> no tidb admin url: tidb skipped");
     }
     if db.neo4j_uri.is_some() {
         servers.push(Backend::Neo4j);

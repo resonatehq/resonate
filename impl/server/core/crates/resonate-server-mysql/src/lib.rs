@@ -73,6 +73,21 @@ impl MysqlEngine {
                     sqlx::query("SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED")
                         .execute(&mut *conn)
                         .await?;
+                    // TiDB speaks this protocol, but READ COMMITTED and the
+                    // `FOR UPDATE` row locks this engine relies on take effect
+                    // only in pessimistic mode. A cluster whose default is
+                    // optimistic would run every transaction as snapshot
+                    // isolation with commit-time conflict detection, so pin
+                    // the mode per session. MySQL has no such variable, hence
+                    // the check.
+                    let version: String = sqlx::query_scalar("SELECT VERSION()")
+                        .fetch_one(&mut *conn)
+                        .await?;
+                    if version.contains("TiDB") {
+                        sqlx::query("SET SESSION tidb_txn_mode = 'pessimistic'")
+                            .execute(&mut *conn)
+                            .await?;
+                    }
                     Ok(())
                 })
             })
