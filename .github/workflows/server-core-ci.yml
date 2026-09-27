@@ -76,12 +76,14 @@ jobs:
   differential:
     name: Differential (${{ matrix.backend }})
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # TiDB answers each statement over the network with a distributed commit
+    # behind it; the default trajectory measured 59-71 minutes locally.
+    timeout-minutes: ${{ matrix.backend == 'tidb' && 90 || 45 }}
 
     strategy:
       fail-fast: false
       matrix:
-        backend: [sqlite, postgres, mysql, blob, neo4j]
+        backend: [sqlite, postgres, mysql, tidb, blob, neo4j]
 
     # Services cannot be selected per matrix leg, so all start everywhere
     # and the step below picks the one this leg talks to.
@@ -113,6 +115,14 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 15
+      # TiDB with its embedded storage (unistore): the SQL layer, the
+      # MySQL protocol and pessimistic transactions are TiDB's own, which is
+      # what the mysql plugin is being held to here. The image has no shell
+      # client, so readiness is waited for in a step rather than a health-cmd.
+      tidb:
+        image: pingcap/tidb:v8.5.8
+        ports:
+          - 4000:4000
       neo4j:
         image: neo4j:5
         env:
@@ -134,6 +144,15 @@ jobs:
         with:
           cache-workspaces: impl/server/core
 
+      - name: Wait for TiDB
+        if: matrix.backend == 'tidb'
+        run: |
+          for i in $(seq 1 60); do
+            (echo > /dev/tcp/127.0.0.1/4000) 2>/dev/null && exit 0
+            sleep 2
+          done
+          echo "tidb did not open port 4000"; exit 1
+
       # The engine differential and the port differential over this leg's
       # backend, each on a database the xtask creates fresh and drops after.
       # The admin URLs are the services' superusers; no job touches the
@@ -142,6 +161,7 @@ jobs:
         env:
           XTASK_POSTGRES_ADMIN_URL: postgres://resonate:resonate@localhost:5432/postgres
           XTASK_MYSQL_ADMIN_URL: mysql://root:resonate@127.0.0.1:3306/mysql
+          XTASK_TIDB_ADMIN_URL: mysql://root@127.0.0.1:4000/mysql
           XTASK_NEO4J_URI: bolt://localhost:7687
         run: cargo xtask differential --backend ${{ matrix.backend }}
 
@@ -175,7 +195,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [sqlite, postgres, mysql, blob, neo4j]
+        backend: [sqlite, postgres, mysql, tidb, blob, neo4j]
 
     services:
       postgres:
@@ -205,6 +225,14 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 15
+      # TiDB with its embedded storage (unistore): the SQL layer, the
+      # MySQL protocol and pessimistic transactions are TiDB's own, which is
+      # what the mysql plugin is being held to here. The image has no shell
+      # client, so readiness is waited for in a step rather than a health-cmd.
+      tidb:
+        image: pingcap/tidb:v8.5.8
+        ports:
+          - 4000:4000
       neo4j:
         image: neo4j:5
         env:
@@ -226,6 +254,15 @@ jobs:
         with:
           cache-workspaces: impl/server/core
 
+      - name: Wait for TiDB
+        if: matrix.backend == 'tidb'
+        run: |
+          for i in $(seq 1 60); do
+            (echo > /dev/tcp/127.0.0.1/4000) 2>/dev/null && exit 0
+            sleep 2
+          done
+          echo "tidb did not open port 4000"; exit 1
+
       # `go-version-file` is resolved from the workspace root, not from the
       # `defaults` working directory, so this is the grafted copy.
       - name: Setup Go
@@ -246,6 +283,7 @@ jobs:
         env:
           XTASK_POSTGRES_ADMIN_URL: postgres://resonate:resonate@localhost:5432/postgres
           XTASK_MYSQL_ADMIN_URL: mysql://root:resonate@127.0.0.1:3306/mysql
+          XTASK_TIDB_ADMIN_URL: mysql://root@127.0.0.1:4000/mysql
           XTASK_NEO4J_URI: bolt://localhost:7687
           XTASK_SPEC_DIR: ${{ github.workspace }}/spec/valid/porc
         run: cargo xtask porcupine --backend ${{ matrix.backend }}

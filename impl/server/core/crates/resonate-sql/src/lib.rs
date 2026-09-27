@@ -130,13 +130,19 @@ impl From<sqlx::Error> for StorageError {
     }
 }
 
-/// MySQL server error numbers that mean the transaction can be run again from
-/// the start: deadlock (1213) and lock wait timeout (1205).
+/// MySQL-family server error numbers that mean the transaction can be run
+/// again from the start.
 ///
 /// Matched by number, not SQLSTATE: sqlx's `DatabaseError::code()` is the
-/// SQLSTATE, and while a deadlock carries `40001`, a lock wait timeout carries
-/// the catch-all `HY000`.
-pub const MYSQL_RETRYABLE_ERRNOS: &[u16] = &[1213, 1205];
+/// SQLSTATE, and while a deadlock carries `40001`, everything else here
+/// carries the catch-all `HY000`.
+///
+/// - 1213 deadlock, 1205 lock wait timeout (MySQL, and TiDB pessimistic mode)
+/// - 9007 write conflict (TiDB: optimistic commit, or pessimistic fallback)
+/// - 8002 `SELECT ... FOR UPDATE` write conflict (TiDB optimistic)
+/// - 8022 transaction retryable (TiDB)
+/// - 8028 information schema changed during the transaction (TiDB DDL)
+pub const MYSQL_RETRYABLE_ERRNOS: &[u16] = &[1213, 1205, 9007, 8002, 8022, 8028];
 
 /// Whether `e` is a failure the whole transaction can be retried from:
 /// a serialization failure (`40001`) or deadlock (`40P01`) by SQLSTATE, for
