@@ -10,17 +10,17 @@ description = "Resonate server: durable state in SQLite, in this process."
 concurrency-stress = []
 
 [dependencies]
-resonate-sql = { path = "../resonate-sql", features = ["sqlite"] }
-resonate-core = { path = "../resonate-core" }
-resonate-plugin = { path = "../resonate-plugin" }
+resonate-sql = { version = "0.10.1", path = "../resonate-sql", features = ["sqlite"] }
+resonate-core = { version = "0.10.1", path = "../resonate-core" }
+resonate-plugin = { version = "0.10.1", path = "../resonate-plugin" }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 validator = { workspace = true }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros"] }
 tracing = "0.1"
-rusqlite = { version = "0.31", features = ["bundled"] }
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "macros", "migrate"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio-rustls", "macros", "migrate"] }
 
 [dev-dependencies]
 base64 = "0.22"
