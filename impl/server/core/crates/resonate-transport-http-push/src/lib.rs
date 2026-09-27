@@ -27,6 +27,21 @@ fn configure(
     if config.concurrency == 0 {
         return Err(settings.reject("concurrency", "must be at least 1 (got 0)"));
     }
+    // Without the GCP token provider the mode could only send every delivery
+    // unauthenticated (what a failed mint does), so it is refused up front.
+    #[cfg(not(feature = "gcp-idtoken"))]
+    if matches!(
+        &config.auth,
+        Some(AuthConfig {
+            mode: AuthMode::Gcp,
+            ..
+        })
+    ) {
+        return Err(settings.reject(
+            "auth.mode",
+            "\"gcp\" needs this crate built with the gcp-idtoken feature",
+        ));
+    }
     Ok(Some(std::sync::Arc::new(HttpPushTransport::new(
         deps.server,
         config,
@@ -149,8 +164,11 @@ fn default_auth_header() -> String {
     "Authorization".to_string()
 }
 
+#[cfg(feature = "gcp-idtoken")]
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, Weak};
+#[cfg(feature = "gcp-idtoken")]
+use std::sync::Mutex;
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use reqwest::Client;
@@ -178,15 +196,18 @@ pub trait TokenProvider: Send + Sync {
 }
 
 // ---------------------------------------------------------------------------
-// GCP ID token provider (backed by google-cloud-auth)
+// GCP ID token provider (backed by google-cloud-auth, feature gcp-idtoken)
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "gcp-idtoken")]
 use google_cloud_auth::credentials::idtoken::{Builder as IdTokenBuilder, IDTokenCredentials};
 
+#[cfg(feature = "gcp-idtoken")]
 struct GcpIdTokenProvider {
     cache: Mutex<HashMap<String, IDTokenCredentials>>,
 }
 
+#[cfg(feature = "gcp-idtoken")]
 #[async_trait::async_trait]
 impl TokenProvider for GcpIdTokenProvider {
     async fn get_token(&self, audience: &str) -> Result<String, String> {
@@ -205,6 +226,21 @@ impl TokenProvider for GcpIdTokenProvider {
                 .clone()
         };
         creds.id_token().await.map_err(|e| e.to_string())
+    }
+}
+
+/// Stands in for the GCP provider in a build without `gcp-idtoken`. `configure`
+/// refuses `mode = "gcp"` there, so only a direct caller of
+/// [`Auth::from_config`] reaches it: every mint fails, and a failed mint sends
+/// the request without the header, as it does with the feature on.
+#[cfg(not(feature = "gcp-idtoken"))]
+struct GcpIdTokenUnavailable;
+
+#[cfg(not(feature = "gcp-idtoken"))]
+#[async_trait::async_trait]
+impl TokenProvider for GcpIdTokenUnavailable {
+    async fn get_token(&self, _audience: &str) -> Result<String, String> {
+        Err("built without the gcp-idtoken feature".to_string())
     }
 }
 
@@ -239,9 +275,12 @@ impl Auth {
             AuthMode::Gcp => Auth::GcpIdToken {
                 header: config.header.clone(),
                 fixed_audience: config.audience.clone(),
+                #[cfg(feature = "gcp-idtoken")]
                 provider: Box::new(GcpIdTokenProvider {
                     cache: Mutex::new(HashMap::new()),
                 }),
+                #[cfg(not(feature = "gcp-idtoken"))]
+                provider: Box::new(GcpIdTokenUnavailable),
             },
         }
     }
@@ -470,7 +509,7 @@ mod tests {
     // worker does is dial it.
     use resonate_plugin::axum;
     use resonate_plugin::axum::{extract::State, routing::post};
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
     use tokio::net::TcpListener;
     use tokio::sync::mpsc;
 
@@ -803,5 +842,20 @@ mod tests {
         };
         assert_eq!(err.key, "workers.transport_http_push.concurrency");
         assert!(err.source.is_some(), "and says where the value came from");
+    }
+
+    #[test]
+    fn gcp_mode_follows_the_gcp_idtoken_feature() {
+        let config = settings(&[("workers.transport_http_push.auth.mode", "gcp")]);
+        let built = (PLUGIN.configure)(&config.worker(&PLUGIN.id()), no_server());
+        #[cfg(feature = "gcp-idtoken")]
+        assert!(built.unwrap().is_some(), "the feature carries the provider");
+        #[cfg(not(feature = "gcp-idtoken"))]
+        {
+            let Err(err) = built else {
+                panic!("without the provider every delivery would go unauthenticated");
+            };
+            assert_eq!(err.key, "workers.transport_http_push.auth.mode");
+        }
     }
 }
