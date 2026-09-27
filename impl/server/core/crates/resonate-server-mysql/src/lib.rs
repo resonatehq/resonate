@@ -184,11 +184,10 @@ impl MysqlEngine {
             }) {
                 Ok(_) => return Ok((result, emitted, armed)),
                 Err(e) => {
-                    let mysql_err = e
-                        .as_database_error()
-                        .and_then(|dbe| dbe.code().map(|c| c.to_string()));
-                    if mysql_err.as_deref() == Some("1213") || mysql_err.as_deref() == Some("1205")
-                    {
+                    // By server error number: `code()` is the SQLSTATE, so
+                    // comparing it with "1213"/"1205" never matched, and a
+                    // deadlock or lock wait timeout at commit answered 500.
+                    if resonate_sql::is_retryable(&e) {
                         if attempt < max_retries {
                             tracing::warn!(
                                 attempt = attempt + 1,
