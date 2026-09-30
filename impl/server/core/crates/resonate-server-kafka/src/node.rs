@@ -231,7 +231,9 @@ impl Node {
         {
             let table = self.table.read().unwrap_or_else(|e| e.into_inner());
             match table.get(&p) {
-                Some(Slot::Serving { partition, .. }) => return Route::Local(Arc::clone(partition)),
+                Some(Slot::Serving { partition, .. }) => {
+                    return Route::Local(Arc::clone(partition))
+                }
                 Some(Slot::Restoring) => {
                     return Route::Nowhere(format!("partition {p} is being taken over"))
                 }
@@ -423,13 +425,16 @@ impl Node {
             return Ok(());
         }
         let timer_stop = (!self.cfg.debug).then(|| self.spawn_timer_loop(Arc::clone(&partition)));
-        self.table.write().unwrap_or_else(|e| e.into_inner()).insert(
-            p,
-            Slot::Serving {
-                partition,
-                timer_stop,
-            },
-        );
+        self.table
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(
+                p,
+                Slot::Serving {
+                    partition,
+                    timer_stop,
+                },
+            );
         Ok(())
     }
 
@@ -485,7 +490,9 @@ impl Node {
                 .contains_key(&p);
             if still && !assigned {
                 match node.local.drop_partition(p) {
-                    Ok(()) => tracing::info!(partition = p, "Local copy of a revoked partition dropped"),
+                    Ok(()) => {
+                        tracing::info!(partition = p, "Local copy of a revoked partition dropped")
+                    }
                     Err(e) => tracing::warn!(partition = p, error = %e, "Local copy not dropped"),
                 }
                 node.revoked_at
@@ -535,9 +542,7 @@ impl Node {
             };
             if let Err(e) = outcome {
                 tracing::warn!(partition = partition.id(), error = %e.message, "Timer sweep failed; re-armed to retry");
-                partition
-                    .timers()
-                    .set(target, Some(now + RETRY_DELAY_MS));
+                partition.timers().set(target, Some(now + RETRY_DELAY_MS));
             }
         }
         swept
@@ -635,7 +640,10 @@ impl Node {
 
     /// A request another node forwarded here: served locally or refused,
     /// never forwarded again.
-    pub async fn process_forwarded(&self, req: &RequestEnvelope) -> Result<ResponseEnvelope, Unavailable> {
+    pub async fn process_forwarded(
+        &self,
+        req: &RequestEnvelope,
+    ) -> Result<ResponseEnvelope, Unavailable> {
         self.process_as(req, true).await
     }
 
@@ -767,14 +775,26 @@ impl Node {
             "promise.register_callback" => {
                 let r: PromiseRegisterCallbackData = parsed!(data);
                 let origin = origin_of(&r.awaiter).to_string();
-                self.to_origin(env, &origin, Req::PromiseRegisterCallback(r), now, forwarded)
-                    .await
+                self.to_origin(
+                    env,
+                    &origin,
+                    Req::PromiseRegisterCallback(r),
+                    now,
+                    forwarded,
+                )
+                .await
             }
             "promise.register_listener" => {
                 let r: PromiseRegisterListenerData = parsed!(data);
                 let origin = origin_of(&r.awaited).to_string();
-                self.to_origin(env, &origin, Req::PromiseRegisterListener(r), now, forwarded)
-                    .await
+                self.to_origin(
+                    env,
+                    &origin,
+                    Req::PromiseRegisterListener(r),
+                    now,
+                    forwarded,
+                )
+                .await
             }
             "promise.search" | "task.search" | "schedule.search" => {
                 self.search(&env.kind, data, now).await

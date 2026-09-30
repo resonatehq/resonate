@@ -94,11 +94,7 @@ impl Membership for StaticMembership {
     }
 
     async fn stop(&self) {
-        let events = self
-            .events
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take();
+        let events = self.events.lock().unwrap_or_else(|e| e.into_inner()).take();
         if let Some(events) = events {
             let (done, wait) = oneshot::channel();
             if events
@@ -213,8 +209,10 @@ impl MemGroup {
         let target: BTreeMap<String, BTreeSet<u32>> = {
             let members = self.lock();
             let names: Vec<&String> = members.keys().collect();
-            let mut target: BTreeMap<String, BTreeSet<u32>> =
-                names.iter().map(|n| ((*n).clone(), BTreeSet::new())).collect();
+            let mut target: BTreeMap<String, BTreeSet<u32>> = names
+                .iter()
+                .map(|n| ((*n).clone(), BTreeSet::new()))
+                .collect();
             if !names.is_empty() {
                 for p in 0..self.partitions {
                     let owner = names[p as usize % names.len()];

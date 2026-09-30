@@ -120,12 +120,15 @@ impl KafkaCfg {
     /// group and never committing offsets.
     fn reader_config(&self) -> ClientConfig {
         let mut c = self.client();
-        c.set("group.id", format!("{}-reader-{}", self.txn_prefix, self.node_id))
-            .set("enable.auto.commit", "false")
-            .set("enable.auto.offset.store", "false")
-            .set("isolation.level", "read_committed")
-            .set("enable.partition.eof", "true")
-            .set("auto.offset.reset", "earliest");
+        c.set(
+            "group.id",
+            format!("{}-reader-{}", self.txn_prefix, self.node_id),
+        )
+        .set("enable.auto.commit", "false")
+        .set("enable.auto.offset.store", "false")
+        .set("isolation.level", "read_committed")
+        .set("enable.partition.eof", "true")
+        .set("auto.offset.reset", "earliest");
         c
     }
 }
@@ -183,7 +186,7 @@ pub struct KafkaLog {
     owners: Arc<RwLock<HashMap<u32, Owner>>>,
     stop: Arc<AtomicBool>,
     tail: std::sync::Mutex<Option<std::thread::JoinHandle<()>>>,
-    probe: BaseConsumer,
+    probe: Arc<BaseConsumer>,
 }
 
 impl KafkaLog {
@@ -198,7 +201,7 @@ impl KafkaLog {
             owners: Arc::new(RwLock::new(HashMap::new())),
             stop: Arc::new(AtomicBool::new(false)),
             tail: std::sync::Mutex::new(None),
-            probe,
+            probe: Arc::new(probe),
             cfg,
         });
         log.check_partition_counts().await?;
@@ -260,7 +263,10 @@ impl KafkaLog {
                                 continue;
                             };
                             let mut owners = owners.write().unwrap_or_else(|e| e.into_inner());
-                            match m.payload().and_then(|v| serde_json::from_slice::<Owner>(v).ok()) {
+                            match m
+                                .payload()
+                                .and_then(|v| serde_json::from_slice::<Owner>(v).ok())
+                            {
                                 Some(owner) => {
                                     owners.insert(p, owner);
                                 }
@@ -300,7 +306,11 @@ async fn create_topics(cfg: &KafkaCfg) -> Result<(), LogError> {
     let promises = cfg.topic(Topic::Promises);
     let schedules = cfg.topic(Topic::Schedules);
     let owners = cfg.owners_topic();
-    let isr = if cfg.replication_factor >= 3 { "2" } else { "1" };
+    let isr = if cfg.replication_factor >= 3 {
+        "2"
+    } else {
+        "1"
+    };
     fn compacted<'a>(name: &'a str, partitions: i32, rf: i32, isr: &'a str) -> NewTopic<'a> {
         NewTopic::new(name, partitions, TopicReplication::Fixed(rf))
             .set("cleanup.policy", "compact")
@@ -314,7 +324,10 @@ async fn create_topics(cfg: &KafkaCfg) -> Result<(), LogError> {
         compacted(&owners, 1, rf, isr),
     ];
     let results = admin
-        .create_topics(topics.iter(), &AdminOptions::new().operation_timeout(Some(cfg.request_timeout)))
+        .create_topics(
+            topics.iter(),
+            &AdminOptions::new().operation_timeout(Some(cfg.request_timeout)),
+        )
         .await
         .map_err(unavailable)?;
     for result in results {
@@ -322,7 +335,9 @@ async fn create_topics(cfg: &KafkaCfg) -> Result<(), LogError> {
             Ok(name) => tracing::info!(topic = %name, "Topic created"),
             Err((_, RDKafkaErrorCode::TopicAlreadyExists)) => {}
             Err((name, code)) => {
-                return Err(LogError::Unavailable(format!("cannot create topic {name}: {code}")))
+                return Err(LogError::Unavailable(format!(
+                    "cannot create topic {name}: {code}"
+                )))
             }
         }
     }
@@ -337,19 +352,22 @@ impl Log for KafkaLog {
 
     async fn fence(&self, partition: u32) -> Result<Arc<dyn Writer>, LogError> {
         let mut c = self.cfg.client();
-        c.set("transactional.id", format!("{}-p{partition}", self.cfg.txn_prefix))
-            .set("enable.idempotence", "true")
-            .set("acks", "all")
-            .set("compression.type", "lz4")
-            .set("linger.ms", "2")
-            .set(
-                "transaction.timeout.ms",
-                self.cfg.transaction_timeout.as_millis().to_string(),
-            )
-            .set(
-                "message.timeout.ms",
-                self.cfg.transaction_timeout.as_millis().to_string(),
-            );
+        c.set(
+            "transactional.id",
+            format!("{}-p{partition}", self.cfg.txn_prefix),
+        )
+        .set("enable.idempotence", "true")
+        .set("acks", "all")
+        .set("compression.type", "lz4")
+        .set("linger.ms", "2")
+        .set(
+            "transaction.timeout.ms",
+            self.cfg.transaction_timeout.as_millis().to_string(),
+        )
+        .set(
+            "message.timeout.ms",
+            self.cfg.transaction_timeout.as_millis().to_string(),
+        );
         let producer: FutureProducer = c.create().map_err(unavailable)?;
         let timeout = self.cfg.request_timeout;
         let p = producer.clone();
@@ -406,11 +424,15 @@ impl Log for KafkaLog {
     }
 
     async fn ready(&self) -> bool {
-        let timeout = Duration::from_secs(5);
         let topic = self.cfg.owners_topic();
-        // The probe is only ever used here, one call at a time.
-        let probe = self.probe.fetch_metadata(Some(&topic), timeout);
-        probe.is_ok()
+        let probe = Arc::clone(&self.probe);
+        tokio::task::spawn_blocking(move || {
+            probe
+                .fetch_metadata(Some(&topic), Duration::from_secs(5))
+                .is_ok()
+        })
+        .await
+        .unwrap_or(false)
     }
 }
 
@@ -469,7 +491,7 @@ impl Writer for KafkaWriter {
                     Class::Fenced => LogError::Fenced(e.to_string()),
                     // Nothing was begun, so nothing can have landed.
                     _ => LogError::Uncertain(format!("cannot begin a transaction: {e}")),
-                })
+                });
             }
         }
 
@@ -530,7 +552,10 @@ impl Writer for KafkaWriter {
         let deadline = Instant::now() + self.timeout;
         loop {
             let timeout = self.timeout;
-            match self.blocking(move |p| p.commit_transaction(timeout)).await? {
+            match self
+                .blocking(move |p| p.commit_transaction(timeout))
+                .await?
+            {
                 Ok(()) => return Ok(after),
                 Err(e) => match classify(&e) {
                     Class::Abort => return Err(self.abort(e).await),

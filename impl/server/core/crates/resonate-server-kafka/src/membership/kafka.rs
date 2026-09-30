@@ -170,7 +170,11 @@ impl Membership for KafkaMembership {
                 let deadline = Instant::now() + Duration::from_secs(30);
                 while Instant::now() < deadline {
                     let _ = consumer.poll(Duration::from_millis(100));
-                    if consumer.assignment().map(|a| a.count() == 0).unwrap_or(true) {
+                    if consumer
+                        .assignment()
+                        .map(|a| a.count() == 0)
+                        .unwrap_or(true)
+                    {
                         break;
                     }
                 }

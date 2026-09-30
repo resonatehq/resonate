@@ -36,7 +36,9 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use resonate_core::types::{PromiseValue, RequestEnvelope, RequestHead, ResponseEnvelope, ResponseHead};
+use resonate_core::types::{
+    PromiseValue, RequestEnvelope, RequestHead, ResponseEnvelope, ResponseHead,
+};
 use resonate_core::Unavailable;
 use resonate_plugin::axum;
 
@@ -65,9 +67,17 @@ pub struct Search {
 /// Reaching another node.
 #[async_trait]
 pub trait Peers: Send + Sync {
-    async fn process(&self, to: &Owner, req: &RequestEnvelope) -> Result<ResponseEnvelope, Unavailable>;
+    async fn process(
+        &self,
+        to: &Owner,
+        req: &RequestEnvelope,
+    ) -> Result<ResponseEnvelope, Unavailable>;
     async fn fire(&self, to: &Owner, fire: &Fire) -> Result<(), Unavailable>;
-    async fn search(&self, to: &Owner, search: &Search) -> Result<Vec<(String, Value)>, Unavailable>;
+    async fn search(
+        &self,
+        to: &Owner,
+        search: &Search,
+    ) -> Result<Vec<(String, Value)>, Unavailable>;
 }
 
 /// The request envelope as it goes over the wire. The core type only
@@ -151,7 +161,11 @@ impl HttpPeers {
 
 #[async_trait]
 impl Peers for HttpPeers {
-    async fn process(&self, to: &Owner, req: &RequestEnvelope) -> Result<ResponseEnvelope, Unavailable> {
+    async fn process(
+        &self,
+        to: &Owner,
+        req: &RequestEnvelope,
+    ) -> Result<ResponseEnvelope, Unavailable> {
         let resp: WireResponse = self
             .post(to, "/peer/process", &envelope_json(req))
             .await?
@@ -173,7 +187,11 @@ impl Peers for HttpPeers {
         self.post(to, "/peer/fire", fire).await.map(|_| ())
     }
 
-    async fn search(&self, to: &Owner, search: &Search) -> Result<Vec<(String, Value)>, Unavailable> {
+    async fn search(
+        &self,
+        to: &Owner,
+        search: &Search,
+    ) -> Result<Vec<(String, Value)>, Unavailable> {
         self.post(to, "/peer/search", search)
             .await?
             .json()
@@ -195,7 +213,10 @@ impl State {
         if let Some(want) = &self.token {
             let got = headers.get(TOKEN_HEADER).and_then(|v| v.to_str().ok());
             if got != Some(want.as_str()) {
-                return Err((axum::http::StatusCode::UNAUTHORIZED, "bad peer token".into()));
+                return Err((
+                    axum::http::StatusCode::UNAUTHORIZED,
+                    "bad peer token".into(),
+                ));
             }
         }
         self.node.upgrade().ok_or((
@@ -224,7 +245,10 @@ pub fn router(node: Weak<Node>, token: Option<String>) -> axum::Router {
         let node = state.check(&headers)?;
         let req: RequestEnvelope = serde_json::from_value(body)
             .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, e.to_string()))?;
-        node.process_forwarded(&req).await.map(Json).map_err(unavailable)
+        node.process_forwarded(&req)
+            .await
+            .map(Json)
+            .map_err(unavailable)
     }
 
     async fn fire(
@@ -243,7 +267,9 @@ pub fn router(node: Weak<Node>, token: Option<String>) -> axum::Router {
         Json(search): Json<Search>,
     ) -> Result<Json<Vec<(String, Value)>>, HttpError> {
         let node = state.check(&headers)?;
-        node.search_forwarded(&search).map(Json).map_err(unavailable)
+        node.search_forwarded(&search)
+            .map(Json)
+            .map_err(unavailable)
     }
 
     axum::Router::new()
@@ -308,7 +334,11 @@ impl LocalPeers {
 
 #[async_trait]
 impl Peers for LocalPeers {
-    async fn process(&self, to: &Owner, req: &RequestEnvelope) -> Result<ResponseEnvelope, Unavailable> {
+    async fn process(
+        &self,
+        to: &Owner,
+        req: &RequestEnvelope,
+    ) -> Result<ResponseEnvelope, Unavailable> {
         // Through the wire format, so the in-process path proves the HTTP one.
         let req: RequestEnvelope = serde_json::from_value(envelope_json(req))
             .map_err(|e| Unavailable::new(e.to_string()))?;
@@ -319,7 +349,11 @@ impl Peers for LocalPeers {
         self.get(to)?.fire_forwarded(fire.clone()).await
     }
 
-    async fn search(&self, to: &Owner, search: &Search) -> Result<Vec<(String, Value)>, Unavailable> {
+    async fn search(
+        &self,
+        to: &Owner,
+        search: &Search,
+    ) -> Result<Vec<(String, Value)>, Unavailable> {
         self.get(to)?.search_forwarded(search)
     }
 }

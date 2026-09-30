@@ -255,57 +255,58 @@ impl KafkaServer {
 impl ResonateServer for KafkaServer {
     async fn init(&self, debug: bool) -> Result<(), Unavailable> {
         let c = &self.config;
-        let (log, membership, peers): (Arc<dyn Log>, Arc<dyn Membership>, Arc<dyn Peers>) =
-            match &c.brokers {
-                None => {
-                    tracing::warn!(
-                        "servers.server_kafka.brokers is not set — one node over an \
+        let (log, membership, peers): (Arc<dyn Log>, Arc<dyn Membership>, Arc<dyn Peers>) = match &c
+            .brokers
+        {
+            None => {
+                tracing::warn!(
+                    "servers.server_kafka.brokers is not set — one node over an \
                          in-process log. Nothing survives this process."
-                    );
-                    (
-                        MemLog::new(c.partitions),
-                        StaticMembership::new(c.partitions),
-                        LocalPeers::new(),
-                    )
-                }
-                Some(brokers) => {
-                    let prefix = c.topic_prefix.clone();
-                    let kafka = KafkaCfg {
-                        brokers: brokers.clone(),
-                        topic_prefix: prefix.clone(),
-                        txn_prefix: c.txn_prefix.clone().unwrap_or_else(|| prefix.clone()),
-                        partitions: c.partitions,
-                        replication_factor: c.replication_factor,
-                        create_topics: c.create_topics,
-                        properties: c.librdkafka.clone(),
-                        node_id: c.node_id.clone(),
-                        ..Default::default()
-                    };
-                    tracing::info!(brokers = %brokers, partitions = c.partitions, node = %c.node_id, "Using Kafka backend");
-                    if c.peer_url.is_empty() {
-                        tracing::warn!(
-                            "servers.server_kafka.peer_url is not set — requests for \
+                );
+                (
+                    MemLog::new(c.partitions),
+                    StaticMembership::new(c.partitions),
+                    LocalPeers::new(),
+                )
+            }
+            Some(brokers) => {
+                let prefix = c.topic_prefix.clone();
+                let kafka = KafkaCfg {
+                    brokers: brokers.clone(),
+                    topic_prefix: prefix.clone(),
+                    txn_prefix: c.txn_prefix.clone().unwrap_or_else(|| prefix.clone()),
+                    partitions: c.partitions,
+                    replication_factor: c.replication_factor,
+                    create_topics: c.create_topics,
+                    properties: c.librdkafka.clone(),
+                    node_id: c.node_id.clone(),
+                    ..Default::default()
+                };
+                tracing::info!(brokers = %brokers, partitions = c.partitions, node = %c.node_id, "Using Kafka backend");
+                if c.peer_url.is_empty() {
+                    tracing::warn!(
+                        "servers.server_kafka.peer_url is not set — requests for \
                              partitions this node does not own cannot be forwarded"
-                        );
-                    }
-                    let log = KafkaLog::connect(kafka.clone())
-                        .await
-                        .map_err(|e| Unavailable::new(e.to_string()))?;
-                    let membership = KafkaMembership::new(
-                        kafka,
-                        GroupCfg {
-                            group_id: c.group_id.clone().unwrap_or(prefix),
-                            session_timeout: Duration::from_millis(c.session_timeout_ms),
-                            instance_id: c.instance_id.clone(),
-                        },
                     );
-                    let peers = Arc::new(HttpPeers::new(
-                        Duration::from_secs(30),
-                        c.peer_token.clone(),
-                    ));
-                    (log, membership, peers)
                 }
-            };
+                let log = KafkaLog::connect(kafka.clone())
+                    .await
+                    .map_err(|e| Unavailable::new(e.to_string()))?;
+                let membership = KafkaMembership::new(
+                    kafka,
+                    GroupCfg {
+                        group_id: c.group_id.clone().unwrap_or(prefix),
+                        session_timeout: Duration::from_millis(c.session_timeout_ms),
+                        instance_id: c.instance_id.clone(),
+                    },
+                );
+                let peers = Arc::new(HttpPeers::new(
+                    Duration::from_secs(30),
+                    c.peer_token.clone(),
+                ));
+                (log, membership, peers)
+            }
+        };
 
         let node = Node::new(
             NodeCfg {
@@ -466,6 +467,9 @@ mod tests {
         let server = (PLUGIN.configure)(&config.server(&PLUGIN.id()), deps())
             .unwrap()
             .server;
-        server.stop().await.expect("nothing to stop is not an error");
+        server
+            .stop()
+            .await
+            .expect("nothing to stop is not an error");
     }
 }

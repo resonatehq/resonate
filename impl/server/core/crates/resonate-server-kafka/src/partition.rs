@@ -334,11 +334,7 @@ impl Partition {
     /// make the local copy durable so a return replays only the tail.
     pub async fn stop(&self) {
         let _ = self.stop.send(true);
-        let handle = self
-            .actor
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take();
+        let handle = self.actor.lock().unwrap_or_else(|e| e.into_inner()).take();
         if let Some(handle) = handle {
             let _ = handle.await;
         }
@@ -521,7 +517,8 @@ impl Actor {
             return Ok(());
         }
         let mut overlay = Overlay::default();
-        let mut answers: Vec<(Answer, Result<Reply, Unavailable>)> = Vec::with_capacity(batch.len());
+        let mut answers: Vec<(Answer, Result<Reply, Unavailable>)> =
+            Vec::with_capacity(batch.len());
         let mut sends: Vec<Effect> = Vec::new();
 
         for work in batch {

@@ -295,10 +295,7 @@ mod tests {
             store.open(0).unwrap().get(b"ok").unwrap(),
             Some(b"a".to_vec())
         );
-        assert_eq!(
-            store.open(1).unwrap().checkpoint().unwrap(),
-            Some(cp(9, 0))
-        );
+        assert_eq!(store.open(1).unwrap().checkpoint().unwrap(), Some(cp(9, 0)));
     }
 
     #[test]

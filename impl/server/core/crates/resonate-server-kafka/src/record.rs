@@ -85,7 +85,11 @@ pub fn assemble<'a>(
 /// promise whose promise or task changed, a tombstone for every promise that
 /// is gone. Unchanged promises produce nothing.
 pub fn diff(before: &OriginDoc, after: &OriginDoc) -> Vec<(String, Option<Vec<u8>>)> {
-    let ids: BTreeSet<&String> = before.promises.keys().chain(after.promises.keys()).collect();
+    let ids: BTreeSet<&String> = before
+        .promises
+        .keys()
+        .chain(after.promises.keys())
+        .collect();
     let mut out = Vec::new();
     for id in ids {
         let old = (before.promises.get(id), before.tasks.get(id));
@@ -201,9 +205,7 @@ mod tests {
         before
             .promises
             .insert("o:b".into(), promise(PromiseState::Pending, true));
-        before
-            .tasks
-            .insert("o:b".into(), task(TaskState::Acquired));
+        before.tasks.insert("o:b".into(), task(TaskState::Acquired));
         before
             .promises
             .insert("o:gone".into(), promise(PromiseState::Resolved, false));

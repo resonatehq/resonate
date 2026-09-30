@@ -100,27 +100,74 @@ fn pick<T: Clone>(rng: &mut fastrand::Rng, v: &[T]) -> Option<T> {
 // Test
 // ---------------------------------------------------------------------------
 
-#[tokio::test(flavor = "multi_thread")]
-async fn differential_random() {
-    debug_assert_eq!(22, ALL_OPS.len(), "Op has 22 variants; ALL_OPS must match");
-
-    let server = Node::in_memory(
-        8,
-        Arc::new(NullRouter),
-        NodeCfg {
-            debug: true,
-            search: true,
-            partition: resonate_server_kafka::partition::PartitionCfg {
-                kernel: resonate_server_blob::kernel::state::KernelCfg {
-                    preload_limit: PRELOAD_LIMIT,
-                    ..Default::default()
-                },
+fn node_cfg() -> NodeCfg {
+    NodeCfg {
+        debug: true,
+        search: true,
+        partition: resonate_server_kafka::partition::PartitionCfg {
+            kernel: resonate_server_blob::kernel::state::KernelCfg {
+                preload_limit: PRELOAD_LIMIT,
                 ..Default::default()
             },
             ..Default::default()
         },
+        ..Default::default()
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn differential_random() {
+    let server = Node::in_memory(8, Arc::new(NullRouter), node_cfg());
+    server.start().await.expect("every partition taken over");
+    run(server, usize::MAX).await;
+}
+
+/// The same trajectory over a real Kafka: every round a transaction, every
+/// `debug.reset` a batch of tombstones. Opt-in, and shorter by default.
+///
+///   TEST_KAFKA_BROKERS=localhost:9092 TEST_KAFKA_STEPS=5000 \
+///     cargo test -p resonate-server-kafka --test differential -- --nocapture
+#[tokio::test(flavor = "multi_thread")]
+async fn differential_random_on_kafka() {
+    let Ok(brokers) = std::env::var("TEST_KAFKA_BROKERS") else {
+        eprintln!("[diff] TEST_KAFKA_BROKERS not set — the Kafka leg is skipped");
+        return;
+    };
+    let steps: usize = std::env::var("TEST_KAFKA_STEPS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(5_000);
+    let prefix = format!("t-diff-{:08x}", fastrand::u32(..));
+    let log = resonate_server_kafka::log::kafka::KafkaLog::connect(
+        resonate_server_kafka::log::kafka::KafkaCfg {
+            brokers,
+            topic_prefix: prefix.clone(),
+            txn_prefix: prefix,
+            partitions: 8,
+            replication_factor: 1,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("kafka");
+    let cfg = node_cfg();
+    let server = Node::new(
+        cfg.clone(),
+        log,
+        resonate_server_kafka::local::mem::MemLocal::new(),
+        Arc::new(resonate_server_blob::sender::Sender::new(
+            Arc::new(NullRouter),
+            cfg.debug,
+        )),
+        resonate_server_kafka::membership::StaticMembership::new(8),
+        resonate_server_kafka::peer::LocalPeers::new(),
     );
     server.start().await.expect("every partition taken over");
+    run(server, steps).await;
+}
+
+async fn run(server: Arc<Node>, max_steps: usize) {
+    debug_assert_eq!(22, ALL_OPS.len(), "Op has 22 variants; ALL_OPS must match");
     let oracle = Arc::new(SharedOracle::with_preload_limit(PRELOAD_LIMIT));
 
     let backends: Vec<(String, Backend)> = vec![
@@ -128,7 +175,8 @@ async fn differential_random() {
         ("oracle".into(), Arc::clone(&oracle) as Backend),
     ];
 
-    const MAX_STEPS: usize = 200_000;
+    let max_steps_cap: usize = 200_000;
+    let max_steps = max_steps.min(max_steps_cap);
     const BATCH_SIZE: usize = 200;
     const PLATEAU_BATCHES: usize = 20;
 
@@ -152,7 +200,7 @@ async fn differential_random() {
         let sigs_before = seen_sigs.len();
 
         for _ in 0..BATCH_SIZE {
-            if total_steps >= MAX_STEPS {
+            if total_steps >= max_steps {
                 break 'outer;
             }
 

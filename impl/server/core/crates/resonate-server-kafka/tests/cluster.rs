@@ -260,7 +260,11 @@ async fn a_partition_restores_from_a_compacted_log() {
 
     // Everyone leaves but one, which must rebuild partition p from scratch
     // (its own local copy of p, if it ever had one, is in memory elsewhere).
-    let owner = if c.nodes[0].serving().contains(&p) { 0 } else { 1 };
+    let owner = if c.nodes[0].serving().contains(&p) {
+        0
+    } else {
+        1
+    };
     let other = 1 - owner;
     c.nodes[owner].stop().await;
     c.settle(&[other]).await;
@@ -291,7 +295,10 @@ async fn a_refused_commit_is_a_retry_and_changes_nothing() {
         json!({ "id": "r", "state": "resolved", "value": {} }),
     )
     .await;
-    assert!(attempt.is_err(), "nothing landed, so nothing may be claimed");
+    assert!(
+        attempt.is_err(),
+        "nothing landed, so nothing may be claimed"
+    );
     let got = ok(&c.nodes[0], "promise.get", json!({ "id": "r" })).await;
     assert_eq!(got["promise"]["state"], "pending");
 

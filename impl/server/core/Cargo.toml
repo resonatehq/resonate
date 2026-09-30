@@ -109,6 +109,9 @@ async-trait = { workspace = true }
 resonate-core = { path = "crates/resonate-core" }
 resonate-sql = { path = "crates/resonate-sql" }
 resonate-oracle = { path = "crates/resonate-oracle" }
+# The port differential holds the Kafka node to the same comparison. A
+# dev-dependency, not a plugin of this binary: see its README.
+resonate-server-kafka = { path = "crates/resonate-server-kafka" }
 serde_json = { workspace = true }
 base64 = "0.22"
 reqwest = { version = "0.12", features = ["json"] }

@@ -8,8 +8,9 @@
 // This is `diff/differential.rs` moved from the SQL family's internal
 // `Engine` contract to the two ports every server has, so a backend joins by
 // being a server and nothing else: the in-memory oracle, the SQL shell over
-// SQLite (Postgres and MySQL are the same shell), and the blob server over an
-// in-process object store all sit in one comparison.
+// SQLite (Postgres and MySQL are the same shell), the blob server over an
+// in-process object store, and a Kafka node over an in-process log all sit in
+// one comparison.
 //
 // What is *not* compared here, by design: announced deadlines, `upcoming`,
 // and narrow `Internal` firing. Those are properties of the SQL engines'
@@ -143,6 +144,7 @@ use resonate_core::{ResonateRouter, ResonateServer, Unavailable};
 use resonate_oracle::{Oracle, SharedOracle};
 use resonate_server_blob::server::{Server as BlobServer, ServerCfg as BlobCfg};
 use resonate_server_blob::store::ObjectStoreAdapter;
+use resonate_server_kafka::node::{Node as KafkaNode, NodeCfg as KafkaCfg};
 use resonate_server_mysql::MysqlEngine;
 use resonate_server_postgres::PostgresEngine;
 use resonate_server_sqlite::SqliteEngine;
@@ -445,6 +447,36 @@ async fn blob_backend() -> Backend {
     }
 }
 
+/// One Kafka node owning every partition of an in-process log: the same
+/// kernel as blob, behind a different shell — per-partition rounds,
+/// per-promise records, and a local copy read back on every request.
+async fn kafka_backend() -> Backend {
+    let router = Arc::new(Recorder::default());
+    let server = KafkaNode::in_memory(
+        8,
+        router.clone(),
+        KafkaCfg {
+            debug: true,
+            search: true,
+            partition: resonate_server_kafka::partition::PartitionCfg {
+                kernel: resonate_server_blob::kernel::state::KernelCfg {
+                    retry_timeout: TASK_RETRY_TIMEOUT_MS,
+                    preload_limit: PRELOAD_LIMIT,
+                    server_url: SERVER_URL.to_string(),
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    );
+    server.init(true).await.expect("kafka init");
+    Backend {
+        name: "kafka".into(),
+        server,
+        router,
+    }
+}
+
 async fn send(b: &Backend, envelope: &RequestEnvelope) -> ResponseEnvelope {
     b.server
         .process(envelope)
@@ -486,6 +518,7 @@ async fn port_differential_random() {
         Err(_) => eprintln!("[port] TEST_MYSQL_URL not set — mysql skipped"),
     }
     backends.push(blob_backend().await);
+    backends.push(kafka_backend().await);
 
     if let Ok(want) = std::env::var("TEST_BACKENDS") {
         let want: Vec<&str> = want

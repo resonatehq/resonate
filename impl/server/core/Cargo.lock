@@ -3254,6 +3254,7 @@ dependencies = [
  "resonate-oracle",
  "resonate-plugin",
  "resonate-server-blob",
+ "resonate-server-kafka",
  "resonate-server-mysql",
  "resonate-server-neo4j",
  "resonate-server-postgres",
