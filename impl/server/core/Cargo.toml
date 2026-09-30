@@ -11,6 +11,7 @@ members = [
     "crates/resonate-sql",
     "crates/resonate-server-scylladb",
     "crates/resonate-server-blob",
+    "crates/resonate-server-kafka",
     "crates/resonate-server-sqlite",
     "crates/resonate-server-postgres",
     "crates/resonate-server-mysql",

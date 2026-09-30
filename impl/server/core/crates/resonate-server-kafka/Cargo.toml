@@ -1,0 +1,29 @@
+[package]
+name = "resonate-server-kafka"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+resonate-core = { path = "../resonate-core" }
+resonate-plugin = { path = "../resonate-plugin" }
+# The kernel, the document codec, the message sender and the oracle are the
+# blob backend's, reused as they are: this crate is a second shell around the
+# same pure state machine.
+resonate-server-blob = { path = "../resonate-server-blob" }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+validator = { workspace = true }
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+futures = "0.3"
+fastrand = "2"
+reqwest = { version = "0.12", features = ["json"] }
+# librdkafka, built from its bundled source.
+rdkafka = "0.39"
+# RocksDB without the compression libraries it does not need: lz4 only.
+rocksdb = { version = "0.24", default-features = false, features = ["lz4", "bindgen-runtime", "multi-threaded-cf"] }
+
+[dev-dependencies]
+tempfile = "3"
