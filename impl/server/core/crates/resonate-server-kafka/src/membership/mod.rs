@@ -134,6 +134,8 @@ struct Member {
 pub struct MemGroup {
     partitions: u32,
     members: Mutex<BTreeMap<String, Member>>,
+    /// Members expelled without being told, until they are.
+    expelled: Mutex<BTreeMap<String, Member>>,
     /// One rebalance at a time.
     rebalancing: tokio::sync::Mutex<()>,
 }
@@ -143,6 +145,7 @@ impl MemGroup {
         Arc::new(Self {
             partitions,
             members: Mutex::new(BTreeMap::new()),
+            expelled: Mutex::new(BTreeMap::new()),
             rebalancing: tokio::sync::Mutex::new(()),
         })
     }
@@ -164,10 +167,41 @@ impl MemGroup {
     }
 
     /// Drop `node` from the group without telling it — a crash, or a session
-    /// that expired while the node was frozen. Its partitions go to the rest.
+    /// that expired while the node was frozen. Its partitions go to the rest,
+    /// and it goes on believing it owns them until [`MemGroup::tell_lost`].
     pub async fn expel(&self, node: &str) {
-        self.lock().remove(node);
+        let member = self.lock().remove(node);
+        if let Some(member) = member {
+            self.expelled
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(node.to_string(), member);
+        }
         self.rebalance().await;
+    }
+
+    /// Tell an expelled node what the group did — what its next poll would
+    /// hear from Kafka: every partition it held, revoked as lost.
+    pub async fn tell_lost(&self, node: &str) {
+        let member = self
+            .expelled
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(node);
+        if let Some(member) = member {
+            let (done, wait) = oneshot::channel();
+            if member
+                .events
+                .send(Event::Revoked {
+                    partitions: member.owned.into_iter().collect(),
+                    lost: true,
+                    done,
+                })
+                .is_ok()
+            {
+                let _ = wait.await;
+            }
+        }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, BTreeMap<String, Member>> {
