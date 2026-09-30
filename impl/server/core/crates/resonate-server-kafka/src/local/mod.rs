@@ -39,6 +39,9 @@ use crate::log::Checkpoint;
 /// One write to apply: a key and its new value, or `None` to delete it.
 pub type Op = (Vec<u8>, Option<Vec<u8>>);
 
+/// One key and its value, read back.
+pub type Row = (Vec<u8>, Vec<u8>);
+
 /// Every partition's local copy on this node.
 pub trait LocalStore: Send + Sync {
     /// The partition's store, created empty if it does not exist.
@@ -63,7 +66,7 @@ pub trait PartitionStore: Send + Sync {
     fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, String>;
 
     /// Every key under `prefix`, ascending, with its value.
-    fn scan(&self, prefix: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>, String>;
+    fn scan(&self, prefix: &[u8]) -> Result<Vec<Row>, String>;
 
     /// Make everything applied so far durable locally. Called on revoke and
     /// stop, so a clean shutdown restarts from where it left off.

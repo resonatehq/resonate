@@ -35,7 +35,7 @@ use rocksdb::{
     MultiThreaded, Options, WriteBatch, WriteBufferManager, WriteOptions,
 };
 
-use super::{LocalStore, Op, PartitionStore};
+use super::{LocalStore, Op, PartitionStore, Row};
 use crate::log::Checkpoint;
 
 type Db = rocksdb::DBWithThreadMode<MultiThreaded>;
@@ -210,7 +210,7 @@ impl PartitionStore for RocksPartition {
         self.db.get_cf(&cf, key).map_err(|e| e.to_string())
     }
 
-    fn scan(&self, prefix: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>, String> {
+    fn scan(&self, prefix: &[u8]) -> Result<Vec<Row>, String> {
         let cf = self.cf()?;
         let mut out = Vec::new();
         for item in self

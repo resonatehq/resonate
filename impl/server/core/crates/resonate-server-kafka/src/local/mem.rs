@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 
-use super::{LocalStore, Op, PartitionStore};
+use super::{LocalStore, Op, PartitionStore, Row};
 use crate::log::Checkpoint;
 
 #[derive(Default)]
@@ -90,7 +90,7 @@ impl PartitionStore for MemPartition {
         Ok(self.lock().data.get(key).cloned())
     }
 
-    fn scan(&self, prefix: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>, String> {
+    fn scan(&self, prefix: &[u8]) -> Result<Vec<Row>, String> {
         Ok(self
             .lock()
             .data
