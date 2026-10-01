@@ -58,10 +58,12 @@ impl Timers {
         let mut inner = self.lock();
         if let Some(old) = inner.by_target.remove(&target) {
             inner.by_time.remove(&(old, target.clone()));
+            crate::metrics::TIMERS_ARMED.dec();
         }
         let Some(at) = at else {
             return;
         };
+        crate::metrics::TIMERS_ARMED.inc();
         let nearer = inner.by_time.first().is_none_or(|(head, _)| at < *head);
         inner.by_time.insert((at, target.clone()));
         inner.by_target.insert(target, at);
@@ -81,6 +83,7 @@ impl Timers {
             }
             let (at, target) = inner.by_time.pop_first().expect("non-empty");
             inner.by_target.remove(&target);
+            crate::metrics::TIMERS_ARMED.dec();
             due.push((at, target));
         }
         due
@@ -97,7 +100,9 @@ impl Timers {
     }
 
     pub fn clear(&self) {
-        *self.lock() = Inner::default();
+        let mut inner = self.lock();
+        crate::metrics::TIMERS_ARMED.sub(inner.by_target.len() as i64);
+        *inner = Inner::default();
     }
 
     pub fn len(&self) -> usize {
@@ -106,6 +111,13 @@ impl Timers {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+}
+
+impl Drop for Timers {
+    fn drop(&mut self) {
+        // A stopped partition's deadlines are no longer armed here.
+        self.clear();
     }
 }
 

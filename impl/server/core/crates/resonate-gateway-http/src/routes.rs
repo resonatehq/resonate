@@ -40,11 +40,16 @@ lazy_static! {
     )
     .unwrap();
 
-    /// Request latency by kind.
+    /// Request latency by kind, at the edge: HTTP, auth and serialization
+    /// included — the end-to-end number. The server's own
+    /// `resonate_server_request_duration_seconds` excludes them, and the gap is
+    /// what the edge costs. Buckets from 100µs, doubling to about 13s: the
+    /// prometheus defaults start at 5ms, too coarse to see a fast request.
     pub static ref REQUEST_DURATION: HistogramVec = register_histogram_vec!(
         "resonate_request_duration_seconds",
         "Request duration in seconds by kind",
-        &["kind"]
+        &["kind"],
+        resonate_plugin::prometheus::exponential_buckets(0.000_1, 2.0, 18).unwrap()
     )
     .unwrap();
 }

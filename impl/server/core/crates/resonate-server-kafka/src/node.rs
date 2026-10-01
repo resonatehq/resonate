@@ -64,6 +64,7 @@ use crate::keys::{self, origin_of};
 use crate::local::LocalStore;
 use crate::log::Log;
 use crate::membership::{Event, Membership};
+use crate::metrics;
 use crate::partition::{Exit, OriginOp, Partition, PartitionCfg, ScheduleOp};
 use crate::peer::{Fire, Peers, Search};
 use crate::record;
@@ -352,6 +353,7 @@ impl Node {
             let mut table = self.table.write().unwrap_or_else(|e| e.into_inner());
             partitions.iter().filter_map(|p| table.remove(p)).collect()
         };
+        self.publish_served();
         for slot in slots {
             if let Slot::Serving {
                 partition,
@@ -431,7 +433,12 @@ impl Node {
                     timer_stop,
                 },
             );
+        self.publish_served();
         Ok(())
+    }
+
+    fn publish_served(&self) {
+        metrics::PARTITIONS_SERVED.set(self.serving().len() as i64);
     }
 
     /// A partition stopped on its own. If the group still assigns it here,
@@ -444,6 +451,7 @@ impl Node {
             let mut table = self.table.write().unwrap_or_else(|e| e.into_inner());
             table.insert(p, Slot::Restoring)
         };
+        self.publish_served();
         if let Some(Slot::Serving {
             timer_stop: Some(stop),
             ..
@@ -627,6 +635,7 @@ impl Node {
             }
             Route::Remote(owner) => {
                 let out = self.peers.fire(&owner, &fire).await;
+                metrics::forwarded("fire", &out);
                 if out.is_err() {
                     self.directory.stale();
                 }
@@ -741,7 +750,9 @@ impl Node {
     async fn forward(&self, owner: &Owner, env: &RequestEnvelope) -> Result<Reply, Unavailable> {
         // A failed forward means the directory may be behind the group: ask
         // again now, so the client's retry finds the new owner.
-        let resp = match self.peers.process(owner, env).await {
+        let out = self.peers.process(owner, env).await;
+        metrics::forwarded("process", &out);
+        let resp = match out {
             Ok(resp) => resp,
             Err(e) => {
                 self.directory.stale();
@@ -962,6 +973,7 @@ impl Node {
             futures::future::join_all(remote.values().map(|owner| self.peers.search(owner, &s)))
                 .await;
         for answer in answers {
+            metrics::forwarded("search", &answer);
             items.extend(answer?);
         }
         Ok(search::respond(&query, items, limit))

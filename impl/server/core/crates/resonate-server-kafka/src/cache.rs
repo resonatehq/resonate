@@ -71,10 +71,12 @@ impl DocCache {
                 self.order.remove(&entry.tick);
                 self.used -= entry.weight;
                 self.hits += 1;
+                crate::metrics::DOC_CACHE.with_label_values(&["hit"]).inc();
                 Some(entry.doc)
             }
             None => {
                 self.misses += 1;
+                crate::metrics::DOC_CACHE.with_label_values(&["miss"]).inc();
                 None
             }
         }

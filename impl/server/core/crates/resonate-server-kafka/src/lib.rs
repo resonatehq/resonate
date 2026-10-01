@@ -25,6 +25,7 @@ pub mod keys;
 pub mod local;
 pub mod log;
 pub mod membership;
+pub mod metrics;
 pub mod node;
 pub mod partition;
 pub mod peer;

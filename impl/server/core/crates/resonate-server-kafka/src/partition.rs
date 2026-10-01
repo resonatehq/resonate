@@ -58,6 +58,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use tokio::sync::{mpsc, oneshot, watch};
 
@@ -74,6 +75,7 @@ use crate::cache::DocCache;
 use crate::keys;
 use crate::local::{LocalStore, Op, PartitionStore, LOCAL_FORMAT};
 use crate::log::{Checkpoint, Consumed, Log, LogError, Record, Topic, Writer};
+use crate::metrics;
 use crate::record;
 use crate::timers::{Target, Timers};
 
@@ -138,18 +140,28 @@ enum Work {
         op: OriginOp,
         now: i64,
         reply: Answer,
+        /// When it reached the partition, for the queue-wait metric.
+        at: Instant,
     },
     Schedule {
         id: String,
         op: ScheduleOp,
         now: i64,
         reply: Answer,
+        at: Instant,
     },
     /// `debug.reset`: tombstone everything the partition holds.
     Reset { reply: Answer },
 }
 
 impl Work {
+    fn at(&self) -> Option<Instant> {
+        match self {
+            Work::Origin { at, .. } | Work::Schedule { at, .. } => Some(*at),
+            Work::Reset { .. } => None,
+        }
+    }
+
     fn fail(self, e: &Unavailable) {
         let reply = match self {
             Work::Origin { reply, .. } | Work::Schedule { reply, .. } | Work::Reset { reply } => {
@@ -200,6 +212,23 @@ impl Partition {
         cfg: PartitionCfg,
         on_exit: Box<dyn FnOnce(Exit) + Send>,
     ) -> Result<Arc<Partition>, TakeoverError> {
+        let started = Instant::now();
+        let out = Self::take_over_inner(id, log, local, sender, cfg, on_exit).await;
+        metrics::TAKEOVER_SECONDS.observe(started.elapsed().as_secs_f64());
+        metrics::TAKEOVERS
+            .with_label_values(&[if out.is_ok() { "ok" } else { "failed" }])
+            .inc();
+        out
+    }
+
+    async fn take_over_inner(
+        id: u32,
+        log: &Arc<dyn Log>,
+        local: &Arc<dyn LocalStore>,
+        sender: Arc<Sender>,
+        cfg: PartitionCfg,
+        on_exit: Box<dyn FnOnce(Exit) + Send>,
+    ) -> Result<Arc<Partition>, TakeoverError> {
         // (1) Fence first: whatever is read after this is final.
         let writer = log.fence(id).await?;
 
@@ -239,6 +268,7 @@ impl Partition {
         let mut reader = log.reader(id, from).await?;
         while let Some((batch, after)) = reader.next().await? {
             replayed += batch.len();
+            metrics::REPLAYED.inc_by(batch.len() as u64);
             let ops = batch
                 .into_iter()
                 .map(op_of)
@@ -319,6 +349,7 @@ impl Partition {
             op,
             now,
             reply,
+            at: Instant::now(),
         })
         .await
     }
@@ -326,8 +357,14 @@ impl Partition {
     /// Decide one schedule operation.
     pub async fn schedule(&self, id: &str, op: ScheduleOp, now: i64) -> Result<Reply, Unavailable> {
         let id = id.to_string();
-        self.submit(|reply| Work::Schedule { id, op, now, reply })
-            .await
+        self.submit(|reply| Work::Schedule {
+            id,
+            op,
+            now,
+            reply,
+            at: Instant::now(),
+        })
+        .await
     }
 
     /// Tombstone everything this partition holds. `debug.reset` only.
@@ -535,6 +572,19 @@ impl Actor {
         if batch.is_empty() {
             return Ok(());
         }
+        let started = Instant::now();
+        metrics::ROUND_REQUESTS.observe(batch.len() as f64);
+        for work in &batch {
+            if let Some(at) = work.at() {
+                metrics::QUEUE_WAIT.observe(started.duration_since(at).as_secs_f64());
+            }
+        }
+        let out = self.decide_and_commit(batch).await;
+        metrics::ROUND_SECONDS.observe(started.elapsed().as_secs_f64());
+        out
+    }
+
+    async fn decide_and_commit(&mut self, batch: Vec<Work>) -> Result<(), Exit> {
         let mut overlay = Overlay::default();
         let mut answers: Vec<(Answer, Result<Reply, Unavailable>)> =
             Vec::with_capacity(batch.len());
@@ -547,6 +597,7 @@ impl Actor {
                     op,
                     now,
                     reply,
+                    ..
                 } => {
                     if !overlay.origins.contains_key(&origin) {
                         // The cache first; a document taken out of it is
@@ -570,7 +621,9 @@ impl Actor {
                     sends.extend(fx);
                     answers.push((reply, Ok(answer)));
                 }
-                Work::Schedule { id, op, now, reply } => {
+                Work::Schedule {
+                    id, op, now, reply, ..
+                } => {
                     if !overlay.schedules.contains_key(&id) {
                         match load_schedule(self.store.as_ref(), &id) {
                             Ok(doc) => {
@@ -669,7 +722,33 @@ impl Actor {
         if records.is_empty() {
             return Ok(());
         }
-        let after = self.writer.commit(records, self.checkpoint).await?;
+        let (promises, schedules) = records
+            .iter()
+            .fold((0u64, 0u64), |(p, s), r| match r.topic {
+                Topic::Promises => (p + 1, s),
+                Topic::Schedules => (p, s + 1),
+            });
+        let started = Instant::now();
+        let committed = self.writer.commit(records, self.checkpoint).await;
+        metrics::COMMIT_SECONDS.observe(started.elapsed().as_secs_f64());
+        let after = match committed {
+            Ok(after) => after,
+            Err(e) => {
+                let kind = match &e {
+                    LogError::Unavailable(_) => "unavailable",
+                    LogError::Fenced(_) => "fenced",
+                    LogError::Uncertain(_) => "uncertain",
+                };
+                metrics::COMMIT_ERRORS.with_label_values(&[kind]).inc();
+                return Err(e);
+            }
+        };
+        metrics::RECORDS_COMMITTED
+            .with_label_values(&["promises"])
+            .inc_by(promises as f64);
+        metrics::RECORDS_COMMITTED
+            .with_label_values(&["schedules"])
+            .inc_by(schedules as f64);
         // The log has it. A local copy that cannot take it now disagrees with
         // the log, which is exactly the uncertain case.
         self.store

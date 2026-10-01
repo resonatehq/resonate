@@ -31,3 +31,8 @@ rocksdb = { version = "0.24", default-features = false, features = ["lz4", "bind
 tempfile = "3"
 # Only for examples/local_codec.rs, which measures candidate local formats.
 rkyv = "0.8"
+# Only for examples/server.rs: a binary carrying this plugin, the HTTP
+# gateway and the metrics endpoint — what the end-to-end benchmark drives.
+resonate-base = { path = "../resonate-base" }
+resonate-gateway-http = { path = "../resonate-gateway-http" }
+resonate-gateway-metrics = { path = "../resonate-gateway-metrics" }
