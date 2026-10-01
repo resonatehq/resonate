@@ -151,7 +151,7 @@ pub use plugin::id_from_crate;
 
 #[rustfmt::skip]
 pub use plugin::{
-    Configured, StaticRoster, ServerDependencies, ServerPlugin,
+    Configured, Routed, StaticRoster, ServerDependencies, ServerPlugin,
     WorkerDependencies, WorkerPlugin,
     GatewayDependencies, GatewayPlugin,
 };
