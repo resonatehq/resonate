@@ -34,7 +34,7 @@ use resonate_core::{
     ResonateGateway, ResonateRoster, ResonateRouter, ResonateServer, ResonateWorker,
 };
 use resonate_plugin::{
-    Configuration, Configured, GatewayDependencies, Loader, Routes, ServerDependencies,
+    Configuration, Configured, GatewayDependencies, Loader, Routed, Routes, ServerDependencies,
     WorkerDependencies,
 };
 use serde::{Deserialize, Serialize};
@@ -353,9 +353,14 @@ pub fn build(
         ),
     )
     .map_err(|e| e.to_string())?;
+    // Behind its roster: a request this node does not own is forwarded to the
+    // node that does, here and nowhere else. A single node's roster routes
+    // everything here.
+    let server: Arc<dyn ResonateServer> = Arc::new(Routed::new(server, Arc::clone(&roster)));
     // Measured at the port, before anything else holds it: the workers and the
     // gateways are handed this one, so every request is counted however it
-    // arrives (see `metered`).
+    // arrives (see `metered`) — once, on the node it arrived at, whether it is
+    // processed here or forwarded.
     let server: Arc<dyn ResonateServer> =
         Arc::new(metered::MeteredServer::new(chosen.id(), server));
     tracing::info!(server = %chosen.id(), "Server plugin selected");

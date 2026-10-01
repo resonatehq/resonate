@@ -23,5 +23,6 @@ prometheus = "0.13"
 figment = { version = "0.10", features = ["toml", "env"] }
 
 [dev-dependencies]
+serde_json = { workspace = true }
 async-trait = { workspace = true }
 tokio = { version = "1", features = ["rt", "macros"] }

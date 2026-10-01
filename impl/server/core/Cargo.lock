@@ -3556,6 +3556,7 @@ dependencies = [
  "resonate-auth",
  "resonate-core",
  "serde",
+ "serde_json",
  "tokio",
 ]
 

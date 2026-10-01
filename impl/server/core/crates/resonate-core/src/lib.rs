@@ -18,7 +18,7 @@ pub mod worker;
 
 pub use address::{is_valid_address, scheme_of};
 pub use gateway::ResonateGateway;
-pub use roster::{Peer, ResonateRoster, Route};
+pub use roster::{routing_id, Peer, ResonateRoster, Route};
 pub use router::ResonateRouter;
 pub use server::ResonateServer;
 pub use worker::ResonateWorker;

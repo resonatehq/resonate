@@ -146,6 +146,58 @@ impl ResonateRoster for StaticRoster {
     }
 }
 
+/// A server behind its roster: what every gateway and worker is handed.
+///
+/// Each request is routed by its [`routing_id`](resonate_core::routing_id):
+///
+/// - [`Route::Me`] or [`Route::Any`] — processed by the server here;
+/// - [`Route::Peer`] — forwarded to that node through the roster, once;
+/// - [`Route::Unknown`] — no answer (`Err(Unavailable)`, a 503), so the client
+///   retries once an owner is known.
+///
+/// A request with no routing id — a search, a debug operation, one too
+/// malformed to name an id — goes to the server here, which answers it.
+///
+/// This is the only place a request is forwarded. A request that arrives from
+/// a peer comes in through the roster's own channel, not through here, and the
+/// server underneath serves it or refuses it: one hop at most.
+pub struct Routed {
+    server: Arc<dyn ResonateServer>,
+    roster: Arc<dyn ResonateRoster>,
+}
+
+impl Routed {
+    pub fn new(server: Arc<dyn ResonateServer>, roster: Arc<dyn ResonateRoster>) -> Self {
+        Self { server, roster }
+    }
+}
+
+#[async_trait]
+impl ResonateServer for Routed {
+    async fn init(&self, debug: bool) -> Result<(), Unavailable> {
+        self.server.init(debug).await
+    }
+
+    async fn stop(&self) -> Result<(), Unavailable> {
+        self.server.stop().await
+    }
+
+    async fn ready(&self) -> bool {
+        self.server.ready().await
+    }
+
+    async fn process(&self, req: &RequestEnvelope) -> Result<ResponseEnvelope, Unavailable> {
+        let Some(id) = resonate_core::routing_id(req) else {
+            return self.server.process(req).await;
+        };
+        match self.roster.route(id) {
+            Route::Me | Route::Any => self.server.process(req).await,
+            Route::Peer(peer) => self.roster.forward(&peer, req).await,
+            Route::Unknown => Err(Unavailable::new(format!("no owner is known yet for {id}"))),
+        }
+    }
+}
+
 /// A plugin that answers Resonate protocol requests.
 ///
 /// The unit of pluggability, not the storage underneath it: whatever internal
