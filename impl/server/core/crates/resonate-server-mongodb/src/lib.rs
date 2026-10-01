@@ -137,7 +137,12 @@ pub struct Config {
     /// How often the timer re-reads the durable deadlines (ms).
     #[serde(default = "default_wheel_refresh")]
     pub wheel_refresh: u64,
-    /// The backstop scan interval (ms).
+    /// The backstop scan interval (ms). Ten minutes by default: the timer
+    /// fires every deadline it holds as it comes due, one transaction each,
+    /// and its backfill re-reads the nearest ones every `wheel_refresh`, so
+    /// the sweep only catches what overflowed the wheel. Each run is a scan
+    /// of every deadline queue, on every shard when sharded, so it should run
+    /// rarely.
     #[serde(default = "default_sweep_interval")]
     pub sweep_interval: u64,
 }
@@ -164,7 +169,7 @@ fn default_wheel_refresh() -> u64 {
     30_000
 }
 fn default_sweep_interval() -> u64 {
-    60_000
+    600_000
 }
 
 impl Default for Config {

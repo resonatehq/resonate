@@ -11,7 +11,14 @@ active = "server_mongodb"
 uri = "mongodb://localhost:27017/?replicaSet=rs0"
 database = "resonate"   # optional; else the URI's path, else "resonate"
 shard = false           # true: shard `promises` by hashed origin (needs mongos)
+sweep_interval = 600000 # ms between backstop sweeps; default 10 minutes
 ```
+
+Deadlines fire from an in-memory timer, one transaction each, as they come
+due. The timer reloads the nearest durable deadlines every `wheel_refresh`
+(30 s by default). The sweep is the backstop for whatever overflowed the timer
+(`wheel_capacity`, 8,192 by default). It scans every deadline queue, so it runs
+rarely: every 10 minutes by default.
 
 Or `resonate serve --storage-type mongodb --storage-mongodb-uri mongodb://localhost:27017/?replicaSet=rs0`.
 
