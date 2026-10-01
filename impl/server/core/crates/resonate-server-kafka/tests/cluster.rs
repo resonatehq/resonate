@@ -21,6 +21,7 @@ use resonate_server_kafka::local::mem::MemLocal;
 use resonate_server_kafka::log::mem::MemLog;
 use resonate_server_kafka::membership::MemGroup;
 use resonate_server_kafka::node::{Node, NodeCfg};
+use resonate_server_kafka::partition::PartitionCfg;
 use resonate_server_kafka::peer::LocalPeers;
 use serde_json::{json, Value};
 
@@ -36,7 +37,15 @@ struct Cluster {
 
 impl Cluster {
     async fn new(n: usize) -> Self {
-        let log = MemLog::new(PARTITIONS);
+        Self::on(MemLog::new(PARTITIONS), n).await
+    }
+
+    /// Over a log without transactions.
+    async fn plain(n: usize) -> Self {
+        Self::on(MemLog::plain(PARTITIONS), n).await
+    }
+
+    async fn on(log: Arc<MemLog>, n: usize) -> Self {
         let group = MemGroup::new(PARTITIONS);
         let peers = LocalPeers::new();
         let mut nodes = Vec::new();
@@ -46,6 +55,10 @@ impl Cluster {
                 NodeCfg {
                     node_id: id.clone(),
                     search: true,
+                    partition: PartitionCfg {
+                        idle_check: Duration::from_millis(50),
+                        ..Default::default()
+                    },
                     ..Default::default()
                 },
                 Arc::clone(&log) as _,
@@ -236,9 +249,88 @@ async fn a_zombie_cannot_commit_after_its_partitions_moved() {
     let _ = &c.peers;
 }
 
+/// Without transactions nothing stops a fenced writer's records landing. They
+/// land after the new owner's claim, carrying an older epoch, so every reader
+/// reads past them; the owner notices the log moved under it (its idle check),
+/// takes the partition over again, and writes the value they hide once more,
+/// so compaction keeps that and not them.
+#[tokio::test(flavor = "multi_thread")]
+async fn without_transactions_a_zombies_records_land_and_are_read_past() {
+    let c = Cluster::plain(3).await;
+    let zombie = Arc::clone(&c.nodes[2]);
+    let p = *zombie.serving().iter().next().unwrap();
+    let origin = origin_in(p, "z");
+    ok(&c.nodes[0], "promise.create", create(&origin)).await;
+
+    c.group.expel("node-2").await;
+    c.settle(&[0, 1]).await;
+    let before = c.log.end(p);
+    let attempt = send(
+        &zombie,
+        "promise.settle",
+        json!({ "id": origin, "state": "rejected", "value": {} }),
+    )
+    .await;
+    assert!(attempt.is_err(), "a fenced writer answered: {attempt:?}");
+    assert!(
+        c.log.end(p).promises > before.promises,
+        "the zombie's record landed, as it would on a broker"
+    );
+    c.group.tell_lost("node-2").await;
+
+    // The owner hears of it on its own and writes the hidden value again.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let records = c.log.promise_records(p);
+        let last = records.iter().rev().find(|(k, _)| *k == origin).unwrap();
+        let state =
+            resonate_server_kafka::record::decode_promise(&origin, last.1.as_ref().unwrap())
+                .unwrap()
+                .0
+                .state;
+        if state == resonate_core::types::PromiseState::Pending {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the zombie's record is still the newest"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    c.settle(&[0, 1]).await;
+    let got = ok(&c.nodes[1], "promise.get", json!({ "id": origin })).await;
+    assert_eq!(got["promise"]["state"], "pending");
+
+    // Compacted, and rebuilt from scratch elsewhere: still pending.
+    c.log.compact(p);
+    let owner = if c.nodes[0].serving().contains(&p) {
+        0
+    } else {
+        1
+    };
+    c.nodes[owner].stop().await;
+    c.settle(&[1 - owner]).await;
+    let got = ok(&c.nodes[1 - owner], "promise.get", json!({ "id": origin })).await;
+    assert_eq!(got["promise"]["state"], "pending");
+    ok(
+        &c.nodes[1 - owner],
+        "promise.settle",
+        json!({ "id": origin, "state": "resolved", "value": {} }),
+    )
+    .await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_partition_restores_from_a_compacted_log() {
-    let c = Cluster::new(2).await;
+    restores_from_a_compacted_log(Cluster::new(2).await).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn without_transactions_a_partition_restores_from_a_compacted_log() {
+    restores_from_a_compacted_log(Cluster::plain(2).await).await;
+}
+
+async fn restores_from_a_compacted_log(c: Cluster) {
     let p = 3;
     let origin = origin_in(p, "compact");
     ok(&c.nodes[0], "promise.create", create(&origin)).await;

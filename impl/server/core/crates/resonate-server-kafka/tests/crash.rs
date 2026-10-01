@@ -41,10 +41,7 @@ fn child(dir: &str) -> ! {
         // One record per batch, a checkpoint just past it — as a commit does.
         p.apply(
             vec![(key(i), Some(vec![b'x'; 512]))],
-            Checkpoint {
-                promises: i + 1,
-                schedules: 0,
-            },
+            Checkpoint::at(i + 1, 0),
         )
         .unwrap();
         if i == FLUSH_AT {

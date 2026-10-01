@@ -264,10 +264,7 @@ mod tests {
     use super::*;
 
     fn cp(p: i64, s: i64) -> Checkpoint {
-        Checkpoint {
-            promises: p,
-            schedules: s,
-        }
+        Checkpoint::at(p, s)
     }
 
     #[test]

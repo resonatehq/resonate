@@ -20,6 +20,7 @@ use resonate_core::types::{
 use resonate_core::ResonateServer;
 use resonate_server_blob::oracle::{Oracle, SharedOracle};
 use resonate_server_blob::sender::NullRouter;
+use resonate_server_kafka::log::mem::{Fault, MemLog};
 use resonate_server_kafka::node::{Node, NodeCfg};
 use serde_json::{json, Value};
 
@@ -119,11 +120,45 @@ fn node_cfg() -> NodeCfg {
 async fn differential_random() {
     let server = Node::in_memory(8, Arc::new(NullRouter), node_cfg());
     server.start().await.expect("every partition taken over");
-    run(server, usize::MAX).await;
+    run(server, usize::MAX, None).await;
+}
+
+/// The same trajectory over a log without transactions: every decision's
+/// records written one by one, in the order that makes each prefix valid.
+#[tokio::test(flavor = "multi_thread")]
+async fn differential_random_plain() {
+    let log = MemLog::plain(8);
+    let server = Node::in_memory_on(log, Arc::new(NullRouter), node_cfg());
+    server.start().await.expect("every partition taken over");
+    run(server, usize::MAX, None).await;
+}
+
+/// Every prefix is a state the protocol allows: the same trajectory over a
+/// log without transactions, with each step's commit cut after a random
+/// number of its records — none, some, or all of them landing — and then
+/// reported lost, as a broker that fails mid-commit would.
+///
+/// The partition stops and is taken over again; recovery finishes the
+/// deliveries the cut left owing. Then both sides tick at the same instant
+/// and either the node holds what the oracle holds — the step happened — or
+/// the step is retried on the node, as a client told "unavailable" would,
+/// and response and state must agree with the oracle's. `TEST_CUT_EVERY`
+/// (default 1) cuts every n-th step.
+#[tokio::test(flavor = "multi_thread")]
+async fn prefix_random() {
+    let log = MemLog::plain(8);
+    let server = Node::in_memory_on(Arc::clone(&log), Arc::new(NullRouter), node_cfg());
+    server.start().await.expect("every partition taken over");
+    let steps: usize = std::env::var("TEST_PREFIX_STEPS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(usize::MAX);
+    run(server, steps, Some(log)).await;
 }
 
 /// The same trajectory over a real Kafka: every round a transaction, every
 /// `debug.reset` a batch of tombstones. Opt-in, and shorter by default.
+/// `TEST_KAFKA_TRANSACTIONS=0` runs it without transactions.
 ///
 ///   TEST_KAFKA_BROKERS=localhost:9092 TEST_KAFKA_STEPS=5000 \
 ///     cargo test -p resonate-server-kafka --test differential -- --nocapture
@@ -145,6 +180,7 @@ async fn differential_random_on_kafka() {
             txn_prefix: prefix,
             partitions: 8,
             replication_factor: 1,
+            transactional: std::env::var("TEST_KAFKA_TRANSACTIONS").as_deref() != Ok("0"),
             ..Default::default()
         },
     )
@@ -164,10 +200,30 @@ async fn differential_random_on_kafka() {
         resonate_server_kafka::peer::LocalPeers::new(),
     );
     server.start().await.expect("every partition taken over");
-    run(server, steps).await;
+    run(server, steps, None).await;
 }
 
-async fn run(server: Arc<Node>, max_steps: usize) {
+/// What the cuts did, for the summary: steps cut, by records landed against
+/// records in the commit.
+#[derive(Default)]
+struct Cuts {
+    /// (landed, of) → count.
+    shapes: std::collections::BTreeMap<(usize, usize), usize>,
+    /// The step happened, by recovery alone.
+    applied: usize,
+    /// The step was retried.
+    retried: usize,
+    /// Messages the cut lost, as a crash after a commit loses them.
+    lost: usize,
+}
+
+async fn run(server: Arc<Node>, max_steps: usize, cut: Option<Arc<MemLog>>) {
+    let node = Arc::clone(&server);
+    let mut cuts = Cuts::default();
+    let cut_every: usize = std::env::var("TEST_CUT_EVERY")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1);
     debug_assert_eq!(22, ALL_OPS.len(), "Op has 22 variants; ALL_OPS must match");
     let oracle = Arc::new(SharedOracle::with_preload_limit(PRELOAD_LIMIT));
 
@@ -222,9 +278,27 @@ async fn run(server: Arc<Node>, max_steps: usize) {
             let pre_snaps = snap_all(&backends, now).await;
             assert_snaps_agree(&pre_snaps, &format!("BEFORE {ctx}"));
 
-            let mut results = send_all(&backends, &envelope, now).await;
+            let mut results = match &cut {
+                Some(log) if total_steps.is_multiple_of(cut_every) && cuttable(&kind) => {
+                    cut_step(
+                        &node, log, &backends, &envelope, now, &mut rng, &mut cuts, &ctx,
+                    )
+                    .await
+                }
+                _ => send_all(&backends, &envelope, now).await,
+            };
             for (_, _, data) in &mut results {
                 normalize_resp(data);
+            }
+            if results.len() == 1 {
+                // Cut, recovered, and found to have happened: only the state
+                // is left to compare, and only the oracle's answer to count.
+                if results[0].1 < 300 {
+                    covered.entry(kind.clone()).or_insert(total_steps);
+                }
+                let post_snaps = snap_all(&backends, now).await;
+                assert_snaps_agree(&post_snaps, &format!("AFTER {ctx} (cut, recovered)"));
+                continue;
             }
 
             let (_, status, _) = &results[0];
@@ -285,6 +359,25 @@ async fn run(server: Arc<Node>, max_steps: usize) {
         );
     }
 
+    if cut.is_some() {
+        let total: usize = cuts.shapes.values().sum();
+        let partial: usize = cuts
+            .shapes
+            .iter()
+            .filter(|((k, n), _)| *k > 0 && k < n)
+            .map(|(_, c)| c)
+            .sum();
+        eprintln!(
+            "[prefix] {total} commits cut, {partial} part-way; {} happened by recovery, {} retried; {} messages lost",
+            cuts.applied, cuts.retried, cuts.lost
+        );
+        eprintln!("[prefix] (landed, of): count — {:?}", cuts.shapes);
+        assert!(
+            partial > 0,
+            "no commit was cut part-way: the test proved nothing"
+        );
+    }
+
     eprintln!(
         "[diff] PASSED — {total_steps} steps, all {} ops covered, {} behavioral signatures",
         ALL_OPS.len(),
@@ -295,6 +388,223 @@ async fn run(server: Arc<Node>, max_steps: usize) {
 // ---------------------------------------------------------------------------
 // Drivers and comparisons
 // ---------------------------------------------------------------------------
+
+/// Steps that decide something and may commit. Reads commit nothing, so a
+/// cut would stay armed; `debug.*` steps are the harness's own.
+fn cuttable(kind: &str) -> bool {
+    !kind.starts_with("debug.") && !kind.ends_with(".get") && !kind.ends_with(".search")
+}
+
+/// One step with its commit cut: see [`prefix_random`]. Returns the results
+/// to compare, as [`send_all`] does.
+#[allow(clippy::too_many_arguments)]
+async fn cut_step(
+    node: &Arc<Node>,
+    log: &Arc<MemLog>,
+    backends: &[(String, Backend)],
+    envelope: &RequestEnvelope,
+    now: i64,
+    rng: &mut fastrand::Rng,
+    cuts: &mut Cuts,
+    ctx: &str,
+) -> Vec<(String, i32, Value)> {
+    let (_, oracle) = &backends[1];
+    let fences = log.fences();
+    // Half the cuts fall strictly inside the commit, whatever its length;
+    // the rest land none, some or all of it, including "all, then lost".
+    log.fail_next(if rng.bool() {
+        Fault::CutWithin(rng.u64(..))
+    } else {
+        Fault::Cut(rng.usize(0..=4))
+    });
+    let mut env = envelope.clone();
+    env.head.debug_time = Some(now);
+    let first = node.process(&env).await;
+    let oracle_resp = send(oracle, envelope, now).await;
+    let oracle_result = (
+        "oracle".to_string(),
+        oracle_resp.head.status,
+        oracle_resp.data,
+    );
+    if std::env::var("TEST_PREFIX_TRACE").is_ok() {
+        eprintln!(
+            "[prefix] {ctx}: first={:?}",
+            first
+                .as_ref()
+                .map(|r| r.head.status)
+                .map_err(|e| e.message.clone())
+        );
+    }
+    let Err(_) = first else {
+        // Nothing was committed, so nothing was cut.
+        assert!(log.disarm(), "{ctx}: answered, yet the cut fired");
+        let resp = first.unwrap();
+        return vec![("kafka".into(), resp.head.status, resp.data), oracle_result];
+    };
+    let shape = log
+        .take_cut()
+        .unwrap_or_else(|| panic!("{ctx}: failed without a cut"));
+    *cuts.shapes.entry(shape).or_default() += 1;
+    if std::env::var("TEST_PREFIX_TRACE").is_ok() {
+        eprintln!("[prefix] {ctx}: cut {shape:?}");
+    }
+
+    // Taken over again: fenced anew, the landed prefix replayed.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while log.fences() == fences || node.serving().len() < 8 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "{ctx}: not taken over again"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+    }
+
+    // Recovery at the same instant, on both sides.
+    let tick = req("debug.tick", json!({ "time": now }));
+    for (name, b) in backends {
+        let r = send(b, &tick, now).await;
+        assert_eq!(r.head.status, 200, "{ctx}: tick on {name}");
+    }
+    // The state: the snapshot without the messages (see
+    // `reconcile_messages`), and the schedules, which it does not hold.
+    let snaps = snap_all(backends, now).await;
+    let mut states = Vec::new();
+    for (i, (_, b)) in backends.iter().enumerate() {
+        let mut v = snaps[i].1.clone();
+        let o = v.as_object_mut().unwrap();
+        o.remove("messages");
+        o.insert("schedules".into(), schedules(b, now).await);
+        states.push(v);
+    }
+    let state = |v: &Value| v.clone();
+    let snaps: Vec<(String, Value)> = states.into_iter().map(|v| (String::new(), v)).collect();
+    let out = if snaps[0].1 == snaps[1].1 {
+        cuts.applied += 1;
+        // The step happened; what it answered is lost with the commit.
+        vec![oracle_result]
+    } else {
+        cuts.retried += 1;
+        if std::env::var("TEST_PREFIX_TRACE").is_ok() {
+            eprintln!(
+                "[prefix] {ctx}: retry; kafka={} oracle={}",
+                state(&snaps[0].1),
+                state(&snaps[1].1)
+            );
+        }
+        let again = send(&(Arc::clone(node) as Backend), envelope, now).await;
+        vec![
+            ("kafka".into(), again.head.status, again.data),
+            oracle_result,
+        ]
+    };
+    cuts.lost += reconcile_messages(node, backends, now, ctx).await;
+    out
+}
+
+/// Every schedule a backend holds, by id.
+async fn schedules(b: &Backend, now: i64) -> Value {
+    let mut out = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let mut data = json!({ "limit": 100 });
+        if let Some(c) = &cursor {
+            data["cursor"] = json!(c);
+        }
+        let r = send(b, &req("schedule.search", data), now).await;
+        assert_eq!(r.head.status, 200, "schedule.search: {}", r.data);
+        out.extend(r.data["schedules"].as_array().cloned().unwrap_or_default());
+        match r.data["cursor"].as_str() {
+            Some(c) if !c.is_empty() => cursor = Some(c.to_string()),
+            _ => break,
+        }
+    }
+    sort_by_id(&mut out);
+    Value::Array(out)
+}
+
+/// What a held message is keyed by, as the sender and the oracle key it: an
+/// execute by its task, an unblock by its promise and address.
+fn message_key(m: &Value) -> (String, String, String) {
+    let kind = m["message"]["kind"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    let address = m["address"].as_str().unwrap_or_default().to_string();
+    match kind.as_str() {
+        "execute" => (
+            kind,
+            m["message"]["data"]["task"]["id"].to_string(),
+            String::new(),
+        ),
+        _ => (
+            kind,
+            m["message"]["data"]["promise"]["id"].to_string(),
+            address,
+        ),
+    }
+}
+
+/// Sends are made after a commit, at most once, on every backend: a commit
+/// cut short loses its round's. Executes are made again by the retry timer;
+/// unblocks are not. So after a cut the node may hold fewer messages than the
+/// oracle — never one the oracle does not. Hand the node what it lost, so the
+/// trajectory goes on comparing, and count it.
+async fn reconcile_messages(
+    node: &Arc<Node>,
+    backends: &[(String, Backend)],
+    now: i64,
+    ctx: &str,
+) -> usize {
+    use resonate_core::types::{
+        ExecuteMsg, ExecuteMsgData, ExecuteMsgTask, Message, MessageHead, PromiseRecord,
+        UnblockMsg, UnblockMsgData, UnblockMsgHead,
+    };
+    let snaps = snap_all(backends, now).await;
+    let msgs = |v: &Value| v["messages"].as_array().cloned().unwrap_or_default();
+    let (ours, theirs) = (msgs(&snaps[0].1), msgs(&snaps[1].1));
+    let keys: HashSet<_> = theirs.iter().map(message_key).collect();
+    for m in &ours {
+        assert!(
+            keys.contains(&message_key(m)),
+            "{ctx}: recovery sent what the oracle never did: {m}"
+        );
+    }
+    let mut lost = 0;
+    for m in theirs.iter().filter(|m| !ours.contains(m)) {
+        lost += 1;
+        let address = m["address"].as_str().unwrap();
+        let body = &m["message"];
+        let msg = match body["kind"].as_str() {
+            Some("execute") => Message::Execute(ExecuteMsg {
+                kind: "execute".into(),
+                head: MessageHead {
+                    server_url: body["head"]["serverUrl"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .into(),
+                },
+                data: ExecuteMsgData {
+                    task: ExecuteMsgTask {
+                        id: body["data"]["task"]["id"].as_str().unwrap().into(),
+                        version: body["data"]["task"]["version"].as_i64().unwrap(),
+                    },
+                },
+            }),
+            _ => Message::Unblock(UnblockMsg {
+                kind: "unblock".into(),
+                head: UnblockMsgHead {},
+                data: UnblockMsgData {
+                    promise: serde_json::from_value::<PromiseRecord>(
+                        body["data"]["promise"].clone(),
+                    )
+                    .unwrap(),
+                },
+            }),
+        };
+        node.sender().dispatch(address, msg).await;
+    }
+    lost
+}
 
 async fn reset_all(backends: &[(String, Backend)], now: i64) {
     let envelope = req("debug.reset", json!({}));

@@ -87,6 +87,22 @@ pub struct Config {
     #[serde(default)]
     pub txn_prefix: Option<String>,
 
+    /// Commit every round in a Kafka transaction (the default), or write
+    /// without transactions: claims, epochs and offset checks fence the
+    /// partitions, and each decision's records go out in an order that leaves
+    /// a valid state wherever a commit stops (see the crate README). Without
+    /// transactions a commit costs one produce rather than a transaction — a
+    /// tenth of the time, measured. Fixed for the life of a log: a log
+    /// written without transactions must not be read with them.
+    #[serde(default = "default_true")]
+    pub transactions: bool,
+
+    /// Without transactions: the topics' `min.compaction.lag.ms`, set when
+    /// this server creates them. Must outlast how late a fenced writer's
+    /// record can land (10s) plus the idle check (1s).
+    #[serde(default = "default_min_compaction_lag_ms")]
+    pub min_compaction_lag_ms: u64,
+
     /// Replication factor for topics this server creates.
     #[serde(default = "default_replication_factor")]
     pub replication_factor: i32,
@@ -172,6 +188,9 @@ pub struct Config {
     pub librdkafka: BTreeMap<String, String>,
 }
 
+fn default_min_compaction_lag_ms() -> u64 {
+    3_600_000
+}
 fn default_partitions() -> u32 {
     64
 }
@@ -288,7 +307,11 @@ impl ResonateServer for KafkaServer {
                          in-process log. Nothing survives this process."
                 );
                 (
-                    MemLog::new(c.partitions),
+                    if c.transactions {
+                        MemLog::new(c.partitions)
+                    } else {
+                        MemLog::plain(c.partitions)
+                    },
                     StaticMembership::new(c.partitions),
                     Arc::new(NoDirectory),
                     LocalPeers::new(),
@@ -305,6 +328,8 @@ impl ResonateServer for KafkaServer {
                     create_topics: c.create_topics,
                     properties: c.librdkafka.clone(),
                     node_id: c.node_id.clone(),
+                    transactional: c.transactions,
+                    min_compaction_lag: Duration::from_millis(c.min_compaction_lag_ms),
                     ..Default::default()
                 };
                 tracing::info!(brokers = %brokers, partitions = c.partitions, node = %c.node_id, "Using Kafka backend");

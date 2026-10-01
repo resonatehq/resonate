@@ -88,6 +88,69 @@ a forwarded request is never forwarded again. Searches are a
 scatter-gather over every owner. A schedule firing into another partition's
 origin crosses the same way.
 
+## Without transactions
+
+A Kafka transaction costs about ten times a plain produce
+(`examples/txn_cost.rs`: 4.3 ms against 0.44 ms on one broker), and the
+commit is the request. With `transactions = false` a partition is written
+without them. Two things transactions gave have to come from elsewhere.
+
+**Fencing: claims and epochs** (`src/log/epoch.rs`). Nothing on the broker
+refuses a writer any more, so ownership is decided in the log, the same way by
+every reader:
+
+- Taking a partition over appends a **claim** to each of its two logs, carrying
+  the offset it expects to land at: the end as the claimer read it. A claim is
+  valid only if it landed exactly there. Two claimers cannot both win, and the
+  loser sees it in the offset it got. A valid claim's offset is the log's new
+  **epoch**.
+- Every record carries its writer's epoch in a header. A reader admits a record
+  only if that is the epoch in force where the record lies, so a fenced
+  writer's records, landing after a newer claim, are read past.
+- A writer checks that every record landed exactly where it last left the
+  log. If anything else landed in between, it stops, and the partition is
+  taken over again. An idle owner asks every second
+  (`Writer::check`).
+- A refused record is still the newest of its key, and compaction keeps the
+  newest. So replay reports every key whose newest record it refused, and the
+  owner writes the admitted value again before serving. `min.compaction.lag.ms`
+  (default 1 h, set on topics this server creates) gives that time.
+
+Claims are keyed by their epoch, so compaction keeps every one. A log first
+written with transactions can be switched to this mode: records without an
+epoch are admitted until the first claim. The other way is not supported.
+
+**Atomicity: an order where every prefix is valid** (`record::ordered`,
+`kernel::recover`). Without a transaction, a commit can stop after any prefix
+of its records. The specification does not make a settlement and its
+consequences one step: settling writes the promise, and delivering each
+callback (resume the awaiter, drop the callback) and each listener (unblock,
+drop the listener) are later steps of their own. Timeouts are likewise
+processed one object at a time. So every kernel decision's records are written
+in the specification's order:
+
+1. settled promises, still holding the callbacks and listeners they owe;
+2. records that only gained callbacks (a task's registrations come before
+   it suspends);
+3. everything else (awaiters resumed, tasks created or moved);
+4. records that lost callbacks (a finished task's registrations on others);
+5. each settled promise's final value, without what it owed;
+6. tombstones.
+
+Whatever prefix lands, the state is one the specification allows, except
+that deliveries may still be owed. `kernel::recover` makes them before
+anything else reads the origin, exactly as the settlement's fan-out would
+have. It is idempotent: an awaiter already resumed only records the resume
+again. Origins that need it are armed at once on takeover. As on every
+backend, sends go out after the commit and at most once: a cut commit loses its
+round's messages. Executes are re-sent by the retry timer; unblocks are not.
+
+`tests/differential.rs::prefix_random` checks this: the whole differential
+trajectory, with every step's commit cut part-way, entirely or not at all, and
+then reported lost. After the partition is taken over and recovered, the node
+must hold what the oracle holds, or a retry must bring it there with the
+oracle's answer.
+
 ## Configuration
 
 `[servers.server_kafka]`:
@@ -112,6 +175,8 @@ origin crosses the same way.
 | `max_batch` | 512 | The group commit's ceiling. |
 | `cache_promises` | 2000 | Per partition: decoded hot documents kept, counted in promises. 0 turns it off. |
 | `search_enabled` | false | Searches read every record of every partition. |
+| `transactions` | true | Commit in Kafka transactions, or without them ([above](#without-transactions)). Fixed for the life of a log. |
+| `min_compaction_lag_ms` | 3600000 | Without transactions: `min.compaction.lag.ms` on topics this server creates. |
 | `librdkafka` | `{}` | Extra client properties (SASL, TLS, tuning). |
 
 The plugin is not in the `resonate` binary's registry: it builds librdkafka and
@@ -124,9 +189,11 @@ Apache Kafka (tested with 3.9.1, KRaft) and Redpanda (tested with 26.2.3): the
 live tests and the differential pass on both. Everything used is in the
 Kafka protocol both implement: idempotent transactional producers,
 `read_committed`, compacted topics, the classic group protocol with the
-cooperative-sticky assignor, and `DescribeConsumerGroups`. Nothing assumes
-exact offsets — Redpanda writes a control batch when a transaction begins, so
-its records land one offset later than Kafka's.
+cooperative-sticky assignor, and `DescribeConsumerGroups`. With transactions
+nothing assumes exact offsets: Redpanda writes a control batch when a
+transaction begins, so its records land one offset later than Kafka's. Without
+transactions there are no control batches, offsets are exact on both brokers,
+and both accept `min.compaction.lag.ms`.
 
 ## Tests
 
@@ -136,14 +203,17 @@ TEST_KAFKA_BROKERS=localhost:9092 \
   cargo test -p resonate-server-kafka -- --test-threads=1 # + fencing, restart, two nodes, differential on a broker
 ```
 
-- `tests/differential.rs` — the blob backend's differential, against this node.
+- `tests/differential.rs` — the blob backend's differential, against this node,
+  with and without transactions (`TEST_KAFKA_TRANSACTIONS=0` on a broker), and
+  `prefix_random`: the same trajectory with every commit cut.
 - `tests/cluster.rs` — several nodes on one in-process log: routing, leave,
-  a zombie that cannot commit, restore from a compacted log, refused and
-  uncertain commits.
+  a zombie that cannot commit (and, without transactions, one whose records
+  land, are read past and are written over before compaction), restore from a
+  compacted log, refused and uncertain commits.
 - `tests/crash.rs` — a child process aborts mid-write with the WAL off; the
   surviving checkpoint names only records that survived.
-- `tests/live.rs` — real Kafka: fencing, restart from RocksDB, two nodes with a
-  real consumer group and HTTP forwarding.
+- `tests/live.rs` — real Kafka: fencing by transaction and by claim, restart
+  from RocksDB, two nodes with a real consumer group and HTTP forwarding.
 
 ## Performance
 
@@ -160,6 +230,23 @@ broker and replication factor 1, so these are relative numbers, not capacity.
 | Kafka, 2 nodes, 16 partitions | 64 | 1,599 | 36 / 142 ms | 20.7 ms | 2.2 |
 | Kafka, 1 node, 64 partitions | 256 | 2,855 | 79 / 205 ms | 37.7 ms | 1.9 |
 | Kafka, 1 node, 16 partitions | 256 | 5,317 | 43 / 150 ms | 11.1 ms | 4.2 |
+
+**With and without transactions**, on the same VM and build (`linger.ms=0`),
+1 node, 16 partitions:
+
+| broker | mode | clients | req/s | client p50 / p99 | server mean | commit mean | requests per round |
+|---|---|---|---|---|---|---|---|
+| Kafka | transactions | 64 | 2,473 | 19 / 125 ms | 23.9 ms | 11.6 ms | 2.1 |
+| Kafka | without | 64 | 6,361 | 10 / 22 ms | 4.8 ms | 1.8 ms | 1.4 |
+| Kafka | transactions | 256 | 4,649 | 49 / 169 ms | 37.6 ms | 12.5 ms | 4.1 |
+| Kafka | without | 256 | 6,236 | 39 / 94 ms | 18.9 ms | 2.0 ms | 1.5 |
+| Redpanda | transactions | 64 | 2,069 | 24 / 131 ms | 30.1 ms | 16.1 ms | 2.2 |
+| Redpanda | without | 64 | 6,727 | 9 / 22 ms | 6.5 ms | 3.2 ms | 1.8 |
+
+Without transactions a commit is a produce: about a sixth of the time on
+Kafka. Throughput is no longer bound by the broker's transaction rate. At about
+6,300 req/s the shared four cores are the limit: the 256-client run went no
+faster than the 64-client one, and client time is twice server time.
 
 What the breakdown (`resonate_kafka_*`) shows:
 

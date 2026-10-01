@@ -41,6 +41,7 @@
 
 use std::collections::BTreeSet;
 
+use resonate_core::types::PromiseState;
 use resonate_server_blob::codec;
 use resonate_server_blob::kernel::state::{min_deadline, OriginDoc, PromiseDoc, TaskDoc};
 use resonate_server_blob::schedules::{ScheduleDoc, SCHEDULE_FORMAT_VERSION};
@@ -134,6 +135,99 @@ pub fn diff(before: &OriginDoc, after: &OriginDoc) -> Vec<Change> {
         });
     }
     out
+}
+
+/// The records that take an origin from `before` to `after` — one decision
+/// of the kernel's — **one at a time**, in an order where every prefix leaves
+/// a state the protocol allows, given [`kernel::recover`]. For a log without
+/// transactions, which can land any prefix of a commit.
+///
+/// The order follows the specification, which makes a settlement and its
+/// consequences separate steps:
+///
+/// 1. **Settlements.** A promise that settled is written settled, still
+///    holding the callbacks and listeners it held before: the deliveries it
+///    owes. Recovery makes them if nothing later lands.
+/// 2. **Registrations**: records that only gained callbacks. A task suspends
+///    after its callbacks are in place, as `taskSuspend` registers before it
+///    parks.
+/// 3. **Everything else**: awaiters resumed, tasks created or moved.
+/// 4. **Cleanups**: records that lost callbacks — a finished task's
+///    registrations on others. Such a record may carry a delivery too (an
+///    awaiter resumed by the very settlement whose task's registration it
+///    drops), so this comes before:
+/// 5. **Settlements, finally**: each settled promise without what it owed,
+///    once every delivery is written.
+/// 6. **Tombstones.**
+///
+/// A record that changed in no way that matters to the order is written once,
+/// in the class it falls in. Unchanged records produce nothing, as in [`diff`].
+///
+/// [`kernel::recover`]: resonate_server_blob::kernel::recover
+pub fn ordered(before: &OriginDoc, after: &OriginDoc) -> Vec<Change> {
+    let ids: BTreeSet<&String> = before
+        .promises
+        .keys()
+        .chain(after.promises.keys())
+        .collect();
+    let mut settled = Vec::new();
+    let mut registered = Vec::new();
+    let mut other = Vec::new();
+    let mut cleaned = Vec::new();
+    let mut finals = Vec::new();
+    let mut tombstones = Vec::new();
+    let value = |id: &str, p: &PromiseDoc, t: Option<&TaskDoc>| Change {
+        id: id.to_string(),
+        log: Some(encode_promise(id, p, t)),
+        local: Some(local::encode(p, t)),
+    };
+    for id in ids {
+        let old = (before.promises.get(id), before.tasks.get(id));
+        let new = (after.promises.get(id), after.tasks.get(id));
+        if old == new {
+            continue;
+        }
+        let Some(p) = new.0 else {
+            tombstones.push(Change {
+                id: id.clone(),
+                log: None,
+                local: None,
+            });
+            continue;
+        };
+        let was = old.0;
+        let pending = |q: &PromiseDoc| q.state == PromiseState::Pending;
+        let lost = |a: &[String], b: &[String]| a.iter().any(|x| !b.contains(x));
+        match was {
+            Some(w) if pending(w) && !pending(p) => {
+                // Settled here: first with what it owes, then without.
+                if w.callbacks != p.callbacks || w.listeners != p.listeners {
+                    let mut owing = p.clone();
+                    owing.callbacks = w.callbacks.clone();
+                    owing.listeners = w.listeners.clone();
+                    settled.push(value(id, &owing, new.1));
+                    finals.push(value(id, p, new.1));
+                } else {
+                    settled.push(value(id, p, new.1));
+                }
+            }
+            Some(w) if lost(&w.callbacks, &p.callbacks) || lost(&w.listeners, &p.listeners) => {
+                cleaned.push(value(id, p, new.1));
+            }
+            Some(w) if p.callbacks.len() > w.callbacks.len() => {
+                registered.push(value(id, p, new.1));
+            }
+            _ => other.push(value(id, p, new.1)),
+        }
+    }
+    settled
+        .into_iter()
+        .chain(registered)
+        .chain(other)
+        .chain(cleaned)
+        .chain(finals)
+        .chain(tombstones)
+        .collect()
 }
 
 /// Encode a schedule as a record value.

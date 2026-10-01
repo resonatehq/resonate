@@ -177,10 +177,22 @@ impl Node {
         router: Arc<dyn resonate_core::ResonateRouter>,
         cfg: NodeCfg,
     ) -> Arc<Self> {
+        Self::in_memory_on(crate::log::mem::MemLog::new(partitions), router, cfg)
+    }
+
+    /// One node owning every partition of `log`, with an in-memory local
+    /// store — for a test that needs the log's handle (faults, a log without
+    /// transactions).
+    pub fn in_memory_on(
+        log: Arc<crate::log::mem::MemLog>,
+        router: Arc<dyn resonate_core::ResonateRouter>,
+        cfg: NodeCfg,
+    ) -> Arc<Self> {
+        let partitions = crate::log::Log::partitions(log.as_ref());
         let sender = Arc::new(Sender::new(router, cfg.debug));
         Self::new(
             cfg,
-            crate::log::mem::MemLog::new(partitions),
+            log,
             crate::local::mem::MemLocal::new(),
             sender,
             crate::membership::StaticMembership::new(partitions),

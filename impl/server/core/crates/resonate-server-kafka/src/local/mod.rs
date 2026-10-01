@@ -42,7 +42,9 @@ use crate::log::Checkpoint;
 /// all, from before stamps — was written by another build, and is dropped
 /// and rebuilt from the log rather than read. That is what lets the local
 /// encoding change between any two releases with no migration: bump this.
-pub const LOCAL_FORMAT: u32 = 1;
+///
+/// 1: postcard promises. 2: checkpoints carry the logs' epochs.
+pub const LOCAL_FORMAT: u32 = 2;
 
 /// One write to apply: a key and its new value, or `None` to delete it.
 pub type Op = (Vec<u8>, Option<Vec<u8>>);

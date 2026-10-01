@@ -91,6 +91,57 @@ fn create(id: &str) -> Value {
     json!({ "id": id, "timeoutAt": FAR, "param": { "data": "aGk=" }, "tags": {} })
 }
 
+/// Without transactions the broker refuses nobody: the first writer's record
+/// lands after the second's claim. It is the writer that notices — its record
+/// did not land where it left the log — and every reader that reads past it,
+/// reporting its key as one to write again.
+#[tokio::test(flavor = "multi_thread")]
+async fn without_transactions_a_claim_fences_the_first_writer() {
+    let Some(brokers) = brokers() else { return };
+    let log = KafkaLog::connect(KafkaCfg {
+        transactional: false,
+        ..cfg(&brokers, &prefix("claim"), 2, "n")
+    })
+    .await
+    .expect("connects and creates topics");
+    assert!(!log.atomic());
+    let rec = |k: &str| Record {
+        topic: Topic::Promises,
+        key: k.to_string(),
+        value: Some(b"v".to_vec()),
+    };
+
+    // The first claim lands at 0 on each log; the records follow it.
+    let first = log.fence(1).await.expect("claimed");
+    let after = first
+        .commit(vec![rec("a"), rec("b")], Checkpoint::at(1, 1))
+        .await
+        .expect("the only writer commits");
+    assert_eq!((after.promises, after.epochs), (3, [0, 0]));
+    first.check(after).await.expect("nobody else wrote");
+
+    // The second claims where the log ends: 3 and 1.
+    let second = log.fence(1).await.expect("claimed again");
+    match first.commit(vec![rec("c")], after).await {
+        Err(LogError::Uncertain(_)) => {}
+        other => panic!("the first writer must notice, got {other:?}"),
+    }
+    // c landed at 4, past the second claim: the second writer, idle, finds
+    // out by asking.
+    assert!(second.check(Checkpoint::at(4, 2)).await.is_err());
+
+    let mut reader = log.reader(1, Checkpoint::default()).await.unwrap();
+    let mut keys = Vec::new();
+    let mut end = Checkpoint::default();
+    while let Some((batch, cp)) = reader.next().await.unwrap() {
+        keys.extend(batch.into_iter().map(|c| c.key));
+        end = cp;
+    }
+    assert_eq!(keys, vec!["a".to_string(), "b".to_string()]);
+    assert_eq!((end.promises, end.schedules, end.epochs), (5, 2, [3, 1]));
+    assert_eq!(reader.stale(), vec![(Topic::Promises, "c".to_string())]);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_second_fence_refuses_the_first_writer() {
     let Some(brokers) = brokers() else { return };

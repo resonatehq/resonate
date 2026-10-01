@@ -37,6 +37,16 @@
 //!    other backend;
 //! 7. answers the callers.
 //!
+//! **Without transactions** ([`Log::atomic`] false) step 2 is per kernel
+//! decision rather than per document: each decision's records, in the order
+//! [`record::ordered`] gives, one decision after another. So a commit cut
+//! short lands every earlier decision whole and a valid prefix of one. Every
+//! fold then starts with [`recover`], which makes the deliveries such a
+//! prefix leaves owing. Takeover adds two steps after replay: write again
+//! every value a fenced writer's records hide ([`crate::log::Reader::stale`]), and arm at
+//! once every origin owing deliveries. An idle partition checks every
+//! [`PartitionCfg::idle_check`] that nobody else wrote to its log.
+//!
 //! The outcome of step 3 decides the rest. `Unavailable`: nothing landed, so
 //! the round's decisions are dropped and its callers told to retry; the
 //! partition carries on. `Fenced`: another node owns the partition; stop.
@@ -56,18 +66,18 @@
 //! The node, which takes partitions over and routes every request, timer and
 //! schedule firing to them.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use tokio::sync::{mpsc, oneshot, watch};
 
-use resonate_core::types::{ScheduleCreateData, ScheduleResponseData};
+use resonate_core::types::{ScheduleCreateData, ScheduleResponseData, TaskState};
 use resonate_core::{util, Unavailable};
 use resonate_server_blob::kernel::state::{
     apply_effects, min_deadline, Effect, KernelCfg, OriginDoc, Reply, Req, TAG_TARGET,
 };
-use resonate_server_blob::kernel::{drain, handle};
+use resonate_server_blob::kernel::{drain, handle, needs_recovery, recover};
 use resonate_server_blob::schedules::{ScheduleDoc, SCHEDULE_FORMAT_VERSION};
 use resonate_server_blob::sender::Sender;
 
@@ -90,6 +100,10 @@ pub struct PartitionCfg {
     /// The hot-document cache's budget, in promises ([`DocCache`]). Zero
     /// turns it off.
     pub cache_promises: usize,
+    /// On a log without transactions: how long the partition may sit idle
+    /// before it checks that nobody else wrote to its log
+    /// ([`Writer::check`]).
+    pub idle_check: Duration,
 }
 
 impl Default for PartitionCfg {
@@ -99,6 +113,7 @@ impl Default for PartitionCfg {
             max_batch: 512,
             mailbox: 4_096,
             cache_promises: 2_000,
+            idle_check: Duration::from_secs(1),
         }
     }
 }
@@ -278,9 +293,29 @@ impl Partition {
             position = after;
         }
 
-        // (4) The timer index, from the records themselves.
+        // (3b) Without transactions: write again every value a fenced
+        // writer's record now hides, so compaction cannot drop it.
+        let atomic = log.atomic();
+        if !atomic {
+            let stale = reader.stale();
+            if !stale.is_empty() {
+                let records = restate(store.as_ref(), &stale).map_err(TakeoverError)?;
+                tracing::warn!(
+                    partition = id,
+                    keys = records.len(),
+                    "Writing again what a fenced writer's records hide"
+                );
+                let after = writer.commit(records, position).await?;
+                store.apply(Vec::new(), after).map_err(TakeoverError)?;
+                position = after;
+            }
+        }
+
+        // (4) The timer index, from the records themselves — and, without
+        // transactions, every origin a cut commit left owing deliveries, due
+        // at once.
         let timers = Arc::new(Timers::new());
-        seed_timers(store.as_ref(), &timers).map_err(TakeoverError)?;
+        seed_timers(store.as_ref(), &timers, !atomic).map_err(TakeoverError)?;
 
         tracing::info!(
             partition = id,
@@ -301,6 +336,7 @@ impl Partition {
             cache: DocCache::new(cfg.cache_promises),
             cfg,
             checkpoint: position,
+            atomic,
         };
         let handle = tokio::spawn(async move {
             let exit = actor.run(rx, stop_rx).await;
@@ -416,22 +452,57 @@ fn op_of(c: Consumed) -> Result<Op, String> {
 }
 
 /// Arm one entry per origin and per schedule from what the store holds.
-fn seed_timers(store: &dyn PartitionStore, timers: &Timers) -> Result<(), String> {
+///
+/// With `recovering`, an origin holding a state only a cut commit leaves
+/// ([`needs_recovery`]) is armed at once, so the deliveries it owes are made
+/// without waiting for a request or a deadline.
+fn seed_timers(
+    store: &dyn PartitionStore,
+    timers: &Timers,
+    recovering: bool,
+) -> Result<(), String> {
     let mut earliest: BTreeMap<String, i64> = BTreeMap::new();
+    // Recovery is per origin, but what calls for it is spread over records: a
+    // settled promise still owing, or a callback naming a finished task.
+    let mut owing: BTreeSet<String> = BTreeSet::new();
+    let mut awaiters: BTreeMap<String, String> = BTreeMap::new();
+    let mut finished: BTreeSet<String> = BTreeSet::new();
     for (key, value) in store.scan(&keys::all_promises_prefix())? {
         let id = keys::id_of_promise_key(&key).ok_or("unreadable promise key")?;
         let (promise, task) = record::local::decode(&value)?;
+        let origin = keys::origin_of(&id).to_string();
         let mut doc = OriginDoc::default();
         doc.promises.insert(id.clone(), promise);
         if let Some(task) = task {
             doc.tasks.insert(id.clone(), task);
         }
+        if recovering {
+            if needs_recovery(&doc) {
+                owing.insert(origin.clone());
+            }
+            if doc
+                .tasks
+                .get(&id)
+                .is_some_and(|t| t.state == TaskState::Fulfilled)
+            {
+                finished.insert(id.clone());
+            }
+            for a in &doc.promises[&id].callbacks {
+                awaiters.insert(a.clone(), origin.clone());
+            }
+        }
         if let Some(at) = min_deadline(&doc) {
-            let slot = earliest
-                .entry(keys::origin_of(&id).to_string())
-                .or_insert(at);
+            let slot = earliest.entry(origin).or_insert(at);
             *slot = (*slot).min(at);
         }
+    }
+    for (awaiter, origin) in awaiters {
+        if finished.contains(&awaiter) {
+            owing.insert(origin);
+        }
+    }
+    for origin in owing {
+        earliest.insert(origin, 0);
     }
     for (origin, at) in earliest {
         timers.set(Target::Origin(origin), Some(at));
@@ -473,6 +544,30 @@ fn load_schedule(store: &dyn PartitionStore, id: &str) -> Result<Option<Schedule
     }
 }
 
+/// The records that state again what the store holds for `keys` — a value in
+/// the log's encoding, or a tombstone.
+fn restate(store: &dyn PartitionStore, stale: &[(Topic, String)]) -> Result<Vec<Record>, String> {
+    let mut records = Vec::with_capacity(stale.len());
+    for (topic, key) in stale {
+        let value = match topic {
+            Topic::Promises => match store.get(&keys::promise_key(key))? {
+                Some(bytes) => {
+                    let (p, t) = record::local::decode(&bytes)?;
+                    Some(record::encode_promise(key, &p, t.as_ref()))
+                }
+                None => None,
+            },
+            Topic::Schedules => store.get(&keys::schedule_key(key))?,
+        };
+        records.push(Record {
+            topic: *topic,
+            key: key.clone(),
+            value,
+        });
+    }
+    Ok(records)
+}
+
 /// The partition's serialized decision loop.
 struct Actor {
     id: u32,
@@ -484,6 +579,10 @@ struct Actor {
     checkpoint: Checkpoint,
     /// Hot documents, decoded. The actor's own: see [`DocCache`].
     cache: DocCache,
+    /// Whether the log commits all or nothing. If not, every decision's
+    /// records go out in the order [`record::ordered`] gives, and every
+    /// decision first finishes what a cut commit left ([`recover`]).
+    atomic: bool,
 }
 
 /// A round's working state: every document and schedule it touched, as they
@@ -497,6 +596,14 @@ struct Overlay {
 impl Actor {
     async fn run(mut self, mut rx: mpsc::Receiver<Work>, mut stop: watch::Receiver<bool>) -> Exit {
         let exit = loop {
+            let (atomic, every) = (self.atomic, self.cfg.idle_check);
+            let idle = async move {
+                if atomic {
+                    std::future::pending::<()>().await
+                } else {
+                    tokio::time::sleep(every).await
+                }
+            };
             let first = tokio::select! {
                 biased;
                 _ = stop.changed() => break Exit::Stopped,
@@ -504,6 +611,15 @@ impl Actor {
                     Some(work) => work,
                     None => break Exit::Stopped,
                 },
+                _ = idle => {
+                    // Nobody else may have written to the log since we did.
+                    match self.writer.check(self.checkpoint).await {
+                        Ok(()) => continue,
+                        Err(LogError::Unavailable(_)) => continue,
+                        Err(LogError::Fenced(m)) => break Exit::Fenced(m),
+                        Err(LogError::Uncertain(m)) => break Exit::Uncertain(m),
+                    }
+                }
             };
             // Group commit: take everything already queued, up to the ceiling.
             let mut batch = vec![first];
@@ -586,6 +702,8 @@ impl Actor {
 
     async fn decide_and_commit(&mut self, batch: Vec<Work>) -> Result<(), Exit> {
         let mut overlay = Overlay::default();
+        // Without transactions: every decision's records, in decision order.
+        let mut steps: Vec<record::Change> = Vec::new();
         let mut answers: Vec<(Answer, Result<Reply, Unavailable>)> =
             Vec::with_capacity(batch.len());
         let mut sends: Vec<Effect> = Vec::new();
@@ -617,7 +735,13 @@ impl Actor {
                         }
                     }
                     let doc = &mut overlay.origins.get_mut(&origin).expect("loaded").1;
-                    let (answer, fx) = decide(doc, &op, now, &self.cfg.kernel);
+                    let (answer, fx) = decide(
+                        doc,
+                        &op,
+                        now,
+                        &self.cfg.kernel,
+                        (!self.atomic).then_some(&mut steps),
+                    );
                     sends.extend(fx);
                     answers.push((reply, Ok(answer)));
                 }
@@ -644,15 +768,22 @@ impl Actor {
 
         let mut records = Vec::new();
         let mut ops: Vec<Op> = Vec::new();
-        for (before, after) in overlay.origins.values() {
-            for change in record::diff(before, after) {
-                ops.push((keys::promise_key(&change.id), change.local));
-                records.push(Record {
-                    topic: Topic::Promises,
-                    key: change.id,
-                    value: change.log,
-                });
-            }
+        let changes: Vec<record::Change> = if self.atomic {
+            overlay
+                .origins
+                .values()
+                .flat_map(|(before, after)| record::diff(before, after))
+                .collect()
+        } else {
+            steps
+        };
+        for change in changes {
+            ops.push((keys::promise_key(&change.id), change.local));
+            records.push(Record {
+                topic: Topic::Promises,
+                key: change.id,
+                value: change.log,
+            });
         }
         for (id, (before, after)) in &overlay.schedules {
             if before != after {
@@ -832,25 +963,45 @@ impl Actor {
 /// The same fold the blob applier makes: every request first sweeps its
 /// origin, so the handler sees a document with nothing due; the sweep's
 /// changes ride the same commit.
-fn decide(doc: &mut OriginDoc, op: &OriginOp, now: i64, cfg: &KernelCfg) -> (Reply, Vec<Effect>) {
-    let (reply, fx) = match op {
-        OriginOp::Req(req) => {
-            let mut fx = drain(doc, now, cfg);
-            apply_effects(doc, &fx);
-            let (mut hfx, reply) = handle(doc, req, now, cfg);
-            fx.append(&mut hfx);
-            (reply, fx)
+///
+/// With `steps` — a log without transactions — every kernel decision's
+/// records are appended to it in [`record::ordered`] order, and the fold
+/// starts by finishing whatever a cut commit left owing ([`recover`]), at
+/// `now`, before anything else sees the document.
+fn decide(
+    doc: &mut OriginDoc,
+    op: &OriginOp,
+    now: i64,
+    cfg: &KernelCfg,
+    mut steps: Option<&mut Vec<record::Change>>,
+) -> (Reply, Vec<Effect>) {
+    let plain = steps.is_some();
+    let mut sends = Vec::new();
+    let mut take = |doc: &mut OriginDoc, fx: Vec<Effect>| {
+        if fx.is_empty() {
+            return;
         }
-        OriginOp::Tick => (
-            Reply::status(200, serde_json::Value::Array(vec![])),
-            drain(doc, now, cfg),
-        ),
+        let before = steps.is_some().then(|| doc.clone());
+        apply_effects(doc, &fx);
+        if let (Some(steps), Some(before)) = (steps.as_deref_mut(), before) {
+            steps.extend(record::ordered(&before, doc));
+        }
+        sends.extend(fx.into_iter().filter(|e| matches!(e, Effect::Send { .. })));
     };
-    apply_effects(doc, &fx);
-    let sends = fx
-        .into_iter()
-        .filter(|e| matches!(e, Effect::Send { .. }))
-        .collect();
+    if plain {
+        let fx = recover(doc, now, cfg);
+        take(doc, fx);
+    }
+    let fx = drain(doc, now, cfg);
+    take(doc, fx);
+    let reply = match op {
+        OriginOp::Req(req) => {
+            let (fx, reply) = handle(doc, req, now, cfg);
+            take(doc, fx);
+            reply
+        }
+        OriginOp::Tick => Reply::status(200, serde_json::Value::Array(vec![])),
+    };
     (reply, sends)
 }
 

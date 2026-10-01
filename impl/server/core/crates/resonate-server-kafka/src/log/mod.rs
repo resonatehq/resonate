@@ -18,6 +18,13 @@
 //!   the log *as it is when the reader is created*. Called after `fence`, that
 //!   end is everything any earlier writer ever committed.
 //!
+//! That is the log **with transactions**. A log without them
+//! ([`Log::atomic`] false, [`epoch`]) keeps the same port with weaker
+//! promises: `fence` appends a claim instead, a fenced writer's records still
+//! land (and every reader reads past them), and a commit can land any prefix
+//! of its records. The partition shell orders its records so that every
+//! prefix is valid, and repairs what a cut leaves; see [`crate::partition`].
+//!
 //! The error taxonomy is the load-bearing part, as it is for the blob store:
 //!
 //! - [`LogError::Unavailable`] — the commit certainly did not land. Fail the
@@ -39,6 +46,7 @@
 //! and commits every round through its writer. Who owns a partition is not
 //! the log's business: see [`crate::membership`] and [`crate::directory`].
 
+pub mod epoch;
 pub mod kafka;
 pub mod mem;
 
@@ -53,14 +61,32 @@ pub enum Topic {
     Schedules,
 }
 
-/// Where to resume reading a partition: the next offset of each of its logs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// Where to resume reading a partition: the next offset of each of its logs,
+/// and — for a log without transactions — the epoch in force at that offset
+/// on each ([`epoch`]). `-1` is "no claim seen yet".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Checkpoint {
     pub promises: i64,
     pub schedules: i64,
+    pub epochs: [i64; 2],
+}
+
+impl Default for Checkpoint {
+    fn default() -> Self {
+        Self::at(0, 0)
+    }
 }
 
 impl Checkpoint {
+    /// Offsets, with no epoch yet.
+    pub fn at(promises: i64, schedules: i64) -> Self {
+        Self {
+            promises,
+            schedules,
+            epochs: [-1, -1],
+        }
+    }
+
     pub fn get(&self, topic: Topic) -> i64 {
         match topic {
             Topic::Promises => self.promises,
@@ -75,25 +101,35 @@ impl Checkpoint {
         }
     }
 
+    pub fn epoch(&self, topic: Topic) -> i64 {
+        self.epochs[topic as usize]
+    }
+
     /// Whether this checkpoint is at or past `other` on both logs.
     pub fn covers(&self, other: &Checkpoint) -> bool {
         self.promises >= other.promises && self.schedules >= other.schedules
     }
 
-    pub fn to_bytes(self) -> [u8; 16] {
-        let mut out = [0u8; 16];
+    pub fn to_bytes(self) -> [u8; 32] {
+        let mut out = [0u8; 32];
         out[..8].copy_from_slice(&self.promises.to_be_bytes());
-        out[8..].copy_from_slice(&self.schedules.to_be_bytes());
+        out[8..16].copy_from_slice(&self.schedules.to_be_bytes());
+        out[16..24].copy_from_slice(&self.epochs[0].to_be_bytes());
+        out[24..].copy_from_slice(&self.epochs[1].to_be_bytes());
         out
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() != 16 {
+        if bytes.len() != 32 {
             return None;
         }
+        let at = |i: usize| -> Option<i64> {
+            Some(i64::from_be_bytes(bytes[i..i + 8].try_into().ok()?))
+        };
         Some(Self {
-            promises: i64::from_be_bytes(bytes[..8].try_into().ok()?),
-            schedules: i64::from_be_bytes(bytes[8..].try_into().ok()?),
+            promises: at(0)?,
+            schedules: at(8)?,
+            epochs: [at(16)?, at(24)?],
         })
     }
 }
@@ -113,6 +149,10 @@ pub struct Consumed {
     pub key: String,
     pub value: Option<Vec<u8>>,
     pub offset: i64,
+    /// The writer's epoch, on a log without transactions ([`epoch`]).
+    pub epoch: Option<i64>,
+    /// A claim, not data ([`epoch`]). Never handed past the epoch filter.
+    pub claim: bool,
 }
 
 /// Why the log did not do what was asked. See the module docs.
@@ -153,6 +193,14 @@ pub trait Log: Send + Sync {
 
     /// Whether the log answers at all — what `/ready` reports.
     async fn ready(&self) -> bool;
+
+    /// Whether a commit is all or nothing. A log that is not (one without
+    /// transactions, [`epoch`]) can land a prefix of a commit's records, so
+    /// its writer orders them to make every prefix a state the protocol
+    /// allows, and its owner repairs what a cut prefix leaves behind.
+    fn atomic(&self) -> bool {
+        true
+    }
 }
 
 /// The one writer of one partition.
@@ -161,6 +209,14 @@ pub trait Writer: Send + Sync {
     /// Commit `records` as one transaction. `base` is the partition's
     /// checkpoint before this commit; the result is its checkpoint after it.
     async fn commit(&self, records: Vec<Record>, base: Checkpoint) -> Result<Checkpoint, LogError>;
+
+    /// Whether the log still ends at `at`, where this writer left it. On a
+    /// log without transactions a fenced writer's records still land, after
+    /// a newer owner's; an idle owner hears of them only by asking. A log with
+    /// transactions has nothing to report.
+    async fn check(&self, _at: Checkpoint) -> Result<(), LogError> {
+        Ok(())
+    }
 }
 
 /// A committed read of one partition, from a checkpoint to a fixed end.
@@ -168,4 +224,11 @@ pub trait Writer: Send + Sync {
 pub trait Reader: Send {
     /// The next batch and the checkpoint after it, or `None` at the end.
     async fn next(&mut self) -> Result<Option<(Vec<Consumed>, Checkpoint)>, LogError>;
+
+    /// Once read to the end: the keys whose newest record was refused as a
+    /// fenced writer's ([`epoch`]). Compaction would keep that record and
+    /// drop the value it hides, so the owner writes the value again.
+    fn stale(&self) -> Vec<(Topic, String)> {
+        Vec::new()
+    }
 }

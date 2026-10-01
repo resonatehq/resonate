@@ -41,10 +41,11 @@ use rdkafka::client::DefaultClientContext;
 use rdkafka::config::ClientConfig;
 use rdkafka::consumer::{BaseConsumer, Consumer};
 use rdkafka::error::{KafkaError, RDKafkaErrorCode};
+use rdkafka::message::{Header, Headers, OwnedHeaders};
 use rdkafka::producer::{FutureProducer, FutureRecord, Producer};
 use rdkafka::{Message, Offset, TopicPartitionList};
 
-use super::{Checkpoint, Consumed, Log, LogError, Reader, Record, Topic, Writer};
+use super::{epoch, Checkpoint, Consumed, Log, LogError, Reader, Record, Topic, Writer};
 
 /// Everything the Kafka log needs.
 #[derive(Debug, Clone)]
@@ -70,6 +71,17 @@ pub struct KafkaCfg {
     pub properties: BTreeMap<String, String>,
     /// This node's id, for client ids.
     pub node_id: String,
+    /// Write in transactions (`true`), or without them — claims, epochs and
+    /// offset checks ([`super::epoch`]).
+    pub transactional: bool,
+    /// Without transactions: how long a record may take to land before the
+    /// producer gives up on it — so how late a fenced writer's records can
+    /// still arrive.
+    pub delivery_timeout: Duration,
+    /// Without transactions: the topics' `min.compaction.lag.ms`, which must
+    /// outlast `delivery_timeout` plus the owner's idle check, so a fenced
+    /// writer's record is never compacted before its key is written again.
+    pub min_compaction_lag: Duration,
 }
 
 impl Default for KafkaCfg {
@@ -85,6 +97,9 @@ impl Default for KafkaCfg {
             request_timeout: Duration::from_secs(30),
             properties: BTreeMap::new(),
             node_id: "node-0".into(),
+            transactional: true,
+            delivery_timeout: Duration::from_secs(10),
+            min_compaction_lag: Duration::from_secs(3_600),
         }
     }
 }
@@ -237,16 +252,28 @@ async fn create_topics(cfg: &KafkaCfg) -> Result<(), LogError> {
     } else {
         "1"
     };
-    fn compacted<'a>(name: &'a str, partitions: i32, rf: i32, isr: &'a str) -> NewTopic<'a> {
-        NewTopic::new(name, partitions, TopicReplication::Fixed(rf))
+    let lag = cfg.min_compaction_lag.as_millis().to_string();
+    fn compacted<'a>(
+        name: &'a str,
+        partitions: i32,
+        rf: i32,
+        isr: &'a str,
+        lag: Option<&'a str>,
+    ) -> NewTopic<'a> {
+        let t = NewTopic::new(name, partitions, TopicReplication::Fixed(rf))
             .set("cleanup.policy", "compact")
-            .set("min.insync.replicas", isr)
+            .set("min.insync.replicas", isr);
+        match lag {
+            Some(lag) => t.set("min.compaction.lag.ms", lag),
+            None => t,
+        }
     }
     let n = cfg.partitions as i32;
     let rf = cfg.replication_factor;
+    let lag = (!cfg.transactional).then_some(lag.as_str());
     let topics = [
-        compacted(&promises, n, rf, isr),
-        compacted(&schedules, n, rf, isr),
+        compacted(&promises, n, rf, isr, lag),
+        compacted(&schedules, n, rf, isr, lag),
     ];
     let results = admin
         .create_topics(
@@ -276,6 +303,9 @@ impl Log for KafkaLog {
     }
 
     async fn fence(&self, partition: u32) -> Result<Arc<dyn Writer>, LogError> {
+        if !self.cfg.transactional {
+            return Ok(Arc::new(self.claim(partition).await?));
+        }
         let mut c = self.cfg.client();
         c.set(
             "transactional.id",
@@ -332,13 +362,22 @@ impl Log for KafkaLog {
     }
 
     async fn reader(&self, partition: u32, from: Checkpoint) -> Result<Box<dyn Reader>, LogError> {
-        Ok(Box::new(KafkaReader {
+        let raw = Box::new(KafkaReader {
             cfg: self.cfg.clone(),
             partition,
             position: from,
             topics: vec![Topic::Promises, Topic::Schedules],
             consumer: None,
-        }))
+        });
+        if self.cfg.transactional {
+            Ok(raw)
+        } else {
+            Ok(Box::new(epoch::Filtered::new(raw, &from)))
+        }
+    }
+
+    fn atomic(&self) -> bool {
+        self.cfg.transactional
     }
 
     async fn ready(&self) -> bool {
@@ -469,6 +508,203 @@ impl Writer for KafkaWriter {
 }
 
 // ---------------------------------------------------------------------------
+// Without transactions
+// ---------------------------------------------------------------------------
+
+/// How many times a claim is tried before the takeover gives up: each retry
+/// means something landed between reading the end and claiming it.
+const CLAIM_ATTEMPTS: usize = 8;
+
+impl KafkaLog {
+    /// The high watermarks of `partition`'s two logs.
+    async fn ends(&self, partition: u32) -> Result<Checkpoint, LogError> {
+        high_watermarks(&self.cfg, &self.probe, partition).await
+    }
+
+    /// Become the writer of `partition` without transactions: claim each log
+    /// where it ends, and check the claim landed there ([`super::epoch`]).
+    async fn claim(&self, partition: u32) -> Result<PlainWriter, LogError> {
+        let mut c = self.cfg.client();
+        c.set("enable.idempotence", "true")
+            .set("acks", "all")
+            .set("compression.type", "lz4")
+            .set("linger.ms", "0")
+            .set(
+                "message.timeout.ms",
+                self.cfg.delivery_timeout.as_millis().to_string(),
+            );
+        let producer: FutureProducer = c.create().map_err(unavailable)?;
+        let mut epochs = [-1i64; 2];
+        for topic in [Topic::Promises, Topic::Schedules] {
+            let name = self.cfg.topic(topic);
+            let mut claimed = None;
+            for _ in 0..CLAIM_ATTEMPTS {
+                let at = self.ends(partition).await?.get(topic);
+                let key = epoch::claim_key(at);
+                let headers = OwnedHeaders::new()
+                    .insert(Header {
+                        key: epoch::EPOCH_HEADER,
+                        value: Some(&epoch::encode_epoch(at)),
+                    })
+                    .insert(Header {
+                        key: epoch::CLAIM_HEADER,
+                        value: Some(&[1u8][..]),
+                    });
+                let record = FutureRecord::<str, [u8]>::to(&name)
+                    .key(key.as_str())
+                    .payload(self.cfg.node_id.as_bytes())
+                    .headers(headers)
+                    .partition(partition as i32);
+                let landed = producer
+                    .send(record, self.cfg.delivery_timeout)
+                    .await
+                    .map_err(|(e, _)| LogError::Unavailable(format!("claim not written: {e}")))?;
+                if landed.offset == at {
+                    claimed = Some(at);
+                    break;
+                }
+                tracing::debug!(
+                    partition,
+                    ?topic,
+                    at,
+                    landed = landed.offset,
+                    "Claim landed late; claiming again"
+                );
+            }
+            epochs[topic as usize] = claimed.ok_or_else(|| {
+                LogError::Unavailable(format!(
+                    "partition {partition}: no claim landed where it meant to in {CLAIM_ATTEMPTS} attempts"
+                ))
+            })?;
+        }
+        Ok(PlainWriter {
+            producer,
+            cfg: self.cfg.clone(),
+            probe: Arc::clone(&self.probe),
+            partition,
+            epochs,
+        })
+    }
+}
+
+async fn high_watermarks(
+    cfg: &KafkaCfg,
+    probe: &Arc<BaseConsumer>,
+    partition: u32,
+) -> Result<Checkpoint, LogError> {
+    let cfg = cfg.clone();
+    let probe = Arc::clone(probe);
+    tokio::task::spawn_blocking(move || {
+        let mut out = Checkpoint::default();
+        for topic in [Topic::Promises, Topic::Schedules] {
+            let (_, high) = probe
+                .fetch_watermarks(&cfg.topic(topic), partition as i32, cfg.request_timeout)
+                .map_err(unavailable)?;
+            out.set(topic, high);
+        }
+        Ok(out)
+    })
+    .await
+    .map_err(unavailable)?
+}
+
+/// The writer of a partition without transactions: its records carry its
+/// epochs, and every one must land exactly where the last one left the log.
+struct PlainWriter {
+    producer: FutureProducer,
+    cfg: KafkaCfg,
+    probe: Arc<BaseConsumer>,
+    partition: u32,
+    epochs: [i64; 2],
+}
+
+#[async_trait]
+impl Writer for PlainWriter {
+    async fn commit(&self, records: Vec<Record>, base: Checkpoint) -> Result<Checkpoint, LogError> {
+        if records.is_empty() {
+            return Ok(base);
+        }
+        let partition = self.partition as i32;
+        let promises = self.cfg.topic(Topic::Promises);
+        let schedules = self.cfg.topic(Topic::Schedules);
+        let mut deliveries = Vec::with_capacity(records.len());
+        for (i, r) in records.iter().enumerate() {
+            let topic = match r.topic {
+                Topic::Promises => &promises,
+                Topic::Schedules => &schedules,
+            };
+            let headers = OwnedHeaders::new().insert(Header {
+                key: epoch::EPOCH_HEADER,
+                value: Some(&epoch::encode_epoch(self.epochs[r.topic as usize])),
+            });
+            let mut record = FutureRecord::<str, [u8]>::to(topic)
+                .key(r.key.as_str())
+                .headers(headers)
+                .partition(partition);
+            if let Some(v) = &r.value {
+                record = record.payload(v.as_slice());
+            }
+            match self.producer.send_result(record) {
+                Ok(d) => deliveries.push((r.topic, d)),
+                // Nothing is in flight yet: nothing landed.
+                Err((e, _)) if i == 0 => return Err(unavailable(e)),
+                // The records before it are on their way.
+                Err((e, _)) => {
+                    return Err(LogError::Uncertain(format!(
+                        "record {i} of {} not sent: {e}",
+                        records.len()
+                    )))
+                }
+            }
+        }
+        // In order, per log: each must land just past the one before.
+        let mut after = base;
+        let mut failure = None;
+        for (topic, delivery) in deliveries {
+            match delivery.await {
+                Ok(Ok(d)) => {
+                    let want = after.get(topic);
+                    if d.offset != want && failure.is_none() {
+                        failure = Some(LogError::Uncertain(format!(
+                            "partition {} {topic:?}: a record landed at {}, not {want}; \
+                             someone else wrote to the log",
+                            self.partition, d.offset
+                        )));
+                    }
+                    after.set(topic, d.offset + 1);
+                }
+                Ok(Err((e, _))) => {
+                    failure.get_or_insert(LogError::Uncertain(format!("delivery failed: {e}")));
+                }
+                Err(_) => {
+                    failure.get_or_insert(LogError::Uncertain(
+                        "the producer dropped a delivery report".into(),
+                    ));
+                }
+            }
+        }
+        if let Some(e) = failure {
+            return Err(e);
+        }
+        after.epochs = self.epochs;
+        Ok(after)
+    }
+
+    async fn check(&self, at: Checkpoint) -> Result<(), LogError> {
+        let ends = high_watermarks(&self.cfg, &self.probe, self.partition).await?;
+        if ends.promises != at.promises || ends.schedules != at.schedules {
+            return Err(LogError::Uncertain(format!(
+                "partition {} ends at {:?}, not where this writer left it ({:?})",
+                self.partition,
+                (ends.promises, ends.schedules),
+                (at.promises, at.schedules)
+            )));
+        }
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Reader
 // ---------------------------------------------------------------------------
 
@@ -482,6 +718,23 @@ struct KafkaReader {
 }
 
 const BATCH: usize = 1_000;
+
+/// A record's epoch and whether it is a claim, from its headers.
+fn epoch_of(m: &rdkafka::message::BorrowedMessage<'_>) -> (Option<i64>, bool) {
+    let Some(headers) = m.headers() else {
+        return (None, false);
+    };
+    let mut epoch = None;
+    let mut claim = false;
+    for h in headers.iter() {
+        match h.key {
+            epoch::EPOCH_HEADER => epoch = h.value.and_then(epoch::decode_epoch),
+            epoch::CLAIM_HEADER => claim = true,
+            _ => {}
+        }
+    }
+    (epoch, claim)
+}
 
 #[async_trait]
 impl Reader for KafkaReader {
@@ -518,11 +771,14 @@ impl Reader for KafkaReader {
                         let Some(key) = m.key().and_then(|k| std::str::from_utf8(k).ok()) else {
                             continue;
                         };
+                        let (epoch, claim) = epoch_of(&m);
                         batch.push(Consumed {
                             topic,
                             key: key.to_string(),
                             value: m.payload().map(|v| v.to_vec()),
                             offset: m.offset(),
+                            epoch,
+                            claim,
                         });
                         position.set(topic, m.offset() + 1);
                         if batch.len() >= BATCH {
