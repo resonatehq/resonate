@@ -29,6 +29,25 @@ pub(crate) fn origin_of(id: &str) -> &str {
     id.split_once(':').map(|(o, _)| o).unwrap_or(id)
 }
 
+/// The filter that names one promise: its id, and the shard key derived from
+/// it. `origin` is a function of `_id`, so adding it never changes which
+/// document matches; what it changes is where a sharded cluster looks — one
+/// shard instead of all of them, for every lock, read and write below.
+pub(crate) fn key(id: &str) -> Document {
+    doc! { "_id": id, "origin": origin_of(id) }
+}
+
+/// The filter that names several promises, targeted the same way: `mongos`
+/// sends it to the shards that own those origins and no others.
+pub(crate) fn keys<S: AsRef<str>>(ids: &[S]) -> Document {
+    let ids: Vec<&str> = ids.iter().map(AsRef::as_ref).collect();
+    let origins: BTreeSet<&str> = ids.iter().map(|id| origin_of(id)).collect();
+    doc! {
+        "_id": { "$in": &ids },
+        "origin": { "$in": origins.into_iter().collect::<Vec<_>>() },
+    }
+}
+
 /// `WriteConflict`: another transaction wrote the document first.
 const WRITE_CONFLICT: i32 = 112;
 /// `DuplicateKey`: two concurrent creates of one id, and this one lost.
@@ -434,9 +453,9 @@ impl<'c> Tx<'c> {
     pub(crate) async fn lock_one(
         &mut self,
         coll: &Collection<Document>,
-        id: &str,
+        filter: Document,
     ) -> StorageResult<Option<Document>> {
-        coll.find_one_and_update(doc! { "_id": id }, doc! { "$inc": { "rev": 1_i64 } })
+        coll.find_one_and_update(filter, doc! { "$inc": { "rev": 1_i64 } })
             .return_document(ReturnDocument::After)
             .session(&mut self.session)
             .await
@@ -508,7 +527,7 @@ impl<'c> Tx<'c> {
     /// `$set` on one promise.
     pub(crate) async fn set_promise(&mut self, id: &str, fields: Document) -> StorageResult<()> {
         let promises = self.promises.clone();
-        self.update_one(&promises, doc! { "_id": id }, doc! { "$set": fields })
+        self.update_one(&promises, key(id), doc! { "$set": fields })
             .await
             .map(|_| ())
     }
@@ -606,7 +625,7 @@ impl<'c> Tx<'c> {
     /// is made on a row read this way.
     pub(crate) async fn lock(&mut self, id: &str) -> StorageResult<Option<PromiseRow>> {
         let promises = self.promises.clone();
-        match self.lock_one(&promises, id).await? {
+        match self.lock_one(&promises, key(id)).await? {
             Some(d) => Ok(Some(PromiseRow::from_doc(&d)?)),
             None => Ok(None),
         }
@@ -629,21 +648,16 @@ impl<'c> Tx<'c> {
             return Ok(Vec::new());
         }
         let promises = self.promises.clone();
-        self.update_many(
-            &promises,
-            doc! { "_id": { "$in": &ids } },
-            doc! { "$inc": { "rev": 1_i64 } },
-        )
-        .await?;
-        self.promise_rows(doc! { "_id": { "$in": &ids } }, doc! { "_id": 1 }, None)
-            .await
+        self.update_many(&promises, keys(&ids), doc! { "$inc": { "rev": 1_i64 } })
+            .await?;
+        self.promise_rows(keys(&ids), doc! { "_id": 1 }, None).await
     }
 
     /// Read one promise without locking it. For reads that follow a lock in
     /// the same transaction, and for the searches.
     pub(crate) async fn read(&mut self, id: &str) -> StorageResult<Option<PromiseRow>> {
         let promises = self.promises.clone();
-        match self.find_one(&promises, doc! { "_id": id }).await? {
+        match self.find_one(&promises, key(id)).await? {
             Some(d) => Ok(Some(PromiseRow::from_doc(&d)?)),
             None => Ok(None),
         }
@@ -684,6 +698,7 @@ impl<'c> Tx<'c> {
             "pid": p.pid,
             "listeners": [],
             "callbacks": [],
+            "awaiting": [],
             "resumes": [],
             "rev": 0_i64,
         };
@@ -706,18 +721,22 @@ impl<'c> Tx<'c> {
 
     /// Move the callback `awaiter -> awaited` from the awaited promise's
     /// `callbacks` to the awaiter's `resumes`: the awaited promise settled.
+    /// The awaiter's `awaiting` loses it in the same breath.
     async fn flip(&mut self, awaiter: &str, awaited: &str) -> StorageResult<()> {
         let promises = self.promises.clone();
         self.update_one(
             &promises,
-            doc! { "_id": awaited },
+            key(awaited),
             doc! { "$pull": { "callbacks": awaiter } },
         )
         .await?;
         self.update_one(
             &promises,
-            doc! { "_id": awaiter },
-            doc! { "$addToSet": { "resumes": awaited } },
+            key(awaiter),
+            doc! {
+                "$addToSet": { "resumes": awaited },
+                "$pull": { "awaiting": awaited },
+            },
         )
         .await?;
         Ok(())
@@ -858,10 +877,11 @@ impl<'c> Tx<'c> {
             return Ok(());
         }
         let due = self
-            .promise_ids(doc! {
-                "_id": { "$in": ids },
-                "state": "pending",
-                "timeout_at": { "$lte": now },
+            .promise_ids({
+                let mut filter = keys(ids);
+                filter.insert("state", "pending");
+                filter.insert("timeout_at", doc! { "$lte": now });
+                filter
             })
             .await?;
         if due.is_empty() {
@@ -900,17 +920,31 @@ impl<'c> Tx<'c> {
     }
 
     /// Fulfil a task: its lifecycle fields to rest, its `resumes` dropped, and
-    /// its callbacks withdrawn from every promise it was blocked on — the
-    /// reverse lookup the `callbacks` multikey index is for.
+    /// its callbacks withdrawn from every promise it was blocked on.
+    ///
+    /// Those promises are the task's own `awaiting`, read fresh: the reverse
+    /// of `callbacks`, kept beside it so the withdrawal names its documents.
+    /// A scan for `{callbacks: id}` would find the same ones, but on a sharded
+    /// cluster it would write to — and so enlist in the commit — every shard,
+    /// on every fulfil.
     pub(crate) async fn fulfil_task(&mut self, id: &str) -> StorageResult<()> {
+        let promises = self.promises.clone();
+        let awaiting = self
+            .find_one(&promises, key(id))
+            .await?
+            .map(|d| strs_of(&d, "awaiting"))
+            .unwrap_or_default();
         let mut fields = task_rest();
         fields.insert("task_state", "fulfilled");
         fields.insert("resumes", Bson::Array(Vec::new()));
+        fields.insert("awaiting", Bson::Array(Vec::new()));
         self.set_promise(id, fields).await?;
-        let promises = self.promises.clone();
+        if awaiting.is_empty() {
+            return Ok(());
+        }
         self.update_many(
             &promises,
-            doc! { "callbacks": id },
+            keys(&awaiting),
             doc! { "$pull": { "callbacks": id } },
         )
         .await
@@ -922,8 +956,9 @@ impl<'c> Tx<'c> {
     }
 
     /// Link an awaiter to an awaited promise: the awaited's `callbacks` gains
-    /// the awaiter, unless the callback is already there — waiting in
-    /// `callbacks`, or already fired into the awaiter's `resumes`.
+    /// the awaiter, and the awaiter's `awaiting` the awaited, unless the
+    /// callback is already there — waiting in `callbacks`, or already fired
+    /// into the awaiter's `resumes`.
     pub(crate) async fn link(&mut self, awaiter: &str, awaited: &str) -> StorageResult<()> {
         let Some(w) = self.read(awaiter).await? else {
             return Ok(());
@@ -934,8 +969,14 @@ impl<'c> Tx<'c> {
         let promises = self.promises.clone();
         self.update_one(
             &promises,
-            doc! { "_id": awaited },
+            key(awaited),
             doc! { "$addToSet": { "callbacks": awaiter } },
+        )
+        .await?;
+        self.update_one(
+            &promises,
+            key(awaiter),
+            doc! { "$addToSet": { "awaiting": awaited } },
         )
         .await
         .map(|_| ())
@@ -948,10 +989,15 @@ impl<'c> Tx<'c> {
     }
 
     /// The branch siblings a task response preloads.
+    ///
+    /// The sibling query is not narrowed to the task's origin: nothing makes
+    /// a branch's members share one, so on a sharded cluster this read asks
+    /// every shard. It is a read, so the shards it reaches commit as read-only
+    /// participants.
     pub(crate) async fn compute_preload(&mut self, id: &str) -> StorageResult<Vec<PromiseRecord>> {
         let promises = self.promises.clone();
         let branch = self
-            .find_one(&promises, doc! { "_id": id })
+            .find_one(&promises, key(id))
             .await?
             .and_then(|d| str_of(&d, "branch_id"));
         let Some(branch) = branch else {

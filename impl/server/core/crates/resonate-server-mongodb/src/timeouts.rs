@@ -26,7 +26,7 @@ async fn due_ids(
     only: Option<&str>,
 ) -> StorageResult<Vec<String>> {
     if let Some(id) = only {
-        filter.insert("_id", id);
+        filter.extend(crate::db::key(id));
     }
     tx.promise_ids(filter).await
 }

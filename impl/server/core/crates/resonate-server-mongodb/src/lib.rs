@@ -49,6 +49,15 @@
 //! writes the awaited promise's document, so a link and a concurrent settle of
 //! the same promise conflict, and one of them runs again on the other's
 //! result.
+//!
+//! # Sharding
+//!
+//! With `shard = true`, `promises` is sharded by hashed `origin`, so a call
+//! tree lives on one shard and a transition within it is a single-shard
+//! transaction. Every per-document filter names the origin beside the id
+//! (`db::key`) so `mongos` routes it to that shard, and a task keeps an
+//! `awaiting` array — the reverse of `callbacks` — so fulfilling it writes to
+//! the promises it awaited and no others. See the README.
 
 mod db;
 mod deadlines;
@@ -103,6 +112,16 @@ pub struct Config {
     /// to get ahead of.
     #[serde(default = "default_migrate")]
     pub migrate: bool,
+    /// Shard `promises` by hashed `origin` on connect (with `migrate`).
+    ///
+    /// Needs a sharded cluster: the URI must name `mongos` routers. Every
+    /// promise of one call tree then lives on one shard, so a transition
+    /// within a tree — a settle and its fan-out, a suspend on its children —
+    /// is a single-shard transaction, and only an await across trees costs a
+    /// two-phase commit. Hashed, because root ids that grow with time would
+    /// otherwise all land on the last range. `schedules` stays unsharded.
+    #[serde(default)]
+    pub shard: bool,
     /// How many branch siblings a task response may carry.
     #[serde(default = "default_preload_limit")]
     pub preload_limit: u32,
@@ -155,6 +174,7 @@ impl Default for Config {
             database: None,
             pool_size: default_pool_size(),
             migrate: default_migrate(),
+            shard: false,
             preload_limit: default_preload_limit(),
             retry_timeout: default_retry_timeout(),
             server_url: String::new(),
@@ -172,6 +192,8 @@ pub struct MongoDbEngine {
     pub(crate) schedules: Collection<Document>,
     pub(crate) task_retry_timeout: i64,
     pub(crate) preload_limit: u32,
+    /// Whether `init` shards `promises`.
+    pub(crate) shard: bool,
     /// Whether `debug.*` operations are permitted at all.
     pub(crate) debug: bool,
 }
@@ -221,6 +243,7 @@ impl MongoDbEngine {
             client,
             task_retry_timeout: cfg.retry_timeout,
             preload_limit: cfg.preload_limit,
+            shard: cfg.shard,
             debug,
         })
     }
@@ -238,7 +261,14 @@ impl MongoDbEngine {
             .run_command(doc! { "hello": 1 })
             .await
             .map_err(|e| StorageError::Backend(format!("mongodb connect: {e}")))?;
-        let replicated = hello.get_str("setName").is_ok() || hello.get_str("msg") == Ok("isdbgrid");
+        let sharded = hello.get_str("msg").is_ok_and(|m| m == "isdbgrid");
+        let replicated = sharded || hello.get_str("setName").is_ok();
+        if self.shard && !sharded {
+            return Err(StorageError::Backend(
+                "mongodb: shard = true needs a sharded cluster; the URI must name mongos"
+                    .to_string(),
+            ));
+        }
         if !replicated {
             return Err(StorageError::Backend(
                 "mongodb: transactions need a replica set or a sharded cluster; \
@@ -257,7 +287,40 @@ impl MongoDbEngine {
                     .await
                     .map_err(|e| StorageError::Backend(format!("create index {name}: {e}")))?;
             }
+            if self.shard {
+                self.shard_promises(&admin).await?;
+            }
         }
+        Ok(())
+    }
+
+    /// Shard `promises` by hashed `origin`. Idempotent: sharding a collection
+    /// again with the same key is a no-op, and a different key is an error
+    /// worth stopping for.
+    ///
+    /// The hashed index is created first, so this works on a collection that
+    /// already holds documents as well as on an empty one.
+    async fn shard_promises(&self, admin: &mongodb::Database) -> StorageResult<()> {
+        let key = doc! { "origin": "hashed" };
+        self.promises
+            .create_index(
+                IndexModel::builder()
+                    .keys(key.clone())
+                    .options(
+                        IndexOptions::builder()
+                            .name("resonate_promise_shard".to_string())
+                            .build(),
+                    )
+                    .build(),
+            )
+            .await
+            .map_err(|e| StorageError::Backend(format!("create shard key index: {e}")))?;
+        let ns = self.promises.namespace().to_string();
+        admin
+            .run_command(doc! { "shardCollection": ns.as_str(), "key": key })
+            .await
+            .map_err(|e| StorageError::Backend(format!("shard {ns}: {e}")))?;
+        tracing::info!(collection = %ns, "Promises sharded by hashed origin");
         Ok(())
     }
 
@@ -522,11 +585,6 @@ fn indexes<'a>(
                 doc! { "lease_timeout_at": 1, "_id": 1 },
                 Some(doc! { "task_state": "acquired" }),
             ),
-        ),
-        // A fulfilled task withdraws itself from every `callbacks` it is in.
-        (
-            promises,
-            index("resonate_promise_callbacks", doc! { "callbacks": 1 }, None),
         ),
         // The branch siblings a task response preloads.
         (

@@ -8,7 +8,8 @@ description = "The one way to run what CI runs: cargo xtask <job>."
 [dependencies]
 clap = { workspace = true }
 neo4rs = "0.8"
-mongodb = "3"
+# bson 3: see crates/resonate-server-mongodb/Cargo.toml.
+mongodb = { version = "3.9", default-features = false, features = ["compat-3-3-0", "bson-3", "rustls-tls", "dns-resolver"] }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "mysql"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 url = { workspace = true }

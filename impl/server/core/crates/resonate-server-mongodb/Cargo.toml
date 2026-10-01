@@ -13,7 +13,10 @@ description = "Resonate server: durable state in MongoDB — one document per pr
 resonate-core = { path = "../resonate-core" }
 resonate-plugin = { path = "../resonate-plugin" }
 resonate-timer-wheel = { path = "../resonate-timer-wheel" }
-mongodb = "3"
+# bson 3, not the default bson 2: bson 2 turns on serde_json's
+# `preserve_order` for the whole binary, which reorders every JSON map every
+# backend writes and grows `serde_json::Value` past clippy's large-error limit.
+mongodb = { version = "3.9", default-features = false, features = ["compat-3-3-0", "bson-3", "rustls-tls", "dns-resolver"] }
 futures-util = { version = "0.3", default-features = false }
 async-trait = { workspace = true }
 serde = { workspace = true }

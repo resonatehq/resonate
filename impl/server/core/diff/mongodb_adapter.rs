@@ -122,7 +122,8 @@ impl Engine for MongoDbBackend {
 /// the console tests do for Postgres, MySQL and Neo4j. The database is the one
 /// the URI's path names — `cargo xtask` names a fresh one per job — and
 /// `resonate_test` when it names none. The deployment must be a replica set
-/// (one member is enough): the engine runs every transition in a transaction.
+/// (one member is enough) or, with `TEST_MONGODB_SHARD=true`, a sharded cluster
+/// whose `promises` the engine shards by origin.
 pub async fn connect_from_env(retry_timeout: i64, preload_limit: u32) -> Option<MongoDbBackend> {
     let uri = std::env::var("TEST_MONGODB_URI").ok()?;
     let named = uri
@@ -133,6 +134,7 @@ pub async fn connect_from_env(retry_timeout: i64, preload_limit: u32) -> Option<
     let cfg = resonate_server_mongodb::Config {
         uri,
         database: (!named).then(|| "resonate_test".to_string()),
+        shard: std::env::var("TEST_MONGODB_SHARD").is_ok_and(|v| v == "true"),
         retry_timeout,
         preload_limit,
         ..resonate_server_mongodb::Config::default()

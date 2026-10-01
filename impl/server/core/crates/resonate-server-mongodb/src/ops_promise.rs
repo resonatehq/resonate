@@ -346,7 +346,7 @@ impl MongoDbEngine {
                     // they registered in.
                     tx.update_one(
                         &tx.promises.clone(),
-                        doc! { "_id": r.awaited.as_str() },
+                        crate::db::key(&r.awaited),
                         doc! { "$addToSet": { "listeners": r.address.as_str() } },
                     )
                     .await?;

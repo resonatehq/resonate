@@ -43,7 +43,7 @@ impl Tx<'_> {
         id: &str,
     ) -> StorageResult<Option<ScheduleRecord>> {
         let schedules = self.schedules.clone();
-        match self.lock_one(&schedules, id).await? {
+        match self.lock_one(&schedules, doc! { "_id": id }).await? {
             Some(d) => Ok(Some(doc_to_schedule(&d)?)),
             None => Ok(None),
         }
