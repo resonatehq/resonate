@@ -5,15 +5,19 @@
 //!
 //! In this order, and the order is the safety argument:
 //!
-//! 1. **Fence** ([`Log::fence`]). From here no earlier owner can commit —
-//!    including one that is paused and does not know it lost the partition.
+//! 1. **Fence** ([`Log::fence`]): claim the partition. From here no earlier
+//!    owner's record counts — including one that is paused and does not know
+//!    it lost the partition, whose records may still land.
 //! 2. **Check the local copy.** A checkpoint below the log's start offset
 //!    means the log was truncated past it, so the copy is dropped and rebuilt.
-//! 3. **Replay** from the checkpoint to the end of the log. Because step 1
-//!    came first, that end is everything anyone will ever have committed
-//!    before us.
-//! 4. **Rebuild the timer index** from the records.
-//! 5. **Serve.**
+//! 3. **Replay** from the checkpoint to the end of the log, reading past
+//!    every fenced writer's record. Because step 1 came first, that end holds
+//!    every record any earlier owner wrote that counts.
+//! 4. **Write again** every value a fenced writer's record now hides
+//!    ([`crate::log::Reader::stale`]), so compaction keeps it.
+//! 5. **Rebuild the timer index** from the records — with every origin a cut
+//!    commit left owing deliveries ([`needs_recovery`]) due at once.
+//! 6. **Serve.**
 //!
 //! Nothing is announced: the group's assignment is what tells other nodes
 //! where the partition lives ([`crate::directory`]).
@@ -26,10 +30,11 @@
 //! 1. loads each origin (and schedule) the batch names from the local store,
 //!    once, and folds the batch through the kernel in arrival order — request
 //!    *k* sees request *k-1*'s document;
-//! 2. diffs every document it touched into records ([`record::diff`]), each
-//!    in the log's encoding and the local store's;
-//! 3. commits all of them in **one transaction** — the group commit — and
-//!    nothing at all if nothing changed;
+//! 2. turns every kernel decision it made into records ([`record::ordered`]),
+//!    each in the log's encoding and the local store's, one decision after
+//!    another;
+//! 3. commits all of them in one write — the group commit — and nothing at all
+//!    if nothing changed;
 //! 4. applies the same records to the local store with the checkpoint the
 //!    commit returned;
 //! 5. re-arms the timer index for every target it touched;
@@ -37,14 +42,11 @@
 //!    other backend;
 //! 7. answers the callers.
 //!
-//! **Without transactions** ([`Log::atomic`] false) step 2 is per kernel
-//! decision rather than per document: each decision's records, in the order
-//! [`record::ordered`] gives, one decision after another. So a commit cut
-//! short lands every earlier decision whole and a valid prefix of one. Every
-//! fold then starts with [`recover`], which makes the deliveries such a
-//! prefix leaves owing. Takeover adds two steps after replay: write again
-//! every value a fenced writer's records hide ([`crate::log::Reader::stale`]), and arm at
-//! once every origin owing deliveries. An idle partition checks every
+//! A commit is not all or nothing: it can stop after any prefix of its
+//! records. So it lands every earlier decision whole and a prefix of one,
+//! and [`record::ordered`] makes every such prefix a state the protocol
+//! allows, up to deliveries still owed. Every fold starts with [`recover`],
+//! which makes them. An idle partition checks every
 //! [`PartitionCfg::idle_check`] that nobody else wrote to its log.
 //!
 //! The outcome of step 3 decides the rest. `Unavailable`: nothing landed, so
@@ -293,29 +295,25 @@ impl Partition {
             position = after;
         }
 
-        // (3b) Without transactions: write again every value a fenced
-        // writer's record now hides, so compaction cannot drop it.
-        let atomic = log.atomic();
-        if !atomic {
-            let stale = reader.stale();
-            if !stale.is_empty() {
-                let records = restate(store.as_ref(), &stale).map_err(TakeoverError)?;
-                tracing::warn!(
-                    partition = id,
-                    keys = records.len(),
-                    "Writing again what a fenced writer's records hide"
-                );
-                let after = writer.commit(records, position).await?;
-                store.apply(Vec::new(), after).map_err(TakeoverError)?;
-                position = after;
-            }
+        // (4) Write again every value a fenced writer's records hide, so
+        // compaction cannot drop it.
+        let stale = reader.stale();
+        if !stale.is_empty() {
+            let records = restate(store.as_ref(), &stale).map_err(TakeoverError)?;
+            tracing::warn!(
+                partition = id,
+                keys = records.len(),
+                "Writing again what a fenced writer's records hide"
+            );
+            let after = writer.commit(records, position).await?;
+            store.apply(Vec::new(), after).map_err(TakeoverError)?;
+            position = after;
         }
 
-        // (4) The timer index, from the records themselves — and, without
-        // transactions, every origin a cut commit left owing deliveries, due
-        // at once.
+        // (5) The timer index, from the records themselves — and every origin
+        // a cut commit left owing deliveries, due at once.
         let timers = Arc::new(Timers::new());
-        seed_timers(store.as_ref(), &timers, !atomic).map_err(TakeoverError)?;
+        seed_timers(store.as_ref(), &timers).map_err(TakeoverError)?;
 
         tracing::info!(
             partition = id,
@@ -324,7 +322,7 @@ impl Partition {
             "Partition taken over"
         );
 
-        // (5) Serve.
+        // (6) Serve.
         let (tx, rx) = mpsc::channel(cfg.mailbox.max(1));
         let (stop, stop_rx) = watch::channel(false);
         let actor = Actor {
@@ -336,7 +334,6 @@ impl Partition {
             cache: DocCache::new(cfg.cache_promises),
             cfg,
             checkpoint: position,
-            atomic,
         };
         let handle = tokio::spawn(async move {
             let exit = actor.run(rx, stop_rx).await;
@@ -453,14 +450,10 @@ fn op_of(c: Consumed) -> Result<Op, String> {
 
 /// Arm one entry per origin and per schedule from what the store holds.
 ///
-/// With `recovering`, an origin holding a state only a cut commit leaves
-/// ([`needs_recovery`]) is armed at once, so the deliveries it owes are made
-/// without waiting for a request or a deadline.
-fn seed_timers(
-    store: &dyn PartitionStore,
-    timers: &Timers,
-    recovering: bool,
-) -> Result<(), String> {
+/// An origin holding a state only a cut commit leaves ([`needs_recovery`])
+/// is armed at once, so the deliveries it owes are made without waiting for a
+/// request or a deadline.
+fn seed_timers(store: &dyn PartitionStore, timers: &Timers) -> Result<(), String> {
     let mut earliest: BTreeMap<String, i64> = BTreeMap::new();
     // Recovery is per origin, but what calls for it is spread over records: a
     // settled promise still owing, or a callback naming a finished task.
@@ -476,20 +469,18 @@ fn seed_timers(
         if let Some(task) = task {
             doc.tasks.insert(id.clone(), task);
         }
-        if recovering {
-            if needs_recovery(&doc) {
-                owing.insert(origin.clone());
-            }
-            if doc
-                .tasks
-                .get(&id)
-                .is_some_and(|t| t.state == TaskState::Fulfilled)
-            {
-                finished.insert(id.clone());
-            }
-            for a in &doc.promises[&id].callbacks {
-                awaiters.insert(a.clone(), origin.clone());
-            }
+        if needs_recovery(&doc) {
+            owing.insert(origin.clone());
+        }
+        if doc
+            .tasks
+            .get(&id)
+            .is_some_and(|t| t.state == TaskState::Fulfilled)
+        {
+            finished.insert(id.clone());
+        }
+        for a in &doc.promises[&id].callbacks {
+            awaiters.insert(a.clone(), origin.clone());
         }
         if let Some(at) = min_deadline(&doc) {
             let slot = earliest.entry(origin).or_insert(at);
@@ -579,10 +570,6 @@ struct Actor {
     checkpoint: Checkpoint,
     /// Hot documents, decoded. The actor's own: see [`DocCache`].
     cache: DocCache,
-    /// Whether the log commits all or nothing. If not, every decision's
-    /// records go out in the order [`record::ordered`] gives, and every
-    /// decision first finishes what a cut commit left ([`recover`]).
-    atomic: bool,
 }
 
 /// A round's working state: every document and schedule it touched, as they
@@ -596,14 +583,7 @@ struct Overlay {
 impl Actor {
     async fn run(mut self, mut rx: mpsc::Receiver<Work>, mut stop: watch::Receiver<bool>) -> Exit {
         let exit = loop {
-            let (atomic, every) = (self.atomic, self.cfg.idle_check);
-            let idle = async move {
-                if atomic {
-                    std::future::pending::<()>().await
-                } else {
-                    tokio::time::sleep(every).await
-                }
-            };
+            let idle = tokio::time::sleep(self.cfg.idle_check);
             let first = tokio::select! {
                 biased;
                 _ = stop.changed() => break Exit::Stopped,
@@ -702,7 +682,7 @@ impl Actor {
 
     async fn decide_and_commit(&mut self, batch: Vec<Work>) -> Result<(), Exit> {
         let mut overlay = Overlay::default();
-        // Without transactions: every decision's records, in decision order.
+        // Every decision's records, in decision order.
         let mut steps: Vec<record::Change> = Vec::new();
         let mut answers: Vec<(Answer, Result<Reply, Unavailable>)> =
             Vec::with_capacity(batch.len());
@@ -735,13 +715,7 @@ impl Actor {
                         }
                     }
                     let doc = &mut overlay.origins.get_mut(&origin).expect("loaded").1;
-                    let (answer, fx) = decide(
-                        doc,
-                        &op,
-                        now,
-                        &self.cfg.kernel,
-                        (!self.atomic).then_some(&mut steps),
-                    );
+                    let (answer, fx) = decide(doc, &op, now, &self.cfg.kernel, &mut steps);
                     sends.extend(fx);
                     answers.push((reply, Ok(answer)));
                 }
@@ -768,16 +742,7 @@ impl Actor {
 
         let mut records = Vec::new();
         let mut ops: Vec<Op> = Vec::new();
-        let changes: Vec<record::Change> = if self.atomic {
-            overlay
-                .origins
-                .values()
-                .flat_map(|(before, after)| record::diff(before, after))
-                .collect()
-        } else {
-            steps
-        };
-        for change in changes {
+        for change in steps {
             ops.push((keys::promise_key(&change.id), change.local));
             records.push(Record {
                 topic: Topic::Promises,
@@ -964,34 +929,29 @@ impl Actor {
 /// origin, so the handler sees a document with nothing due; the sweep's
 /// changes ride the same commit.
 ///
-/// With `steps` — a log without transactions — every kernel decision's
-/// records are appended to it in [`record::ordered`] order, and the fold
-/// starts by finishing whatever a cut commit left owing ([`recover`]), at
-/// `now`, before anything else sees the document.
+/// Every kernel decision's records are appended to `steps` in
+/// [`record::ordered`] order, and the fold starts by finishing whatever a cut
+/// commit left owing ([`recover`]), at `now`, before anything else sees the
+/// document.
 fn decide(
     doc: &mut OriginDoc,
     op: &OriginOp,
     now: i64,
     cfg: &KernelCfg,
-    mut steps: Option<&mut Vec<record::Change>>,
+    steps: &mut Vec<record::Change>,
 ) -> (Reply, Vec<Effect>) {
-    let plain = steps.is_some();
     let mut sends = Vec::new();
     let mut take = |doc: &mut OriginDoc, fx: Vec<Effect>| {
         if fx.is_empty() {
             return;
         }
-        let before = steps.is_some().then(|| doc.clone());
+        let before = doc.clone();
         apply_effects(doc, &fx);
-        if let (Some(steps), Some(before)) = (steps.as_deref_mut(), before) {
-            steps.extend(record::ordered(&before, doc));
-        }
+        steps.extend(record::ordered(&before, doc));
         sends.extend(fx.into_iter().filter(|e| matches!(e, Effect::Send { .. })));
     };
-    if plain {
-        let fx = recover(doc, now, cfg);
-        take(doc, fx);
-    }
+    let fx = recover(doc, now, cfg);
+    take(doc, fx);
     let fx = drain(doc, now, cfg);
     take(doc, fx);
     let reply = match op {

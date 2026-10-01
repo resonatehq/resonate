@@ -1,10 +1,10 @@
-//! Fencing without transactions: claims, epochs, and the filter that applies
-//! them.
+//! Fencing by claim: claims, epochs, and the filter that applies them.
 //!
 //! # Contract
 //!
-//! Without transactions the broker refuses nobody: a writer that lost its
-//! partition still lands records. So ownership is decided in the log itself,
+//! The broker refuses nobody: a writer that lost its partition still lands
+//! records. (Kafka transactions would refuse it, at about ten times the cost
+//! of a commit — `examples/txn_cost.rs`.) So ownership is decided in the log itself,
 //! and every reader decides it the same way:
 //!
 //! - **A claim** is a record a new owner appends to each of the partition's
@@ -15,9 +15,8 @@
 //!   the new **epoch** of that log.
 //! - **Data** carries its writer's epoch. A reader admits a record iff its
 //!   epoch is the one in force where it lies, so a fenced writer's records —
-//!   landing after a newer claim — are read past. A record with no epoch at
-//!   all predates the first claim (a log first written with transactions) and
-//!   is admitted until one is seen.
+//!   landing after a newer claim — are read past. A record without an epoch
+//!   was written by nothing of ours and is refused.
 //! - **The writer checks every offset.** Its records must land exactly where
 //!   it last left the log. If anything else landed in between, a claim or a
 //!   zombie's record, the writer stops: its records may lie past a claim, or
@@ -38,8 +37,7 @@
 //!
 //! # Dependants
 //!
-//! [`super::mem`] in its plain mode and [`super::kafka`] without
-//! transactions wrap their raw readers in [`Filtered`].
+//! [`super::mem`] and [`super::kafka`] wrap their raw readers in [`Filtered`].
 
 use std::collections::BTreeSet;
 
@@ -92,10 +90,7 @@ impl Filter {
             }
             return false;
         }
-        let admitted = match c.epoch {
-            Some(e) => e == *slot,
-            None => *slot < 0,
-        };
+        let admitted = c.epoch.is_some_and(|e| e == *slot);
         let key = (c.topic, c.key.clone());
         if admitted {
             self.stale.remove(&key);
@@ -199,9 +194,9 @@ mod tests {
     }
 
     #[test]
-    fn records_without_an_epoch_count_only_before_the_first_claim() {
+    fn a_record_without_an_epoch_is_refused() {
         let mut f = Filter::new(&Checkpoint::default());
-        assert!(f.admit(&data("a", 0, None)));
+        assert!(!f.admit(&data("a", 0, None)));
         f.admit(&claim(1, 1));
         assert!(!f.admit(&data("a", 2, None)));
     }

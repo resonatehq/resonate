@@ -82,24 +82,9 @@ pub struct Config {
     #[serde(default)]
     pub group_id: Option<String>,
 
-    /// Transactional ids are `<txn_prefix>-p<partition>`. Defaults to the
-    /// topic prefix.
-    #[serde(default)]
-    pub txn_prefix: Option<String>,
-
-    /// Commit every round in a Kafka transaction (the default), or write
-    /// without transactions: claims, epochs and offset checks fence the
-    /// partitions, and each decision's records go out in an order that leaves
-    /// a valid state wherever a commit stops (see the crate README). Without
-    /// transactions a commit costs one produce rather than a transaction — a
-    /// tenth of the time, measured. Fixed for the life of a log: a log
-    /// written without transactions must not be read with them.
-    #[serde(default = "default_true")]
-    pub transactions: bool,
-
-    /// Without transactions: the topics' `min.compaction.lag.ms`, set when
-    /// this server creates them. Must outlast how late a fenced writer's
-    /// record can land (10s) plus the idle check (1s).
+    /// The topics' `min.compaction.lag.ms`, set when this server creates them.
+    /// An existing topic with less than 70s (how late a fenced writer's record
+    /// can land, plus a minute) is refused at startup.
     #[serde(default = "default_min_compaction_lag_ms")]
     pub min_compaction_lag_ms: u64,
 
@@ -307,11 +292,7 @@ impl ResonateServer for KafkaServer {
                          in-process log. Nothing survives this process."
                 );
                 (
-                    if c.transactions {
-                        MemLog::new(c.partitions)
-                    } else {
-                        MemLog::plain(c.partitions)
-                    },
+                    MemLog::new(c.partitions),
                     StaticMembership::new(c.partitions),
                     Arc::new(NoDirectory),
                     LocalPeers::new(),
@@ -322,13 +303,11 @@ impl ResonateServer for KafkaServer {
                 let kafka = KafkaCfg {
                     brokers: brokers.clone(),
                     topic_prefix: prefix.clone(),
-                    txn_prefix: c.txn_prefix.clone().unwrap_or_else(|| prefix.clone()),
                     partitions: c.partitions,
                     replication_factor: c.replication_factor,
                     create_topics: c.create_topics,
                     properties: c.librdkafka.clone(),
                     node_id: c.node_id.clone(),
-                    transactional: c.transactions,
                     min_compaction_lag: Duration::from_millis(c.min_compaction_lag_ms),
                     ..Default::default()
                 };

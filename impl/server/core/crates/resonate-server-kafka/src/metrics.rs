@@ -9,7 +9,7 @@
 //! | `resonate_kafka_queue_wait_seconds` | from a request reaching its partition to its round starting |
 //! | `resonate_kafka_round_seconds` | a whole round: load, decide, commit, apply |
 //! | `resonate_kafka_round_requests` | requests decided per round — the group commit at work |
-//! | `resonate_kafka_commit_seconds` | the Kafka transaction alone |
+//! | `resonate_kafka_commit_seconds` | the commit alone: producing a round's records |
 //! | `resonate_kafka_commit_errors_total{kind}` | `unavailable`, `fenced`, `uncertain` |
 //! | `resonate_kafka_records_committed_total{topic}` | |
 //! | `resonate_kafka_doc_cache_total{result}` | `hit`, `miss` |
@@ -63,7 +63,7 @@ pub static ROUND_REQUESTS: LazyLock<Histogram> = LazyLock::new(|| {
 pub static COMMIT_SECONDS: LazyLock<Histogram> = LazyLock::new(|| {
     register_histogram!(
         "resonate_kafka_commit_seconds",
-        "Time a round's Kafka transaction took",
+        "Time a round's commit took",
         latency()
     )
     .unwrap()

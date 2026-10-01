@@ -2,9 +2,7 @@
 // consumer group, RocksDB copies and HTTP forwarding.
 //
 // Opt-in, like the blob backend's live tests. Every test uses fresh topics
-// under a random prefix, so a shared cluster is fine; a single broker needs
-// its transaction log configured for one replica (the stock KRaft
-// `server.properties` is).
+// under a random prefix, so a shared cluster is fine.
 //
 // Run:
 //   TEST_KAFKA_BROKERS=localhost:9092 \
@@ -41,7 +39,6 @@ fn cfg(brokers: &str, prefix: &str, partitions: u32, node: &str) -> KafkaCfg {
     KafkaCfg {
         brokers: brokers.to_string(),
         topic_prefix: prefix.to_string(),
-        txn_prefix: prefix.to_string(),
         partitions,
         replication_factor: 1,
         create_topics: true,
@@ -91,20 +88,16 @@ fn create(id: &str) -> Value {
     json!({ "id": id, "timeoutAt": FAR, "param": { "data": "aGk=" }, "tags": {} })
 }
 
-/// Without transactions the broker refuses nobody: the first writer's record
+/// The broker refuses nobody: the first writer's record
 /// lands after the second's claim. It is the writer that notices — its record
 /// did not land where it left the log — and every reader that reads past it,
 /// reporting its key as one to write again.
 #[tokio::test(flavor = "multi_thread")]
-async fn without_transactions_a_claim_fences_the_first_writer() {
+async fn a_claim_fences_the_first_writer() {
     let Some(brokers) = brokers() else { return };
-    let log = KafkaLog::connect(KafkaCfg {
-        transactional: false,
-        ..cfg(&brokers, &prefix("claim"), 2, "n")
-    })
-    .await
-    .expect("connects and creates topics");
-    assert!(!log.atomic());
+    let log = KafkaLog::connect(cfg(&brokers, &prefix("claim"), 2, "n"))
+        .await
+        .expect("connects and creates topics");
     let rec = |k: &str| Record {
         topic: Topic::Promises,
         key: k.to_string(),
@@ -140,68 +133,7 @@ async fn without_transactions_a_claim_fences_the_first_writer() {
     assert_eq!(keys, vec!["a".to_string(), "b".to_string()]);
     assert_eq!((end.promises, end.schedules, end.epochs), (5, 2, [3, 1]));
     assert_eq!(reader.stale(), vec![(Topic::Promises, "c".to_string())]);
-}
 
-#[tokio::test(flavor = "multi_thread")]
-async fn a_second_fence_refuses_the_first_writer() {
-    let Some(brokers) = brokers() else { return };
-    let log = KafkaLog::connect(cfg(&brokers, &prefix("fence"), 2, "n"))
-        .await
-        .expect("connects and creates topics");
-
-    let first = log.fence(1).await.expect("fenced");
-    let rec = |k: &str| Record {
-        topic: Topic::Promises,
-        key: k.to_string(),
-        value: Some(b"v".to_vec()),
-    };
-    let after = first
-        .commit(vec![rec("a"), rec("b")], Checkpoint::default())
-        .await
-        .expect("the only writer commits");
-    // Two records — at offsets 0 and 1 on Kafka; Redpanda writes a control
-    // batch of its own when a transaction begins, so they land one later
-    // there. Only "past both records" is promised.
-    assert!(
-        after.promises >= 2,
-        "a checkpoint past both records: {after:?}"
-    );
-
-    let second = log.fence(1).await.expect("fenced again");
-    match first.commit(vec![rec("c")], after).await {
-        Err(LogError::Fenced(_)) => {}
-        other => panic!("the first writer must be fenced, got {other:?}"),
-    }
-    let after = second
-        .commit(
-            vec![Record {
-                topic: Topic::Schedules,
-                key: "s".into(),
-                value: Some(b"x".to_vec()),
-            }],
-            after,
-        )
-        .await
-        .expect("the new writer commits");
-
-    // Read back: committed only, the fenced write nowhere, and a checkpoint
-    // past every marker.
-    let mut reader = log.reader(1, Checkpoint::default()).await.unwrap();
-    let mut keys = Vec::new();
-    let mut end = Checkpoint::default();
-    while let Some((batch, cp)) = reader.next().await.unwrap() {
-        keys.extend(batch.into_iter().map(|c| (c.topic, c.key)));
-        end = cp;
-    }
-    assert_eq!(
-        keys,
-        vec![
-            (Topic::Promises, "a".to_string()),
-            (Topic::Promises, "b".to_string()),
-            (Topic::Schedules, "s".to_string())
-        ]
-    );
-    assert!(end.covers(&after), "{end:?} must cover {after:?}");
     // Resuming at the end reads nothing.
     let mut reader = log.reader(1, end).await.unwrap();
     while let Some((batch, _)) = reader.next().await.unwrap() {

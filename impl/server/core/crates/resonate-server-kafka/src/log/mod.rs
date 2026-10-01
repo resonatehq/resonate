@@ -1,29 +1,30 @@
-//! The log port: fenced, transactional writes and committed reads, per
-//! partition.
+//! The log port: fenced writes and filtered reads, per partition.
 //!
 //! # Contract
 //!
 //! A partition is two logs of the same index — promise records and schedule
 //! records — and whoever owns one owns both. Ownership is not decided here;
-//! what is decided here is who may *write*:
+//! what is decided here is whose writes *count*. There are no transactions:
+//! the broker takes every record it is sent, so fencing lives in the log
+//! itself ([`epoch`]):
 //!
-//! - [`Log::fence`] makes the caller the partition's only writer. Every writer
-//!   handed out earlier for that partition is refused from then on
-//!   ([`LogError::Fenced`]), whatever it believes about itself. On Kafka this is
-//!   `init_transactions` on the partition's transactional id, which also
-//!   finishes whatever transaction the previous writer left open.
-//! - [`Writer::commit`] is all or nothing: every record lands, or none does, and
-//!   a reader never sees part of one (`read_committed`).
-//! - [`Log::reader`] reads committed records from a checkpoint up to the end of
-//!   the log *as it is when the reader is created*. Called after `fence`, that
-//!   end is everything any earlier writer ever committed.
-//!
-//! That is the log **with transactions**. A log without them
-//! ([`Log::atomic`] false, [`epoch`]) keeps the same port with weaker
-//! promises: `fence` appends a claim instead, a fenced writer's records still
-//! land (and every reader reads past them), and a commit can land any prefix
-//! of its records. The partition shell orders its records so that every
-//! prefix is valid, and repairs what a cut leaves; see [`crate::partition`].
+//! - [`Log::fence`] appends a claim to each of the partition's logs. From then
+//!   on the caller's records are the only ones any reader admits; a writer
+//!   handed out earlier still lands records, and every reader reads past
+//!   them.
+//! - [`Writer::commit`] lands its records in order, and can stop after any
+//!   prefix of them. It fails if they did not land exactly where this writer
+//!   last left the log. The partition shell orders its records so that every
+//!   prefix is a state the protocol allows, and repairs what a cut leaves
+//!   ([`crate::partition`]).
+//! - [`Writer::check`] asks, without writing, whether the log still ends where
+//!   this writer left it — how an idle owner hears of a fenced writer's
+//!   records.
+//! - [`Log::reader`] reads the admitted records from a checkpoint up to the end
+//!   of the log *as it is when the reader is created*. Called after `fence`,
+//!   that end is everything any earlier owner ever wrote. Once read to the
+//!   end, it names the keys whose newest record it refused
+//!   ([`Reader::stale`]).
 //!
 //! The error taxonomy is the load-bearing part, as it is for the blob store:
 //!
@@ -62,8 +63,8 @@ pub enum Topic {
 }
 
 /// Where to resume reading a partition: the next offset of each of its logs,
-/// and — for a log without transactions — the epoch in force at that offset
-/// on each ([`epoch`]). `-1` is "no claim seen yet".
+/// and the epoch in force at that offset on each ([`epoch`]). `-1` is "no
+/// claim seen yet".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Checkpoint {
     pub promises: i64,
@@ -149,7 +150,7 @@ pub struct Consumed {
     pub key: String,
     pub value: Option<Vec<u8>>,
     pub offset: i64,
-    /// The writer's epoch, on a log without transactions ([`epoch`]).
+    /// The writer's epoch ([`epoch`]).
     pub epoch: Option<i64>,
     /// A claim, not data ([`epoch`]). Never handed past the epoch filter.
     pub claim: bool,
@@ -175,51 +176,41 @@ impl std::fmt::Display for LogError {
 
 impl std::error::Error for LogError {}
 
-/// The partitioned, transactional log.
+/// The partitioned log.
 #[async_trait]
 pub trait Log: Send + Sync {
     /// How many partitions there are. Fixed for the life of a deployment: the
     /// partition of an origin is a function of it.
     fn partitions(&self) -> u32;
 
-    /// Become `partition`'s only writer, refusing every earlier one.
+    /// Become `partition`'s only writer: claim it ([`epoch`]).
     async fn fence(&self, partition: u32) -> Result<Arc<dyn Writer>, LogError>;
 
     /// The earliest offsets still readable on the partition's two logs.
     async fn start(&self, partition: u32) -> Result<Checkpoint, LogError>;
 
-    /// Read committed records from `from` to the end of the log as it is now.
+    /// Read admitted records from `from` to the end of the log as it is now.
     async fn reader(&self, partition: u32, from: Checkpoint) -> Result<Box<dyn Reader>, LogError>;
 
     /// Whether the log answers at all — what `/ready` reports.
     async fn ready(&self) -> bool;
-
-    /// Whether a commit is all or nothing. A log that is not (one without
-    /// transactions, [`epoch`]) can land a prefix of a commit's records, so
-    /// its writer orders them to make every prefix a state the protocol
-    /// allows, and its owner repairs what a cut prefix leaves behind.
-    fn atomic(&self) -> bool {
-        true
-    }
 }
 
 /// The one writer of one partition.
 #[async_trait]
 pub trait Writer: Send + Sync {
-    /// Commit `records` as one transaction. `base` is the partition's
-    /// checkpoint before this commit; the result is its checkpoint after it.
+    /// Land `records`, in order. `base` is the partition's checkpoint before
+    /// this commit; the result is its checkpoint after it. An error may leave
+    /// any prefix of them landed — except `Unavailable`, which landed none.
     async fn commit(&self, records: Vec<Record>, base: Checkpoint) -> Result<Checkpoint, LogError>;
 
-    /// Whether the log still ends at `at`, where this writer left it. On a
-    /// log without transactions a fenced writer's records still land, after
-    /// a newer owner's; an idle owner hears of them only by asking. A log with
-    /// transactions has nothing to report.
-    async fn check(&self, _at: Checkpoint) -> Result<(), LogError> {
-        Ok(())
-    }
+    /// Whether the log still ends at `at`, where this writer left it. A
+    /// fenced writer's records still land, after a newer owner's claim; an
+    /// idle owner hears of them only by asking.
+    async fn check(&self, at: Checkpoint) -> Result<(), LogError>;
 }
 
-/// A committed read of one partition, from a checkpoint to a fixed end.
+/// A read of one partition, from a checkpoint to a fixed end.
 #[async_trait]
 pub trait Reader: Send {
     /// The next batch and the checkpoint after it, or `None` at the end.
@@ -227,7 +218,8 @@ pub trait Reader: Send {
 
     /// Once read to the end: the keys whose newest record was refused as a
     /// fenced writer's ([`epoch`]). Compaction would keep that record and
-    /// drop the value it hides, so the owner writes the value again.
+    /// drop the value it hides, so the owner writes the value again. A raw
+    /// reader, below the epoch filter, refuses nothing.
     fn stale(&self) -> Vec<(Topic, String)> {
         Vec::new()
     }

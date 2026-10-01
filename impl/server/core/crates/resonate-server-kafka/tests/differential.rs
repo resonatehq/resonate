@@ -123,18 +123,8 @@ async fn differential_random() {
     run(server, usize::MAX, None).await;
 }
 
-/// The same trajectory over a log without transactions: every decision's
-/// records written one by one, in the order that makes each prefix valid.
-#[tokio::test(flavor = "multi_thread")]
-async fn differential_random_plain() {
-    let log = MemLog::plain(8);
-    let server = Node::in_memory_on(log, Arc::new(NullRouter), node_cfg());
-    server.start().await.expect("every partition taken over");
-    run(server, usize::MAX, None).await;
-}
-
-/// Every prefix is a state the protocol allows: the same trajectory over a
-/// log without transactions, with each step's commit cut after a random
+/// Every prefix is a state the protocol allows: the same trajectory, with
+/// each step's commit cut after a random
 /// number of its records — none, some, or all of them landing — and then
 /// reported lost, as a broker that fails mid-commit would.
 ///
@@ -146,7 +136,7 @@ async fn differential_random_plain() {
 /// (default 1) cuts every n-th step.
 #[tokio::test(flavor = "multi_thread")]
 async fn prefix_random() {
-    let log = MemLog::plain(8);
+    let log = MemLog::new(8);
     let server = Node::in_memory_on(Arc::clone(&log), Arc::new(NullRouter), node_cfg());
     server.start().await.expect("every partition taken over");
     let steps: usize = std::env::var("TEST_PREFIX_STEPS")
@@ -156,9 +146,8 @@ async fn prefix_random() {
     run(server, steps, Some(log)).await;
 }
 
-/// The same trajectory over a real Kafka: every round a transaction, every
+/// The same trajectory over a real Kafka: every round a produce, every
 /// `debug.reset` a batch of tombstones. Opt-in, and shorter by default.
-/// `TEST_KAFKA_TRANSACTIONS=0` runs it without transactions.
 ///
 ///   TEST_KAFKA_BROKERS=localhost:9092 TEST_KAFKA_STEPS=5000 \
 ///     cargo test -p resonate-server-kafka --test differential -- --nocapture
@@ -177,10 +166,8 @@ async fn differential_random_on_kafka() {
         resonate_server_kafka::log::kafka::KafkaCfg {
             brokers,
             topic_prefix: prefix.clone(),
-            txn_prefix: prefix,
             partitions: 8,
             replication_factor: 1,
-            transactional: std::env::var("TEST_KAFKA_TRANSACTIONS").as_deref() != Ok("0"),
             ..Default::default()
         },
     )

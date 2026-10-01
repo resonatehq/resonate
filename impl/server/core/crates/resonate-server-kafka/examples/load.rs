@@ -10,7 +10,7 @@
 //!   server   resonate_server_request_duration_seconds   (server port)
 //!   queue    resonate_kafka_queue_wait_seconds          (waiting for a round)
 //!   round    resonate_kafka_round_seconds               (load, decide, commit, apply)
-//!   commit   resonate_kafka_commit_seconds              (the Kafka transaction)
+//!   commit   resonate_kafka_commit_seconds              (producing a round)
 //!
 //!   cargo run --release -p resonate-server-kafka --example load -- \
 //!     --url http://127.0.0.1:8101 --metrics http://127.0.0.1:9101/metrics \

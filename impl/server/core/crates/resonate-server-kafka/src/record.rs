@@ -13,9 +13,9 @@
 //!   canonical form, the format version and the origin check all carry over,
 //!   and the deadlines a record arms travel inside it.
 //! - A deleted promise is a tombstone: a record with no value.
-//! - [`diff`] is the whole write path: the records a transition from one origin
-//!   document to another needs, and nothing for what did not change — each in
-//!   both encodings below.
+//! - [`ordered`] is the whole write path: the records one kernel decision
+//!   needs, and nothing for what did not change — each in both encodings
+//!   below, in an order where every prefix is a valid state.
 //!
 //! # Two encodings
 //!
@@ -35,7 +35,7 @@
 //!
 //! # Dependants
 //!
-//! The partition shell encodes with [`diff`] before every commit, transcodes
+//! The partition shell encodes with [`ordered`] after every decision, transcodes
 //! with [`local::from_log`] on replay, and decodes with [`local::assemble`] on
 //! every load; search and the snapshot decode local records too.
 
@@ -105,42 +105,10 @@ pub struct Change {
     pub local: Option<Vec<u8>>,
 }
 
-/// The records that take an origin from `before` to `after`: a value for every
-/// promise whose promise or task changed, a tombstone for every promise that
-/// is gone. Unchanged promises produce nothing.
-pub fn diff(before: &OriginDoc, after: &OriginDoc) -> Vec<Change> {
-    let ids: BTreeSet<&String> = before
-        .promises
-        .keys()
-        .chain(after.promises.keys())
-        .collect();
-    let mut out = Vec::new();
-    for id in ids {
-        let old = (before.promises.get(id), before.tasks.get(id));
-        let new = (after.promises.get(id), after.tasks.get(id));
-        if old == new {
-            continue;
-        }
-        out.push(match new.0 {
-            Some(promise) => Change {
-                id: id.clone(),
-                log: Some(encode_promise(id, promise, new.1)),
-                local: Some(local::encode(promise, new.1)),
-            },
-            None => Change {
-                id: id.clone(),
-                log: None,
-                local: None,
-            },
-        });
-    }
-    out
-}
-
 /// The records that take an origin from `before` to `after` — one decision
 /// of the kernel's — **one at a time**, in an order where every prefix leaves
-/// a state the protocol allows, given [`kernel::recover`]. For a log without
-/// transactions, which can land any prefix of a commit.
+/// a state the protocol allows, given [`kernel::recover`] — because a commit
+/// can land any prefix of its records.
 ///
 /// The order follows the specification, which makes a settlement and its
 /// consequences separate steps:
@@ -161,7 +129,7 @@ pub fn diff(before: &OriginDoc, after: &OriginDoc) -> Vec<Change> {
 /// 6. **Tombstones.**
 ///
 /// A record that changed in no way that matters to the order is written once,
-/// in the class it falls in. Unchanged records produce nothing, as in [`diff`].
+/// in the class it falls in. Unchanged records produce nothing.
 ///
 /// [`kernel::recover`]: resonate_server_blob::kernel::recover
 pub fn ordered(before: &OriginDoc, after: &OriginDoc) -> Vec<Change> {
@@ -511,7 +479,7 @@ mod tests {
     }
 
     #[test]
-    fn the_diff_writes_only_what_changed() {
+    fn only_what_changed_is_written_and_tombstones_last() {
         let mut before = OriginDoc::default();
         before
             .promises
@@ -532,7 +500,7 @@ mod tests {
             .promises
             .insert("o:new".into(), promise(PromiseState::Pending, false));
 
-        let out = diff(&before, &after);
+        let out = ordered(&before, &after);
         let ids: Vec<(&str, bool)> = out
             .iter()
             .map(|c| (c.id.as_str(), c.log.is_some()))
@@ -540,8 +508,54 @@ mod tests {
         for c in &out {
             assert_eq!(c.log.is_some(), c.local.is_some());
         }
-        assert_eq!(ids, vec![("o:b", true), ("o:gone", false), ("o:new", true)]);
-        assert!(diff(&after, &after).is_empty());
+        assert_eq!(ids, vec![("o:b", true), ("o:new", true), ("o:gone", false)]);
+        assert!(ordered(&after, &after).is_empty());
+    }
+
+    #[test]
+    fn a_settlement_is_written_owing_before_its_deliveries_and_final_after() {
+        let mut before = OriginDoc::default();
+        let mut awaited = promise(PromiseState::Pending, true);
+        awaited.callbacks = vec!["o:t".into()];
+        awaited.listeners = vec!["http://l:1".into()];
+        before.promises.insert("o:a".into(), awaited);
+        let mut awaiter = promise(PromiseState::Pending, true);
+        awaiter.listeners.clear();
+        before.promises.insert("o:t".into(), awaiter);
+        before
+            .tasks
+            .insert("o:t".into(), task(TaskState::Suspended));
+        let mut registered = promise(PromiseState::Pending, true);
+        registered.callbacks.clear();
+        registered.listeners.clear();
+        before.promises.insert("o:q".into(), registered);
+
+        let mut after = before.clone();
+        let a = after.promises.get_mut("o:a").unwrap();
+        a.state = PromiseState::Resolved;
+        a.settled_at = Some(2_000);
+        a.callbacks.clear();
+        a.listeners.clear();
+        after.tasks.get_mut("o:t").unwrap().state = TaskState::Pending;
+        after.promises.get_mut("o:q").unwrap().callbacks = vec!["o:t".into()];
+
+        let out = ordered(&before, &after);
+        let shape: Vec<(&str, usize, usize)> = out
+            .iter()
+            .map(|c| {
+                let (p, _) = local::decode(c.local.as_ref().unwrap()).unwrap();
+                (c.id.as_str(), p.callbacks.len(), p.listeners.len())
+            })
+            .collect();
+        assert_eq!(
+            shape,
+            vec![
+                ("o:a", 1, 1), // settled, still owing
+                ("o:q", 1, 0), // a registration
+                ("o:t", 0, 0), // the delivery
+                ("o:a", 0, 0), // settled, owing nothing
+            ]
+        );
     }
 
     #[test]

@@ -10,23 +10,28 @@
 //! | `<prefix>.schedules` | N | schedule id | the schedule |
 //!
 //! Partition *p* of the promise topic and partition *p* of the schedule topic
-//! are one partition of this backend: one owner, one writer, one transaction.
-//! Records are produced to an explicit partition ([`crate::keys::partition_of`]
-//! over the origin, or the schedule id), never to the producer's own choice.
+//! are one partition of this backend: one owner, one writer. Records are
+//! produced to an explicit partition ([`crate::keys::partition_of`] over the
+//! origin, or the schedule id), never to the producer's own choice.
 //!
 //! # Fencing
 //!
-//! Partition *p* has one transactional id, `<txn_prefix>-p<p>`. Fencing is
-//! `init_transactions` on a fresh producer with that id: the broker bumps the
-//! id's epoch, which refuses every earlier producer with it, and completes or
-//! aborts whatever transaction such a producer left open. So after `fence`
-//! returns, the log's committed end is final until this writer adds to it.
+//! By claim, as [`super::epoch`] describes: `fence` reads each log's high
+//! watermark and produces a claim that must land exactly there. Records go
+//! out through an idempotent producer (`acks=all`), so they land in order and
+//! once, and each delivery report's offset is checked against where this
+//! writer last left the log. No transactions: one costs about ten times a
+//! produce (`examples/txn_cost.rs`).
+//!
+//! Connecting checks both topics are compacted with a
+//! `min.compaction.lag.ms` long enough for an owner to write over a fenced
+//! writer's late record before compaction can keep it — and refuses to
+//! start otherwise.
 //!
 //! # Reading
 //!
-//! `read_committed`, one topic after the other, each to end-of-partition. The
-//! checkpoint after a topic is its high watermark at that moment, which is
-//! past any trailing transaction marker, so a resume never starts on one.
+//! One topic after the other, each to end-of-partition, through the epoch
+//! filter. The checkpoint after a topic is its high watermark at that moment.
 //!
 //! Who owns a partition is the consumer group's to say, not the log's: see
 //! [`crate::directory::kafka`].
@@ -36,13 +41,13 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use rdkafka::admin::{AdminClient, AdminOptions, NewTopic, TopicReplication};
+use rdkafka::admin::{AdminClient, AdminOptions, NewTopic, ResourceSpecifier, TopicReplication};
 use rdkafka::client::DefaultClientContext;
 use rdkafka::config::ClientConfig;
 use rdkafka::consumer::{BaseConsumer, Consumer};
 use rdkafka::error::{KafkaError, RDKafkaErrorCode};
 use rdkafka::message::{Header, Headers, OwnedHeaders};
-use rdkafka::producer::{FutureProducer, FutureRecord, Producer};
+use rdkafka::producer::{FutureProducer, FutureRecord};
 use rdkafka::{Message, Offset, TopicPartitionList};
 
 use super::{epoch, Checkpoint, Consumed, Log, LogError, Reader, Record, Topic, Writer};
@@ -54,8 +59,6 @@ pub struct KafkaCfg {
     pub brokers: String,
     /// Topic names are `<topic_prefix>.promises` and `.schedules`.
     pub topic_prefix: String,
-    /// Transactional ids are `<txn_prefix>-p<partition>`. One per deployment.
-    pub txn_prefix: String,
     /// Partitions of the promise and schedule topics. Fixed: an origin's
     /// partition is a function of it.
     pub partitions: u32,
@@ -63,24 +66,17 @@ pub struct KafkaCfg {
     pub replication_factor: i32,
     /// Create the topics if they do not exist.
     pub create_topics: bool,
-    /// How long a transaction may take before it is abandoned.
-    pub transaction_timeout: Duration,
     /// How long to wait on the broker for anything else.
     pub request_timeout: Duration,
     /// Extra librdkafka properties for every client (security, tuning).
     pub properties: BTreeMap<String, String>,
     /// This node's id, for client ids.
     pub node_id: String,
-    /// Write in transactions (`true`), or without them — claims, epochs and
-    /// offset checks ([`super::epoch`]).
-    pub transactional: bool,
-    /// Without transactions: how long a record may take to land before the
-    /// producer gives up on it — so how late a fenced writer's records can
-    /// still arrive.
+    /// How long a record may take to land before the producer gives up on
+    /// it — so how late a fenced writer's records can still arrive.
     pub delivery_timeout: Duration,
-    /// Without transactions: the topics' `min.compaction.lag.ms`, which must
-    /// outlast `delivery_timeout` plus the owner's idle check, so a fenced
-    /// writer's record is never compacted before its key is written again.
+    /// `min.compaction.lag.ms` for topics this log creates. An existing topic
+    /// must have at least [`KafkaCfg::compaction_lag_floor`].
     pub min_compaction_lag: Duration,
 }
 
@@ -89,15 +85,12 @@ impl Default for KafkaCfg {
         Self {
             brokers: "localhost:9092".into(),
             topic_prefix: "resonate".into(),
-            txn_prefix: "resonate".into(),
             partitions: 64,
             replication_factor: 3,
             create_topics: true,
-            transaction_timeout: Duration::from_secs(60),
             request_timeout: Duration::from_secs(30),
             properties: BTreeMap::new(),
             node_id: "node-0".into(),
-            transactional: true,
             delivery_timeout: Duration::from_secs(10),
             min_compaction_lag: Duration::from_secs(3_600),
         }
@@ -110,6 +103,14 @@ impl KafkaCfg {
             Topic::Promises => format!("{}.promises", self.topic_prefix),
             Topic::Schedules => format!("{}.schedules", self.topic_prefix),
         }
+    }
+
+    /// The shortest `min.compaction.lag.ms` that keeps a fenced writer's
+    /// record from being compacted before its owner writes over it: as late as
+    /// such a record can land, plus a minute for the owner's idle check and a
+    /// takeover.
+    pub fn compaction_lag_floor(&self) -> Duration {
+        self.delivery_timeout + Duration::from_secs(60)
     }
 
     fn client(&self) -> ClientConfig {
@@ -128,11 +129,10 @@ impl KafkaCfg {
         let mut c = self.client();
         c.set(
             "group.id",
-            format!("{}-reader-{}", self.txn_prefix, self.node_id),
+            format!("{}-reader-{}", self.topic_prefix, self.node_id),
         )
         .set("enable.auto.commit", "false")
         .set("enable.auto.offset.store", "false")
-        .set("isolation.level", "read_committed")
         .set("enable.partition.eof", "true")
         .set("auto.offset.reset", "earliest");
         c
@@ -141,50 +141,6 @@ impl KafkaCfg {
 
 fn unavailable(e: impl std::fmt::Display) -> LogError {
     LogError::Unavailable(e.to_string())
-}
-
-fn is_fenced_code(code: RDKafkaErrorCode) -> bool {
-    matches!(
-        code,
-        RDKafkaErrorCode::ProducerFenced
-            | RDKafkaErrorCode::Fenced
-            | RDKafkaErrorCode::InvalidProducerEpoch
-            | RDKafkaErrorCode::TransactionalIdAuthorizationFailed
-    )
-}
-
-/// How a transactional error must be handled.
-#[derive(Debug, PartialEq, Eq)]
-enum Class {
-    /// Abort the transaction; nothing landed.
-    Abort,
-    /// Try the same call again.
-    Retry,
-    /// Someone else owns the transactional id now.
-    Fenced,
-    /// The producer is unusable and nothing is known.
-    Fatal,
-}
-
-fn classify(e: &KafkaError) -> Class {
-    if let KafkaError::Transaction(t) = e {
-        if is_fenced_code(t.code()) {
-            return Class::Fenced;
-        }
-        if t.txn_requires_abort() {
-            return Class::Abort;
-        }
-        if t.is_retriable() {
-            return Class::Retry;
-        }
-        return Class::Fatal;
-    }
-    match e.rdkafka_error_code() {
-        Some(code) if is_fenced_code(code) => Class::Fenced,
-        // A produce that failed inside a transaction poisons the transaction:
-        // abort it, and nothing it held lands.
-        _ => Class::Abort,
-    }
 }
 
 pub struct KafkaLog {
@@ -204,7 +160,52 @@ impl KafkaLog {
             cfg,
         });
         log.check_partition_counts().await?;
+        log.check_topic_configs().await?;
         Ok(log)
+    }
+
+    /// Refuse a topic that is not compacted, or compacted sooner than an
+    /// owner can write over a fenced writer's late record
+    /// ([`KafkaCfg::compaction_lag_floor`]).
+    async fn check_topic_configs(&self) -> Result<(), LogError> {
+        let admin: AdminClient<DefaultClientContext> =
+            self.cfg.client().create().map_err(unavailable)?;
+        let names = [
+            self.cfg.topic(Topic::Promises),
+            self.cfg.topic(Topic::Schedules),
+        ];
+        let specs: Vec<ResourceSpecifier<'_>> =
+            names.iter().map(|n| ResourceSpecifier::Topic(n)).collect();
+        let results = admin
+            .describe_configs(
+                specs.iter(),
+                &AdminOptions::new().request_timeout(Some(self.cfg.request_timeout)),
+            )
+            .await
+            .map_err(unavailable)?;
+        let floor = self.cfg.compaction_lag_floor().as_millis() as i64;
+        for (name, result) in names.iter().zip(results) {
+            let config = result.map_err(|e| {
+                LogError::Unavailable(format!("cannot read the config of topic {name}: {e}"))
+            })?;
+            let value = |key: &str| config.get(key).and_then(|e| e.value.clone());
+            let policy = value("cleanup.policy").unwrap_or_default();
+            if !policy.split(',').any(|p| p.trim() == "compact") {
+                return Err(LogError::Unavailable(format!(
+                    "topic {name} has cleanup.policy={policy}; it must be compacted"
+                )));
+            }
+            let lag: i64 = value("min.compaction.lag.ms")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0);
+            if lag < floor {
+                return Err(LogError::Unavailable(format!(
+                    "topic {name} has min.compaction.lag.ms={lag}; it must be at least {floor} \
+                     so a fenced writer's late record is written over before compaction"
+                )));
+            }
+        }
+        Ok(())
     }
 
     /// Refuse a topic whose partition count differs from the configured one:
@@ -270,7 +271,7 @@ async fn create_topics(cfg: &KafkaCfg) -> Result<(), LogError> {
     }
     let n = cfg.partitions as i32;
     let rf = cfg.replication_factor;
-    let lag = (!cfg.transactional).then_some(lag.as_str());
+    let lag = Some(lag.as_str());
     let topics = [
         compacted(&promises, n, rf, isr, lag),
         compacted(&schedules, n, rf, isr, lag),
@@ -303,45 +304,7 @@ impl Log for KafkaLog {
     }
 
     async fn fence(&self, partition: u32) -> Result<Arc<dyn Writer>, LogError> {
-        if !self.cfg.transactional {
-            return Ok(Arc::new(self.claim(partition).await?));
-        }
-        let mut c = self.cfg.client();
-        c.set(
-            "transactional.id",
-            format!("{}-p{partition}", self.cfg.txn_prefix),
-        )
-        .set("enable.idempotence", "true")
-        .set("acks", "all")
-        .set("compression.type", "lz4")
-        // A round already is the batch: waiting for more only adds latency
-        // (about 1ms per commit, measured with examples/txn_cost.rs).
-        .set("linger.ms", "0")
-        .set(
-            "transaction.timeout.ms",
-            self.cfg.transaction_timeout.as_millis().to_string(),
-        )
-        .set(
-            "message.timeout.ms",
-            self.cfg.transaction_timeout.as_millis().to_string(),
-        );
-        let producer: FutureProducer = c.create().map_err(unavailable)?;
-        let timeout = self.cfg.request_timeout;
-        let p = producer.clone();
-        tokio::task::spawn_blocking(move || p.init_transactions(timeout))
-            .await
-            .map_err(unavailable)?
-            .map_err(|e| match classify(&e) {
-                Class::Fenced => LogError::Fenced(e.to_string()),
-                _ => LogError::Unavailable(format!("cannot fence partition {partition}: {e}")),
-            })?;
-        Ok(Arc::new(KafkaWriter {
-            producer,
-            partition,
-            promises: self.cfg.topic(Topic::Promises),
-            schedules: self.cfg.topic(Topic::Schedules),
-            timeout: self.cfg.transaction_timeout,
-        }))
+        Ok(Arc::new(self.claim(partition).await?))
     }
 
     async fn start(&self, partition: u32) -> Result<Checkpoint, LogError> {
@@ -369,15 +332,7 @@ impl Log for KafkaLog {
             topics: vec![Topic::Promises, Topic::Schedules],
             consumer: None,
         });
-        if self.cfg.transactional {
-            Ok(raw)
-        } else {
-            Ok(Box::new(epoch::Filtered::new(raw, &from)))
-        }
-    }
-
-    fn atomic(&self) -> bool {
-        self.cfg.transactional
+        Ok(Box::new(epoch::Filtered::new(raw, &from)))
     }
 
     async fn ready(&self) -> bool {
@@ -397,120 +352,6 @@ impl Log for KafkaLog {
 // Writer
 // ---------------------------------------------------------------------------
 
-struct KafkaWriter {
-    producer: FutureProducer,
-    partition: u32,
-    promises: String,
-    schedules: String,
-    timeout: Duration,
-}
-
-impl KafkaWriter {
-    async fn blocking<T: Send + 'static>(
-        &self,
-        f: impl FnOnce(FutureProducer) -> Result<T, KafkaError> + Send + 'static,
-    ) -> Result<Result<T, KafkaError>, LogError> {
-        let p = self.producer.clone();
-        tokio::task::spawn_blocking(move || f(p))
-            .await
-            .map_err(|e| LogError::Uncertain(format!("transaction call panicked: {e}")))
-    }
-
-    /// Abort after an abortable error: nothing landed.
-    async fn abort(&self, cause: KafkaError) -> LogError {
-        let timeout = self.timeout;
-        match self.blocking(move |p| p.abort_transaction(timeout)).await {
-            Ok(Ok(())) => LogError::Unavailable(format!("transaction aborted: {cause}")),
-            Ok(Err(e)) if classify(&e) == Class::Fenced => LogError::Fenced(e.to_string()),
-            // Could not even abort: the producer's state is unknown.
-            Ok(Err(e)) => LogError::Uncertain(format!("abort failed after {cause}: {e}")),
-            Err(e) => e,
-        }
-    }
-}
-
-#[async_trait]
-impl Writer for KafkaWriter {
-    async fn commit(&self, records: Vec<Record>, base: Checkpoint) -> Result<Checkpoint, LogError> {
-        if records.is_empty() {
-            return Ok(base);
-        }
-        match self.blocking(|p| p.begin_transaction()).await? {
-            Ok(()) => {}
-            Err(e) => {
-                return Err(match classify(&e) {
-                    Class::Fenced => LogError::Fenced(e.to_string()),
-                    // Nothing was begun, so nothing can have landed.
-                    _ => LogError::Uncertain(format!("cannot begin a transaction: {e}")),
-                });
-            }
-        }
-
-        let partition = self.partition as i32;
-        let mut deliveries = Vec::with_capacity(records.len());
-        for r in &records {
-            let topic = match r.topic {
-                Topic::Promises => &self.promises,
-                Topic::Schedules => &self.schedules,
-            };
-            let mut record = FutureRecord::<str, [u8]>::to(topic)
-                .key(r.key.as_str())
-                .partition(partition);
-            if let Some(v) = &r.value {
-                record = record.payload(v.as_slice());
-            }
-            match self.producer.send_result(record) {
-                Ok(d) => deliveries.push((r.topic, d)),
-                Err((e, _)) => return Err(self.abort(e).await),
-            }
-        }
-
-        let mut after = base;
-        for (topic, delivery) in deliveries {
-            match delivery.await {
-                Ok(Ok(d)) => {
-                    if d.offset + 1 > after.get(topic) {
-                        after.set(topic, d.offset + 1);
-                    }
-                }
-                Ok(Err((e, _))) => return Err(self.abort(e).await),
-                Err(_) => {
-                    return Err(LogError::Uncertain(
-                        "the producer dropped a delivery report".into(),
-                    ))
-                }
-            }
-        }
-
-        // Commit, retrying what librdkafka says may be retried. Only an
-        // outright abort is known not to have landed.
-        let deadline = Instant::now() + self.timeout;
-        loop {
-            let timeout = self.timeout;
-            match self
-                .blocking(move |p| p.commit_transaction(timeout))
-                .await?
-            {
-                Ok(()) => return Ok(after),
-                Err(e) => match classify(&e) {
-                    Class::Abort => return Err(self.abort(e).await),
-                    Class::Fenced => return Err(LogError::Fenced(e.to_string())),
-                    Class::Retry if Instant::now() < deadline => {
-                        tokio::time::sleep(Duration::from_millis(100)).await;
-                    }
-                    Class::Retry | Class::Fatal => {
-                        return Err(LogError::Uncertain(format!("commit outcome unknown: {e}")))
-                    }
-                },
-            }
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Without transactions
-// ---------------------------------------------------------------------------
-
 /// How many times a claim is tried before the takeover gives up: each retry
 /// means something landed between reading the end and claiming it.
 const CLAIM_ATTEMPTS: usize = 8;
@@ -521,9 +362,9 @@ impl KafkaLog {
         high_watermarks(&self.cfg, &self.probe, partition).await
     }
 
-    /// Become the writer of `partition` without transactions: claim each log
-    /// where it ends, and check the claim landed there ([`super::epoch`]).
-    async fn claim(&self, partition: u32) -> Result<PlainWriter, LogError> {
+    /// Become the writer of `partition`: claim each log where it ends, and
+    /// check the claim landed there ([`super::epoch`]).
+    async fn claim(&self, partition: u32) -> Result<KafkaWriter, LogError> {
         let mut c = self.cfg.client();
         c.set("enable.idempotence", "true")
             .set("acks", "all")
@@ -577,7 +418,7 @@ impl KafkaLog {
                 ))
             })?;
         }
-        Ok(PlainWriter {
+        Ok(KafkaWriter {
             producer,
             cfg: self.cfg.clone(),
             probe: Arc::clone(&self.probe),
@@ -608,9 +449,8 @@ async fn high_watermarks(
     .map_err(unavailable)?
 }
 
-/// The writer of a partition without transactions: its records carry its
-/// epochs, and every one must land exactly where the last one left the log.
-struct PlainWriter {
+/// The writer of a partition: its records carry its epochs, and every one must land exactly where the last one left the log.
+struct KafkaWriter {
     producer: FutureProducer,
     cfg: KafkaCfg,
     probe: Arc<BaseConsumer>,
@@ -619,7 +459,7 @@ struct PlainWriter {
 }
 
 #[async_trait]
-impl Writer for PlainWriter {
+impl Writer for KafkaWriter {
     async fn commit(&self, records: Vec<Record>, base: Checkpoint) -> Result<Checkpoint, LogError> {
         if records.is_empty() {
             return Ok(base);
@@ -786,7 +626,7 @@ impl Reader for KafkaReader {
                         }
                     }
                     Some(Err(KafkaError::PartitionEOF(_))) => {
-                        // At the end. Resume past any trailing marker.
+                        // At the end: resume at the high watermark.
                         let (_, high) = consumer
                             .fetch_watermarks(&name, partition as i32, cfg.request_timeout)
                             .map_err(unavailable)?;

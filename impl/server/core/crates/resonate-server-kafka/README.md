@@ -34,23 +34,24 @@ is there for its membership, not its records. A revoke callback blocks the poll
 thread until the node has stopped the partitions, which is what makes an
 ordinary handoff clean.
 
-**Safety: a fence.** Partition *p* has one transactional id. Taking *p* over
-begins with `init_transactions` on it, which refuses every earlier producer —
-including a paused node that does not know it lost *p*. Only then is the log
-read to its end; only then is the partition served. Every round commits its
-records in one transaction, so a fenced writer can never have a write
-acknowledged.
+**Safety: a claim.** No Kafka transactions — one costs about ten times a
+produce. Taking partition *p* over begins with a claim appended to its logs,
+and from then on no earlier owner's record counts — including a paused node
+that does not know it lost *p*. Only then is the log read to its end; only
+then is the partition served. [Below](#fencing-and-atomicity-without-transactions)
+is how.
 
-**Takeover**, in order: fence → check the local copy against the log's start
-offset → replay from the local checkpoint to the end → rebuild the timer index
-→ serve.
+**Takeover**, in order: claim → check the local copy against the log's start
+offset → replay from the local checkpoint to the end → write again what a
+fenced writer's records hide → rebuild the timer index → serve.
 
 **A round.** One actor per partition drains its mailbox, loads each origin the
-batch names from the local store, folds the batch through the kernel, diffs the
-documents into records, commits them in one transaction (nothing at all if
-nothing changed), applies them locally with the checkpoint the commit returned,
-re-arms timers, sends messages post-commit, and answers. A commit whose outcome
-is unknown takes the partition over again: fence, re-read, serve.
+batch names from the local store, folds the batch through the kernel, turns
+each decision into records in an order where every prefix is valid, produces
+them in one write (nothing at all if nothing changed), applies them locally
+with the checkpoint the commit returned, re-arms timers, sends messages
+post-commit, and answers. A commit whose outcome is unknown takes the
+partition over again: claim, re-read, serve.
 
 **Local copy: RocksDB, WAL off.** One database per node, one column family per
 partition. Each batch writes its records and its checkpoint into the
@@ -88,12 +89,12 @@ a forwarded request is never forwarded again. Searches are a
 scatter-gather over every owner. A schedule firing into another partition's
 origin crosses the same way.
 
-## Without transactions
+## Fencing and atomicity without transactions
 
-A Kafka transaction costs about ten times a plain produce
-(`examples/txn_cost.rs`: 4.3 ms against 0.44 ms on one broker), and the
-commit is the request. With `transactions = false` a partition is written
-without them. Two things transactions gave have to come from elsewhere.
+A Kafka transaction would give two things: a broker that refuses a fenced
+writer, and commits that land whole. It costs about ten times a plain produce
+(`examples/txn_cost.rs`: 4.3 ms against 0.44 ms on one broker), and the commit
+is the request — so both come from elsewhere.
 
 **Fencing: claims and epochs** (`src/log/epoch.rs`). Nothing on the broker
 refuses a writer any more, so ownership is decided in the log, the same way by
@@ -116,13 +117,15 @@ every reader:
   owner writes the admitted value again before serving. `min.compaction.lag.ms`
   (default 1 h, set on topics this server creates) gives that time.
 
-Claims are keyed by their epoch, so compaction keeps every one. A log first
-written with transactions can be switched to this mode: records without an
-epoch are admitted until the first claim. The other way is not supported.
+Claims are keyed by their epoch, so compaction keeps every one. A record
+without an epoch is refused. On connect, both topics must be compacted with
+a `min.compaction.lag.ms` of at least the producer's delivery timeout plus a
+minute, or the server refuses to start. Because a fenced writer's records do
+land, nothing but this server should read the topics: a reader without the
+epoch filter would see them.
 
 **Atomicity: an order where every prefix is valid** (`record::ordered`,
-`kernel::recover`). Without a transaction, a commit can stop after any prefix
-of its records. The specification does not make a settlement and its
+`kernel::recover`). A commit can stop after any prefix of its records. The specification does not make a settlement and its
 consequences one step: settling writes the promise, and delivering each
 callback (resume the awaiter, drop the callback) and each listener (unblock,
 drop the listener) are later steps of their own. Timeouts are likewise
@@ -160,7 +163,7 @@ oracle's answer.
 | `brokers` | unset | `bootstrap.servers`. Unset: one node over an in-process log, nothing durable. |
 | `partitions` | 64 | Fixed for the life of the deployment. |
 | `topic_prefix` | `resonate` | |
-| `group_id`, `txn_prefix` | the topic prefix | |
+| `group_id` | the topic prefix | |
 | `replication_factor` | 3 | For topics this server creates. |
 | `create_topics` | true | An existing topic with a different partition count is refused. |
 | `node_id` | `$HOSTNAME` | Unique in the cluster. |
@@ -175,8 +178,7 @@ oracle's answer.
 | `max_batch` | 512 | The group commit's ceiling. |
 | `cache_promises` | 2000 | Per partition: decoded hot documents kept, counted in promises. 0 turns it off. |
 | `search_enabled` | false | Searches read every record of every partition. |
-| `transactions` | true | Commit in Kafka transactions, or without them ([above](#without-transactions)). Fixed for the life of a log. |
-| `min_compaction_lag_ms` | 3600000 | Without transactions: `min.compaction.lag.ms` on topics this server creates. |
+| `min_compaction_lag_ms` | 3600000 | `min.compaction.lag.ms` on topics this server creates. An existing topic with less than 70 s is refused. |
 | `librdkafka` | `{}` | Extra client properties (SASL, TLS, tuning). |
 
 The plugin is not in the `resonate` binary's registry: it builds librdkafka and
@@ -187,13 +189,11 @@ shows for any plugin.
 
 Apache Kafka (tested with 3.9.1, KRaft) and Redpanda (tested with 26.2.3): the
 live tests and the differential pass on both. Everything used is in the
-Kafka protocol both implement: idempotent transactional producers,
-`read_committed`, compacted topics, the classic group protocol with the
-cooperative-sticky assignor, and `DescribeConsumerGroups`. With transactions
-nothing assumes exact offsets: Redpanda writes a control batch when a
-transaction begins, so its records land one offset later than Kafka's. Without
-transactions there are no control batches, offsets are exact on both brokers,
-and both accept `min.compaction.lag.ms`.
+Kafka protocol both implement: idempotent producers, record headers,
+compacted topics with `min.compaction.lag.ms`, `DescribeConfigs`, the classic
+group protocol with the cooperative-sticky assignor, and
+`DescribeConsumerGroups`. No transactions, so no control batches: offsets are
+exact on both brokers.
 
 ## Tests
 
@@ -204,16 +204,14 @@ TEST_KAFKA_BROKERS=localhost:9092 \
 ```
 
 - `tests/differential.rs` — the blob backend's differential, against this node,
-  with and without transactions (`TEST_KAFKA_TRANSACTIONS=0` on a broker), and
-  `prefix_random`: the same trajectory with every commit cut.
+  in memory and on a broker, and `prefix_random`: the same trajectory with
+  every commit cut.
 - `tests/cluster.rs` — several nodes on one in-process log: routing, leave,
-  a zombie that cannot commit (and, without transactions, one whose records
-  land, are read past and are written over before compaction), restore from a
-  compacted log, refused and uncertain commits.
+  a zombie whose records land, are read past and are written over before
+  compaction, restore from a compacted log, refused and uncertain commits.
 - `tests/crash.rs` — a child process aborts mid-write with the WAL off; the
   surviving checkpoint names only records that survived.
-- `tests/live.rs` — real Kafka: fencing by transaction and by claim, restart
-  from RocksDB, two nodes with a real consumer group and HTTP forwarding.
+- `tests/live.rs` — real Kafka: fencing by claim, restart from RocksDB, two nodes with a real consumer group and HTTP forwarding.
 
 ## Performance
 
@@ -223,44 +221,31 @@ a fresh origin, 256-byte payloads, one request in flight per client). One
 4-vCPU VM ran everything — broker, node(s) and load generator — with a single
 broker and replication factor 1, so these are relative numbers, not capacity.
 
-| setup | clients | req/s | client p50 / p99 | commit mean | requests per round |
-|---|---|---|---|---|---|
-| Kafka, 1 node, 16 partitions | 64 | 2,318 | 22 / 120 ms | 13.5 ms | 2.2 |
-| Redpanda, 1 node, 16 partitions | 64 | 2,213 | 22 / 125 ms | 14.8 ms | 2.2 |
-| Kafka, 2 nodes, 16 partitions | 64 | 1,599 | 36 / 142 ms | 20.7 ms | 2.2 |
-| Kafka, 1 node, 64 partitions | 256 | 2,855 | 79 / 205 ms | 37.7 ms | 1.9 |
-| Kafka, 1 node, 16 partitions | 256 | 5,317 | 43 / 150 ms | 11.1 ms | 4.2 |
+| broker | clients | req/s | client p50 / p99 | server mean | commit mean | requests per round |
+|---|---|---|---|---|---|---|
+| Kafka | 64 | 6,361 | 10 / 22 ms | 4.8 ms | 1.8 ms | 1.4 |
+| Kafka | 256 | 6,236 | 39 / 94 ms | 18.9 ms | 2.0 ms | 1.5 |
+| Redpanda | 64 | 6,727 | 9 / 22 ms | 6.5 ms | 3.2 ms | 1.8 |
 
-**With and without transactions**, on the same VM and build (`linger.ms=0`),
-1 node, 16 partitions:
+1 node, 16 partitions. A commit is a produce. At about 6,300 req/s the shared
+four cores are the limit: 256 clients went no faster than 64, and client time
+is twice server time. Loading, deciding and applying take well under a
+millisecond; the HTTP edge adds microseconds.
 
-| broker | mode | clients | req/s | client p50 / p99 | server mean | commit mean | requests per round |
-|---|---|---|---|---|---|---|---|
-| Kafka | transactions | 64 | 2,473 | 19 / 125 ms | 23.9 ms | 11.6 ms | 2.1 |
-| Kafka | without | 64 | 6,361 | 10 / 22 ms | 4.8 ms | 1.8 ms | 1.4 |
-| Kafka | transactions | 256 | 4,649 | 49 / 169 ms | 37.6 ms | 12.5 ms | 4.1 |
-| Kafka | without | 256 | 6,236 | 39 / 94 ms | 18.9 ms | 2.0 ms | 1.5 |
-| Redpanda | transactions | 64 | 2,069 | 24 / 131 ms | 30.1 ms | 16.1 ms | 2.2 |
-| Redpanda | without | 64 | 6,727 | 9 / 22 ms | 6.5 ms | 3.2 ms | 1.8 |
+**Why there are no transactions.** The same runs, on the same VM and build,
+with every round committed in a Kafka transaction (the design this backend
+started with):
 
-Without transactions a commit is a produce: about a sixth of the time on
-Kafka. Throughput is no longer bound by the broker's transaction rate. At about
-6,300 req/s the shared four cores are the limit: the 256-client run went no
-faster than the 64-client one, and client time is twice server time.
+| broker | clients | req/s | client p50 / p99 | server mean | commit mean | requests per round |
+|---|---|---|---|---|---|---|
+| Kafka | 64 | 2,473 | 19 / 125 ms | 23.9 ms | 11.6 ms | 2.1 |
+| Kafka | 256 | 4,649 | 49 / 169 ms | 37.6 ms | 12.5 ms | 4.1 |
+| Redpanda | 64 | 2,069 | 24 / 131 ms | 30.1 ms | 16.1 ms | 2.2 |
 
-What the breakdown (`resonate_kafka_*`) shows:
-
-- **The transaction is the request.** Server time is queue wait plus round,
-  and the round is almost all commit; loading, deciding and applying take
-  well under a millisecond. The HTTP edge adds microseconds.
-- **Throughput = transactions per second × requests per round.** The broker
-  completed roughly 1,000–1,500 transactions per second in every run. More
-  partitions did not raise that — they made each commit slower — while more
-  requests per partition did: rounds grew, and throughput doubled at the same
-  transaction rate.
-- **Two nodes on one VM** compete for the same four cores; half the requests
-  were forwarded. Horizontal scaling needs nodes and brokers on their own
-  machines to show.
+The transaction was the request, and throughput was transactions per second
+times requests per round: the broker completed roughly 1,000–1,500
+transactions per second in every run, and more partitions only made each
+slower.
 
 ## Known limits
 

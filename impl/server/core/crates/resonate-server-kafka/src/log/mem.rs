@@ -1,30 +1,21 @@
-//! The log in process: Kafka's fencing and transaction semantics, without
-//! Kafka.
+//! The log in process: Kafka without a broker, written as [`super::kafka`]
+//! writes it — claims, epochs and offset checks ([`super::epoch`]).
 //!
 //! What it models, because the shell depends on it:
 //!
-//! - **Fencing by epoch.** Each partition has an epoch, as a transactional id
-//!   has a producer epoch; [`Log::fence`] bumps it, and a writer holding an
-//!   older one is refused. Several in-process nodes sharing one `MemLog` fence
-//!   each other exactly as processes sharing a cluster do.
-//! - **Atomic commits with markers.** A commit appends every record and then a
-//!   control marker, which takes an offset and is never returned to a reader —
-//!   so offsets have gaps, as they do on Kafka.
+//! - **Claims.** [`Log::fence`] appends a claim to each of a partition's logs,
+//!   where it ends. Several in-process nodes sharing one `MemLog` fence each
+//!   other exactly as processes sharing a cluster do.
+//! - **Zombie writes.** A writer lands its records wherever the log ends and
+//!   only then finds out whether that was where it left it. A fenced writer's
+//!   records land too — after the claim that fenced it — so a test sees
+//!   exactly the records a real broker would take from a zombie.
 //! - **Compaction.** [`MemLog::compact`] keeps the newest record per key, which
 //!   is what lets a test restore from a compacted log.
 //! - **Faults.** [`MemLog::fail_next`] makes the next commit fail with the error
 //!   of your choice, land and still report `Uncertain` — the case that forces
-//!   a partition to re-read — or, without transactions, land only its first
-//!   *k* records ([`Fault::Cut`]).
-//!
-//! # Without transactions
-//!
-//! [`MemLog::plain`] models a log written without transactions, as
-//! [`super::epoch`] describes: no markers, a claim per log on `fence`, an
-//! epoch on every record, and a writer that lands its records wherever the
-//! log ends and only then finds out whether that was where it expected. A
-//! fenced writer's records land too — after the claim that fenced it — so a
-//! test sees exactly the zombie writes a real broker would take.
+//!   a partition to re-read — or land only a prefix of its records
+//!   ([`Fault::Cut`], [`Fault::CutWithin`]).
 //!
 //! # Dependants
 //!
@@ -48,12 +39,11 @@ struct Entry {
 
 #[derive(Default)]
 struct PartitionLog {
-    epoch: u64,
     promises: Vec<Entry>,
     schedules: Vec<Entry>,
     next_promises: i64,
     next_schedules: i64,
-    /// The newest claim on each log, without transactions.
+    /// The newest claim on each log.
     claims: [i64; 2],
 }
 
@@ -63,10 +53,6 @@ impl PartitionLog {
             Topic::Promises => &self.promises,
             Topic::Schedules => &self.schedules,
         }
-    }
-
-    fn append(&mut self, topic: Topic, key: String, value: Option<Vec<u8>>) -> i64 {
-        self.push(topic, key, value, None, false)
     }
 
     fn push(
@@ -98,14 +84,6 @@ impl PartitionLog {
         self.claims[topic as usize]
     }
 
-    /// A transaction marker: an offset nobody reads.
-    fn mark(&mut self, topic: Topic) {
-        match topic {
-            Topic::Promises => self.next_promises += 1,
-            Topic::Schedules => self.next_schedules += 1,
-        }
-    }
-
     fn end(&self) -> Checkpoint {
         Checkpoint::at(self.next_promises, self.next_schedules)
     }
@@ -118,8 +96,7 @@ pub enum Fault {
     Refuse(LogError),
     /// Land the commit, then report `Uncertain`.
     LandThenUncertain,
-    /// Land the commit's first *k* records, then report `Uncertain`. Without
-    /// transactions only: a transactional commit cut short lands nothing.
+    /// Land the commit's first *k* records, then report `Uncertain`.
     Cut(usize),
     /// Land a prefix of the commit chosen from its own length — `seed`
     /// modulo it, so never the whole of it — then report `Uncertain`. Hits
@@ -141,27 +118,14 @@ struct Inner {
 /// An in-process log. Cheap to clone a handle to: share one between nodes.
 pub struct MemLog {
     n: u32,
-    /// Transactions (fencing by epoch, atomic commits) or claims.
-    atomic: bool,
     inner: Arc<Mutex<Inner>>,
 }
 
 impl MemLog {
-    /// A log with transactions.
     pub fn new(partitions: u32) -> Arc<Self> {
-        Self::with(partitions, true)
-    }
-
-    /// A log without transactions: claims, epochs and offset checks.
-    pub fn plain(partitions: u32) -> Arc<Self> {
-        Self::with(partitions, false)
-    }
-
-    fn with(partitions: u32, atomic: bool) -> Arc<Self> {
         let partitions = partitions.max(1);
         Arc::new(Self {
             n: partitions,
-            atomic,
             inner: Arc::new(Mutex::new(Inner {
                 partitions: (0..partitions).map(|_| PartitionLog::default()).collect(),
                 ..Default::default()
@@ -245,14 +209,6 @@ impl Log for MemLog {
             .partitions
             .get_mut(partition as usize)
             .ok_or_else(|| LogError::Unavailable(format!("no partition {partition}")))?;
-        if self.atomic {
-            log.epoch += 1;
-            return Ok(Arc::new(MemWriter {
-                inner: Arc::clone(&self.inner),
-                partition,
-                epoch: log.epoch,
-            }));
-        }
         // A claim on each log, where it ends: in process nobody races us to
         // it, so it lands where it meant to.
         let mut epochs = [-1; 2];
@@ -269,7 +225,7 @@ impl Log for MemLog {
             epochs[topic as usize] = at;
             log.claims[topic as usize] = at;
         }
-        Ok(Arc::new(PlainWriter {
+        Ok(Arc::new(MemWriter {
             inner: Arc::clone(&self.inner),
             partition,
             epochs,
@@ -311,80 +267,23 @@ impl Log for MemLog {
             end,
             done: false,
         });
-        if self.atomic {
-            Ok(raw)
-        } else {
-            Ok(Box::new(epoch::Filtered::new(raw, &from)))
-        }
+        Ok(Box::new(epoch::Filtered::new(raw, &from)))
     }
 
     async fn ready(&self) -> bool {
         true
     }
-
-    fn atomic(&self) -> bool {
-        self.atomic
-    }
 }
 
+/// A partition's writer: its records land wherever the log ends, and it
+/// checks afterwards that that was where it left the log.
 struct MemWriter {
-    inner: Arc<Mutex<Inner>>,
-    partition: u32,
-    epoch: u64,
-}
-
-#[async_trait]
-impl Writer for MemWriter {
-    async fn commit(&self, records: Vec<Record>, base: Checkpoint) -> Result<Checkpoint, LogError> {
-        let mut inner = lock(&self.inner);
-        let fault = inner.fault.take();
-        match &fault {
-            Some(Fault::Refuse(e)) => return Err(e.clone()),
-            // All or nothing: a transaction cut short is aborted.
-            Some(Fault::Cut(_) | Fault::CutWithin(_)) => {
-                return Err(LogError::Uncertain("injected: cut".into()))
-            }
-            _ => {}
-        }
-        let current = inner.partitions[self.partition as usize].epoch;
-        if current != self.epoch {
-            return Err(LogError::Fenced(format!(
-                "partition {} is at epoch {current}, this writer holds {}",
-                self.partition, self.epoch
-            )));
-        }
-        let mut after = base;
-        let partition = &mut inner.partitions[self.partition as usize];
-        let mut touched = [false, false];
-        for record in records {
-            let offset = partition.append(record.topic, record.key, record.value);
-            after.set(record.topic, offset + 1);
-            touched[record.topic as usize] = true;
-        }
-        for (i, topic) in [Topic::Promises, Topic::Schedules].into_iter().enumerate() {
-            if touched[i] {
-                partition.mark(topic);
-            }
-        }
-        inner.commits += 1;
-        match fault {
-            Some(Fault::LandThenUncertain) => {
-                Err(LogError::Uncertain("injected: landed, then lost".into()))
-            }
-            _ => Ok(after),
-        }
-    }
-}
-
-/// The writer of a log without transactions: its records land wherever the
-/// log ends, and it checks afterwards that that was where it left the log.
-struct PlainWriter {
     inner: Arc<Mutex<Inner>>,
     partition: u32,
     epochs: [i64; 2],
 }
 
-impl PlainWriter {
+impl MemWriter {
     /// Why the log does not end at `at`: a newer claim fenced this writer, or
     /// something else landed and nobody knows what of ours is admitted.
     fn moved(&self, log: &PartitionLog, at: &Checkpoint) -> Option<LogError> {
@@ -409,7 +308,7 @@ impl PlainWriter {
 }
 
 #[async_trait]
-impl Writer for PlainWriter {
+impl Writer for MemWriter {
     async fn commit(&self, records: Vec<Record>, base: Checkpoint) -> Result<Checkpoint, LogError> {
         let mut inner = lock(&self.inner);
         let fault = inner.fault.take();
@@ -482,8 +381,10 @@ impl Reader for MemReader {
         const BATCH: usize = 1_000;
         if self.records.is_empty() {
             self.done = true;
-            // The end, past any trailing marker, so a resume starts after it.
-            if self.position != self.end {
+            // The end, so a resume starts there.
+            if (self.position.promises, self.position.schedules)
+                != (self.end.promises, self.end.schedules)
+            {
                 self.position = self.end;
                 return Ok(Some((Vec::new(), self.end)));
             }

@@ -181,8 +181,7 @@ impl Node {
     }
 
     /// One node owning every partition of `log`, with an in-memory local
-    /// store — for a test that needs the log's handle (faults, a log without
-    /// transactions).
+    /// store — for a test that needs the log's handle (faults, cuts).
     pub fn in_memory_on(
         log: Arc<crate::log::mem::MemLog>,
         router: Arc<dyn resonate_core::ResonateRouter>,

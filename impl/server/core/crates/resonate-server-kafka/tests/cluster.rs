@@ -1,6 +1,6 @@
 // Several nodes, one log: the scaling and failover story, in process.
 //
-// Every node shares one `MemLog` (fencing and transactions as Kafka has them),
+// Every node shares one `MemLog` (claims, epochs and zombie writes as on Kafka),
 // one `MemGroup` (a consumer group: round-robin, cooperative rebalances) and
 // one `LocalPeers` (forwarding without sockets, through the wire format).
 // Each node has its own in-memory local store, as each process would have its
@@ -31,18 +31,12 @@ const FAR: i64 = 4_000_000_000_000;
 struct Cluster {
     log: Arc<MemLog>,
     group: Arc<MemGroup>,
-    peers: Arc<LocalPeers>,
     nodes: Vec<Arc<Node>>,
 }
 
 impl Cluster {
     async fn new(n: usize) -> Self {
         Self::on(MemLog::new(PARTITIONS), n).await
-    }
-
-    /// Over a log without transactions.
-    async fn plain(n: usize) -> Self {
-        Self::on(MemLog::plain(PARTITIONS), n).await
     }
 
     async fn on(log: Arc<MemLog>, n: usize) -> Self {
@@ -72,12 +66,7 @@ impl Cluster {
             node.start().await.unwrap();
             nodes.push(node);
         }
-        let c = Self {
-            log,
-            group,
-            peers,
-            nodes,
-        };
+        let c = Self { log, group, nodes };
         c.settle(&(0..n).collect::<Vec<_>>()).await;
         c
     }
@@ -201,62 +190,14 @@ async fn a_node_that_leaves_hands_its_partitions_over_with_their_state() {
     assert_eq!(got["promise"]["state"], "resolved");
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn a_zombie_cannot_commit_after_its_partitions_moved() {
-    let c = Cluster::new(3).await;
-    let zombie = Arc::clone(&c.nodes[2]);
-    let held: Vec<u32> = zombie.serving().into_iter().collect();
-    let p = held[0];
-    let origin = origin_in(p, "z");
-    ok(&c.nodes[0], "promise.create", create(&origin)).await;
-
-    // The group gives the zombie's partitions away without telling it.
-    c.group.expel("node-2").await;
-    c.settle(&[0, 1]).await;
-    assert!(
-        zombie.serving().contains(&p),
-        "the zombie still believes it owns {p}"
-    );
-
-    // It still takes a write for them — and cannot land it.
-    let attempt = send(
-        &zombie,
-        "promise.settle",
-        json!({ "id": origin, "state": "rejected", "value": {} }),
-    )
-    .await;
-    assert!(
-        attempt.is_err(),
-        "a fenced writer answered as if it had committed: {attempt:?}"
-    );
-
-    // The rightful owner never saw it.
-    let got = ok(&c.nodes[1], "promise.get", json!({ "id": origin })).await;
-    assert_eq!(got["promise"]["state"], "pending");
-    // And writes to it where it now lives.
-    ok(
-        &c.nodes[0],
-        "promise.settle",
-        json!({ "id": origin, "state": "resolved", "value": {} }),
-    )
-    .await;
-
-    // The zombie's next poll tells it; it lets go.
-    c.group.tell_lost("node-2").await;
-    assert!(zombie.serving().is_empty());
-    let got = ok(&c.nodes[0], "promise.get", json!({ "id": origin })).await;
-    assert_eq!(got["promise"]["state"], "resolved");
-    let _ = &c.peers;
-}
-
-/// Without transactions nothing stops a fenced writer's records landing. They
+/// Nothing stops a fenced writer's records landing. They
 /// land after the new owner's claim, carrying an older epoch, so every reader
 /// reads past them; the owner notices the log moved under it (its idle check),
 /// takes the partition over again, and writes the value they hide once more,
 /// so compaction keeps that and not them.
 #[tokio::test(flavor = "multi_thread")]
-async fn without_transactions_a_zombies_records_land_and_are_read_past() {
-    let c = Cluster::plain(3).await;
+async fn a_zombies_records_land_and_are_read_past() {
+    let c = Cluster::new(3).await;
     let zombie = Arc::clone(&c.nodes[2]);
     let p = *zombie.serving().iter().next().unwrap();
     let origin = origin_in(p, "z");
@@ -322,15 +263,7 @@ async fn without_transactions_a_zombies_records_land_and_are_read_past() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_partition_restores_from_a_compacted_log() {
-    restores_from_a_compacted_log(Cluster::new(2).await).await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn without_transactions_a_partition_restores_from_a_compacted_log() {
-    restores_from_a_compacted_log(Cluster::plain(2).await).await;
-}
-
-async fn restores_from_a_compacted_log(c: Cluster) {
+    let c = Cluster::new(2).await;
     let p = 3;
     let origin = origin_in(p, "compact");
     ok(&c.nodes[0], "promise.create", create(&origin)).await;
