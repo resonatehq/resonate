@@ -61,11 +61,13 @@ fn envelope(kind: &str, data: Value) -> RequestEnvelope {
 }
 
 /// Send until answered: a rebalance answers 503s for a moment, as it would to
-/// any client, and a client retries.
+/// any client, and a client retries. Through the routing layer, with the node
+/// as its own roster, as a request reaches it in a binary.
 async fn ok(node: &Arc<Node>, kind: &str, data: Value) -> Value {
+    let routed = resonate_plugin::Routed::new(Arc::clone(node) as _, Arc::clone(node) as _);
     let deadline = Instant::now() + Duration::from_secs(60);
     loop {
-        match node.process(&envelope(kind, data.clone())).await {
+        match routed.process(&envelope(kind, data.clone())).await {
             Ok(resp) => {
                 assert_eq!(resp.head.status, 200, "{kind}: {}", resp.data);
                 return resp.data;

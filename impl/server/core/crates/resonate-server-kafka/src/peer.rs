@@ -1,14 +1,14 @@
-//! Node to node: forward a request to the partition's owner.
+//! Node to node: the channel the roster forwards over.
 //!
 //! # Contract
 //!
-//! Any node takes any request. The node that receives it finds the owner of
-//! the partition the request belongs to in the owner directory and, if that is
-//! another node, forwards it there — once. A forwarded request is served
-//! locally or refused with a 503; it is never forwarded again, so two nodes
-//! with briefly different views of the directory cannot bounce a request
-//! between them. The client's retry covers the moment in between, as it does
-//! a rebalance.
+//! Any node takes any request. The routing layer in front of the node asks
+//! the roster where the request's partition is served and, if that is another
+//! node, the roster carries it there — once. A request that arrives here is
+//! served locally or refused with a 503; it is never forwarded again, so two
+//! nodes with briefly different views of the directory cannot bounce a
+//! request between them. The client's retry covers the moment in between, as
+//! it does a rebalance.
 //!
 //! Three calls cross between nodes: a protocol request ([`Peers::process`]),
 //! a schedule firing into another partition's origin ([`Peers::fire`]) — not a
@@ -248,10 +248,7 @@ pub fn router(node: Weak<Node>, token: Option<String>) -> axum::Router {
         let node = state.check(&headers)?;
         let req: RequestEnvelope = serde_json::from_value(body)
             .map_err(|e| (axum::http::StatusCode::BAD_REQUEST, e.to_string()))?;
-        node.process_forwarded(&req)
-            .await
-            .map(Json)
-            .map_err(unavailable)
+        node.serve(&req).await.map(Json).map_err(unavailable)
     }
 
     async fn fire(
@@ -345,7 +342,7 @@ impl Peers for LocalPeers {
         // Through the wire format, so the in-process path proves the HTTP one.
         let req: RequestEnvelope = serde_json::from_value(envelope_json(req))
             .map_err(|e| Unavailable::new(e.to_string()))?;
-        self.get(to)?.process_forwarded(&req).await
+        self.get(to)?.serve(&req).await
     }
 
     async fn fire(&self, to: &Owner, fire: &Fire) -> Result<(), Unavailable> {

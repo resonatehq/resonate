@@ -1,15 +1,18 @@
 //! A node: the `ResonateServer` one process runs, serving the partitions the
-//! group gave it and forwarding everything else to whoever owns it.
+//! group gave it, and the `ResonateRoster` that says who serves the rest.
 //!
 //! # Contract
 //!
 //! - **Routing.** Every promise and task operation names one origin; the
 //!   origin names one partition ([`keys::partition_of`]). Every schedule
-//!   operation names one schedule id, routed the same way. If this node serves
-//!   the partition, the partition decides; if the owner directory names
-//!   another node, the request is forwarded there once; otherwise it is a 503,
-//!   which the caller's retry covers — this is what a client sees during a
-//!   rebalance.
+//!   operation names one schedule id, routed the same way. The roster
+//!   ([`ResonateRoster::route`]) says where a request goes, and the routing
+//!   layer in front of every server forwards it there, once. A request that
+//!   reaches the node is served if the node serves its partition and is
+//!   otherwise a 503, which the caller's retry covers — this is what a client
+//!   sees during a rebalance. The node forwards no request itself: only the
+//!   two calls that are not requests — a schedule firing into another origin,
+//!   and one owner's part of a search — cross to a peer from here.
 //! - **Ownership.** Membership events drive everything: an assignment starts a
 //!   takeover ([`Partition::take_over`]), a revocation stops the partition
 //!   before it is acknowledged. A partition that stops on its own — fenced by
@@ -664,15 +667,6 @@ impl Node {
     // Forwarded calls
     // -----------------------------------------------------------------------
 
-    /// A request another node forwarded here: served locally or refused,
-    /// never forwarded again.
-    pub async fn process_forwarded(
-        &self,
-        req: &RequestEnvelope,
-    ) -> Result<ResponseEnvelope, Unavailable> {
-        self.process_as(req, true).await
-    }
-
     pub async fn fire_forwarded(&self, fire: Fire) -> Result<(), Unavailable> {
         self.fire_promise(fire, true).await
     }
@@ -705,18 +699,18 @@ impl Node {
     // Dispatch
     // -----------------------------------------------------------------------
 
-    async fn process_as(
-        &self,
-        req: &RequestEnvelope,
-        forwarded: bool,
-    ) -> Result<ResponseEnvelope, Unavailable> {
+    /// One request, already routed here — by the routing layer, or by a
+    /// peer's: served by the partition it belongs to if this node serves it,
+    /// and otherwise refused. Never forwarded, so no request takes more than
+    /// the one hop the routing layer gave it.
+    pub async fn serve(&self, req: &RequestEnvelope) -> Result<ResponseEnvelope, Unavailable> {
         let debug_time = if self.cfg.debug {
             req.head.debug_time
         } else {
             None
         };
         let now = util::resolve_time(debug_time);
-        let reply = self.dispatch(req, now, forwarded).await?;
+        let reply = self.dispatch(req, now).await?;
         Ok(ResponseEnvelope::new(
             req.kind.clone(),
             req.head.corr_id.clone(),
@@ -725,46 +719,30 @@ impl Node {
         ))
     }
 
-    /// Route one origin operation to its partition, wherever it is.
-    async fn to_origin(
-        &self,
-        env: &RequestEnvelope,
-        origin: &str,
-        req: Req,
-        now: i64,
-        forwarded: bool,
-    ) -> Result<Reply, Unavailable> {
+    /// Partition `p`, if this node serves it.
+    fn served(&self, p: u32) -> Result<Arc<Partition>, Unavailable> {
+        match self.route(p, true) {
+            Route::Local(partition) => Ok(partition),
+            Route::Remote(owner) => Err(Unavailable::new(format!(
+                "partition {p} is served by {}",
+                owner.node
+            ))),
+            Route::Nowhere(why) => Err(Unavailable::new(why)),
+        }
+    }
+
+    /// One origin operation, on its partition here.
+    async fn to_origin(&self, origin: &str, req: Req, now: i64) -> Result<Reply, Unavailable> {
         let p = keys::partition_of(origin, self.partitions());
-        match self.route(p, forwarded) {
-            Route::Local(partition) => {
-                partition
-                    .origin(origin, OriginOp::Req(Box::new(req)), now)
-                    .await
-            }
-            Route::Remote(owner) => self.forward(&owner, env).await,
-            Route::Nowhere(why) => Err(Unavailable::new(why)),
-        }
+        self.served(p)?
+            .origin(origin, OriginOp::Req(Box::new(req)), now)
+            .await
     }
 
-    async fn to_schedule(
-        &self,
-        env: &RequestEnvelope,
-        id: &str,
-        op: ScheduleOp,
-        now: i64,
-        forwarded: bool,
-    ) -> Result<Reply, Unavailable> {
+    /// One schedule operation, on its partition here.
+    async fn to_schedule(&self, id: &str, op: ScheduleOp, now: i64) -> Result<Reply, Unavailable> {
         let p = keys::partition_of(id, self.partitions());
-        match self.route(p, forwarded) {
-            Route::Local(partition) => partition.schedule(id, op, now).await,
-            Route::Remote(owner) => self.forward(&owner, env).await,
-            Route::Nowhere(why) => Err(Unavailable::new(why)),
-        }
-    }
-
-    async fn forward(&self, owner: &Owner, env: &RequestEnvelope) -> Result<Reply, Unavailable> {
-        let resp = self.forward_envelope(owner, env).await?;
-        Ok(Reply::status(resp.head.status, resp.data))
+        self.served(p)?.schedule(id, op, now).await
     }
 
     async fn forward_envelope(
@@ -789,12 +767,7 @@ impl Node {
         Ok(resp)
     }
 
-    async fn dispatch(
-        &self,
-        env: &RequestEnvelope,
-        now: i64,
-        forwarded: bool,
-    ) -> Result<Reply, Unavailable> {
+    async fn dispatch(&self, env: &RequestEnvelope, now: i64) -> Result<Reply, Unavailable> {
         let data = &env.data;
         match env.kind.as_str() {
             "promise.search" | "task.search" | "schedule.search" if !self.cfg.search => {
@@ -805,44 +778,29 @@ impl Node {
             "promise.get" => {
                 let r: PromiseGetData = parsed!(data);
                 let origin = origin_of(&r.id).to_string();
-                self.to_origin(env, &origin, Req::PromiseGet(r), now, forwarded)
-                    .await
+                self.to_origin(&origin, Req::PromiseGet(r), now).await
             }
             "promise.create" => {
                 let r: PromiseCreateData = parsed!(data);
                 let origin = origin_of(&r.id).to_string();
-                self.to_origin(env, &origin, Req::PromiseCreate(r), now, forwarded)
-                    .await
+                self.to_origin(&origin, Req::PromiseCreate(r), now).await
             }
             "promise.settle" => {
                 let r: PromiseSettleData = parsed!(data);
                 let origin = origin_of(&r.id).to_string();
-                self.to_origin(env, &origin, Req::PromiseSettle(r), now, forwarded)
-                    .await
+                self.to_origin(&origin, Req::PromiseSettle(r), now).await
             }
             "promise.register_callback" => {
                 let r: PromiseRegisterCallbackData = parsed!(data);
                 let origin = origin_of(&r.awaiter).to_string();
-                self.to_origin(
-                    env,
-                    &origin,
-                    Req::PromiseRegisterCallback(r),
-                    now,
-                    forwarded,
-                )
-                .await
+                self.to_origin(&origin, Req::PromiseRegisterCallback(r), now)
+                    .await
             }
             "promise.register_listener" => {
                 let r: PromiseRegisterListenerData = parsed!(data);
                 let origin = origin_of(&r.awaited).to_string();
-                self.to_origin(
-                    env,
-                    &origin,
-                    Req::PromiseRegisterListener(r),
-                    now,
-                    forwarded,
-                )
-                .await
+                self.to_origin(&origin, Req::PromiseRegisterListener(r), now)
+                    .await
             }
             "promise.search" | "task.search" | "schedule.search" => {
                 self.search(&env.kind, data, now).await
@@ -852,38 +810,32 @@ impl Node {
             "task.get" => {
                 let r: TaskGetData = parsed!(data);
                 let origin = origin_of(&r.id).to_string();
-                self.to_origin(env, &origin, Req::TaskGet(r), now, forwarded)
-                    .await
+                self.to_origin(&origin, Req::TaskGet(r), now).await
             }
             "task.create" => {
                 let r: TaskCreateData = parsed!(data);
                 let origin = origin_of(&r.action.data.id).to_string();
-                self.to_origin(env, &origin, Req::TaskCreate(r), now, forwarded)
-                    .await
+                self.to_origin(&origin, Req::TaskCreate(r), now).await
             }
             "task.acquire" => {
                 let r: TaskAcquireData = parsed!(data);
                 let origin = origin_of(&r.id).to_string();
-                self.to_origin(env, &origin, Req::TaskAcquire(r), now, forwarded)
-                    .await
+                self.to_origin(&origin, Req::TaskAcquire(r), now).await
             }
             "task.release" => {
                 let r: TaskReleaseData = parsed!(data);
                 let origin = origin_of(&r.id).to_string();
-                self.to_origin(env, &origin, Req::TaskRelease(r), now, forwarded)
-                    .await
+                self.to_origin(&origin, Req::TaskRelease(r), now).await
             }
             "task.fulfill" => {
                 let r: TaskFulfillData = parsed!(data);
                 let origin = origin_of(&r.id).to_string();
-                self.to_origin(env, &origin, Req::TaskFulfill(r), now, forwarded)
-                    .await
+                self.to_origin(&origin, Req::TaskFulfill(r), now).await
             }
             "task.suspend" => {
                 let r: TaskSuspendData = parsed!(data);
                 let origin = origin_of(&r.id).to_string();
-                self.to_origin(env, &origin, Req::TaskSuspend(r), now, forwarded)
-                    .await
+                self.to_origin(&origin, Req::TaskSuspend(r), now).await
             }
             "task.fence" => {
                 let r: TaskFenceData = parsed!(data);
@@ -900,44 +852,38 @@ impl Node {
                     data: r,
                     corr_id: env.head.corr_id.clone(),
                 };
-                self.to_origin(env, &origin, req, now, forwarded).await
+                self.to_origin(&origin, req, now).await
             }
             "task.heartbeat" => {
                 let r: TaskHeartbeatData = parsed!(data);
                 // The validator requires a non-empty batch sharing one origin.
                 let origin = origin_of(&r.tasks[0].id).to_string();
-                self.to_origin(env, &origin, Req::TaskHeartbeat(r), now, forwarded)
-                    .await
+                self.to_origin(&origin, Req::TaskHeartbeat(r), now).await
             }
             "task.halt" => {
                 let r: TaskHaltData = parsed!(data);
                 let origin = origin_of(&r.id).to_string();
-                self.to_origin(env, &origin, Req::TaskHalt(r), now, forwarded)
-                    .await
+                self.to_origin(&origin, Req::TaskHalt(r), now).await
             }
             "task.continue" => {
                 let r: TaskContinueData = parsed!(data);
                 let origin = origin_of(&r.id).to_string();
-                self.to_origin(env, &origin, Req::TaskContinue(r), now, forwarded)
-                    .await
+                self.to_origin(&origin, Req::TaskContinue(r), now).await
             }
 
             // --- schedules --------------------------------------------------
             "schedule.get" => {
                 let r: ScheduleGetData = parsed!(data);
-                self.to_schedule(env, &r.id, ScheduleOp::Get, now, forwarded)
-                    .await
+                self.to_schedule(&r.id, ScheduleOp::Get, now).await
             }
             "schedule.create" => {
                 let r: ScheduleCreateData = parsed!(data);
                 let id = r.id.clone();
-                self.to_schedule(env, &id, ScheduleOp::Create(r), now, forwarded)
-                    .await
+                self.to_schedule(&id, ScheduleOp::Create(r), now).await
             }
             "schedule.delete" => {
                 let r: ScheduleDeleteData = parsed!(data);
-                self.to_schedule(env, &r.id, ScheduleOp::Delete, now, forwarded)
-                    .await
+                self.to_schedule(&r.id, ScheduleOp::Delete, now).await
             }
 
             // --- debug ------------------------------------------------------
@@ -1242,6 +1188,6 @@ impl ResonateServer for Node {
     }
 
     async fn process(&self, req: &RequestEnvelope) -> Result<ResponseEnvelope, Unavailable> {
-        self.process_as(req, false).await
+        self.serve(req).await
     }
 }

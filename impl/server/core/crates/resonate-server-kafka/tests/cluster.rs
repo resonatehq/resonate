@@ -103,8 +103,12 @@ fn envelope(kind: &str, data: Value) -> RequestEnvelope {
     .unwrap()
 }
 
+/// A request to `node` as a client's reaches it in a binary: through the
+/// routing layer, with the node as its own roster.
 async fn send(node: &Arc<Node>, kind: &str, data: Value) -> Result<ResponseEnvelope, Unavailable> {
-    node.process(&envelope(kind, data)).await
+    resonate_plugin::Routed::new(Arc::clone(node) as _, Arc::clone(node) as _)
+        .process(&envelope(kind, data))
+        .await
 }
 
 async fn ok(node: &Arc<Node>, kind: &str, data: Value) -> Value {
@@ -472,4 +476,37 @@ async fn the_roster_names_the_owner_and_forwards_to_it() {
         want.sort();
         assert_eq!(peers, want);
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_node_serves_what_it_owns_and_forwards_nothing_itself() {
+    let c = Cluster::new(3).await;
+    let p = 0;
+    let id = format!("{}:1", origin_in(p, "hop"));
+    let owner = c.nodes.iter().find(|n| n.serving().contains(&p)).unwrap();
+    let other = c.nodes.iter().find(|n| !Arc::ptr_eq(n, owner)).unwrap();
+    let commits = c.log.commits();
+
+    // Handed straight to a node that does not serve the partition — as a
+    // peer's forward would hand it — the request is refused, not passed on.
+    let err = other
+        .process(&envelope("promise.create", create(&id)))
+        .await
+        .expect_err("not served here");
+    assert!(
+        err.message.contains(&format!("partition {p}")),
+        "{}",
+        err.message
+    );
+    assert_eq!(c.log.commits(), commits, "nothing was written anywhere");
+
+    // The owner serves it directly, and through the routing layer any node
+    // reaches it.
+    let resp = owner
+        .process(&envelope("promise.create", create(&id)))
+        .await
+        .expect("served by its owner");
+    assert_eq!(resp.head.status, 200, "{}", resp.data);
+    let got = ok(other, "promise.get", json!({ "id": id })).await;
+    assert_eq!(got["promise"]["state"], "pending");
 }
