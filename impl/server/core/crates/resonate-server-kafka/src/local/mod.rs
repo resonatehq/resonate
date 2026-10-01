@@ -36,6 +36,14 @@ use std::sync::Arc;
 
 use crate::log::Checkpoint;
 
+/// The encoding this build writes into the local store ([`crate::record::local`]).
+///
+/// Stamped into every partition's copy. A copy stamped otherwise — or not at
+/// all, from before stamps — was written by another build, and is dropped
+/// and rebuilt from the log rather than read. That is what lets the local
+/// encoding change between any two releases with no migration: bump this.
+pub const LOCAL_FORMAT: u32 = 1;
+
 /// One write to apply: a key and its new value, or `None` to delete it.
 pub type Op = (Vec<u8>, Option<Vec<u8>>);
 
@@ -58,6 +66,13 @@ pub trait LocalStore: Send + Sync {
 pub trait PartitionStore: Send + Sync {
     /// The checkpoint applied so far, or `None` for a copy never written.
     fn checkpoint(&self) -> Result<Option<Checkpoint>, String>;
+
+    /// The local format the copy is stamped with, or `None` if it never was.
+    fn format(&self) -> Result<Option<u32>, String>;
+
+    /// Stamp the copy. Written before anything it describes, so a copy whose
+    /// data survived a crash has its stamp too.
+    fn set_format(&self, format: u32) -> Result<(), String>;
 
     /// Apply `ops` and record `checkpoint`, atomically.
     fn apply(&self, ops: Vec<Op>, checkpoint: Checkpoint) -> Result<(), String>;

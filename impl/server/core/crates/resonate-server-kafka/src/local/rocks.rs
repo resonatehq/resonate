@@ -44,6 +44,9 @@ type Db = rocksdb::DBWithThreadMode<MultiThreaded>;
 /// the `o` and `s` prefixes, so no scan ever returns it.
 const CHECKPOINT_KEY: &[u8] = b"m/checkpoint";
 
+/// Where a column family keeps its local-format stamp.
+const FORMAT_KEY: &[u8] = b"m/format";
+
 /// Tuning for the node's database.
 #[derive(Debug, Clone)]
 pub struct RocksCfg {
@@ -189,6 +192,30 @@ impl PartitionStore for RocksPartition {
         }
     }
 
+    fn format(&self) -> Result<Option<u32>, String> {
+        let cf = self.cf()?;
+        match self.db.get_cf(&cf, FORMAT_KEY).map_err(|e| e.to_string())? {
+            Some(bytes) => bytes
+                .as_slice()
+                .try_into()
+                .map(|b| Some(u32::from_be_bytes(b)))
+                .map_err(|_| format!("{}: unreadable format stamp", self.name)),
+            None => Ok(None),
+        }
+    }
+
+    fn set_format(&self, format: u32) -> Result<(), String> {
+        let cf = self.cf()?;
+        let mut batch = WriteBatch::default();
+        batch.put_cf(&cf, FORMAT_KEY, format.to_be_bytes());
+        let mut opts = WriteOptions::default();
+        // Without the WAL, like every write here. Written before any batch it
+        // describes, so the column family's memtable cannot flush those
+        // batches without it.
+        opts.disable_wal(true);
+        self.db.write_opt(batch, &opts).map_err(|e| e.to_string())
+    }
+
     fn apply(&self, ops: Vec<Op>, checkpoint: Checkpoint) -> Result<(), String> {
         let cf = self.cf()?;
         let mut batch = WriteBatch::default();
@@ -286,6 +313,7 @@ mod tests {
                 .unwrap();
             b.apply(vec![(b"ok".to_vec(), Some(b"b".to_vec()))], cp(9, 0))
                 .unwrap();
+            a.set_format(7).unwrap();
             a.flush().unwrap();
             b.flush().unwrap();
         }
@@ -296,6 +324,8 @@ mod tests {
             Some(b"a".to_vec())
         );
         assert_eq!(store.open(1).unwrap().checkpoint().unwrap(), Some(cp(9, 0)));
+        assert_eq!(store.open(0).unwrap().format().unwrap(), Some(7));
+        assert_eq!(store.open(1).unwrap().format().unwrap(), None);
     }
 
     #[test]

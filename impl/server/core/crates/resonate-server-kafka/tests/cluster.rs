@@ -340,3 +340,54 @@ async fn an_uncertain_commit_makes_the_partition_re_read_the_log() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_local_copy_in_another_format_is_rebuilt_from_the_log() {
+    use resonate_server_kafka::directory::NoDirectory;
+    use resonate_server_kafka::keys::promise_key;
+    use resonate_server_kafka::local::{LocalStore, LOCAL_FORMAT};
+    use resonate_server_kafka::membership::StaticMembership;
+
+    let log = MemLog::new(PARTITIONS);
+    let local = MemLocal::new();
+    let node = |id: &str| {
+        Node::new(
+            NodeCfg {
+                node_id: id.into(),
+                ..Default::default()
+            },
+            Arc::clone(&log) as _,
+            Arc::clone(&local) as _,
+            Arc::new(Sender::new(Arc::new(NullRouter), false)),
+            StaticMembership::new(PARTITIONS),
+            Arc::new(NoDirectory),
+            LocalPeers::new(),
+        )
+    };
+
+    let first = node("n");
+    first.start().await.unwrap();
+    ok(&first, "promise.create", create("fmt")).await;
+    first.stop().await;
+
+    // An older build's copy: another stamp, and bytes this build cannot read.
+    let p = partition_of("fmt", PARTITIONS);
+    let store = local.open(p).unwrap();
+    assert_eq!(store.format().unwrap(), Some(LOCAL_FORMAT));
+    let cp = store.checkpoint().unwrap().expect("applied");
+    store
+        .apply(
+            vec![(promise_key("fmt"), Some(b"not postcard".to_vec()))],
+            cp,
+        )
+        .unwrap();
+    store.set_format(LOCAL_FORMAT + 1).unwrap();
+
+    // The next takeover drops it and replays the log instead of reading it.
+    let second = node("n");
+    second.start().await.unwrap();
+    let got = ok(&second, "promise.get", json!({ "id": "fmt" })).await;
+    assert_eq!(got["promise"]["state"], "pending");
+    assert_eq!(local.open(p).unwrap().format().unwrap(), Some(LOCAL_FORMAT));
+    second.stop().await;
+}

@@ -26,7 +26,8 @@
 //! 1. loads each origin (and schedule) the batch names from the local store,
 //!    once, and folds the batch through the kernel in arrival order — request
 //!    *k* sees request *k-1*'s document;
-//! 2. diffs every document it touched into records ([`record::diff`]);
+//! 2. diffs every document it touched into records ([`record::diff`]), each
+//!    in the log's encoding and the local store's;
 //! 3. commits all of them in **one transaction** — the group commit — and
 //!    nothing at all if nothing changed;
 //! 4. applies the same records to the local store with the checkpoint the
@@ -71,7 +72,7 @@ use resonate_server_blob::sender::Sender;
 
 use crate::cache::DocCache;
 use crate::keys;
-use crate::local::{LocalStore, Op, PartitionStore};
+use crate::local::{LocalStore, Op, PartitionStore, LOCAL_FORMAT};
 use crate::log::{Checkpoint, Consumed, Log, LogError, Record, Topic, Writer};
 use crate::record;
 use crate::timers::{Target, Timers};
@@ -207,15 +208,28 @@ impl Partition {
         let mut store = local.open(id).map_err(TakeoverError)?;
         let mut checkpoint = store.checkpoint().map_err(TakeoverError)?;
         if let Some(cp) = checkpoint {
-            if !cp.covers(&start) {
+            let format = store.format().map_err(TakeoverError)?;
+            let why = if format != Some(LOCAL_FORMAT) {
+                Some("written in another local format")
+            } else if !cp.covers(&start) {
+                Some("behind the log's start offset")
+            } else {
+                None
+            };
+            if let Some(why) = why {
                 tracing::warn!(
                     partition = id,
-                    "Local copy is behind the log's start offset; rebuilding it"
+                    ?format,
+                    "Local copy is {why}; rebuilding it from the log"
                 );
                 local.drop_partition(id).map_err(TakeoverError)?;
                 store = local.open(id).map_err(TakeoverError)?;
                 checkpoint = None;
             }
+        }
+        if checkpoint.is_none() {
+            // Stamped before the first batch it describes.
+            store.set_format(LOCAL_FORMAT).map_err(TakeoverError)?;
         }
         let from = checkpoint.unwrap_or(start);
 
@@ -225,9 +239,12 @@ impl Partition {
         let mut reader = log.reader(id, from).await?;
         while let Some((batch, after)) = reader.next().await? {
             replayed += batch.len();
-            store
-                .apply(batch.into_iter().map(op_of).collect(), after)
+            let ops = batch
+                .into_iter()
+                .map(op_of)
+                .collect::<Result<Vec<Op>, String>>()
                 .map_err(TakeoverError)?;
+            store.apply(ops, after).map_err(TakeoverError)?;
             position = after;
         }
 
@@ -346,21 +363,19 @@ impl Partition {
     }
 }
 
-/// The local write a consumed record becomes.
-fn op_of(c: Consumed) -> Op {
-    let key = match c.topic {
-        Topic::Promises => keys::promise_key(&c.key),
-        Topic::Schedules => keys::schedule_key(&c.key),
-    };
-    (key, c.value)
-}
-
-fn op_of_record(r: &Record) -> Op {
-    let key = match r.topic {
-        Topic::Promises => keys::promise_key(&r.key),
-        Topic::Schedules => keys::schedule_key(&r.key),
-    };
-    (key, r.value.clone())
+/// The local write a consumed record becomes: a promise transcoded into the
+/// local format, a schedule as it is.
+fn op_of(c: Consumed) -> Result<Op, String> {
+    Ok(match c.topic {
+        Topic::Promises => {
+            let value = match &c.value {
+                Some(v) => Some(record::local::from_log(&c.key, v)?),
+                None => None,
+            };
+            (keys::promise_key(&c.key), value)
+        }
+        Topic::Schedules => (keys::schedule_key(&c.key), c.value),
+    })
 }
 
 /// Arm one entry per origin and per schedule from what the store holds.
@@ -368,7 +383,7 @@ fn seed_timers(store: &dyn PartitionStore, timers: &Timers) -> Result<(), String
     let mut earliest: BTreeMap<String, i64> = BTreeMap::new();
     for (key, value) in store.scan(&keys::all_promises_prefix())? {
         let id = keys::id_of_promise_key(&key).ok_or("unreadable promise key")?;
-        let (promise, task) = record::decode_promise(&id, &value)?;
+        let (promise, task) = record::local::decode(&value)?;
         let mut doc = OriginDoc::default();
         doc.promises.insert(id.clone(), promise);
         if let Some(task) = task {
@@ -405,7 +420,7 @@ fn load_origin(store: &dyn PartitionStore, origin: &str) -> Result<OriginDoc, Un
     }
     // A document that cannot be read is not something to paper over: refusing
     // beats deciding against a guess.
-    record::assemble(records)
+    record::local::assemble(records)
         .map_err(|e| Unavailable::new(format!("origin {origin} unreadable: {e}")))
 }
 
@@ -575,26 +590,30 @@ impl Actor {
         }
 
         let mut records = Vec::new();
+        let mut ops: Vec<Op> = Vec::new();
         for (before, after) in overlay.origins.values() {
-            for (id, value) in record::diff(before, after) {
+            for change in record::diff(before, after) {
+                ops.push((keys::promise_key(&change.id), change.local));
                 records.push(Record {
                     topic: Topic::Promises,
-                    key: id,
-                    value,
+                    key: change.id,
+                    value: change.log,
                 });
             }
         }
         for (id, (before, after)) in &overlay.schedules {
             if before != after {
+                let value = after.as_ref().map(record::encode_schedule);
+                ops.push((keys::schedule_key(id), value.clone()));
                 records.push(Record {
                     topic: Topic::Schedules,
                     key: id.clone(),
-                    value: after.as_ref().map(record::encode_schedule),
+                    value,
                 });
             }
         }
 
-        let result = self.commit(records).await;
+        let result = self.commit(records, ops).await;
         match result {
             Ok(()) => {
                 // Arm every target the round touched, changed or not: a timer
@@ -644,11 +663,12 @@ impl Actor {
 
     /// Commit `records` and apply them locally. Nothing is written when
     /// nothing changed.
-    async fn commit(&mut self, records: Vec<Record>) -> Result<(), LogError> {
+    /// Commit `records` to the log, then apply `ops` — the same changes in
+    /// the local encoding — to the local store.
+    async fn commit(&mut self, records: Vec<Record>, ops: Vec<Op>) -> Result<(), LogError> {
         if records.is_empty() {
             return Ok(());
         }
-        let ops: Vec<Op> = records.iter().map(op_of_record).collect();
         let after = self.writer.commit(records, self.checkpoint).await?;
         // The log has it. A local copy that cannot take it now disagrees with
         // the log, which is exactly the uncertain case.
@@ -697,7 +717,15 @@ impl Actor {
                 });
             }
         }
-        match self.commit(records).await {
+        // Tombstones: the same in both encodings.
+        let ops: Vec<Op> = records
+            .iter()
+            .map(|r| match r.topic {
+                Topic::Promises => (keys::promise_key(&r.key), None),
+                Topic::Schedules => (keys::schedule_key(&r.key), None),
+            })
+            .collect();
+        match self.commit(records, ops).await {
             Ok(()) => {
                 self.timers.clear();
                 self.cache.clear();

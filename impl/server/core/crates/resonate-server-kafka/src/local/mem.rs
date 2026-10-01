@@ -52,6 +52,7 @@ impl LocalStore for MemLocal {
 struct State {
     data: BTreeMap<Vec<u8>, Vec<u8>>,
     checkpoint: Option<Checkpoint>,
+    format: Option<u32>,
 }
 
 #[derive(Default)]
@@ -68,6 +69,15 @@ impl MemPartition {
 impl PartitionStore for MemPartition {
     fn checkpoint(&self) -> Result<Option<Checkpoint>, String> {
         Ok(self.lock().checkpoint)
+    }
+
+    fn format(&self) -> Result<Option<u32>, String> {
+        Ok(self.lock().format)
+    }
+
+    fn set_format(&self, format: u32) -> Result<(), String> {
+        self.lock().format = Some(format);
+        Ok(())
     }
 
     fn apply(&self, ops: Vec<Op>, checkpoint: Checkpoint) -> Result<(), String> {

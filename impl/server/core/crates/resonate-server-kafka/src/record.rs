@@ -14,7 +14,20 @@
 //!   and the deadlines a record arms travel inside it.
 //! - A deleted promise is a tombstone: a record with no value.
 //! - [`diff`] is the whole write path: the records a transition from one origin
-//!   document to another needs, and nothing for what did not change.
+//!   document to another needs, and nothing for what did not change — each in
+//!   both encodings below.
+//!
+//! # Two encodings
+//!
+//! The **log** holds the format above: durable, read by every node and every
+//! future version, so versioned and evolvable. The **local store** holds the
+//! same promise and task as [postcard](https://docs.rs/postcard) ([`local`]):
+//! a compact binary that decodes three to four times faster
+//! (`examples/local_codec.rs`). The local format needs no evolution story of
+//! its own — the store is a disposable copy, stamped with
+//! [`crate::local::LOCAL_FORMAT`] and rebuilt from the log whenever the stamp
+//! is not this build's. Schedules are few and never on the hot path, so they
+//! keep the log's encoding in both places.
 //!
 //! # Dependencies
 //!
@@ -22,8 +35,9 @@
 //!
 //! # Dependants
 //!
-//! The partition shell encodes with [`diff`] before every commit and decodes
-//! with [`assemble`] on every load; restore and search decode stored records.
+//! The partition shell encodes with [`diff`] before every commit, transcodes
+//! with [`local::from_log`] on replay, and decodes with [`local::assemble`] on
+//! every load; search and the snapshot decode local records too.
 
 use std::collections::BTreeSet;
 
@@ -81,10 +95,19 @@ pub fn assemble<'a>(
     Ok(doc)
 }
 
+/// One promise's change: its new value for the log and for the local store,
+/// or `None` in both for a tombstone.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Change {
+    pub id: String,
+    pub log: Option<Vec<u8>>,
+    pub local: Option<Vec<u8>>,
+}
+
 /// The records that take an origin from `before` to `after`: a value for every
 /// promise whose promise or task changed, a tombstone for every promise that
 /// is gone. Unchanged promises produce nothing.
-pub fn diff(before: &OriginDoc, after: &OriginDoc) -> Vec<(String, Option<Vec<u8>>)> {
+pub fn diff(before: &OriginDoc, after: &OriginDoc) -> Vec<Change> {
     let ids: BTreeSet<&String> = before
         .promises
         .keys()
@@ -97,10 +120,18 @@ pub fn diff(before: &OriginDoc, after: &OriginDoc) -> Vec<(String, Option<Vec<u8
         if old == new {
             continue;
         }
-        match new.0 {
-            Some(promise) => out.push((id.clone(), Some(encode_promise(id, promise, new.1)))),
-            None => out.push((id.clone(), None)),
-        }
+        out.push(match new.0 {
+            Some(promise) => Change {
+                id: id.clone(),
+                log: Some(encode_promise(id, promise, new.1)),
+                local: Some(local::encode(promise, new.1)),
+            },
+            None => Change {
+                id: id.clone(),
+                log: None,
+                local: None,
+            },
+        });
     }
     out
 }
@@ -117,6 +148,175 @@ pub fn decode_schedule(bytes: &[u8]) -> Result<ScheduleDoc, String> {
         return Err(format!("unsupported schedule version {}", doc.v));
     }
     Ok(doc)
+}
+
+/// The local store's encoding of a promise and its task.
+pub mod local {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use resonate_core::types::{PromiseState, PromiseValue, TaskState};
+    use resonate_server_blob::kernel::state::{min_deadline, OriginDoc, PromiseDoc, TaskDoc};
+    use serde::{Deserialize, Serialize};
+
+    // The kernel's types carry no serde derives, and postcard is not
+    // self-describing — every field is always written, in order — so the
+    // shape is spelled out here. Changing it means bumping LOCAL_FORMAT.
+
+    #[derive(Serialize, Deserialize)]
+    struct Promise {
+        state: u8,
+        param: Value,
+        value: Value,
+        tags: Vec<(String, String)>,
+        timeout_at: i64,
+        created_at: i64,
+        settled_at: Option<i64>,
+        callbacks: Vec<String>,
+        listeners: Vec<String>,
+        task: Option<Task>,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct Value {
+        headers: Option<Vec<(String, String)>>,
+        data: Option<String>,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct Task {
+        state: u8,
+        version: i64,
+        pid: Option<String>,
+        ttl: Option<i64>,
+        resumes: Vec<String>,
+        retry_at: Option<i64>,
+        lease_at: Option<i64>,
+    }
+
+    const PROMISE_STATES: [PromiseState; 5] = [
+        PromiseState::Pending,
+        PromiseState::Resolved,
+        PromiseState::Rejected,
+        PromiseState::RejectedCanceled,
+        PromiseState::RejectedTimedout,
+    ];
+    const TASK_STATES: [TaskState; 5] = [
+        TaskState::Pending,
+        TaskState::Acquired,
+        TaskState::Suspended,
+        TaskState::Halted,
+        TaskState::Fulfilled,
+    ];
+
+    fn code<T: PartialEq>(all: &[T], s: &T) -> u8 {
+        all.iter()
+            .position(|x| x == s)
+            .expect("every state has a code") as u8
+    }
+
+    fn state<T: Copy>(all: &[T], c: u8) -> Result<T, String> {
+        all.get(c as usize)
+            .copied()
+            .ok_or_else(|| format!("unknown state code {c}"))
+    }
+
+    fn value_of(v: &PromiseValue) -> Value {
+        Value {
+            headers: v.headers.as_ref().map(|h| {
+                let mut h: Vec<(String, String)> =
+                    h.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+                h.sort();
+                h
+            }),
+            data: v.data.clone(),
+        }
+    }
+
+    fn value_from(v: Value) -> PromiseValue {
+        PromiseValue {
+            headers: v.headers.map(|h| h.into_iter().collect()),
+            data: v.data,
+        }
+    }
+
+    /// Encode a promise and its task for the local store.
+    pub fn encode(p: &PromiseDoc, t: Option<&TaskDoc>) -> Vec<u8> {
+        let shape = Promise {
+            state: code(&PROMISE_STATES, &p.state),
+            param: value_of(&p.param),
+            value: value_of(&p.value),
+            tags: p.tags.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+            timeout_at: p.timeout_at,
+            created_at: p.created_at,
+            settled_at: p.settled_at,
+            callbacks: p.callbacks.clone(),
+            listeners: p.listeners.clone(),
+            task: t.map(|t| Task {
+                state: code(&TASK_STATES, &t.state),
+                version: t.version,
+                pid: t.pid.clone(),
+                ttl: t.ttl,
+                resumes: t.resumes.iter().cloned().collect(),
+                retry_at: t.retry_at,
+                lease_at: t.lease_at,
+            }),
+        };
+        postcard::to_allocvec(&shape).expect("a promise encodes")
+    }
+
+    /// Decode a local value back into a promise and its task.
+    pub fn decode(bytes: &[u8]) -> Result<(PromiseDoc, Option<TaskDoc>), String> {
+        let shape: Promise = postcard::from_bytes(bytes).map_err(|e| e.to_string())?;
+        let task = match shape.task {
+            Some(t) => Some(TaskDoc {
+                state: state(&TASK_STATES, t.state)?,
+                version: t.version,
+                pid: t.pid,
+                ttl: t.ttl,
+                resumes: t.resumes.into_iter().collect::<BTreeSet<_>>(),
+                retry_at: t.retry_at,
+                lease_at: t.lease_at,
+            }),
+            None => None,
+        };
+        Ok((
+            PromiseDoc {
+                state: state(&PROMISE_STATES, shape.state)?,
+                param: value_from(shape.param),
+                value: value_from(shape.value),
+                tags: shape.tags.into_iter().collect::<BTreeMap<_, _>>(),
+                timeout_at: shape.timeout_at,
+                created_at: shape.created_at,
+                settled_at: shape.settled_at,
+                callbacks: shape.callbacks,
+                listeners: shape.listeners,
+            },
+            task,
+        ))
+    }
+
+    /// Transcode a log record of promise `id` into its local value — what a
+    /// replay writes.
+    pub fn from_log(id: &str, bytes: &[u8]) -> Result<Vec<u8>, String> {
+        let (p, t) = super::decode_promise(id, bytes)?;
+        Ok(encode(&p, t.as_ref()))
+    }
+
+    /// Assemble an origin's document from its local values.
+    pub fn assemble<'a>(
+        records: impl IntoIterator<Item = (String, &'a [u8])>,
+    ) -> Result<OriginDoc, String> {
+        let mut doc = OriginDoc::default();
+        for (id, bytes) in records {
+            let (promise, task) = decode(bytes).map_err(|e| format!("record {id}: {e}"))?;
+            if let Some(task) = task {
+                doc.tasks.insert(id.clone(), task);
+            }
+            doc.promises.insert(id, promise);
+        }
+        doc.timer_at = min_deadline(&doc);
+        Ok(doc)
+    }
 }
 
 #[cfg(test)]
@@ -164,6 +364,26 @@ mod tests {
         let t = task(TaskState::Acquired);
         let bytes = encode_promise("o:charge", &p, Some(&t));
         assert_eq!(decode_promise("o:charge", &bytes).unwrap(), (p, Some(t)));
+    }
+
+    #[test]
+    fn the_local_encoding_round_trips_and_agrees_with_the_log() {
+        let mut p = promise(PromiseState::Pending, true);
+        p.param.headers = Some([("a".to_string(), "1".to_string())].into());
+        p.callbacks = vec!["o:x".into()];
+        let mut t = task(TaskState::Acquired);
+        t.resumes.insert("o:y".into());
+        for (p, t) in [
+            (p.clone(), Some(t)),
+            (promise(PromiseState::Resolved, false), None),
+        ] {
+            let bytes = local::encode(&p, t.as_ref());
+            assert_eq!(local::decode(&bytes).unwrap(), (p.clone(), t.clone()));
+            // Replay's transcode lands on the same bytes a commit writes.
+            let log = encode_promise("o:charge", &p, t.as_ref());
+            assert_eq!(local::from_log("o:charge", &log).unwrap(), bytes);
+        }
+        assert!(local::decode(b"garbage").is_err());
     }
 
     #[test]
@@ -221,8 +441,11 @@ mod tests {
         let out = diff(&before, &after);
         let ids: Vec<(&str, bool)> = out
             .iter()
-            .map(|(id, v)| (id.as_str(), v.is_some()))
+            .map(|c| (c.id.as_str(), c.log.is_some()))
             .collect();
+        for c in &out {
+            assert_eq!(c.log.is_some(), c.local.is_some());
+        }
         assert_eq!(ids, vec![("o:b", true), ("o:gone", false), ("o:new", true)]);
         assert!(diff(&after, &after).is_empty());
     }

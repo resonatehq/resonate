@@ -90,7 +90,7 @@ pub fn local(
                 if !after(&id) {
                     continue;
                 }
-                let (promise, _) = record::decode_promise(&id, &value)?;
+                let (promise, _) = record::local::decode(&value)?;
                 let mut p = promise.to_record(&id);
                 p.project(now);
                 let state_ok = q.state.map(|s| p.state == s).unwrap_or(true);
@@ -111,7 +111,7 @@ pub fn local(
                 if !after(&id) {
                     continue;
                 }
-                if let (_, Some(task)) = record::decode_promise(&id, &value)? {
+                if let (_, Some(task)) = record::local::decode(&value)? {
                     if q.state.map(|s| task.state == s).unwrap_or(true) {
                         let t = task.to_record(&id);
                         out.push((id, serde_json::to_value(t).map_err(|e| e.to_string())?));

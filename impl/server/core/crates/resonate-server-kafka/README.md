@@ -60,6 +60,16 @@ A revoked partition's column family is kept for a grace period (a partition
 that comes straight back replays only its tail) and then dropped. Memory is the
 block cache and memtables, shared across column families, and the timer index.
 
+**Local format: postcard, stamped.** The log keeps the blob codec's versioned
+lines, because every node and every future version reads them. The local copy
+is private and disposable, so it holds the same promise and task as postcard,
+which decodes 3–4× faster (`examples/local_codec.rs`). Each column family is
+stamped with the local format; a copy stamped otherwise is dropped and rebuilt
+from the log at takeover, so the local format can change between any two
+releases with no migration. Hot origins skip decoding altogether: each
+partition keeps an LRU of decoded documents (`cache_promises`), owned by its
+actor, refilled only by committed rounds, and empty after every takeover.
+
 **Timers** are fields of records, committed with the state that arms them. The
 index is in memory only, rebuilt from the records on takeover.
 

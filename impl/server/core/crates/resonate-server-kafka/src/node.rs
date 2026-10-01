@@ -1037,7 +1037,7 @@ impl Node {
             {
                 let id = keys::id_of_promise_key(&key)
                     .ok_or_else(|| Unavailable::new("unreadable promise key"))?;
-                let (p, t) = record::decode_promise(&id, &value).map_err(Unavailable::new)?;
+                let (p, t) = record::local::decode(&value).map_err(Unavailable::new)?;
                 promises.push(p.to_record(&id));
                 if p.timeout_armed() {
                     promise_timeouts.push(SnapshotPromiseTimeout {
