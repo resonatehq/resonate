@@ -145,6 +145,36 @@ TEST_KAFKA_BROKERS=localhost:9092 \
 - `tests/live.rs` — real Kafka: fencing, restart from RocksDB, two nodes with a
   real consumer group and HTTP forwarding.
 
+## Performance
+
+Measured end to end over HTTP with `examples/load.rs` against
+`examples/server.rs` (each client: `promise.create` then `promise.settle` on
+a fresh origin, 256-byte payloads, one request in flight per client). One
+4-vCPU VM ran everything — broker, node(s) and load generator — with a single
+broker and replication factor 1, so these are relative numbers, not capacity.
+
+| setup | clients | req/s | client p50 / p99 | commit mean | requests per round |
+|---|---|---|---|---|---|
+| Kafka, 1 node, 16 partitions | 64 | 2,318 | 22 / 120 ms | 13.5 ms | 2.2 |
+| Redpanda, 1 node, 16 partitions | 64 | 2,213 | 22 / 125 ms | 14.8 ms | 2.2 |
+| Kafka, 2 nodes, 16 partitions | 64 | 1,599 | 36 / 142 ms | 20.7 ms | 2.2 |
+| Kafka, 1 node, 64 partitions | 256 | 2,855 | 79 / 205 ms | 37.7 ms | 1.9 |
+| Kafka, 1 node, 16 partitions | 256 | 5,317 | 43 / 150 ms | 11.1 ms | 4.2 |
+
+What the breakdown (`resonate_kafka_*`) shows:
+
+- **The transaction is the request.** Server time is queue wait plus round,
+  and the round is almost all commit; loading, deciding and applying take
+  well under a millisecond. The HTTP edge adds microseconds.
+- **Throughput = transactions per second × requests per round.** The broker
+  completed roughly 1,000–1,500 transactions per second in every run. More
+  partitions did not raise that — they made each commit slower — while more
+  requests per partition did: rounds grew, and throughput doubled at the same
+  transaction rate.
+- **Two nodes on one VM** compete for the same four cores; half the requests
+  were forwarded. Horizontal scaling needs nodes and brokers on their own
+  machines to show.
+
 ## Known limits
 
 - A **hot origin** is one partition's work: one actor, one core.
