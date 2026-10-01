@@ -21,12 +21,14 @@ use resonate_core::{ResonateServer, Unavailable};
 use resonate_server_blob::kernel::state::KernelCfg;
 use resonate_server_blob::sender::Sender;
 
+use crate::directory::kafka::{GroupDirectory, GroupDirectoryCfg};
+use crate::directory::{Directory, NoDirectory};
 use crate::local::mem::MemLocal;
 use crate::local::rocks::{RocksCfg, RocksLocal};
 use crate::local::LocalStore;
 use crate::log::kafka::{KafkaCfg, KafkaLog};
 use crate::log::mem::MemLog;
-use crate::log::Log;
+use crate::log::{Log, Topic};
 use crate::membership::kafka::{GroupCfg, KafkaMembership};
 use crate::membership::{Membership, StaticMembership};
 use crate::node::{Node, NodeCfg};
@@ -72,7 +74,7 @@ pub struct Config {
     #[serde(default = "default_partitions")]
     pub partitions: u32,
 
-    /// Topics are `<topic_prefix>.promises`, `.schedules` and `.owners`.
+    /// Topics are `<topic_prefix>.promises` and `.schedules`.
     #[serde(default = "default_prefix")]
     pub topic_prefix: String,
 
@@ -105,6 +107,11 @@ pub struct Config {
     /// The URL other nodes reach `peer_bind` at.
     #[serde(default)]
     pub peer_url: String,
+
+    /// How often the owner directory asks the group who owns what, in ms. A
+    /// failed forward asks at once.
+    #[serde(default = "default_directory_refresh_ms")]
+    pub directory_refresh_ms: u64,
 
     /// A shared secret every peer request must carry.
     #[serde(default)]
@@ -177,6 +184,9 @@ fn default_node_id() -> String {
 fn default_peer_bind() -> String {
     "0.0.0.0:8002".into()
 }
+fn default_directory_refresh_ms() -> u64 {
+    2_000
+}
 fn default_block_cache_mb() -> usize {
     256
 }
@@ -204,6 +214,13 @@ impl Default for Config {
         serde_json::from_value(serde_json::json!({})).expect("every field has a default")
     }
 }
+
+type Wiring = (
+    Arc<dyn Log>,
+    Arc<dyn Membership>,
+    Arc<dyn Directory>,
+    Arc<dyn Peers>,
+);
 
 pub struct KafkaServer {
     config: Config,
@@ -255,9 +272,7 @@ impl KafkaServer {
 impl ResonateServer for KafkaServer {
     async fn init(&self, debug: bool) -> Result<(), Unavailable> {
         let c = &self.config;
-        let (log, membership, peers): (Arc<dyn Log>, Arc<dyn Membership>, Arc<dyn Peers>) = match &c
-            .brokers
-        {
+        let (log, membership, directory, peers): Wiring = match &c.brokers {
             None => {
                 tracing::warn!(
                     "servers.server_kafka.brokers is not set — one node over an \
@@ -266,6 +281,7 @@ impl ResonateServer for KafkaServer {
                 (
                     MemLog::new(c.partitions),
                     StaticMembership::new(c.partitions),
+                    Arc::new(NoDirectory),
                     LocalPeers::new(),
                 )
             }
@@ -292,26 +308,38 @@ impl ResonateServer for KafkaServer {
                 let log = KafkaLog::connect(kafka.clone())
                     .await
                     .map_err(|e| Unavailable::new(e.to_string()))?;
+                let group_id = c.group_id.clone().unwrap_or(prefix);
+                // Nodes find each other through the group: who is assigned
+                // what, and where each member says it can be reached.
+                let directory = GroupDirectory::start(GroupDirectoryCfg {
+                    brokers: brokers.clone(),
+                    group_id: group_id.clone(),
+                    topic: kafka.topic(Topic::Promises),
+                    refresh: Duration::from_millis(c.directory_refresh_ms),
+                    timeout: Duration::from_secs(10),
+                    properties: c.librdkafka.clone(),
+                })
+                .map_err(Unavailable::new)?;
                 let membership = KafkaMembership::new(
                     kafka,
                     GroupCfg {
-                        group_id: c.group_id.clone().unwrap_or(prefix),
+                        group_id,
                         session_timeout: Duration::from_millis(c.session_timeout_ms),
                         instance_id: c.instance_id.clone(),
+                        peer_url: c.peer_url.clone(),
                     },
                 );
                 let peers = Arc::new(HttpPeers::new(
                     Duration::from_secs(30),
                     c.peer_token.clone(),
                 ));
-                (log, membership, peers)
+                (log, membership, directory, peers)
             }
         };
 
         let node = Node::new(
             NodeCfg {
                 node_id: c.node_id.clone(),
-                peer_url: c.peer_url.clone(),
                 partition: PartitionCfg {
                     kernel: KernelCfg {
                         retry_timeout: c.retry_timeout,
@@ -330,6 +358,7 @@ impl ResonateServer for KafkaServer {
             self.open_local()?,
             Arc::new(Sender::new(Arc::clone(&self.router), debug)),
             membership,
+            directory,
             peers,
         );
 

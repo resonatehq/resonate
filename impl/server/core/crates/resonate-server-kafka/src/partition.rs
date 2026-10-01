@@ -13,9 +13,10 @@
 //!    came first, that end is everything anyone will ever have committed
 //!    before us.
 //! 4. **Rebuild the timer index** from the records.
-//! 5. **Claim** the partition in the owner directory, in a transaction of its
-//!    own — which is also the first proof that the fence still holds.
-//! 6. **Serve.**
+//! 5. **Serve.**
+//!
+//! Nothing is announced: the group's assignment is what tells other nodes
+//! where the partition lives ([`crate::directory`]).
 //!
 //! # A round
 //!
@@ -70,7 +71,7 @@ use resonate_server_blob::sender::Sender;
 
 use crate::keys;
 use crate::local::{LocalStore, Op, PartitionStore};
-use crate::log::{Checkpoint, Consumed, Log, LogError, Owner, Record, Topic, Writer};
+use crate::log::{Checkpoint, Consumed, Log, LogError, Record, Topic, Writer};
 use crate::record;
 use crate::timers::{Target, Timers};
 
@@ -189,7 +190,6 @@ impl Partition {
         id: u32,
         log: &Arc<dyn Log>,
         local: &Arc<dyn LocalStore>,
-        claim: Owner,
         sender: Arc<Sender>,
         cfg: PartitionCfg,
         on_exit: Box<dyn FnOnce(Exit) + Send>,
@@ -230,10 +230,6 @@ impl Partition {
         let timers = Arc::new(Timers::new());
         seed_timers(store.as_ref(), &timers).map_err(TakeoverError)?;
 
-        // (5) Claim it. A fence that no longer holds fails here, before
-        // anything is served.
-        writer.commit(Vec::new(), Some(claim), position).await?;
-
         tracing::info!(
             partition = id,
             replayed,
@@ -241,7 +237,7 @@ impl Partition {
             "Partition taken over"
         );
 
-        // (6) Serve.
+        // (5) Serve.
         let (tx, rx) = mpsc::channel(cfg.mailbox.max(1));
         let (stop, stop_rx) = watch::channel(false);
         let actor = Actor {
@@ -635,7 +631,7 @@ impl Actor {
             return Ok(());
         }
         let ops: Vec<Op> = records.iter().map(op_of_record).collect();
-        let after = self.writer.commit(records, None, self.checkpoint).await?;
+        let after = self.writer.commit(records, self.checkpoint).await?;
         // The log has it. A local copy that cannot take it now disagrees with
         // the log, which is exactly the uncertain case.
         self.store

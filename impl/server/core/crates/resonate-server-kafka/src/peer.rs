@@ -42,7 +42,7 @@ use resonate_core::types::{
 use resonate_core::Unavailable;
 use resonate_plugin::axum;
 
-use crate::log::Owner;
+use crate::directory::Owner;
 use crate::node::Node;
 
 /// A schedule's occurrence, created in the partition that owns its origin.
@@ -127,6 +127,9 @@ impl HttpPeers {
     pub fn new(timeout: Duration, token: Option<String>) -> Self {
         let client = reqwest::Client::builder()
             .timeout(timeout)
+            // A peer that is gone should fail fast, not after `timeout`: the
+            // directory is refreshed on failure and the client retries.
+            .connect_timeout(Duration::from_secs(2))
             .build()
             .expect("an HTTP client builds");
         Self { client, token }

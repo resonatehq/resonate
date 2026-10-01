@@ -2,13 +2,12 @@
 //!
 //! # Topics
 //!
-//! Three, all compacted, named from one prefix:
+//! Two, both compacted, named from one prefix:
 //!
 //! | topic | partitions | key | value |
 //! |---|---|---|---|
 //! | `<prefix>.promises` | N | promise id | the promise and its task ([`crate::record`]) |
 //! | `<prefix>.schedules` | N | schedule id | the schedule |
-//! | `<prefix>.owners` | 1 | partition number | [`Owner`], as JSON |
 //!
 //! Partition *p* of the promise topic and partition *p* of the schedule topic
 //! are one partition of this backend: one owner, one writer, one transaction.
@@ -29,15 +28,11 @@
 //! checkpoint after a topic is its high watermark at that moment, which is
 //! past any trailing transaction marker, so a resume never starts on one.
 //!
-//! # Owner directory
-//!
-//! A claim is a record on the owners topic, produced in the claiming writer's
-//! own transaction — so a fenced writer cannot claim. Every node tails the
-//! owners topic (committed records only) into an in-memory map.
+//! Who owns a partition is the consumer group's to say, not the log's: see
+//! [`crate::directory::kafka`].
 
-use std::collections::{BTreeMap, HashMap};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
+use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -49,14 +44,14 @@ use rdkafka::error::{KafkaError, RDKafkaErrorCode};
 use rdkafka::producer::{FutureProducer, FutureRecord, Producer};
 use rdkafka::{Message, Offset, TopicPartitionList};
 
-use super::{Checkpoint, Consumed, Log, LogError, Owner, Reader, Record, Topic, Writer};
+use super::{Checkpoint, Consumed, Log, LogError, Reader, Record, Topic, Writer};
 
 /// Everything the Kafka log needs.
 #[derive(Debug, Clone)]
 pub struct KafkaCfg {
     /// `bootstrap.servers`.
     pub brokers: String,
-    /// Topic names are `<topic_prefix>.promises`, `.schedules` and `.owners`.
+    /// Topic names are `<topic_prefix>.promises` and `.schedules`.
     pub topic_prefix: String,
     /// Transactional ids are `<txn_prefix>-p<partition>`. One per deployment.
     pub txn_prefix: String,
@@ -100,10 +95,6 @@ impl KafkaCfg {
             Topic::Promises => format!("{}.promises", self.topic_prefix),
             Topic::Schedules => format!("{}.schedules", self.topic_prefix),
         }
-    }
-
-    pub fn owners_topic(&self) -> String {
-        format!("{}.owners", self.topic_prefix)
     }
 
     fn client(&self) -> ClientConfig {
@@ -183,29 +174,21 @@ fn classify(e: &KafkaError) -> Class {
 
 pub struct KafkaLog {
     cfg: KafkaCfg,
-    owners: Arc<RwLock<HashMap<u32, Owner>>>,
-    stop: Arc<AtomicBool>,
-    tail: std::sync::Mutex<Option<std::thread::JoinHandle<()>>>,
     probe: Arc<BaseConsumer>,
 }
 
 impl KafkaLog {
-    /// Connect: create or check the topics, then start tailing the owner
-    /// directory.
+    /// Connect: create the topics, or check the ones that exist.
     pub async fn connect(cfg: KafkaCfg) -> Result<Arc<Self>, LogError> {
         if cfg.create_topics {
             create_topics(&cfg).await?;
         }
         let probe: BaseConsumer = cfg.reader_config().create().map_err(unavailable)?;
         let log = Arc::new(Self {
-            owners: Arc::new(RwLock::new(HashMap::new())),
-            stop: Arc::new(AtomicBool::new(false)),
-            tail: std::sync::Mutex::new(None),
             probe: Arc::new(probe),
             cfg,
         });
         log.check_partition_counts().await?;
-        log.start_tail()?;
         Ok(log)
     }
 
@@ -218,7 +201,6 @@ impl KafkaLog {
             for (topic, want) in [
                 (cfg.topic(Topic::Promises), cfg.partitions as usize),
                 (cfg.topic(Topic::Schedules), cfg.partitions as usize),
-                (cfg.owners_topic(), 1),
             ] {
                 let md = consumer
                     .fetch_metadata(Some(&topic), cfg.request_timeout)
@@ -241,63 +223,8 @@ impl KafkaLog {
         .map_err(unavailable)?
     }
 
-    fn start_tail(&self) -> Result<(), LogError> {
-        let consumer: BaseConsumer = self.cfg.reader_config().create().map_err(unavailable)?;
-        let mut tpl = TopicPartitionList::new();
-        tpl.add_partition_offset(&self.cfg.owners_topic(), 0, Offset::Beginning)
-            .map_err(unavailable)?;
-        consumer.assign(&tpl).map_err(unavailable)?;
-        let owners = Arc::clone(&self.owners);
-        let stop = Arc::clone(&self.stop);
-        let handle = std::thread::Builder::new()
-            .name("resonate-owners".into())
-            .spawn(move || {
-                while !stop.load(Ordering::Relaxed) {
-                    match consumer.poll(Duration::from_millis(200)) {
-                        Some(Ok(m)) => {
-                            let Some(p) = m
-                                .key()
-                                .and_then(|k| std::str::from_utf8(k).ok())
-                                .and_then(|k| k.parse::<u32>().ok())
-                            else {
-                                continue;
-                            };
-                            let mut owners = owners.write().unwrap_or_else(|e| e.into_inner());
-                            match m
-                                .payload()
-                                .and_then(|v| serde_json::from_slice::<Owner>(v).ok())
-                            {
-                                Some(owner) => {
-                                    owners.insert(p, owner);
-                                }
-                                None => {
-                                    owners.remove(&p);
-                                }
-                            }
-                        }
-                        Some(Err(KafkaError::PartitionEOF(_))) | None => {}
-                        Some(Err(e)) => {
-                            tracing::debug!(error = %e, "Owner directory read error");
-                        }
-                    }
-                }
-            })
-            .map_err(unavailable)?;
-        *self.tail.lock().unwrap_or_else(|e| e.into_inner()) = Some(handle);
-        Ok(())
-    }
-
     pub fn cfg(&self) -> &KafkaCfg {
         &self.cfg
-    }
-}
-
-impl Drop for KafkaLog {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
-        if let Some(handle) = self.tail.lock().unwrap_or_else(|e| e.into_inner()).take() {
-            let _ = handle.join();
-        }
     }
 }
 
@@ -305,7 +232,6 @@ async fn create_topics(cfg: &KafkaCfg) -> Result<(), LogError> {
     let admin: AdminClient<DefaultClientContext> = cfg.client().create().map_err(unavailable)?;
     let promises = cfg.topic(Topic::Promises);
     let schedules = cfg.topic(Topic::Schedules);
-    let owners = cfg.owners_topic();
     let isr = if cfg.replication_factor >= 3 {
         "2"
     } else {
@@ -321,7 +247,6 @@ async fn create_topics(cfg: &KafkaCfg) -> Result<(), LogError> {
     let topics = [
         compacted(&promises, n, rf, isr),
         compacted(&schedules, n, rf, isr),
-        compacted(&owners, 1, rf, isr),
     ];
     let results = admin
         .create_topics(
@@ -383,7 +308,6 @@ impl Log for KafkaLog {
             partition,
             promises: self.cfg.topic(Topic::Promises),
             schedules: self.cfg.topic(Topic::Schedules),
-            owners: self.cfg.owners_topic(),
             timeout: self.cfg.transaction_timeout,
         }))
     }
@@ -415,16 +339,8 @@ impl Log for KafkaLog {
         }))
     }
 
-    fn owner(&self, partition: u32) -> Option<Owner> {
-        self.owners
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(&partition)
-            .cloned()
-    }
-
     async fn ready(&self) -> bool {
-        let topic = self.cfg.owners_topic();
+        let topic = self.cfg.topic(Topic::Promises);
         let probe = Arc::clone(&self.probe);
         tokio::task::spawn_blocking(move || {
             probe
@@ -445,7 +361,6 @@ struct KafkaWriter {
     partition: u32,
     promises: String,
     schedules: String,
-    owners: String,
     timeout: Duration,
 }
 
@@ -475,13 +390,8 @@ impl KafkaWriter {
 
 #[async_trait]
 impl Writer for KafkaWriter {
-    async fn commit(
-        &self,
-        records: Vec<Record>,
-        claim: Option<Owner>,
-        base: Checkpoint,
-    ) -> Result<Checkpoint, LogError> {
-        if records.is_empty() && claim.is_none() {
+    async fn commit(&self, records: Vec<Record>, base: Checkpoint) -> Result<Checkpoint, LogError> {
+        if records.is_empty() {
             return Ok(base);
         }
         match self.blocking(|p| p.begin_transaction()).await? {
@@ -496,11 +406,7 @@ impl Writer for KafkaWriter {
         }
 
         let partition = self.partition as i32;
-        let claim_value = claim
-            .as_ref()
-            .map(|o| serde_json::to_vec(o).expect("an owner serializes"));
-        let claim_key = self.partition.to_string();
-        let mut deliveries = Vec::with_capacity(records.len() + 1);
+        let mut deliveries = Vec::with_capacity(records.len());
         for r in &records {
             let topic = match r.topic {
                 Topic::Promises => &self.promises,
@@ -513,17 +419,7 @@ impl Writer for KafkaWriter {
                 record = record.payload(v.as_slice());
             }
             match self.producer.send_result(record) {
-                Ok(d) => deliveries.push((Some(r.topic), d)),
-                Err((e, _)) => return Err(self.abort(e).await),
-            }
-        }
-        if let Some(value) = &claim_value {
-            let record = FutureRecord::<str, [u8]>::to(&self.owners)
-                .key(claim_key.as_str())
-                .partition(0)
-                .payload(value.as_slice());
-            match self.producer.send_result(record) {
-                Ok(d) => deliveries.push((None, d)),
+                Ok(d) => deliveries.push((r.topic, d)),
                 Err((e, _)) => return Err(self.abort(e).await),
             }
         }
@@ -532,10 +428,8 @@ impl Writer for KafkaWriter {
         for (topic, delivery) in deliveries {
             match delivery.await {
                 Ok(Ok(d)) => {
-                    if let Some(topic) = topic {
-                        if d.offset + 1 > after.get(topic) {
-                            after.set(topic, d.offset + 1);
-                        }
+                    if d.offset + 1 > after.get(topic) {
+                        after.set(topic, d.offset + 1);
                     }
                 }
                 Ok(Err((e, _))) => return Err(self.abort(e).await),

@@ -260,6 +260,21 @@ impl MemGroup {
     }
 }
 
+/// The in-process group is its own directory, as the Kafka group is through
+/// `DescribeConsumerGroups`: a partition's owner is the member it is assigned
+/// to. Peers are reached by node id ([`crate::peer::LocalPeers`]).
+impl crate::directory::Directory for MemGroup {
+    fn owner(&self, partition: u32) -> Option<crate::directory::Owner> {
+        self.lock()
+            .iter()
+            .find(|(_, m)| m.owned.contains(&partition))
+            .map(|(node, _)| crate::directory::Owner {
+                node: node.clone(),
+                peer_url: format!("local://{node}"),
+            })
+    }
+}
+
 struct MemMember {
     group: Arc<MemGroup>,
     node: String,

@@ -59,9 +59,10 @@ use resonate_core::{util, ResonateServer, Unavailable};
 use resonate_server_blob::kernel::state::{Reply, Req, ScheduleFireData};
 use resonate_server_blob::sender::Sender;
 
+use crate::directory::{Directory, Owner};
 use crate::keys::{self, origin_of};
 use crate::local::LocalStore;
-use crate::log::{Log, Owner};
+use crate::log::Log;
 use crate::membership::{Event, Membership};
 use crate::partition::{Exit, OriginOp, Partition, PartitionCfg, ScheduleOp};
 use crate::peer::{Fire, Peers, Search};
@@ -75,10 +76,10 @@ const RETRY_DELAY_MS: i64 = 1_000;
 /// Everything a node needs to know about itself.
 #[derive(Debug, Clone)]
 pub struct NodeCfg {
-    /// This node's id in the owner directory. Unique in the cluster.
+    /// This node's id, as the group and the directory know it. Unique in the
+    /// cluster. (Where other nodes reach it is advertised through the group:
+    /// see [`crate::membership::kafka::GroupCfg::peer_url`].)
     pub node_id: String,
-    /// Where other nodes forward requests to this one.
-    pub peer_url: String,
     pub partition: PartitionCfg,
     /// The debug startup flag: `debug.*` answered, `head.debug_time` honoured,
     /// messages held, no timer loops.
@@ -96,7 +97,6 @@ impl Default for NodeCfg {
     fn default() -> Self {
         Self {
             node_id: "node-0".into(),
-            peer_url: String::new(),
             partition: PartitionCfg::default(),
             debug: false,
             search: false,
@@ -129,6 +129,7 @@ pub struct Node {
     local: Arc<dyn LocalStore>,
     sender: Arc<Sender>,
     membership: Arc<dyn Membership>,
+    directory: Arc<dyn Directory>,
     peers: Arc<dyn Peers>,
     table: RwLock<HashMap<u32, Slot>>,
     /// Partitions the group assigns here, each with the token of its current
@@ -147,6 +148,7 @@ impl Node {
         local: Arc<dyn LocalStore>,
         sender: Arc<Sender>,
         membership: Arc<dyn Membership>,
+        directory: Arc<dyn Directory>,
         peers: Arc<dyn Peers>,
     ) -> Arc<Self> {
         Arc::new_cyclic(|me| Self {
@@ -155,6 +157,7 @@ impl Node {
             local,
             sender,
             membership,
+            directory,
             peers,
             table: RwLock::new(HashMap::new()),
             assigned: Mutex::new(HashMap::new()),
@@ -180,6 +183,7 @@ impl Node {
             crate::local::mem::MemLocal::new(),
             sender,
             crate::membership::StaticMembership::new(partitions),
+            Arc::new(crate::directory::NoDirectory),
             crate::peer::LocalPeers::new(),
         )
     }
@@ -194,13 +198,6 @@ impl Node {
 
     fn partitions(&self) -> u32 {
         self.log.partitions()
-    }
-
-    fn owner(&self) -> Owner {
-        Owner {
-            node: self.cfg.node_id.clone(),
-            peer_url: self.cfg.peer_url.clone(),
-        }
     }
 
     /// The partitions this node is serving right now.
@@ -243,7 +240,7 @@ impl Node {
         if forwarded {
             return Route::Nowhere(format!("partition {p} is not served by {}", self.id()));
         }
-        match self.log.owner(p) {
+        match self.directory.owner(p) {
             Some(owner) if owner.node != self.cfg.node_id => Route::Remote(owner),
             _ => Route::Nowhere(format!("partition {p} has no owner yet")),
         }
@@ -411,7 +408,6 @@ impl Node {
             p,
             &self.log,
             &self.local,
-            self.owner(),
             Arc::clone(&self.sender),
             self.cfg.partition.clone(),
             on_exit,
@@ -629,7 +625,13 @@ impl Node {
                     .await
                     .map(|_| ())
             }
-            Route::Remote(owner) => self.peers.fire(&owner, &fire).await,
+            Route::Remote(owner) => {
+                let out = self.peers.fire(&owner, &fire).await;
+                if out.is_err() {
+                    self.directory.stale();
+                }
+                out
+            }
             Route::Nowhere(why) => Err(Unavailable::new(why)),
         }
     }
@@ -737,7 +739,18 @@ impl Node {
     }
 
     async fn forward(&self, owner: &Owner, env: &RequestEnvelope) -> Result<Reply, Unavailable> {
-        let resp = self.peers.process(owner, env).await?;
+        // A failed forward means the directory may be behind the group: ask
+        // again now, so the client's retry finds the new owner.
+        let resp = match self.peers.process(owner, env).await {
+            Ok(resp) => resp,
+            Err(e) => {
+                self.directory.stale();
+                return Err(e);
+            }
+        };
+        if resp.head.status == 503 {
+            self.directory.stale();
+        }
         Ok(Reply::status(resp.head.status, resp.data))
     }
 

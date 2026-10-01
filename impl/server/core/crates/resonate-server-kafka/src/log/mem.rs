@@ -20,12 +20,12 @@
 //!
 //! The differential suite and every test that runs nodes in process.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 
-use super::{Checkpoint, Consumed, Log, LogError, Owner, Reader, Record, Topic, Writer};
+use super::{Checkpoint, Consumed, Log, LogError, Reader, Record, Topic, Writer};
 
 #[derive(Debug, Clone)]
 struct Entry {
@@ -90,7 +90,6 @@ pub enum Fault {
 #[derive(Default)]
 struct Inner {
     partitions: Vec<PartitionLog>,
-    owners: HashMap<u32, Owner>,
     fault: Option<Fault>,
     commits: u64,
 }
@@ -208,10 +207,6 @@ impl Log for MemLog {
         }))
     }
 
-    fn owner(&self, partition: u32) -> Option<Owner> {
-        self.lock().owners.get(&partition).cloned()
-    }
-
     async fn ready(&self) -> bool {
         true
     }
@@ -225,12 +220,7 @@ struct MemWriter {
 
 #[async_trait]
 impl Writer for MemWriter {
-    async fn commit(
-        &self,
-        records: Vec<Record>,
-        claim: Option<Owner>,
-        base: Checkpoint,
-    ) -> Result<Checkpoint, LogError> {
+    async fn commit(&self, records: Vec<Record>, base: Checkpoint) -> Result<Checkpoint, LogError> {
         let mut inner = lock(&self.inner);
         let fault = inner.fault.take();
         if let Some(Fault::Refuse(e)) = &fault {
@@ -255,9 +245,6 @@ impl Writer for MemWriter {
             if touched[i] {
                 partition.mark(topic);
             }
-        }
-        if let Some(owner) = claim {
-            inner.owners.insert(self.partition, owner);
         }
         inner.commits += 1;
         if let Some(Fault::LandThenUncertain) = fault {

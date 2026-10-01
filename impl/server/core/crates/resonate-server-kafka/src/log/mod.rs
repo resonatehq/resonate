@@ -36,8 +36,8 @@
 //! # Dependants
 //!
 //! The partition shell, which fences on takeover, replays through a reader,
-//! and commits every round through its writer; the node, which reads the owner
-//! directory to forward requests.
+//! and commits every round through its writer. Who owns a partition is not
+//! the log's business: see [`crate::membership`] and [`crate::directory`].
 
 pub mod kafka;
 pub mod mem;
@@ -45,7 +45,6 @@ pub mod mem;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 
 /// Which of a partition's two logs a record belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -116,15 +115,6 @@ pub struct Consumed {
     pub offset: i64,
 }
 
-/// Who serves a partition, as the owner directory records it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Owner {
-    /// The owning node's id.
-    pub node: String,
-    /// Where the owning node takes forwarded requests.
-    pub peer_url: String,
-}
-
 /// Why the log did not do what was asked. See the module docs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LogError {
@@ -161,9 +151,6 @@ pub trait Log: Send + Sync {
     /// Read committed records from `from` to the end of the log as it is now.
     async fn reader(&self, partition: u32, from: Checkpoint) -> Result<Box<dyn Reader>, LogError>;
 
-    /// Who serves `partition`, as far as this process has heard.
-    fn owner(&self, partition: u32) -> Option<Owner>;
-
     /// Whether the log answers at all — what `/ready` reports.
     async fn ready(&self) -> bool;
 }
@@ -171,15 +158,9 @@ pub trait Log: Send + Sync {
 /// The one writer of one partition.
 #[async_trait]
 pub trait Writer: Send + Sync {
-    /// Commit `records`, and optionally an ownership `claim` for the owner
-    /// directory, as one transaction. `base` is the partition's checkpoint
-    /// before this commit; the result is its checkpoint after it.
-    async fn commit(
-        &self,
-        records: Vec<Record>,
-        claim: Option<Owner>,
-        base: Checkpoint,
-    ) -> Result<Checkpoint, LogError>;
+    /// Commit `records` as one transaction. `base` is the partition's
+    /// checkpoint before this commit; the result is its checkpoint after it.
+    async fn commit(&self, records: Vec<Record>, base: Checkpoint) -> Result<Checkpoint, LogError>;
 }
 
 /// A committed read of one partition, from a checkpoint to a fixed end.

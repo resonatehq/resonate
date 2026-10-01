@@ -45,7 +45,6 @@ impl Cluster {
             let node = Node::new(
                 NodeCfg {
                     node_id: id.clone(),
-                    peer_url: format!("local://{id}"),
                     search: true,
                     ..Default::default()
                 },
@@ -53,6 +52,7 @@ impl Cluster {
                 MemLocal::new(),
                 Arc::new(Sender::new(Arc::new(NullRouter), false)),
                 group.member(&id),
+                Arc::clone(&group) as _,
                 Arc::clone(&peers) as _,
             );
             peers.register(&node);

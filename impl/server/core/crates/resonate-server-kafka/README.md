@@ -16,13 +16,12 @@ Kafka's own murmur2 partitioner over the origin, modulo a fixed partition
 count. Schedules are partitioned by their id the same way. A partition owner
 can answer any single operation on its partition without talking to anyone.
 
-**Topics.** Three, compacted, from one prefix:
+**Topics.** Two, compacted, from one prefix:
 
 | topic | partitions | key | value |
 |---|---|---|---|
 | `<prefix>.promises` | N | promise id | the promise **and its task** — one record |
 | `<prefix>.schedules` | N | schedule id | the schedule |
-| `<prefix>.owners` | 1 | partition | the owning node and its peer URL |
 
 A record is the object's whole current version, never a delta, so compaction
 keeps exactly the current state and replaying a record twice is harmless. The
@@ -44,8 +43,7 @@ acknowledged.
 
 **Takeover**, in order: fence → check the local copy against the log's start
 offset → replay from the local checkpoint to the end → rebuild the timer index
-→ claim the partition in the owner directory (in a transaction of its own) →
-serve.
+→ serve.
 
 **A round.** One actor per partition drains its mailbox, loads each origin the
 batch names from the local store, folds the batch through the kernel, diffs the
@@ -65,9 +63,18 @@ block cache and memtables, shared across column families, and the timer index.
 **Timers** are fields of records, committed with the state that arms them. The
 index is in memory only, rebuilt from the records on takeover.
 
+**Nodes find each other through the group.** No node keeps a list of the
+others. Each node's group consumer carries `resonate/<node>/<peer url>` as its
+`client.id`, and every node asks the group coordinator
+(`DescribeConsumerGroups`) every couple of seconds — and at once after a failed
+forward — which member is assigned which partition. A node that dies drops out
+when its session times out. The directory is for routing only: a stale answer
+costs a 503 and a retry, never a lost or doubled write, because the fence is
+what keeps writes safe.
+
 **Any node answers.** A request for a partition this node does not serve is
-forwarded once, over an internal HTTP listener, to the owner the directory
-names; a forwarded request is never forwarded again. Searches are a
+forwarded once, over an internal HTTP listener, to the owner the group names;
+a forwarded request is never forwarded again. Searches are a
 scatter-gather over every owner. A schedule firing into another partition's
 origin crosses the same way.
 
@@ -86,6 +93,7 @@ origin crosses the same way.
 | `node_id` | `$HOSTNAME` | Unique in the cluster. |
 | `peer_bind`, `peer_url` | `0.0.0.0:8002`, unset | The internal forwarding listener, and where other nodes reach it. |
 | `peer_token` | unset | Shared secret for peer requests. |
+| `directory_refresh_ms` | 2000 | How often the group is asked who owns what. |
 | `data_dir` | unset | RocksDB directory. Unset: local copies in memory, restored from Kafka on every start. |
 | `block_cache_mb`, `write_buffer_mb` | 256, 128 | Shared across partitions. |
 | `session_timeout_ms` | 10000 | How long a silent node keeps its partitions. |

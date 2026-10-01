@@ -17,6 +17,8 @@ use std::time::{Duration, Instant};
 use resonate_core::types::{RequestEnvelope, SUPPORTED_VERSIONS};
 use resonate_core::ResonateServer;
 use resonate_server_blob::sender::{NullRouter, Sender};
+use resonate_server_kafka::directory::kafka::{GroupDirectory, GroupDirectoryCfg};
+use resonate_server_kafka::directory::{Directory, Owner};
 use resonate_server_kafka::local::rocks::{RocksCfg, RocksLocal};
 use resonate_server_kafka::log::kafka::{KafkaCfg, KafkaLog};
 use resonate_server_kafka::log::{Checkpoint, Log, LogError, Record, Topic};
@@ -103,13 +105,13 @@ async fn a_second_fence_refuses_the_first_writer() {
         value: Some(b"v".to_vec()),
     };
     let after = first
-        .commit(vec![rec("a"), rec("b")], None, Checkpoint::default())
+        .commit(vec![rec("a"), rec("b")], Checkpoint::default())
         .await
         .expect("the only writer commits");
     assert_eq!(after.promises, 2, "two records, offsets 0 and 1");
 
     let second = log.fence(1).await.expect("fenced again");
-    match first.commit(vec![rec("c")], None, after).await {
+    match first.commit(vec![rec("c")], after).await {
         Err(LogError::Fenced(_)) => {}
         other => panic!("the first writer must be fenced, got {other:?}"),
     }
@@ -120,7 +122,6 @@ async fn a_second_fence_refuses_the_first_writer() {
                 key: "s".into(),
                 value: Some(b"x".to_vec()),
             }],
-            None,
             after,
         )
         .await
@@ -168,10 +169,10 @@ async fn start_node(
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     drop(listener);
+    let peer_url = format!("http://127.0.0.1:{port}");
     let node = Node::new(
         NodeCfg {
             node_id: id.to_string(),
-            peer_url: format!("http://127.0.0.1:{port}"),
             search: true,
             ..Default::default()
         },
@@ -184,8 +185,10 @@ async fn start_node(
                 group_id: prefix.to_string(),
                 session_timeout: Duration::from_secs(6),
                 instance_id: None,
+                peer_url,
             },
         ),
+        directory(brokers, prefix),
         Arc::new(HttpPeers::new(
             Duration::from_secs(10),
             Some("secret".into()),
@@ -202,6 +205,18 @@ async fn start_node(
     .unwrap();
     node.start().await.unwrap();
     Started { node, stop_peer }
+}
+
+fn directory(brokers: &str, prefix: &str) -> Arc<GroupDirectory> {
+    GroupDirectory::start(GroupDirectoryCfg {
+        brokers: brokers.to_string(),
+        group_id: prefix.to_string(),
+        topic: format!("{prefix}.promises"),
+        refresh: Duration::from_millis(500),
+        timeout: Duration::from_secs(10),
+        properties: Default::default(),
+    })
+    .unwrap()
 }
 
 async fn settle(nodes: &[&Arc<Node>], partitions: u32) {
@@ -267,6 +282,31 @@ async fn two_nodes_share_the_partitions_and_forward_to_each_other() {
     let b = start_node(&brokers, &prefix, 6, "b", db.path()).await;
     settle(&[&a.node, &b.node], 6).await;
     assert!(!a.node.serving().is_empty() && !b.node.serving().is_empty());
+
+    // The group itself says who owns what, and where to reach them.
+    let dir = directory(&brokers, &prefix);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let owners: Vec<Option<Owner>> = (0..6).map(|p| dir.owner(p)).collect();
+        let agrees = (0..6u32).all(|p| {
+            let want = if a.node.serving().contains(&p) {
+                "a"
+            } else {
+                "b"
+            };
+            owners[p as usize]
+                .as_ref()
+                .is_some_and(|o| o.node == want && o.peer_url.starts_with("http://127.0.0.1:"))
+        });
+        if agrees {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the directory never matched: {owners:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
 
     // Written through one, read through the other: half of it forwarded.
     for i in 0..30 {

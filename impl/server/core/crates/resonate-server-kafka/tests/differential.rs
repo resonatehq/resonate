@@ -160,6 +160,7 @@ async fn differential_random_on_kafka() {
             cfg.debug,
         )),
         resonate_server_kafka::membership::StaticMembership::new(8),
+        Arc::new(resonate_server_kafka::directory::NoDirectory),
         resonate_server_kafka::peer::LocalPeers::new(),
     );
     server.start().await.expect("every partition taken over");

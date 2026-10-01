@@ -40,6 +40,9 @@ pub struct GroupCfg {
     /// `group.instance.id`, for static membership: a restart within the
     /// session timeout keeps its partitions without a rebalance.
     pub instance_id: Option<String>,
+    /// Where other nodes reach this one. Advertised in the group member's
+    /// `client.id`, which is how every other node's directory finds it.
+    pub peer_url: String,
 }
 
 impl Default for GroupCfg {
@@ -48,6 +51,7 @@ impl Default for GroupCfg {
             group_id: "resonate".into(),
             session_timeout: Duration::from_secs(10),
             instance_id: None,
+            peer_url: String::new(),
         }
     }
 }
@@ -134,7 +138,6 @@ impl Membership for KafkaMembership {
         let mut config = rdkafka::ClientConfig::new();
         config
             .set("bootstrap.servers", &self.log.brokers)
-            .set("client.id", format!("resonate-{}-group", self.log.node_id))
             .set("group.id", &self.group.group_id)
             .set("partition.assignment.strategy", "cooperative-sticky")
             .set("enable.auto.commit", "false")
@@ -149,6 +152,11 @@ impl Membership for KafkaMembership {
         for (k, v) in &self.log.properties {
             config.set(k, v);
         }
+        // Last, so no extra property can override it: the directory reads it.
+        config.set(
+            "client.id",
+            crate::directory::encode_client_id(&self.log.node_id, &self.group.peer_url),
+        );
         let consumer: BaseConsumer<GroupContext> = config
             .create_with_context(GroupContext { events })
             .map_err(|e| Unavailable::new(format!("cannot create the group consumer: {e}")))?;
