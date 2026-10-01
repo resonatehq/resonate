@@ -55,7 +55,7 @@ use resonate_core::types::{
     TaskContinueData, TaskCreateData, TaskFenceData, TaskFulfillData, TaskGetData, TaskHaltData,
     TaskHeartbeatData, TaskReleaseData, TaskSuspendData,
 };
-use resonate_core::{util, ResonateServer, Unavailable};
+use resonate_core::{util, Peer, ResonateRoster, ResonateServer, Unavailable};
 use resonate_server_blob::kernel::state::{Reply, Req, ScheduleFireData};
 use resonate_server_blob::sender::Sender;
 
@@ -81,6 +81,9 @@ pub struct NodeCfg {
     /// cluster. (Where other nodes reach it is advertised through the group:
     /// see [`crate::membership::kafka::GroupCfg::peer_url`].)
     pub node_id: String,
+    /// Where peers reach this node: its [`Peer::addr`](resonate_core::Peer)
+    /// in the roster. Empty for a node that is never forwarded to.
+    pub peer_url: String,
     pub partition: PartitionCfg,
     /// The debug startup flag: `debug.*` answered, `head.debug_time` honoured,
     /// messages held, no timer loops.
@@ -98,6 +101,7 @@ impl Default for NodeCfg {
     fn default() -> Self {
         Self {
             node_id: "node-0".into(),
+            peer_url: String::new(),
             partition: PartitionCfg::default(),
             debug: false,
             search: false,
@@ -759,6 +763,15 @@ impl Node {
     }
 
     async fn forward(&self, owner: &Owner, env: &RequestEnvelope) -> Result<Reply, Unavailable> {
+        let resp = self.forward_envelope(owner, env).await?;
+        Ok(Reply::status(resp.head.status, resp.data))
+    }
+
+    async fn forward_envelope(
+        &self,
+        owner: &Owner,
+        env: &RequestEnvelope,
+    ) -> Result<ResponseEnvelope, Unavailable> {
         // A failed forward means the directory may be behind the group: ask
         // again now, so the client's retry finds the new owner.
         let out = self.peers.process(owner, env).await;
@@ -773,7 +786,7 @@ impl Node {
         if resp.head.status == 503 {
             self.directory.stale();
         }
-        Ok(Reply::status(resp.head.status, resp.data))
+        Ok(resp)
     }
 
     async fn dispatch(
@@ -1158,6 +1171,59 @@ fn parse<T: DeserializeOwned + Validate>(data: &Value) -> Result<T, Reply> {
         .validate()
         .map_err(|e| Reply::err(400, &format_validation_errors(&e)))?;
     Ok(parsed)
+}
+
+/// The node's roster: partitions decide who serves an id.
+///
+/// An id routes by its origin — everything before its first `':'` — to that
+/// origin's partition. A schedule id holds no `':'`, so it is its own origin,
+/// and the promises a schedule fires land on its partition.
+#[async_trait]
+impl ResonateRoster for Node {
+    fn me(&self) -> Peer {
+        Peer {
+            name: self.cfg.node_id.clone(),
+            addr: self.cfg.peer_url.clone(),
+        }
+    }
+
+    /// Every other node the directory names as owning a partition. A member
+    /// that owns nothing yet is not listed: nothing would be sent to it.
+    fn peers(&self) -> Vec<Peer> {
+        let mut seen = BTreeSet::new();
+        (0..self.partitions())
+            .filter_map(|p| self.directory.owner(p))
+            .filter(|o| o.node != self.cfg.node_id && seen.insert(o.node.clone()))
+            .map(|o| Peer {
+                name: o.node,
+                addr: o.peer_url,
+            })
+            .collect()
+    }
+
+    fn route(&self, id: &str) -> resonate_core::Route {
+        let p = keys::partition_of_id(id, self.partitions());
+        match Node::route(self, p, false) {
+            Route::Local(_) => resonate_core::Route::Me,
+            Route::Remote(owner) => resonate_core::Route::Peer(Peer {
+                name: owner.node,
+                addr: owner.peer_url,
+            }),
+            Route::Nowhere(_) => resonate_core::Route::Unknown,
+        }
+    }
+
+    async fn forward(
+        &self,
+        to: &Peer,
+        req: &RequestEnvelope,
+    ) -> Result<ResponseEnvelope, Unavailable> {
+        let owner = Owner {
+            node: to.name.clone(),
+            peer_url: to.addr.clone(),
+        };
+        self.forward_envelope(&owner, req).await
+    }
 }
 
 #[async_trait]

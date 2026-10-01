@@ -17,7 +17,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use resonate_core::router::ResonateRouter;
 use resonate_core::types::{RequestEnvelope, ResponseEnvelope};
-use resonate_core::{ResonateServer, Unavailable};
+use resonate_core::{Peer, ResonateRoster, ResonateServer, Route, Unavailable};
 use resonate_server_blob::kernel::state::KernelCfg;
 use resonate_server_blob::sender::Sender;
 
@@ -53,12 +53,13 @@ fn configure(
     if config.max_batch == 0 {
         return Err(settings.reject("max_batch", "must be at least 1 (got 0)"));
     }
-    // A placeholder: nothing reads the roster yet, and the node still forwards
-    // between nodes itself. Kafka's own roster — its partition table and
-    // directory — replaces this.
-    Ok(resonate_plugin::Configured::single(Arc::new(
-        KafkaServer::new(config, deps.router),
-    )))
+    // One value, both ports: the roster is the node's partition table and
+    // directory, which exist once the server has started.
+    let server = Arc::new(KafkaServer::new(config, deps.router));
+    Ok(resonate_plugin::Configured::new(
+        Arc::clone(&server) as Arc<dyn ResonateRoster>,
+        server,
+    ))
 }
 
 /// Everything under `[servers.server_kafka]`.
@@ -281,6 +282,37 @@ impl KafkaServer {
     }
 }
 
+/// The started node's roster. Before `init` there is no node: this node is
+/// known, nobody else is, and no id has an owner yet.
+#[async_trait]
+impl ResonateRoster for KafkaServer {
+    fn me(&self) -> Peer {
+        Peer {
+            name: self.config.node_id.clone(),
+            addr: self.config.peer_url.clone(),
+        }
+    }
+
+    fn peers(&self) -> Vec<Peer> {
+        self.inner.get().map(|n| n.peers()).unwrap_or_default()
+    }
+
+    fn route(&self, id: &str) -> Route {
+        match self.inner.get() {
+            Some(node) => ResonateRoster::route(node.as_ref(), id),
+            None => Route::Unknown,
+        }
+    }
+
+    async fn forward(
+        &self,
+        to: &Peer,
+        req: &RequestEnvelope,
+    ) -> Result<ResponseEnvelope, Unavailable> {
+        ResonateRoster::forward(self.started()?.as_ref(), to, req).await
+    }
+}
+
 #[async_trait]
 impl ResonateServer for KafkaServer {
     async fn init(&self, debug: bool) -> Result<(), Unavailable> {
@@ -353,6 +385,7 @@ impl ResonateServer for KafkaServer {
         let node = Node::new(
             NodeCfg {
                 node_id: c.node_id.clone(),
+                peer_url: c.peer_url.clone(),
                 partition: PartitionCfg {
                     kernel: KernelCfg {
                         retry_timeout: c.retry_timeout,
@@ -482,6 +515,26 @@ mod tests {
     }
 
     /// With no brokers it runs alone in memory: the whole lifecycle.
+    /// The roster is the started node's: before `init` no id has an owner,
+    /// after it this one node owns them all.
+    #[tokio::test]
+    async fn its_roster_is_the_node_once_started() {
+        let config = settings(&[
+            ("servers.server_kafka.partitions", "4"),
+            ("servers.server_kafka.node_id", "kafka-a"),
+        ]);
+        let configured = (PLUGIN.configure)(&config.server(&PLUGIN.id()), deps()).unwrap();
+        let roster = configured.roster;
+        assert_eq!(roster.me().name, "kafka-a");
+        assert_eq!(roster.route("o:1"), Route::Unknown, "nothing is served yet");
+
+        configured.server.init(true).await.unwrap();
+        assert_eq!(roster.route("o:1"), Route::Me);
+        assert_eq!(roster.route("nightly"), Route::Me);
+        assert!(roster.peers().is_empty());
+        configured.server.stop().await.unwrap();
+    }
+
     #[tokio::test]
     async fn it_starts_answers_and_stops_in_memory() {
         let config = settings(&[("servers.server_kafka.partitions", "4")]);

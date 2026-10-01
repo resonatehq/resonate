@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use resonate_core::types::{RequestEnvelope, ResponseEnvelope, SUPPORTED_VERSIONS};
-use resonate_core::{ResonateServer, Unavailable};
+use resonate_core::{ResonateRoster, ResonateServer, Route, Unavailable};
 use resonate_server_blob::sender::{NullRouter, Sender};
 use resonate_server_kafka::keys::partition_of;
 use resonate_server_kafka::local::mem::MemLocal;
@@ -48,6 +48,8 @@ impl Cluster {
             let node = Node::new(
                 NodeCfg {
                     node_id: id.clone(),
+                    // What the in-memory group advertises for it.
+                    peer_url: format!("local://{id}"),
                     search: true,
                     partition: PartitionCfg {
                         idle_check: Duration::from_millis(50),
@@ -415,4 +417,59 @@ async fn a_local_copy_in_another_format_is_rebuilt_from_the_log() {
     assert_eq!(got["promise"]["state"], "pending");
     assert_eq!(local.open(p).unwrap().format().unwrap(), Some(LOCAL_FORMAT));
     second.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_roster_names_the_owner_and_forwards_to_it() {
+    let c = Cluster::new(3).await;
+
+    for p in 0..PARTITIONS {
+        let origin = origin_in(p, "roster");
+        let owner = c
+            .nodes
+            .iter()
+            .find(|n| n.serving().contains(&p))
+            .expect("every partition is served");
+
+        // A promise of the origin, and the origin itself as a schedule id,
+        // both route to the partition's owner.
+        for id in [format!("{origin}:1.1"), origin.clone()] {
+            for node in &c.nodes {
+                let want = if Arc::ptr_eq(node, owner) {
+                    Route::Me
+                } else {
+                    Route::Peer(owner.me())
+                };
+                assert_eq!(ResonateRoster::route(node.as_ref(), &id), want, "{id}");
+            }
+        }
+
+        // Forwarding through the roster reaches the owner.
+        let other = c.nodes.iter().find(|n| !Arc::ptr_eq(n, owner)).unwrap();
+        let id = format!("{origin}:1");
+        let resp = ResonateRoster::forward(
+            other.as_ref(),
+            &owner.me(),
+            &envelope("promise.create", create(&id)),
+        )
+        .await
+        .expect("an answer");
+        assert_eq!(resp.head.status, 200, "{}", resp.data);
+        let got = ok(owner, "promise.get", json!({ "id": id })).await;
+        assert_eq!(got["promise"]["id"], id);
+    }
+
+    // Every node lists the other two, not itself.
+    for node in &c.nodes {
+        let mut peers: Vec<String> = node.peers().into_iter().map(|p| p.name).collect();
+        peers.sort();
+        let mut want: Vec<String> = c
+            .nodes
+            .iter()
+            .filter(|n| !Arc::ptr_eq(n, node))
+            .map(|n| n.id().to_string())
+            .collect();
+        want.sort();
+        assert_eq!(peers, want);
+    }
 }
