@@ -100,6 +100,7 @@ origin crosses the same way.
 | `instance_id` | unset | `group.instance.id`, for static membership. |
 | `drop_grace_secs` | 900 | How long a revoked partition's local copy is kept. |
 | `max_batch` | 512 | The group commit's ceiling. |
+| `cache_promises` | 2000 | Per partition: decoded hot documents kept, counted in promises. 0 turns it off. |
 | `search_enabled` | false | Searches read every record of every partition. |
 | `librdkafka` | `{}` | Extra client properties (SASL, TLS, tuning). |
 

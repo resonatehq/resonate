@@ -69,6 +69,7 @@ use resonate_server_blob::kernel::{drain, handle};
 use resonate_server_blob::schedules::{ScheduleDoc, SCHEDULE_FORMAT_VERSION};
 use resonate_server_blob::sender::Sender;
 
+use crate::cache::DocCache;
 use crate::keys;
 use crate::local::{LocalStore, Op, PartitionStore};
 use crate::log::{Checkpoint, Consumed, Log, LogError, Record, Topic, Writer};
@@ -83,6 +84,9 @@ pub struct PartitionCfg {
     pub max_batch: usize,
     /// Mailbox depth.
     pub mailbox: usize,
+    /// The hot-document cache's budget, in promises ([`DocCache`]). Zero
+    /// turns it off.
+    pub cache_promises: usize,
 }
 
 impl Default for PartitionCfg {
@@ -91,6 +95,7 @@ impl Default for PartitionCfg {
             kernel: KernelCfg::default(),
             max_batch: 512,
             mailbox: 4_096,
+            cache_promises: 2_000,
         }
     }
 }
@@ -246,6 +251,7 @@ impl Partition {
             store: Arc::clone(&store),
             timers: Arc::clone(&timers),
             sender,
+            cache: DocCache::new(cfg.cache_promises),
             cfg,
             checkpoint: position,
         };
@@ -424,6 +430,8 @@ struct Actor {
     sender: Arc<Sender>,
     cfg: PartitionCfg,
     checkpoint: Checkpoint,
+    /// Hot documents, decoded. The actor's own: see [`DocCache`].
+    cache: DocCache,
 }
 
 /// A round's working state: every document and schedule it touched, as they
@@ -526,7 +534,13 @@ impl Actor {
                     reply,
                 } => {
                     if !overlay.origins.contains_key(&origin) {
-                        match load_origin(self.store.as_ref(), &origin) {
+                        // The cache first; a document taken out of it is
+                        // put back only if this round commits.
+                        let loaded = match self.cache.take(&origin) {
+                            Some(doc) => Ok(doc),
+                            None => load_origin(self.store.as_ref(), &origin),
+                        };
+                        match loaded {
                             Ok(doc) => {
                                 overlay.origins.insert(origin.clone(), (doc.clone(), doc));
                             }
@@ -594,6 +608,10 @@ impl Actor {
                         Target::Schedule(id.clone()),
                         after.as_ref().map(|s| s.next_run_at),
                     );
+                }
+                // Committed, so these are what the store now holds.
+                for (origin, (_, after)) in overlay.origins {
+                    self.cache.put(origin, after);
                 }
                 for effect in sends {
                     if let Effect::Send { address, msg } = effect {
@@ -682,6 +700,7 @@ impl Actor {
         match self.commit(records).await {
             Ok(()) => {
                 self.timers.clear();
+                self.cache.clear();
                 let _ = reply.send(Ok(Reply::status(200, serde_json::json!({}))));
                 Ok(())
             }

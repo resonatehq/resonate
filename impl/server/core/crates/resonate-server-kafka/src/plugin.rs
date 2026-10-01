@@ -141,6 +141,12 @@ pub struct Config {
     #[serde(default = "default_drop_grace_secs")]
     pub drop_grace_secs: u64,
 
+    /// Each partition's hot-document cache, in promises held. Memory is
+    /// roughly this × partitions owned × the size of a decoded promise. Zero
+    /// turns it off.
+    #[serde(default = "default_cache_promises")]
+    pub cache_promises: usize,
+
     /// The most requests one commit round decides.
     #[serde(default = "default_max_batch")]
     pub max_batch: usize,
@@ -198,6 +204,9 @@ fn default_session_timeout_ms() -> u64 {
 }
 fn default_drop_grace_secs() -> u64 {
     15 * 60
+}
+fn default_cache_promises() -> usize {
+    2_000
 }
 fn default_max_batch() -> usize {
     512
@@ -347,6 +356,7 @@ impl ResonateServer for KafkaServer {
                         server_url: c.server_url.clone(),
                     },
                     max_batch: c.max_batch,
+                    cache_promises: c.cache_promises,
                     ..Default::default()
                 },
                 debug,

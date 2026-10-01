@@ -111,7 +111,10 @@ async fn a_second_fence_refuses_the_first_writer() {
     // Two records — at offsets 0 and 1 on Kafka; Redpanda writes a control
     // batch of its own when a transaction begins, so they land one later
     // there. Only "past both records" is promised.
-    assert!(after.promises >= 2, "a checkpoint past both records: {after:?}");
+    assert!(
+        after.promises >= 2,
+        "a checkpoint past both records: {after:?}"
+    );
 
     let second = log.fence(1).await.expect("fenced again");
     match first.commit(vec![rec("c")], after).await {

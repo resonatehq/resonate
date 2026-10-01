@@ -11,13 +11,15 @@
 //! The internal graph, bottom up: [`keys`] routes and lays out keys;
 //! [`record`] is the bytes of a record; [`log`] is the fenced, transactional
 //! log (in process, or Kafka); [`local`] is the node's copy of its partitions
-//! (in memory, or RocksDB); [`timers`] is a partition's deadline index;
+//! (in memory, or RocksDB); [`cache`] holds a partition's hot documents
+//! decoded; [`timers`] is a partition's deadline index;
 //! [`partition`] takes a partition over and runs its rounds; [`membership`]
 //! says which partitions to own and [`directory`] which node owns the rest;
 //! [`peer`] forwards to other nodes; [`search`] gathers searches; [`node`] is
 //! the `ResonateServer` that ties them together; and [`plugin`] reads the
 //! configuration.
 
+pub mod cache;
 pub mod directory;
 pub mod keys;
 pub mod local;
