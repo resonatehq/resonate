@@ -284,7 +284,9 @@ impl Log for KafkaLog {
         .set("enable.idempotence", "true")
         .set("acks", "all")
         .set("compression.type", "lz4")
-        .set("linger.ms", "2")
+        // A round already is the batch: waiting for more only adds latency
+        // (about 1ms per commit, measured with examples/txn_cost.rs).
+        .set("linger.ms", "0")
         .set(
             "transaction.timeout.ms",
             self.cfg.transaction_timeout.as_millis().to_string(),
