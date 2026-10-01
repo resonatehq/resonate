@@ -15,6 +15,7 @@ members = [
     "crates/resonate-server-postgres",
     "crates/resonate-server-mysql",
     "crates/resonate-server-neo4j",
+    "crates/resonate-server-mongodb",
     "crates/resonate-oracle",
     "crates/resonate-timer-wheel",
     "crates/resonate-transport-gcps",
@@ -84,6 +85,7 @@ resonate-server-mysql = { path = "crates/resonate-server-mysql" }
 resonate-server-scylladb = { path = "crates/resonate-server-scylladb" }
 resonate-server-blob = { path = "crates/resonate-server-blob" }
 resonate-server-neo4j = { path = "crates/resonate-server-neo4j" }
+resonate-server-mongodb = { path = "crates/resonate-server-mongodb" }
 resonate-transport-http-push = { path = "crates/resonate-transport-http-push" }
 resonate-transport-http-poll = { path = "crates/resonate-transport-http-poll" }
 resonate-transport-gcps = { path = "crates/resonate-transport-gcps" }
@@ -100,8 +102,9 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
 clap = { workspace = true }
 
 [dev-dependencies]
-# `diff/neo4j_adapter.rs` implements the SQL family's engine trait over the
-# Neo4j engine, so the harness can hold that plugin to the same comparison.
+# `diff/neo4j_adapter.rs` and `diff/mongodb_adapter.rs` implement the SQL
+# family's engine trait over the Neo4j and MongoDB engines, so the harness can
+# hold those plugins to the same comparison.
 async-trait = { workspace = true }
 # `tests/ui.rs` drives the console's read model against every engine that is
 # compiled in, so it reaches past the plugins to what they are built on.

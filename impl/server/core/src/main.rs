@@ -73,6 +73,7 @@ fn registry() -> Registry {
         .server(&resonate_server_scylladb::PLUGIN)
         .server(&resonate_server_blob::PLUGIN)
         .server(&resonate_server_neo4j::PLUGIN)
+        .server(&resonate_server_mongodb::PLUGIN)
         .worker(&resonate_transport_http_push::PLUGIN)
         .worker(&resonate_transport_http_poll::PLUGIN)
         .worker(&resonate_transport_gcps::PLUGIN)

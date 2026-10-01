@@ -93,6 +93,30 @@ services:
       resonate:
         aliases: [resonate-server]
 
+  resonate-server-mongodb:
+    build: .
+    profiles: [mongodb]
+    ports:
+      - "8001:8001"   # the protocol, the poll endpoint and the console
+      - "9090:9090"   # prometheus
+    environment:
+      - RESONATE_GATEWAYS__GATEWAY_HTTP__BIND=0.0.0.0:8001
+      - RESONATE_GATEWAYS__GATEWAY_METRICS__BIND=0.0.0.0:9090
+      - RESONATE_LEVEL=info
+      - RESONATE_SERVERS__ACTIVE=server_mongodb
+      - RESONATE_SERVERS__SERVER_MONGODB__URI=mongodb://mongodb:27017/resonate?replicaSet=rs0
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8001/ready || exit 1"]
+      interval: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      resonate:
+        aliases: [resonate-server]
+
   resonate-server-sqlite-auth:
     build: .
     profiles: [sqlite-auth]
@@ -218,6 +242,30 @@ services:
       - "7687:7687"
     healthcheck:
       test: ["CMD-SHELL", "cypher-shell -u neo4j -p resonate 'RETURN 1' || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+    networks:
+      - resonate
+
+  # A single-member replica set: the server runs every transition in a
+  # transaction, and MongoDB runs transactions only on a replica set. The
+  # healthcheck initiates it on first start, so `service_healthy` means a
+  # primary is up. Compass connects with
+  # mongodb://localhost:27017/?directConnection=true
+  mongodb:
+    image: mongo:8
+    profiles: [mongodb]
+    command: ["--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          mongosh --quiet --eval "try { rs.status().ok } catch (e)
+          { rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'mongodb:27017'}]}).ok }"
+          && mongosh --quiet --eval "quit(db.hello().isWritablePrimary ? 0 : 1)"
       interval: 5s
       timeout: 10s
       retries: 20

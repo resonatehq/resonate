@@ -77,7 +77,7 @@ pub struct CommonArgs {
     pub cors_allow_origins: Vec<String>,
 
     // --- Storage ---
-    /// Storage backend: sqlite, postgres, mysql, scylladb, blob or neo4j [default: sqlite]
+    /// Storage backend: sqlite, postgres, mysql, scylladb, blob, neo4j or mongodb [default: sqlite]
     #[arg(long = "storage-type")]
     pub storage_type: Option<String>,
 
@@ -108,6 +108,14 @@ pub struct CommonArgs {
     /// Neo4j password
     #[arg(long = "storage-neo4j-password", value_name = "PASSWORD")]
     pub neo4j_password: Option<String>,
+
+    /// MongoDB connection string; must name a replica set [default: mongodb://localhost:27017/?replicaSet=rs0]
+    #[arg(long = "storage-mongodb-uri", value_name = "URI")]
+    pub mongodb_uri: Option<String>,
+
+    /// MongoDB database [default: resonate]
+    #[arg(long = "storage-mongodb-database", value_name = "NAME")]
+    pub mongodb_database: Option<String>,
 
     // --- Auth ---
     /// Public key for JWT verification (enables auth; use "none" for unsigned mode)
@@ -314,6 +322,11 @@ impl CommonArgs {
         o.maybe_str("servers.server_neo4j.uri", self.neo4j_uri.clone());
         o.maybe_str("servers.server_neo4j.user", self.neo4j_user.clone());
         o.maybe_str("servers.server_neo4j.password", self.neo4j_password.clone());
+        o.maybe_str("servers.server_mongodb.uri", self.mongodb_uri.clone());
+        o.maybe_str(
+            "servers.server_mongodb.database",
+            self.mongodb_database.clone(),
+        );
 
         // The URL a worker is told to call back on. The server stamps it into
         // every execute message, so it is the server's setting — the gateway

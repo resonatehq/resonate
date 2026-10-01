@@ -25,6 +25,12 @@
 //! construction. Nothing here depends on a database called `resonate`
 //! existing, and nothing here ever touches one that does.
 //!
+//! MongoDB gets the same treatment from a connection string
+//! (`--mongodb-uri`, `XTASK_MONGODB_URI`) rather than an admin URL: a fresh
+//! database is just a fresh name in the URI's path, created by the first
+//! write and dropped afterwards. The deployment must be a replica set — the
+//! server runs every transition in a transaction.
+//!
 //! Neo4j is the exception that cannot be fresh: Community Edition has one
 //! database and no `CREATE DATABASE`. So the rule is kept by checking rather
 //! than by construction — given `--neo4j-uri` (or `XTASK_NEO4J_URI`) a job
@@ -107,6 +113,7 @@ enum Backend {
     Mysql,
     Blob,
     Neo4j,
+    Mongodb,
 }
 
 #[derive(Args, Clone)]
@@ -126,6 +133,10 @@ struct DbArgs {
     neo4j_user: String,
     #[arg(long, env = "XTASK_NEO4J_PASSWORD", default_value = "resonate")]
     neo4j_password: String,
+    /// Connection string of a MongoDB replica set; its database is ignored.
+    /// Fresh databases are named in its path and dropped after the job.
+    #[arg(long, env = "XTASK_MONGODB_URI")]
+    mongodb_uri: Option<String>,
     /// Leave the fresh databases in place after the run, for inspection.
     #[arg(long)]
     keep_db: bool,
@@ -283,6 +294,8 @@ impl FreshDb {
                     .await
                     .map_err(|e| format!("create database {name}: {e}"))?;
             }
+            // Nothing to create: the first write creates it.
+            Backend::Mongodb => {}
             Backend::Sqlite | Backend::Blob | Backend::Neo4j => {
                 unreachable!("no server to create a database on")
             }
@@ -330,6 +343,14 @@ impl FreshDb {
                     .await
                     .map_err(|e| e.to_string()),
                 Err(e) => Err(e),
+            },
+            Backend::Mongodb => match mongodb::Client::with_uri_str(&self.admin_url).await {
+                Ok(client) => client
+                    .database(&self.name)
+                    .drop()
+                    .await
+                    .map_err(|e| e.to_string()),
+                Err(e) => Err(e.to_string()),
             },
             Backend::Sqlite | Backend::Blob => Ok(()),
         };
@@ -385,6 +406,11 @@ fn admin_url(db: &DbArgs, backend: Backend) -> Result<Option<String>> {
                 .clone()
                 .ok_or("neo4j needs --neo4j-uri or XTASK_NEO4J_URI")?,
         ),
+        Backend::Mongodb => Some(
+            db.mongodb_uri
+                .clone()
+                .ok_or("mongodb needs --mongodb-uri or XTASK_MONGODB_URI")?,
+        ),
         Backend::Sqlite | Backend::Blob => None,
     })
 }
@@ -412,6 +438,7 @@ fn url_var(backend: Backend) -> Option<&'static str> {
         Backend::Postgres => Some("TEST_POSTGRES_URL"),
         Backend::Mysql => Some("TEST_MYSQL_URL"),
         Backend::Neo4j => Some("TEST_NEO4J_URI"),
+        Backend::Mongodb => Some("TEST_MONGODB_URI"),
         Backend::Sqlite | Backend::Blob => None,
     }
 }
@@ -506,8 +533,8 @@ async fn one_differential(backend: Backend, seed: Option<u64>, db: &DbArgs) -> R
         run("engine differential", with_seed(&mut cmd, seed))
     })
     .await?;
-    if backend == Backend::Neo4j {
-        // Neo4j is not behind the ports yet, so its port differential is the
+    if matches!(backend, Backend::Neo4j | Backend::Mongodb) {
+        // Neither is behind the ports yet, so its port differential is the
         // default one: the oracle, SQLite and blob, with nothing to clear.
         return run(
             "port differential",
@@ -655,6 +682,11 @@ async fn porcupine(backend: Backend, db: &DbArgs, porc: &PorcArgs) -> Result<()>
                     .env("RESONATE_SERVERS__ACTIVE", "server_mysql")
                     .env("RESONATE_SERVERS__SERVER_MYSQL__URL", url.expect("fresh"));
             }
+            Backend::Mongodb => {
+                server
+                    .env("RESONATE_SERVERS__ACTIVE", "server_mongodb")
+                    .env("RESONATE_SERVERS__SERVER_MONGODB__URI", url.expect("fresh"));
+            }
             Backend::Neo4j => {
                 server
                     .env("RESONATE_SERVERS__ACTIVE", "server_neo4j")
@@ -741,6 +773,11 @@ async fn all(db: &DbArgs, porc: &PorcArgs) -> Result<()> {
         servers.push(Backend::Neo4j);
     } else {
         eprintln!("==> no neo4j uri: neo4j skipped");
+    }
+    if db.mongodb_uri.is_some() {
+        servers.push(Backend::Mongodb);
+    } else {
+        eprintln!("==> no mongodb uri: mongodb skipped");
     }
     for b in servers.iter().copied().chain([Backend::Blob]) {
         differential(b, &[], db).await?;

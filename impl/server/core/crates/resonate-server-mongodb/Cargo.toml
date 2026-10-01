@@ -1,0 +1,24 @@
+[package]
+name = "resonate-server-mongodb"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Resonate server: durable state in MongoDB — one document per promise, callbacks and resumes as arrays, one multi-document transaction per transition."
+
+# Depends on no other plugin, and on no other server's library. Like Neo4j's,
+# the engine and the shell are a copy of ScyllaDB's, so the copies can be
+# diffed and any divergence between them read off rather than argued.
+
+[dependencies]
+resonate-core = { path = "../resonate-core" }
+resonate-plugin = { path = "../resonate-plugin" }
+resonate-timer-wheel = { path = "../resonate-timer-wheel" }
+mongodb = "3"
+futures-util = { version = "0.3", default-features = false }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+validator = { workspace = true }
+tokio = { version = "1", features = ["rt", "sync", "macros", "time"] }
+tracing = "0.1"
+lazy_static = "1"
