@@ -107,12 +107,22 @@ The plugin is not in the `resonate` binary's registry: it builds librdkafka and
 RocksDB from source. A binary that wants it names it, as the top-level README
 shows for any plugin.
 
+## Brokers
+
+Apache Kafka (tested with 3.9.1, KRaft) and Redpanda (tested with 26.2.3): the
+live tests and the differential pass on both. Everything used is in the
+Kafka protocol both implement: idempotent transactional producers,
+`read_committed`, compacted topics, the classic group protocol with the
+cooperative-sticky assignor, and `DescribeConsumerGroups`. Nothing assumes
+exact offsets — Redpanda writes a control batch when a transaction begins, so
+its records land one offset later than Kafka's.
+
 ## Tests
 
 ```
 cargo test -p resonate-server-kafka                       # unit, cluster, crash, differential
 TEST_KAFKA_BROKERS=localhost:9092 \
-  cargo test -p resonate-server-kafka -- --test-threads=1 # + fencing, restart, two nodes, differential on Kafka
+  cargo test -p resonate-server-kafka -- --test-threads=1 # + fencing, restart, two nodes, differential on a broker
 ```
 
 - `tests/differential.rs` — the blob backend's differential, against this node.
