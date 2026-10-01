@@ -8,6 +8,7 @@
 
 pub mod address;
 pub mod gateway;
+pub mod roster;
 pub mod router;
 pub mod server;
 pub mod types;
@@ -17,6 +18,7 @@ pub mod worker;
 
 pub use address::{is_valid_address, scheme_of};
 pub use gateway::ResonateGateway;
+pub use roster::{Peer, ResonateRoster, Route};
 pub use router::ResonateRouter;
 pub use server::ResonateServer;
 pub use worker::ResonateWorker;

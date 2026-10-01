@@ -32,7 +32,7 @@ pub static PLUGIN: resonate_plugin::ServerPlugin =
 fn configure(
     settings: &resonate_plugin::Settings<'_>,
     deps: resonate_plugin::ServerDependencies,
-) -> Result<Arc<dyn ResonateServer>, resonate_plugin::ConfigError> {
+) -> Result<resonate_plugin::Configured, resonate_plugin::ConfigError> {
     let config: Config = settings.extract()?;
     if config.timer_shards == 0 {
         return Err(settings.reject("timer_shards", "must be at least 1 (got 0)"));
@@ -40,7 +40,9 @@ fn configure(
     if config.cache_capacity == 0 {
         return Err(settings.reject("cache_capacity", "must be at least 1 (got 0)"));
     }
-    Ok(Arc::new(BlobServer::new(config, deps.router)))
+    Ok(resonate_plugin::Configured::single(Arc::new(
+        BlobServer::new(config, deps.router),
+    )))
 }
 
 /// Everything under `[servers.server_blob]`.
@@ -306,7 +308,10 @@ mod tests {
     }
 
     fn deps() -> resonate_plugin::ServerDependencies {
-        resonate_plugin::ServerDependencies::new(Arc::new(NoRouter) as Arc<dyn ResonateRouter>)
+        resonate_plugin::ServerDependencies::new(
+            Arc::new(NoRouter) as Arc<dyn ResonateRouter>,
+            resonate_plugin::Routes::new(),
+        )
     }
 
     fn settings(pairs: &[(&str, &str)]) -> resonate_plugin::Configuration {
@@ -364,7 +369,9 @@ mod tests {
     #[tokio::test]
     async fn it_starts_and_stops_against_the_in_memory_store() {
         let config = settings(&[]);
-        let server = (PLUGIN.configure)(&config.server(&PLUGIN.id()), deps()).unwrap();
+        let server = (PLUGIN.configure)(&config.server(&PLUGIN.id()), deps())
+            .unwrap()
+            .server;
 
         assert!(!server.ready().await, "not ready before init");
         server.init(true).await.expect("in-memory needs nothing");
@@ -378,7 +385,9 @@ mod tests {
     #[tokio::test]
     async fn stop_is_safe_when_init_never_ran() {
         let config = settings(&[]);
-        let server = (PLUGIN.configure)(&config.server(&PLUGIN.id()), deps()).unwrap();
+        let server = (PLUGIN.configure)(&config.server(&PLUGIN.id()), deps())
+            .unwrap()
+            .server;
         server
             .stop()
             .await

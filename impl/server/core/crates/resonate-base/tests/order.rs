@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use resonate_base::{build, Options};
 use resonate_plugin::types::{Message, RequestEnvelope, ResponseEnvelope};
 use resonate_plugin::{
-    Configuration, GatewayPlugin, Loader, Registry, ResonateGateway, ResonateRouter,
+    Configuration, Configured, GatewayPlugin, Loader, Registry, ResonateGateway, ResonateRouter,
     ResonateServer, ResonateWorker, ServerPlugin, Unavailable, WorkerPlugin,
 };
 
@@ -106,7 +106,7 @@ impl ResonateGateway for Gateway {
 static SERVER: ServerPlugin = ServerPlugin::new("resonate-server-stub", |_settings, deps| {
     // The router exists and is still empty — that is what step 1 is for.
     let _: &Arc<dyn ResonateRouter> = &deps.router;
-    Ok(Arc::new(Server) as Arc<dyn ResonateServer>)
+    Ok(Configured::single(Arc::new(Server)))
 });
 
 /// Two schemes, one worker. The shape that used to start twice.

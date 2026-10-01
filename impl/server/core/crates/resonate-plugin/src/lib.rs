@@ -57,9 +57,10 @@
 //! // 1. The router, empty.
 //! let router = Arc::new(Router::new());   // the message router, not axum's
 //!
-//! // 2. The server, handed that router. Nothing is connected yet.
-//! let deps = ServerDependencies::new(Arc::clone(&router) as _);
-//! let server = (chosen.configure)(&config.server(&chosen.id()), deps)?;
+//! // 2. The server, handed that router, and its roster beside it. Nothing is
+//! //    connected yet.
+//! let deps = ServerDependencies::new(Arc::clone(&router) as _, Arc::clone(&routes));
+//! let Configured { roster, server, .. } = (chosen.configure)(&config.server(&chosen.id()), deps)?;
 //!
 //! // 3. The workers, each downgrading the server that now exists.
 //! let mut routes = HashMap::new();
@@ -150,7 +151,7 @@ pub use plugin::id_from_crate;
 
 #[rustfmt::skip]
 pub use plugin::{
-    ServerDependencies, ServerPlugin,
+    Configured, StaticRoster, ServerDependencies, ServerPlugin,
     WorkerDependencies, WorkerPlugin,
     GatewayDependencies, GatewayPlugin,
 };
@@ -162,12 +163,12 @@ pub use routes::{RouteBuilder, Routes};
 // The port traits a plugin implements, re-exported so a plugin crate names one
 // dependency rather than two.
 #[rustfmt::skip]
-pub use resonate_core::{ResonateServer, ResonateWorker, ResonateGateway, ResonateRouter};
+pub use resonate_core::{ResonateServer, ResonateWorker, ResonateGateway, ResonateRouter, ResonateRoster};
 
 // And what implementing one of them requires: the wire types a plugin handles,
 // and the error it reports. Without these a plugin crate would still have to
 // name resonate-core, and the pair would have to version together anyway.
-pub use resonate_core::{types, Unavailable};
+pub use resonate_core::{types, Peer, Route, Unavailable};
 
 /// HTTP, for any plugin that serves it.
 ///

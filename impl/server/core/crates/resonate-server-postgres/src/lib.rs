@@ -4675,7 +4675,7 @@ impl PostgresEngine {
 
 // ─── The plugin ──────────────────────────────────────────────────────────────
 
-use resonate_plugin::{ConfigError, ResonateServer, ServerDependencies, ServerPlugin, Settings};
+use resonate_plugin::{ConfigError, ServerDependencies, ServerPlugin, Settings};
 use serde::{Deserialize, Serialize};
 
 /// This server, as a plugin. The one thing a binary names to run on PostgreSQL.
@@ -4773,7 +4773,7 @@ impl Default for Config {
 fn configure(
     settings: &Settings<'_>,
     deps: ServerDependencies,
-) -> Result<std::sync::Arc<dyn ResonateServer>, ConfigError> {
+) -> Result<resonate_plugin::Configured, ConfigError> {
     let config: Config = settings.extract()?;
     if config.url.is_empty() {
         return Err(settings.reject("url", "a connection URL is required"));
@@ -4786,7 +4786,7 @@ fn configure(
         sweep_interval: config.sweep_interval,
     };
     let open = config.clone();
-    Ok(resonate_sql::server::Server::new(
+    let server = resonate_sql::server::Server::new(
         Box::new(move |debug| {
             Box::pin(async move {
                 let engine = PostgresEngine::connect(
@@ -4807,5 +4807,6 @@ fn configure(
         }),
         deps.router,
         options,
-    ))
+    );
+    Ok(resonate_plugin::Configured::single(server))
 }

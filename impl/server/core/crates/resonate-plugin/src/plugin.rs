@@ -1,7 +1,8 @@
 //! The three kinds of plugin, and what each is handed when it is built.
 //!
-//! Each plugin is handed exactly one thing: what it talks to. A server is handed
-//! its router, a worker and a gateway are handed the server. Everything else
+//! Each plugin is handed what it talks to. A server is handed its router, a
+//! worker and a gateway are handed the server, and all three get the routes
+//! registry if they serve HTTP. A server hands back its roster beside itself. Everything else
 //! either comes out of the plugin's own settings, or is handed to it by its
 //! `init` — the process-wide debug flag included, which is why it appears in no
 //! dependency struct.
@@ -20,7 +21,12 @@
 
 use std::sync::{Arc, Weak};
 
-use resonate_core::{ResonateGateway, ResonateRouter, ResonateServer, ResonateWorker};
+use async_trait::async_trait;
+use resonate_core::types::{RequestEnvelope, ResponseEnvelope};
+use resonate_core::{
+    Peer, ResonateGateway, ResonateRoster, ResonateRouter, ResonateServer, ResonateWorker, Route,
+    Unavailable,
+};
 
 use crate::config::Settings;
 use crate::error::ConfigError;
@@ -44,20 +50,99 @@ pub fn id_from_crate(krate: &str) -> String {
 
 // ─── Server ──────────────────────────────────────────────────────────────────
 
-/// What the composition root gives a server: the router it delivers through.
+/// What the composition root gives a server: the router it delivers through,
+/// and the routes its roster serves peers on.
 ///
 /// The router exists before the server and is still empty — its workers are
 /// installed once the server they hold a handle to exists. A server that needs a
 /// handle to *itself* (an engine-backed one arms its timer with one) makes it
 /// inside its own crate, where the concrete type is known.
+///
+/// `routes` is the same registry the workers and gateways get: a roster that
+/// talks to peers registers its endpoint there and opens no socket. See
+/// [`Routes`].
 #[non_exhaustive]
 pub struct ServerDependencies {
     pub router: Arc<dyn ResonateRouter>,
+    pub routes: Arc<Routes>,
 }
 
 impl ServerDependencies {
-    pub fn new(router: Arc<dyn ResonateRouter>) -> Self {
-        Self { router }
+    pub fn new(router: Arc<dyn ResonateRouter>, routes: Arc<Routes>) -> Self {
+        Self { router, routes }
+    }
+}
+
+/// What a server plugin builds: the server, and the roster that routes for it.
+///
+/// One plugin builds both because they are one implementation — they share a
+/// configuration and often a connection, and one backend's server with
+/// another's roster means nothing. A backend that runs as a single node
+/// returns [`Configured::single`].
+#[non_exhaustive]
+pub struct Configured {
+    pub roster: Arc<dyn ResonateRoster>,
+    pub server: Arc<dyn ResonateServer>,
+}
+
+impl Configured {
+    pub fn new(roster: Arc<dyn ResonateRoster>, server: Arc<dyn ResonateServer>) -> Self {
+        Self { roster, server }
+    }
+
+    /// A server that runs as a single node: a [`StaticRoster`] beside it.
+    pub fn single(server: Arc<dyn ResonateServer>) -> Self {
+        Self::new(Arc::new(StaticRoster::single()), server)
+    }
+}
+
+/// The roster of a single node: no peers, and every route [`Route::Any`].
+///
+/// Whatever the backend's storage, one node is the only one there is to
+/// process a request, so nothing is ever forwarded and `forward` has no peer
+/// to reach.
+#[derive(Debug, Clone)]
+pub struct StaticRoster {
+    me: Peer,
+}
+
+impl StaticRoster {
+    pub fn new(me: Peer) -> Self {
+        Self { me }
+    }
+
+    /// A node nobody addresses: named `local`, with no address.
+    pub fn single() -> Self {
+        Self::new(Peer {
+            name: "local".to_string(),
+            addr: String::new(),
+        })
+    }
+}
+
+#[async_trait]
+impl ResonateRoster for StaticRoster {
+    fn me(&self) -> Peer {
+        self.me.clone()
+    }
+
+    fn peers(&self) -> Vec<Peer> {
+        Vec::new()
+    }
+
+    fn route(&self, _id: &str) -> Route {
+        Route::Any
+    }
+
+    async fn forward(
+        &self,
+        to: &Peer,
+        _req: &RequestEnvelope,
+    ) -> Result<ResponseEnvelope, Unavailable> {
+        Err(Unavailable::new(format!(
+            "{} is not a peer of a single node",
+            to.name
+        )))
     }
 }
 
@@ -85,8 +170,7 @@ pub struct ServerPlugin {
     ///
     /// No `Option`, unlike the other two: a binary has one server, chosen by
     /// name, so switching it off is not a thing to express.
-    pub configure:
-        fn(&Settings<'_>, ServerDependencies) -> Result<Arc<dyn ResonateServer>, ConfigError>,
+    pub configure: fn(&Settings<'_>, ServerDependencies) -> Result<Configured, ConfigError>,
 }
 
 impl ServerPlugin {
@@ -99,10 +183,7 @@ impl ServerPlugin {
     #[allow(clippy::type_complexity)]
     pub const fn new(
         krate: &'static str,
-        configure: fn(
-            &Settings<'_>,
-            ServerDependencies,
-        ) -> Result<Arc<dyn ResonateServer>, ConfigError>,
+        configure: fn(&Settings<'_>, ServerDependencies) -> Result<Configured, ConfigError>,
     ) -> Self {
         Self { krate, configure }
     }

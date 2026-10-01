@@ -451,7 +451,7 @@ impl Engine for Neo4jEngine {
 
 // ─── The plugin ──────────────────────────────────────────────────────────────
 
-use resonate_plugin::{ConfigError, ResonateServer, ServerDependencies, ServerPlugin, Settings};
+use resonate_plugin::{ConfigError, ServerDependencies, ServerPlugin, Settings};
 
 /// This server, as a plugin. The one thing a binary names to run on Neo4j.
 pub static PLUGIN: ServerPlugin = ServerPlugin::new(env!("CARGO_PKG_NAME"), configure);
@@ -461,7 +461,7 @@ pub static PLUGIN: ServerPlugin = ServerPlugin::new(env!("CARGO_PKG_NAME"), conf
 fn configure(
     settings: &Settings<'_>,
     deps: ServerDependencies,
-) -> Result<std::sync::Arc<dyn ResonateServer>, ConfigError> {
+) -> Result<resonate_plugin::Configured, ConfigError> {
     let config: Config = settings.extract()?;
     if config.uri.is_empty() {
         return Err(settings.reject("uri", "a Bolt URI is required"));
@@ -476,7 +476,7 @@ fn configure(
         sweep_interval: config.sweep_interval,
     };
     let open = config.clone();
-    Ok(server::Server::new(
+    let server = server::Server::new(
         Box::new(move |debug| {
             Box::pin(async move {
                 let engine = Neo4jEngine::connect(&open, debug).await.map_err(|e| {
@@ -491,5 +491,6 @@ fn configure(
         }),
         deps.router,
         options,
-    ))
+    );
+    Ok(resonate_plugin::Configured::single(server))
 }

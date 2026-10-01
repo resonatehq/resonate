@@ -5,10 +5,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 #[rustfmt::skip]
 use resonate_plugin::{
-    ServerDependencies, ServerPlugin, WorkerDependencies, WorkerPlugin, GatewayPlugin,
+    Configured, ServerDependencies, ServerPlugin, WorkerDependencies, WorkerPlugin, GatewayPlugin,
     ResonateServer, ResonateWorker, ResonateRouter,
     ConfigError, RegistryError,
-    Loader, Registry, Settings,
+    Loader, Registry, Routes, Settings,
 };
 use serde::{Deserialize, Serialize};
 
@@ -24,7 +24,7 @@ static SQLITE: ServerPlugin = ServerPlugin::new("resonate-server-sqlite", |setti
     let _config: SqliteConfig = settings.extract()?;
     // Nothing is opened here. A real engine connects in `init`, like every
     // other port, and reports failure from there.
-    Ok(Arc::new(Unstarted) as Arc<dyn ResonateServer>)
+    Ok(Configured::single(Arc::new(Unstarted)))
 });
 
 /// A server that has been built and not started. Standing in for one whose
@@ -355,9 +355,10 @@ async fn connecting_is_init_not_configure() {
     let loaded = loader().load();
     let server = (SQLITE.configure)(
         &loaded.server(&SQLITE.id()),
-        ServerDependencies::new(Arc::new(NoRoute) as Arc<dyn ResonateRouter>),
+        ServerDependencies::new(Arc::new(NoRoute) as Arc<dyn ResonateRouter>, Routes::new()),
     )
-    .expect("its settings are fine");
+    .expect("its settings are fine")
+    .server;
 
     let err = server
         .init(false)

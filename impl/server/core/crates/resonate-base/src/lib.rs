@@ -29,9 +29,12 @@ pub mod router;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use resonate_core::{ResonateGateway, ResonateRouter, ResonateServer, ResonateWorker};
+use resonate_core::{
+    ResonateGateway, ResonateRoster, ResonateRouter, ResonateServer, ResonateWorker,
+};
 use resonate_plugin::{
-    Configuration, GatewayDependencies, Loader, Routes, ServerDependencies, WorkerDependencies,
+    Configuration, Configured, GatewayDependencies, Loader, Routes, ServerDependencies,
+    WorkerDependencies,
 };
 use serde::{Deserialize, Serialize};
 
@@ -289,6 +292,7 @@ fn load(options: &Options) -> Result<Configuration, String> {
 /// failed to bind.
 pub struct Running {
     server: Arc<dyn ResonateServer>,
+    roster: Arc<dyn ResonateRoster>,
     workers: Vec<(String, Arc<dyn ResonateWorker>)>,
     gateways: Vec<(String, Arc<dyn ResonateGateway>)>,
 }
@@ -298,6 +302,11 @@ impl Running {
     /// it without a gateway.
     pub fn server(&self) -> &Arc<dyn ResonateServer> {
         &self.server
+    }
+
+    /// The roster the server plugin built beside it.
+    pub fn roster(&self) -> &Arc<dyn ResonateRoster> {
+        &self.roster
     }
 }
 
@@ -335,9 +344,12 @@ pub fn build(
     };
     let active = config.active_server(&fallback);
     let chosen = registry.select_server(&active).map_err(|e| e.to_string())?;
-    let server = (chosen.configure)(
+    let Configured { roster, server, .. } = (chosen.configure)(
         &config.server(&chosen.id()),
-        ServerDependencies::new(Arc::clone(&router) as Arc<dyn ResonateRouter>),
+        ServerDependencies::new(
+            Arc::clone(&router) as Arc<dyn ResonateRouter>,
+            Arc::clone(&routes),
+        ),
     )
     .map_err(|e| e.to_string())?;
     tracing::info!(server = %chosen.id(), "Server plugin selected");
@@ -388,6 +400,7 @@ pub fn build(
 
     Ok(Running {
         server,
+        roster,
         workers,
         gateways,
     })

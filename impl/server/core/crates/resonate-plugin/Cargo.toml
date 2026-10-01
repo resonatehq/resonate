@@ -7,6 +7,7 @@ description = "The Resonate plugin surface: what a plugin announces, how it is c
 
 [dependencies]
 resonate-core = { path = "../resonate-core" }
+async-trait = { workspace = true }
 # In the ABI because a registered route is handed the gateway's loaded auth
 # policy — one policy at one edge, rather than a setting per plugin.
 resonate-auth = { path = "../resonate-auth" }
