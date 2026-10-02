@@ -3,7 +3,7 @@
 # commit, and publish them to the bucket.
 set -euo pipefail
 cd "$(dirname "$0")"; source env.sh
-z=$(zone_of 1); root=$(git rev-parse --show-toplevel 2>/dev/null); rev=$(git rev-parse --short HEAD 2>/dev/null)
+z=$(zone_of 1); root=$(git rev-parse --show-toplevel 2>/dev/null || true); rev=$(git rev-parse --short HEAD 2>/dev/null || true)
 # SRC_TGZ: a source tarball to build instead of HEAD (on the controller, which has no git).
 if [ -n "${SRC_TGZ:-}" ]; then cp "$SRC_TGZ" /tmp/$PREFIX-src.tgz; rev=$(cat "${SRC_TGZ%.tgz}.rev" 2>/dev/null || echo unknown)
 else git -C "$root" archive --format=tar.gz -o /tmp/$PREFIX-src.tgz HEAD impl/server/core; fi

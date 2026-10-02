@@ -9,6 +9,17 @@ META="--metadata=bucket=$BUCKET"
 
 exists() { $G compute instances describe "$1" --zone "$2" --format='value(name)' >/dev/null 2>&1; }
 
+# create NAME ZONE TYPE ARGS..: the machine type, or the next in its family
+# list when the zone is out of it (stockouts are common in single zones).
+create() {
+  local name=$1 zone=$2 type=$3; shift 3
+  for t in $type ${FALLBACK_TYPES:-n2d-standard-4}; do
+    [ "$t" = "$type" ] || echo "$name: $type unavailable in $zone, trying $t"
+    $G compute instances create $name --zone $zone --machine-type $t "$@" && return 0
+  done
+  return 1
+}
+
 case "$1" in
 bucket)
   gcloud storage buckets describe "$BUCKET" --project "$PROJECT" >/dev/null 2>&1 \
@@ -24,8 +35,7 @@ brokers)
   # Create first without starting Kafka, to learn the IPs the voters need.
   for i in 1 2 3; do
     z=$(zone_of $i)
-    exists $PREFIX-b$i $z || $G compute instances create $PREFIX-b$i --zone $z \
-      --machine-type $BROKER_TYPE $COMMON $META --boot-disk-size=20GB \
+    exists $PREFIX-b$i $z || create $PREFIX-b$i $z $BROKER_TYPE $COMMON $META --boot-disk-size=20GB \
       --create-disk=name=$PREFIX-b$i-data,size=500GB,type=pd-ssd,device-name=data,auto-delete=yes &
   done; wait
   voters=""; brokers=""
@@ -46,8 +56,7 @@ nodes)
   n=$2; brokers=$(cat .brokers)
   for i in $(seq 1 $n); do
     z=$(zone_of $i)
-    exists $PREFIX-n$i $z || $G compute instances create $PREFIX-n$i --zone $z \
-      --machine-type $NODE_TYPE $COMMON --boot-disk-size=20GB --local-ssd=interface=NVME \
+    exists $PREFIX-n$i $z || create $PREFIX-n$i $z $NODE_TYPE $COMMON --boot-disk-size=20GB --local-ssd=interface=NVME \
       "--metadata=^;^bucket=$BUCKET;brokers=$brokers;partitions=$PARTITIONS;topic-prefix=${TOPIC_PREFIX:-resonate}" \
       --metadata-from-file=startup-script=node-startup.sh &
   done; wait

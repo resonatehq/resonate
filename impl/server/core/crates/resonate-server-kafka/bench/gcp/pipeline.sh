@@ -21,4 +21,5 @@ step loadgens; for t in 1 2 3; do ./up.sh loadgens $loadgens 2>&1 | grep -E "ERR
 for i in $(seq 1 $nodes); do wait_for $PREFIX-n$i $(zone_of $i) "systemctl is-enabled resonate" || exit 1; done
 for l in $(seq 1 $loadgens); do wait_for $PREFIX-l$l $(zone_of $l) "test -x /opt/resonate/load" || exit 1; done
 step "fleet ready: $(cat .brokers)"
+$G compute instances list --filter="labels.$PREFIX=1" --format="table(name,zone.basename(),machineType.basename())"
 "$@"
