@@ -1,0 +1,5 @@
+== ab6-any-15000: --rate 15000 --seconds 30 --warmup 5 --max-inflight 30000 (split over 2 loadgens, 6 nodes)
+ops/s 15,000  req/s 30,000  failed 0  p50 29.6 ms  p99 111.3 ms  p99.9 216.0 ms  max 441 ms
+server mean/p99 ms: edge 16.19/80.58  queue 5.74/41.70  round 8.20/37.77  commit 8.07/37.58  req/round 2.1  forwarded 750424/899528
+verify: 525,000 read back, 0 missing, 0 regressed, 0 unreadable
+JSON {"ops_per_s": 15000.0, "requests_per_s": 29999.9, "failed": 0, "p99_ms": 111.305, "p999_ms": 215.994, "verify": {"checked": 525000, "missing": 0, "regressed": 0, "unreadable": 0}, "server": {"commit": {"mean_ms": 8.070550222243337, "p50_ms": 8.775499039909379, "p99_ms": 37.5818495741302}, "edge": {"mean_ms": 16.19413867968902, "p50_ms": 14.752753866077551, "p99_ms": 80.57845687203779}, "forwarded": 750424.0, "queue": {"mean_ms": 5.74094236365439, "p50_ms": 4.588468724596848, "p99_ms": 41.703124702232515}, "requests_per_round": 2.083351089453791, "round": {"mean_ms": 8.19962342220028, "p50_ms": 9.082761938359898, "p99_ms": 37.772557659208246}, "served": 899528.0, "server": {"mean_ms": 16.185645446281924, "p50_ms": 14.722308175184923, "p99_ms": 80.57066729880275}}}

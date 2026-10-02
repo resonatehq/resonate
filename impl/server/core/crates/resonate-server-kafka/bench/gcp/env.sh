@@ -8,7 +8,7 @@
 : "${BROKER_TYPE:=n2-standard-4}"
 : "${NODE_TYPE:=n2-standard-4}"
 : "${LOADGEN_TYPE:=n2-standard-8}"
-: "${BUILDER_TYPE:=c2d-standard-16}"
+: "${BUILDER_TYPE:=n2-standard-16}"
 : "${PARTITIONS:=128}"
 : "${IMAGE:=--image-family=debian-12 --image-project=debian-cloud}"
 read -r -a ZONE <<< "$ZONES"

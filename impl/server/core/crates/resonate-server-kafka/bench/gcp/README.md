@@ -78,6 +78,29 @@ On clean brokers (no idle topics), 30 s per point:
   partitions per broker) had commit times 2–3× higher and broker CPU ~55%:
   idle partitions are not free.
 
+### Owner routing (lifecycle, same session and topic, back to back)
+
+`--route owner`: the client reads the consumer-group directory and sends each
+request to its partition's owner, so nothing is forwarded (commit `a5d3e647`).
+
+| nodes | ops/s | round-robin p99 | owner p99 | round-robin node CPU | owner node CPU |
+|---|---|---|---|---|---|
+| 3 | 10,000 | 79 ms | 61 ms | 71% | 53% |
+| 3 | 12,500 | 1.6 s (saturated) | 59 ms | 90% | 62% |
+| 3 | 15,000 | 10.8 s, 11,108 failed | 94 ms | 89% | 78% |
+| 6 | 15,000 | 111 ms | 88 ms | 60% | 38% |
+| 6 | 20,000 | 634 ms | 99 ms | 91% | 48% |
+| 6 | 25,000 | 2.6 s | 214 ms | 90% | 88% |
+| 6 | 30,000 | 11.3 s, 2,979 failed | 444 ms, none failed | 91% | 91% |
+
+- **The forward hop is a third or more of node CPU** below saturation: −26%
+  at 3 nodes, −35% at 6 nodes for the same rate.
+- **Capacity rises 35–50%:** at p99 under 100 ms, 3 nodes go from ~10k to
+  ~15k ops/s and 6 nodes from under 15k to 20k; 6 nodes serve 30k ops/s
+  (60k req/s) without failures where round-robin collapses.
+- Clients need the owner map and each owner's *gateway* URL; the group only
+  advertises peer URLs, so the client rewrote the port.
+
 ### Failures (3 nodes, workflows at 600/s ≈ 50% of capacity)
 
 Clients retry 503s and transport errors for 30 s at the next gateway; an
