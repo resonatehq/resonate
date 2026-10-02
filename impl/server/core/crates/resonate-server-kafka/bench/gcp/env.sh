@@ -2,7 +2,7 @@
 # environment before sourcing.
 : "${PROJECT:=resonate-cloud}"
 : "${REGION:=us-central1}"
-: "${ZONES:=us-central1-a us-central1-b us-central1-f}"
+: "${ZONES:=us-central1-a us-central1-b us-central1-c}"
 : "${PREFIX:=rbench}"
 : "${BUCKET:=gs://${PROJECT}-${PREFIX}}"
 : "${BROKER_TYPE:=n2-standard-4}"
