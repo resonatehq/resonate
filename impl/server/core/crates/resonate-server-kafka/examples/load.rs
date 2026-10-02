@@ -33,6 +33,12 @@
 //!   round    resonate_kafka_round_seconds               (load, decide, commit, apply)
 //!   commit   resonate_kafka_commit_seconds              (producing a round)
 //!
+//! `--route owner` sends each request to the node that owns its partition, as
+//! a client that knows the roster would: it reads the same consumer-group
+//! directory the nodes use (`--brokers`, `--topic-prefix`, `--partitions`)
+//! and rewrites each owner's peer URL to its gateway (`--gateway-port`).
+//! Retries, and requests whose owner is unknown, fall back to round-robin.
+//!
 //! `--timeline` writes one CSV row per second of the whole run (warm-up
 //! included), and the last line printed is `RESULT {json}` for scripts.
 //!
@@ -46,11 +52,14 @@
 
 use std::collections::HashMap;
 use std::io::Write;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use resonate_plugin::axum;
+use resonate_server_kafka::directory::kafka::{GroupDirectory, GroupDirectoryCfg};
+use resonate_server_kafka::directory::Directory;
+use resonate_server_kafka::keys::partition_of_id;
 use serde_json::{json, Value};
 use tokio::sync::{oneshot, Semaphore};
 
@@ -79,6 +88,12 @@ struct Args {
     verify: bool,
     verify_only: Option<String>,
     timeline: Option<String>,
+    route_owner: bool,
+    brokers: Option<String>,
+    topic_prefix: String,
+    group: Option<String>,
+    partitions: u32,
+    gateway_port: String,
 }
 
 fn args() -> Args {
@@ -101,6 +116,12 @@ fn args() -> Args {
         verify: true,
         verify_only: None,
         timeline: None,
+        route_owner: false,
+        brokers: None,
+        topic_prefix: "resonate".into(),
+        group: None,
+        partitions: 128,
+        gateway_port: "8001".into(),
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -130,6 +151,18 @@ fn args() -> Args {
             "--verify" => a.verify = v.parse().expect("--verify true|false"),
             "--verify-only" => a.verify_only = Some(v),
             "--timeline" => a.timeline = Some(v),
+            "--route" => {
+                a.route_owner = match v.as_str() {
+                    "owner" => true,
+                    "any" => false,
+                    other => panic!("unknown route {other}"),
+                }
+            }
+            "--brokers" => a.brokers = Some(v),
+            "--topic-prefix" => a.topic_prefix = v,
+            "--group" => a.group = Some(v),
+            "--partitions" => a.partitions = v.parse().expect("--partitions"),
+            "--gateway-port" => a.gateway_port = v,
             other => panic!("unknown flag {other}"),
         }
     }
@@ -169,7 +202,39 @@ enum Acked {
     Resolved,
 }
 
+/// Owner routing: the group's view of who serves each partition.
+struct Router {
+    dir: Arc<GroupDirectory>,
+    partitions: u32,
+    /// A port, or an offset from the peer port (`-1`, `+1`).
+    gateway_port: String,
+    /// Requests sent to the owner the directory named, and those that fell
+    /// back to round-robin (owner unknown, or a retry).
+    owner: AtomicU64,
+    fallback: AtomicU64,
+}
+
+impl Router {
+    /// The owner's gateway: its peer URL with the gateway's port.
+    fn gateway(&self, id: &str) -> Option<String> {
+        let owner = self.dir.owner(partition_of_id(id, self.partitions))?;
+        let base = owner.peer_url.trim_end_matches('/');
+        let (host, peer_port) = base.rsplit_once(':')?;
+        let port = match self.gateway_port.as_bytes()[0] {
+            b'+' | b'-' => (peer_port.parse::<i64>().ok()? + self.gateway_port.parse::<i64>().ok()?).to_string(),
+            _ => self.gateway_port.clone(),
+        };
+        Some(format!("{host}:{port}/"))
+    }
+}
+
+/// The id a request is about, for routing.
+fn id_of(data: &Value) -> Option<&str> {
+    data["id"].as_str().or_else(|| data["action"]["data"]["id"].as_str())
+}
+
 struct Shared {
+    router: Option<Router>,
     http: reqwest::Client,
     urls: Vec<String>,
     rr: AtomicUsize,
@@ -219,13 +284,30 @@ impl Shared {
     /// at the next gateway.
     async fn send(&self, kind: &'static str, data: &Value) -> Result<(i64, Value), String> {
         let started = Instant::now();
+        let mut attempt = 0;
         loop {
-            let out = send(&self.http, self.url(), kind, data).await;
+            // The owner first; a retry goes round-robin, as the owner may be gone.
+            let owner = match (&self.router, attempt, id_of(data)) {
+                (Some(r), 0, Some(id)) => r.gateway(id),
+                _ => None,
+            };
+            if let Some(r) = &self.router {
+                let n = if owner.is_some() { &r.owner } else { &r.fallback };
+                n.fetch_add(1, Ordering::Relaxed);
+            }
+            let url = owner.as_deref().unwrap_or_else(|| self.url());
+            let out = send(&self.http, url, kind, data).await;
+            attempt += 1;
             let retryable = match &out {
                 Ok((503, _)) => true,
                 Ok(_) => false,
                 Err(_) => true,
             };
+            if retryable {
+                if let Some(r) = &self.router {
+                    r.dir.stale();
+                }
+            }
             if retryable && started.elapsed() < self.retry {
                 tokio::time::sleep(Duration::from_millis(50)).await;
                 continue;
@@ -731,7 +813,35 @@ async fn main() {
     }
 
     let run = format!("{:08x}", fastrand::u32(..));
+    let router = if a.route_owner {
+        let brokers = a.brokers.clone().expect("--route owner needs --brokers");
+        let dir = GroupDirectory::start(GroupDirectoryCfg {
+            brokers,
+            group_id: a.group.clone().unwrap_or_else(|| a.topic_prefix.clone()),
+            topic: format!("{}.promises", a.topic_prefix),
+            refresh: Duration::from_secs(2),
+            timeout: Duration::from_secs(5),
+            properties: Default::default(),
+        })
+        .expect("directory");
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while (0..a.partitions).any(|p| dir.owner(p).is_none()) && Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+        let known = (0..a.partitions).filter(|p| dir.owner(*p).is_some()).count();
+        println!("owner routing: {known} of {} partitions have a known owner", a.partitions);
+        Some(Router {
+            dir,
+            partitions: a.partitions,
+            gateway_port: a.gateway_port.clone(),
+            owner: AtomicU64::new(0),
+            fallback: AtomicU64::new(0),
+        })
+    } else {
+        None
+    };
     let s = Arc::new(Shared {
+        router,
         http: http.clone(),
         urls: urls.clone(),
         rr: AtomicUsize::new(fastrand::usize(..)),
@@ -884,6 +994,11 @@ async fn main() {
     if !errors.is_empty() {
         println!("errors: {errors:?}");
     }
+    let routed = s.router.as_ref().map(|r| {
+        let (o, f) = (r.owner.load(Ordering::Relaxed), r.fallback.load(Ordering::Relaxed));
+        println!("owner routing: {o} requests to the owner, {f} round-robin");
+        json!({ "owner": o, "fallback": f })
+    });
     let worker_errors = s.worker_errors.lock().unwrap().clone();
     if !worker_errors.is_empty() {
         println!("worker errors: {worker_errors:?}");
@@ -970,7 +1085,7 @@ async fn main() {
             "ops_failed": ops_failed,
             "p50_ms": pct(&op_lat, 0.5), "p99_ms": pct(&op_lat, 0.99),
             "p999_ms": pct(&op_lat, 0.999), "max_ms": pct(&op_lat, 1.0),
-            "errors": errors, "worker_errors": worker_errors,
+            "errors": errors, "worker_errors": worker_errors, "routed": routed,
             "server": breakdown,
             "verify": verdict.as_ref().map(|v| json!({ "checked": v.checked, "missing": v.missing,
                 "regressed": v.regressed, "unreadable": v.unreadable })),

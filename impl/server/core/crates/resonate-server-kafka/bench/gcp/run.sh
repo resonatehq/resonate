@@ -6,7 +6,8 @@
 #   ./run.sh stop                stop resonate on every node
 #   ./run.sh load NAME K ARGS..  run the load generator on loadgens 1..K at once,
 #                                split --rate evenly, against nodes 1..$NODES;
-#                                results land in results/NAME/
+#                                results land in results/NAME/; ROUTE=owner routes
+#                                each request to its partition's owner (needs TOPIC)
 #   ./run.sh kill-node I | restart-node I | rolling N | kill-broker I | start-broker I
 #   ./run.sh isolate-zone Z | heal-zone Z      drop all traffic of zone #Z's VMs (except ssh)
 #   ./run.sh cut-node I | heal-node I          cut node I off from the brokers
@@ -71,6 +72,10 @@ load)
     [[ " ${GATEWAYS:-$(seq 1 $NODES)} " =~ [[:space:]]$i[[:space:]] ]] && urls+="${urls:+,}http://$ip:8001"
   done
   args=("$@")
+  # ROUTE=owner: clients send each request to its partition's owner
+  if [ "${ROUTE:-any}" = owner ]; then
+    args+=(--route owner --brokers "$(cat .brokers)" --topic-prefix "${TOPIC:-resonate}" --partitions "$PARTITIONS")
+  fi
   # split --rate across the load generators
   for j in "${!args[@]}"; do
     if [ "${args[$j]}" = --rate ]; then args[$((j+1))]=$(python3 -c "print(${args[$((j+1))]}/$k)"); fi
