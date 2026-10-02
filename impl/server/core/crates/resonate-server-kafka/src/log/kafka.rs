@@ -123,6 +123,30 @@ impl KafkaCfg {
         c
     }
 
+    /// The writer's producer. Tunables first, then the operator's
+    /// properties, which may override them; last, what the log's safety
+    /// rests on, which nothing overrides: idempotence and `acks=all` keep a
+    /// partition's records in order and durable, and the delivery timeout
+    /// bounds how late a fenced writer's record can land
+    /// ([`KafkaCfg::compaction_lag_floor`]).
+    fn producer_config(&self) -> ClientConfig {
+        let mut c = ClientConfig::new();
+        c.set("bootstrap.servers", &self.brokers)
+            .set("client.id", format!("resonate-{}", self.node_id))
+            .set("compression.type", "lz4")
+            .set("linger.ms", "0");
+        for (k, v) in &self.properties {
+            c.set(k, v);
+        }
+        c.set("enable.idempotence", "true")
+            .set("acks", "all")
+            .set(
+                "message.timeout.ms",
+                self.delivery_timeout.as_millis().to_string(),
+            );
+        c
+    }
+
     /// A consumer that reads committed records by assignment, never joining a
     /// group and never committing offsets.
     fn reader_config(&self) -> ClientConfig {
@@ -365,16 +389,7 @@ impl KafkaLog {
     /// Become the writer of `partition`: claim each log where it ends, and
     /// check the claim landed there ([`super::epoch`]).
     async fn claim(&self, partition: u32) -> Result<KafkaWriter, LogError> {
-        let mut c = self.cfg.client();
-        c.set("enable.idempotence", "true")
-            .set("acks", "all")
-            .set("compression.type", "lz4")
-            .set("linger.ms", "0")
-            .set(
-                "message.timeout.ms",
-                self.cfg.delivery_timeout.as_millis().to_string(),
-            );
-        let producer: FutureProducer = c.create().map_err(unavailable)?;
+        let producer: FutureProducer = self.cfg.producer_config().create().map_err(unavailable)?;
         let mut epochs = [-1i64; 2];
         for topic in [Topic::Promises, Topic::Schedules] {
             let name = self.cfg.topic(topic);
