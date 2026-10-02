@@ -5,7 +5,7 @@
 set -uo pipefail
 cd "$(dirname "$0")"; source env.sh
 n=$1; shift
-export LIBRDKAFKA='"topic.metadata.refresh.interval.ms" = "10000"' TOPIC=ab$n-p$PARTITIONS-$(date +%H%M)
+export LIBRDKAFKA="${LIBRDKAFKA:-\"topic.metadata.refresh.interval.ms\" = \"10000\"}" TOPIC=ab$n-p$PARTITIONS-$(date +%H%M)
 ./run.sh start $n | tail -1
 for _ in $(seq 1 12); do
   served=0; for i in $(seq 1 $n); do s=$(./run.sh metrics $i 2>/dev/null | awk '/partitions_served/{print $2}'); served=$((served + ${s:-0})); done
