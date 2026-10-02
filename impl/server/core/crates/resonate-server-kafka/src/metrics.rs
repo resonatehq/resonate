@@ -18,6 +18,7 @@
 //! | `resonate_kafka_partitions_served` | |
 //! | `resonate_kafka_forwarded_total{call,outcome}` | requests, fires and searches sent to another node |
 //! | `resonate_kafka_timers_armed` | |
+//! | `resonate_kafka_pruned_total` | settled promises deleted under a settled parent (`prune_shadowed`) |
 //!
 //! Declared into the process-wide registry through `resonate-plugin`'s
 //! prometheus, so the metrics gateway serves them with everything else.
@@ -135,6 +136,14 @@ pub static FORWARDED: LazyLock<CounterVec> = LazyLock::new(|| {
         "resonate_kafka_forwarded_total",
         "Calls forwarded to another node, by call and outcome",
         &["call", "outcome"]
+    )
+    .unwrap()
+});
+
+pub static PRUNED: LazyLock<IntCounter> = LazyLock::new(|| {
+    register_int_counter!(
+        "resonate_kafka_pruned_total",
+        "Settled promises deleted because their settled parent shadows them"
     )
     .unwrap()
 });

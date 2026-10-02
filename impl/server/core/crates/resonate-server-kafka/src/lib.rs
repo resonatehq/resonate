@@ -31,6 +31,7 @@ pub mod node;
 pub mod partition;
 pub mod peer;
 pub mod plugin;
+pub mod prune;
 pub mod record;
 pub mod search;
 pub mod timers;

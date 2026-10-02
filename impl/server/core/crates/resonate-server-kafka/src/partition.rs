@@ -106,6 +106,8 @@ pub struct PartitionCfg {
     /// before it checks that nobody else wrote to its log
     /// ([`Writer::check`]).
     pub idle_check: Duration,
+    /// Delete settled promises whose parent is settled ([`crate::prune`]).
+    pub prune: bool,
 }
 
 impl Default for PartitionCfg {
@@ -116,6 +118,7 @@ impl Default for PartitionCfg {
             mailbox: 4_096,
             cache_promises: 2_000,
             idle_check: Duration::from_secs(1),
+            prune: false,
         }
     }
 }
@@ -715,7 +718,8 @@ impl Actor {
                         }
                     }
                     let doc = &mut overlay.origins.get_mut(&origin).expect("loaded").1;
-                    let (answer, fx) = decide(doc, &op, now, &self.cfg.kernel, &mut steps);
+                    let (answer, fx) =
+                        decide(doc, &op, now, &self.cfg.kernel, self.cfg.prune, &mut steps);
                     sends.extend(fx);
                     answers.push((reply, Ok(answer)));
                 }
@@ -938,6 +942,7 @@ fn decide(
     op: &OriginOp,
     now: i64,
     cfg: &KernelCfg,
+    prune: bool,
     steps: &mut Vec<record::Change>,
 ) -> (Reply, Vec<Effect>) {
     let mut sends = Vec::new();
@@ -962,6 +967,23 @@ fn decide(
         }
         OriginOp::Tick => Reply::status(200, serde_json::Value::Array(vec![])),
     };
+    // Last, as a step of its own: its records are tombstones only, after
+    // every record of the decision. Deepest first — a descendant's id extends
+    // its ancestor's, so it sorts after it, and descending order deletes a
+    // child before its parent — so whatever prefix of the commit lands, no
+    // promise is left without its parent, and the next decision on the
+    // origin finishes what a cut commit left.
+    if prune {
+        let before = doc.clone();
+        let gone = crate::prune::prune(doc);
+        if !gone.is_empty() {
+            metrics::PRUNED.inc_by(gone.len() as u64);
+            let mut tombstones = record::ordered(&before, doc);
+            debug_assert!(tombstones.iter().all(|t| t.log.is_none()));
+            tombstones.sort_by(|a, b| b.id.cmp(&a.id));
+            steps.extend(tombstones);
+        }
+    }
     (reply, sends)
 }
 

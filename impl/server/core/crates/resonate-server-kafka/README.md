@@ -178,12 +178,38 @@ oracle's answer.
 | `max_batch` | 512 | The group commit's ceiling. |
 | `cache_promises` | 2000 | Per partition: decoded hot documents kept, counted in promises. 0 turns it off. |
 | `search_enabled` | false | Searches read every record of every partition. |
+| `prune_shadowed` | false | Delete a settled promise once its parent is settled ([Pruning](#pruning)). |
 | `min_compaction_lag_ms` | 3600000 | `min.compaction.lag.ms` on topics this server creates. An existing topic with less than 70 s is refused. |
 | `librdkafka` | `{}` | Extra client properties (SASL, TLS, tuning). |
 
 The plugin is not in the `resonate` binary's registry: it builds librdkafka and
 RocksDB from source. A binary that wants it names it, as the top-level README
 shows for any plugin.
+
+## Pruning
+
+With `prune_shadowed`, a settled promise whose parent is settled is deleted,
+once nothing under it is pending. A promise is read only by a replay of its
+parent's body, and a settled parent's body never runs again: with `o:1.1`
+settled, nothing asks for `o:1.1.1` or `o:1.1.2` again. A finished workflow
+collapses to its root.
+
+- The parent, not any ancestor: with `o:1` timed out while `o:1.1` still
+  runs, a replay of `o:1.1` still reads `o:1.1.1`, so it stays.
+- Only settled promises go, and settling fulfils a promise's task, so nothing
+  a worker holds is deleted. A child still pending when its parent settles
+  keeps working and goes when it settles.
+- Ids are the tree: the server holds `resonate:parent` to a prefix of the id,
+  and the SDKs mint `o:1`, `o:1.1`, `o:1.1.2`.
+
+A deletion is a tombstone, written in the same commit after everything the
+settlement owed, deepest first, so whatever prefix of a commit lands, nothing is
+left without its parent; pruning runs on every decision, so a cut commit's
+leftovers go the next time the origin is touched. Compaction drops the tombstones after the
+topic's `delete.retention.ms`. Visible to clients: a pruned promise answers
+404, and a create retried after its promise was pruned makes it again — as
+garbage, pruned again when it settles. `resonate_kafka_pruned_total` counts
+what went.
 
 ## Brokers
 

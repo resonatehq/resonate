@@ -157,6 +157,13 @@ pub struct Config {
     #[serde(default)]
     pub search_enabled: bool,
 
+    /// Delete a settled promise once its parent is settled: with `o:1.1`
+    /// settled, its body never runs again, so nothing asks for `o:1.1.1`
+    /// again. A finished workflow collapses to its root. A pruned promise
+    /// answers 404, so this is off unless set (see `prune`).
+    #[serde(default)]
+    pub prune_shadowed: bool,
+
     /// The URL a worker is told to call back on.
     #[serde(default)]
     pub server_url: String,
@@ -394,6 +401,7 @@ impl ResonateServer for KafkaServer {
                     },
                     max_batch: c.max_batch,
                     cache_promises: c.cache_promises,
+                    prune: c.prune_shadowed,
                     ..Default::default()
                 },
                 debug,
