@@ -1,5 +1,5 @@
-//! A Resonate server on Kafka: this plugin, the HTTP gateway and the
-//! Prometheus endpoint — the shape a binary takes when it names its plugins,
+//! A Resonate server on Kafka: this plugin, HTTP push delivery, the HTTP
+//! gateway and the Prometheus endpoint — the shape a binary takes when it names its plugins,
 //! and what `examples/load.rs` drives end to end.
 //!
 //! Configured like any binary built on `resonate-base`, by `resonate.toml` or
@@ -20,6 +20,7 @@ async fn main() -> std::process::ExitCode {
     resonate_base::main(
         Registry::new()
             .server(&resonate_server_kafka::PLUGIN)
+            .worker(&resonate_transport_http_push::PLUGIN)
             .gateway(&resonate_gateway_http::PLUGIN)
             .gateway(&resonate_gateway_metrics::PLUGIN),
         Options::default(),

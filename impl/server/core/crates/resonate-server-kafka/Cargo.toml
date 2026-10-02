@@ -36,3 +36,5 @@ rkyv = "0.8"
 resonate-base = { path = "../resonate-base" }
 resonate-gateway-http = { path = "../resonate-gateway-http" }
 resonate-gateway-metrics = { path = "../resonate-gateway-metrics" }
+# Delivers `execute` messages to the push workers the workflow benchmark runs.
+resonate-transport-http-push = { path = "../resonate-transport-http-push" }

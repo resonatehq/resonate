@@ -3596,6 +3596,7 @@ dependencies = [
  "resonate-gateway-metrics",
  "resonate-plugin",
  "resonate-server-blob",
+ "resonate-transport-http-push",
  "rkyv",
  "rocksdb",
  "serde",
