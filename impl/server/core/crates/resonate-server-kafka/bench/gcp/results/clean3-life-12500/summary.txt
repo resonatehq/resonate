@@ -1,0 +1,6 @@
+== clean3-life-12500: --rate 12500 --seconds 30 --warmup 5 --max-inflight 30000 (split over 2 loadgens, 3 nodes)
+ops/s 12,498  req/s 24,987  failed 50  p50 1519.0 ms  p99 2860.5 ms  p99.9 3314.7 ms  max 9887 ms
+server mean/p99 ms: edge 670.64/1618.99  queue 144.34/403.73  round 225.70/576.05  commit 222.21/522.37  req/round 44.1  forwarded 493674/741455
+verify: 437,440 read back, 0 missing, 0 regressed, 0 unreadable
+errors: {"promise.create timeout": 60, "promise.settle timeout": 46}
+JSON {"ops_per_s": 12498.333333333332, "requests_per_s": 24986.666666666668, "failed": 50, "p99_ms": 2860.528, "p999_ms": 3314.681, "verify": {"checked": 437440, "missing": 0, "regressed": 0, "unreadable": 0}, "server": {"commit": {"mean_ms": 222.20912841573528, "p50_ms": 205.12464333617854, "p99_ms": 522.3729870129845}, "edge": {"mean_ms": 670.6397508451709, "p50_ms": 642.4105415023564, "p99_ms": 1618.9939119418946}, "forwarded": 493674.0, "queue": {"mean_ms": 144.33501088241596, "p50_ms": 132.37445376055857, "p99_ms": 403.72837456824874}, "requests_per_round": 44.08390736342043, "round": {"mean_ms": 225.70430919625855, "p50_ms": 208.79778286540548, "p99_ms": 576.0544680851043}, "served": 741455.0, "server": {"mean_ms": 670.6290190799369, "p50_ms": 642.4030308049909, "p99_ms": 1618.9894782970566}}}

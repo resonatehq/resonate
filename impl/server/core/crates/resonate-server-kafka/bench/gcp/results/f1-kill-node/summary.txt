@@ -1,0 +1,6 @@
+== f1-kill-node: --mode workflow --rate 600 --seconds 120 --warmup 5 --retry-ms 30000 --max-inflight 20000 (split over 2 loadgens, 3 nodes)
+ops/s 585  req/s 5,304  failed 1828  p50 255.3 ms  p99 44324.6 ms  p99.9 48555.3 ms  max 52025 ms
+server mean/p99 ms: edge -  queue -  round -  commit -  req/round 0.0  forwarded -1495973/-1878906
+verify: 365,925 read back, 0 missing, 0 regressed, 0 unreadable
+errors: {"task.create 409": 2, "task.create 503": 1754, "task.create timeout": 52, "task.fence 503": 9, "task.suspend 503": 2, "task.suspend connect": 1, "workflow: not completed in time": 6, "worker task.acquire 409": 4, "worker task.acquire 503": 4, "task.create connect": 2, "worker task.fulfill 503": 1}
+JSON {"ops_per_s": 584.7666666666667, "requests_per_s": 5303.791666666666, "failed": 1828, "p99_ms": 44324.649, "p999_ms": 48555.321, "verify": {"checked": 365925, "missing": 0, "regressed": 0, "unreadable": 0}, "server": {"forwarded": -1495973.0, "served": -1878906.0}}

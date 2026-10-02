@@ -1,0 +1,41 @@
+
+workflow (3 local steps + 1 remote), open loop at 100 ops/s, 3 gateway(s), 15s measured, 256-byte payloads
+throughput: 100 ops/s completed, 901 requests/s from the client; 0 ops failed
+
+client-side latency (op: from when it was due):
+  op              n=1500     p50    71.24 ms  p99   124.67 ms  p99.9   152.82 ms  max   155.38 ms
+  task.create     n=1500     p50     5.71 ms  p99    19.00 ms  p99.9    36.96 ms  max    39.86 ms
+  task.fence      n=10509    p50     5.64 ms  p99    11.64 ms  p99.9    35.68 ms  max    43.41 ms
+  task.suspend    n=1505     p50     7.99 ms  p99    16.99 ms  p99.9    42.13 ms  max    46.65 ms
+
+server-side, all nodes (mean / p50 / p99):
+  edge    n=39367       5.40 ms   5.12 ms  12.79 ms
+  server  n=39366       5.39 ms   5.11 ms  12.79 ms
+  queue   n=39411       0.61 ms   0.03 ms   6.05 ms
+  round   n=38956       3.99 ms   4.35 ms  11.47 ms
+  commit  n=38451       3.92 ms   4.23 ms  11.35 ms
+  rounds  n=38948        1.0 requests/round (p50 1, p99 1)
+  forwarded 26130 of 39366 requests reaching a server; doc cache 92% hits
+
+verify: 9000 promises read back, 0 missing, 0 less settled than acknowledged, 0 unreadable
+RESULT {"clients":64,"errors":{},"gateways":3,"max_ms":155.376,"mode":"workflow","ops_failed":0,"ops_per_s":100.0,"p50_ms":71.237,"p999_ms":152.817,"p99_ms":124.667,"payload":256,"rate":100.0,"requests_per_s":900.9333333333333,"run":"9227162b","seconds":15,"server":{"commit":{"mean_ms":3.9190664122649674,"p50_ms":4.233503674139282,"p99_ms":11.348640537513985},"edge":{"mean_ms":5.40204940384079,"p50_ms":5.118758674685932,"p99_ms":12.785171506577317},"forwarded":26130.0,"queue":{"mean_ms":0.6083469440257814,"p50_ms":0.03187663787246433,"p99_ms":6.050933101650738},"requests_per_round":1.0119133203245352,"round":{"mean_ms":3.987674147345737,"p50_ms":4.354409864123791,"p99_ms":11.470036217303837},"served":39366.0,"server":{"mean_ms":5.391384801300616,"p50_ms":5.1128517056166185,"p99_ms":12.785071999999998}},"steps":3,"verify":{"checked":9000,"missing":0,"regressed":0,"unreadable":0},"worker_errors":{}}
+--- timeline
+second,ok,failed,p50_ms,p99_ms,max_ms
+0,100,0,128.05,193.25,195.76
+1,100,0,100.14,158.02,162.99
+2,100,0,95.61,157.29,177.61
+3,100,0,83.45,149.33,149.63
+4,100,0,87.60,152.82,155.38
+5,100,0,80.27,113.79,120.55
+6,100,0,78.88,128.71,131.96
+7,100,0,81.48,110.31,124.67
+8,100,0,72.46,107.27,107.60
+9,100,0,68.15,86.20,95.02
+10,100,0,66.64,82.51,82.69
+11,100,0,68.22,84.01,92.88
+12,100,0,67.98,89.42,95.33
+13,100,0,68.24,92.63,93.85
+14,100,0,67.51,90.48,90.61
+15,100,0,69.13,123.92,126.94
+16,100,0,65.65,96.30,103.27
+17,100,0,65.30,91.12,93.52
