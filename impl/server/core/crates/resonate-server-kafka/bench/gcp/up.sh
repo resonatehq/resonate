@@ -61,5 +61,12 @@ loadgens)
       --metadata-from-file=startup-script=loadgen-startup.sh &
   done; wait
   ;;
-*) echo "usage: $0 bucket|builder|brokers|nodes N|loadgens N"; exit 1 ;;
+controller)
+  # Runs experiments inside GCP (controller.sh), so nothing depends on the
+  # workstation staying up.
+  z=$(zone_of 1)
+  exists $PREFIX-ctl $z || $G compute instances create $PREFIX-ctl --zone $z \
+    --machine-type e2-standard-2 $COMMON $META --boot-disk-size=20GB
+  ;;
+*) echo "usage: $0 bucket|builder|brokers|nodes N|loadgens N|controller"; exit 1 ;;
 esac

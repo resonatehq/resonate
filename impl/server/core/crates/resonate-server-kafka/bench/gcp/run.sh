@@ -2,6 +2,7 @@
 # Drive experiments from a workstation. Every command goes over ssh.
 #
 #   ./run.sh start N             start resonate on nodes 1..N, wiping local copies; TOPIC picks
+#                                the topic prefix, PARTITIONS the partition count (new topics only),
 #                                the topic prefix, LIBRDKAFKA adds client properties (toml lines)
 #   ./run.sh stop                stop resonate on every node
 #   ./run.sh load NAME K ARGS..  run the load generator on loadgens 1..K at once,
@@ -29,7 +30,7 @@ case "$cmd" in
 start)
   n=$1
   for i in $(seq 1 $n); do
-    node $i "sudo systemctl stop resonate && sudo sed -i '/TOPIC_PREFIX/d' /etc/resonate.env && echo RESONATE_SERVERS__SERVER_KAFKA__TOPIC_PREFIX=${TOPIC:-resonate} | sudo tee -a /etc/resonate.env >/dev/null \
+    node $i "sudo systemctl stop resonate && sudo sed -i '/TOPIC_PREFIX/d; /__PARTITIONS=/d' /etc/resonate.env && printf 'RESONATE_SERVERS__SERVER_KAFKA__TOPIC_PREFIX=${TOPIC:-resonate}\\nRESONATE_SERVERS__SERVER_KAFKA__PARTITIONS=$PARTITIONS\\n' | sudo tee -a /etc/resonate.env >/dev/null \
       && sudo mkdir -p /etc/systemd/system/resonate.service.d && printf '[Service]\nWorkingDirectory=/opt/resonate\n' | sudo tee /etc/systemd/system/resonate.service.d/cwd.conf >/dev/null \
       && printf '[servers.server_kafka.librdkafka]\n${LIBRDKAFKA:-}\n' | sudo tee /opt/resonate/resonate.toml >/dev/null \
       && sudo systemctl daemon-reload && sudo rm -rf /mnt/ssd/rocks && sudo systemctl start resonate" &
