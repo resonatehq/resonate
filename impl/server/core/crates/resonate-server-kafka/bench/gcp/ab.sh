@@ -1,6 +1,7 @@
 #!/bin/bash
 # Owner routing against round-robin: the same rates on the same topic, back
 # to back, with node 1's CPU sampled mid-run.  ./ab.sh NODES RATE...
+# PARTITIONS, ROUTES (default "any owner") and MODE (default lifecycle) select the rest.
 set -uo pipefail
 cd "$(dirname "$0")"; source env.sh
 n=$1; shift
@@ -15,6 +16,6 @@ cpu() { ssh_to $PREFIX-n1 $(zone_of 1) "sleep 18; top -bn2 -d5 | grep '^%Cpu' | 
 for r in "$@"; do for route in ${ROUTES:-any owner}; do
   cpu > /tmp/ab-cpu &
   echo "-- $n nodes, $r ops/s, route=$route"
-  ROUTE=$route NODES=$n ./run.sh load ab$n-p$PARTITIONS-$route-$r 2 --rate $r --seconds 30 --warmup 5 --max-inflight 30000 2>&1 | sed -n 2,4p | cut -c1-170
+  ROUTE=$route NODES=$n ./run.sh load ab$n-p$PARTITIONS-${MODE:-lifecycle}-$route-$r 2 --mode ${MODE:-lifecycle} --rate $r --seconds 30 --warmup 5 --max-inflight 30000 2>&1 | sed -n 2,4p | cut -c1-170
   wait; echo "   node 1 CPU: $(cat /tmp/ab-cpu)%"
 done; done
