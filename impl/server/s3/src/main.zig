@@ -59,6 +59,10 @@ const usage =
     \\                           nothing can check that for you
     \\  --shutdown-timeout <ms>  how long SIGTERM waits for work in flight
     \\                           [default: 2000]
+    \\  --request-timeout <ms>   how long one request to the store may take. Past
+    \\                           it the request is a timeout — which the server
+    \\                           treats as "may or may not have happened", like
+    \\                           every other failure                [default: 10000]
     \\
     \\There is no TLS and no authentication here on purpose. Put a proxy in front:
     \\it terminates TLS, authenticates, authorizes, and forwards what is left.
@@ -82,6 +86,7 @@ const Args = struct {
     cache_bytes: u64 = 64 << 20,
     sole_writer: bool = false,
     shutdown_timeout: i64 = 2_000,
+    request_timeout: i64 = net.default_request_timeout_ms,
 };
 
 pub fn main() u8 {
@@ -171,6 +176,12 @@ pub fn main() u8 {
             i += 1;
             args.cache_bytes = std.fmt.parseInt(u64, v, 10) catch return fail("--cache-bytes is not a number");
             if (args.cache_bytes == 0) return fail("--cache-bytes must be at least 1");
+        } else if (std.mem.eql(u8, arg, "--request-timeout")) {
+            const v = value orelse return fail("--request-timeout needs a value");
+            i += 1;
+            args.request_timeout = std.fmt.parseInt(i64, v, 10) catch
+                return fail("--request-timeout is not a number");
+            if (args.request_timeout <= 0) return fail("--request-timeout must be positive");
         } else if (std.mem.eql(u8, arg, "--shutdown-timeout")) {
             const v = value orelse return fail("--shutdown-timeout needs a value");
             i += 1;
@@ -344,7 +355,6 @@ const Process = struct {
             .{ "resonate_requests_total", "Protocol requests answered", runtime.server.requests },
             .{ "resonate_commits_total", "Documents committed", runtime.applier.commits },
             .{ "resonate_contentions_total", "Commits that lost a race and were re-decided", runtime.applier.contentions },
-            .{ "resonate_conflicts_total", "Conditional writes the store could not order", runtime.applier.conflicts },
             .{ "resonate_cache_hits_total", "Documents served from memory", runtime.applier.cache.hits },
             .{ "resonate_cache_misses_total", "Documents read from the store", runtime.applier.cache.misses },
             .{ "resonate_messages_sent_total", "Messages handed to a transport", runtime.sender.sent },
@@ -473,6 +483,7 @@ fn run(allocator: std.mem.Allocator, args: Args) !void {
 
     var client = net.Client.init(allocator, &loop);
     defer client.deinit();
+    client.request_timeout_ms = args.request_timeout;
 
     var push = bus_mod.HttpPush.init(allocator, &client);
 

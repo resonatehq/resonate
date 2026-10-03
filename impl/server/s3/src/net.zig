@@ -16,11 +16,22 @@
 //! response byte arrives* on a reused connection is retried once on a fresh one.
 //! A request that fails after that is not retried here: the caller knows whether
 //! its operation is idempotent and this layer does not.
+//!
+//! ## Every request has a deadline
+//!
+//! A connection that accepts a request and then goes quiet answers nothing,
+//! ever, and without a deadline the caller waits as long — along with everything
+//! queued behind it. So `send` arms one (`Client.request_timeout_ms`, covering
+//! the retry above too), and when it fires the socket is shut down. That makes
+//! whatever the ring has in flight on it complete now, with an error, through
+//! the same path as any other failure — rather than being cancelled out from
+//! under memory the kernel still points into. An expired call is never retried.
 
 const std = @import("std");
 const posix = std.posix;
 const stdx = @import("stdx.zig");
 const io_mod = @import("io.zig");
+const env = @import("env.zig");
 const http = @import("http.zig");
 
 const assert = stdx.assert;
@@ -32,6 +43,9 @@ pub const read_chunk = 32 * 1024;
 pub const max_body_bytes = 64 * 1024 * 1024;
 /// How long a resolved host is reused before it is looked up again.
 pub const dns_ttl_ms: i64 = 60_000;
+/// How long a call may take before the caller stops waiting. Generous against
+/// S3's latency for objects this size, and short against a caller's patience.
+pub const default_request_timeout_ms: i64 = 10_000;
 
 // ── The server ────────────────────────────────────────────────────────────────
 
@@ -451,6 +465,9 @@ pub const Call = struct {
     in: std.ArrayListUnmanaged(u8) = .{},
     read_buf: [read_chunk]u8 = undefined,
     saw_response_bytes: bool = false,
+    deadline: env.Timeout = .{ .at_ms = 0 },
+    /// Set when the deadline fired: whatever fails next is final.
+    expired: bool = false,
 };
 
 pub const Client = struct {
@@ -470,9 +487,14 @@ pub const Client = struct {
     max_idle: u32 = 64,
     resolved: std.StringHashMapUnmanaged(Resolved) = .{},
 
+    /// How long one call may take, end to end, before the caller stops waiting.
+    request_timeout_ms: i64 = default_request_timeout_ms,
+
     sent: u64 = 0,
     reused_connections: u64 = 0,
     failures: u64 = 0,
+    /// Calls the deadline ended.
+    expirations: u64 = 0,
 
     pub fn init(allocator: std.mem.Allocator, loop: *io_mod.Loop) Client {
         return .{ .allocator = allocator, .loop = loop };
@@ -492,7 +514,21 @@ pub const Client = struct {
     pub fn send(self: *Client, call: *Call) void {
         call.client = self;
         call.attempt = 0;
+        call.expired = false;
+        call.deadline = .{ .at_ms = 0 };
+        call.deadline.listen(*Call, call, on_deadline);
+        self.loop.timer().arm(&call.deadline, self.loop.clock().now_ms() + self.request_timeout_ms);
         self.attempt(call);
+    }
+
+    fn on_deadline(call: *Call, _: *env.Timeout) void {
+        if (call.state == .done) return;
+        call.expired = true;
+        call.client.expirations += 1;
+        // Not a close: the ring holds the descriptor and its operation goes on.
+        // A shutdown ends that operation now, with an error, and the ordinary
+        // failure path takes it from there.
+        if (call.fd >= 0) posix.shutdown(call.fd, .both) catch {};
     }
 
     fn attempt(self: *Client, call: *Call) void {
@@ -686,6 +722,7 @@ pub const Client = struct {
         call.response_headers = head.headers;
         call.response_body = body;
         call.state = .done;
+        self.loop.timer().cancel(&call.deadline);
         if (head.keep_alive()) {
             self.keep_idle(call, call.fd);
         } else {
@@ -698,7 +735,7 @@ pub const Client = struct {
     /// A reused connection that failed before answering is a dead connection, not
     /// a failed request. One retry, on a fresh one.
     fn retry_or_fail(self: *Client, call: *Call, detail: []const u8) void {
-        if (call.reused and !call.saw_response_bytes and call.attempt == 0) {
+        if (call.reused and !call.saw_response_bytes and call.attempt == 0 and !call.expired) {
             posix.close(call.fd);
             call.fd = -1;
             call.attempt = 1;
@@ -718,8 +755,9 @@ pub const Client = struct {
     fn fail(self: *Client, call: *Call, detail: []const u8) void {
         self.failures += 1;
         call.status = 0;
-        call.failure = detail;
+        call.failure = if (call.expired) "the deadline passed" else detail;
         call.state = .done;
+        self.loop.timer().cancel(&call.deadline);
         call.callback(call);
     }
 };
@@ -948,6 +986,38 @@ test "a request to nowhere fails rather than hanging" {
     }
     try testing.expectEqual(@as(u16, 0), answer.status);
     try testing.expect(answer.failure.len > 0);
+}
+
+test "a server that accepts and never answers is ended by the deadline" {
+    const p = try Pair.create(testing.allocator);
+    defer p.destroy(testing.allocator);
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    // A socket that listens and is never accepted from: the kernel completes the
+    // handshake and takes the request, and nothing ever answers. A black hole.
+    const silent = try io_mod.listen(try std.net.Address.parseIp("127.0.0.1", 0), 8);
+    defer posix.close(silent);
+    const url = try std.fmt.allocPrint(arena.allocator(), "http://127.0.0.1:{d}/", .{try io_mod.bound_port(silent)});
+
+    p.client.request_timeout_ms = 200;
+    var answer = Pair.Answer{};
+    var call = Call{
+        .method = "GET",
+        .url = url,
+        .arena = arena.allocator(),
+        .callback = Pair.Answer.callback,
+        .context = &answer,
+    };
+    const started = std.time.milliTimestamp();
+    p.client.send(&call);
+    while (!answer.done) {
+        if (std.time.milliTimestamp() - started > 5_000) return error.NeverAnswered;
+        try p.loop.tick();
+    }
+    try testing.expectEqual(@as(u16, 0), answer.status);
+    try testing.expectEqualStrings("the deadline passed", answer.failure);
+    try testing.expectEqual(@as(u64, 1), p.client.expirations);
 }
 
 test "a malformed url is refused without a syscall" {

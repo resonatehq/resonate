@@ -534,13 +534,13 @@ pub const Timerd = struct {
         fn on_listed(self: *Tick, op: *store_mod.Operation) void {
             const keys = switch (op.result) {
                 .keys => |k| k,
-                .unavailable => |detail| {
+                .timeout => {
                     // Try again rather than stop: rounds after the first have
                     // already fired something, and a sweep that stops there is
                     // one nobody can describe.
                     self.list_attempts += 1;
                     if (self.list_attempts < tick_max_list_attempts) return self.list();
-                    return self.give_up(detail);
+                    return self.give_up(store_mod.timeout_message);
                 },
                 else => return self.finish(),
             };

@@ -151,7 +151,7 @@ pub const Scanner = struct {
     fn on_listed(self: *Scanner, req: *Request, result: store_mod.Result) void {
         switch (result) {
             .keys => |keys| req.keys = keys,
-            .unavailable => |detail| return fail(req, 503, detail),
+            .timeout => return fail(req, 503, store_mod.timeout_message),
             else => return fail(req, 500, "the store answered a listing with something else"),
         }
         req.index = 0;
@@ -199,7 +199,7 @@ pub const Scanner = struct {
             // Deleted between the listing and the read. Not an error: a listing
             // is a survey.
             .not_found => {},
-            .unavailable => |detail| return fail(req, 503, detail),
+            .timeout => return fail(req, 503, store_mod.timeout_message),
             else => return fail(req, 500, "the store answered a read with something else"),
         }
         req.index += 1;
@@ -246,7 +246,7 @@ pub const Scanner = struct {
         const self = req.scanner;
         switch (op.result) {
             .keys => |keys| req.keys = keys,
-            .unavailable => |detail| return fail(req, 503, detail),
+            .timeout => return fail(req, 503, store_mod.timeout_message),
             else => return fail(req, 500, "the store answered a listing with something else"),
         }
         if (req.keys.len == 0) {
@@ -276,7 +276,7 @@ pub const Scanner = struct {
     fn on_deleted(self: *Scanner, req: *Request, result: store_mod.Result) void {
         switch (result) {
             .deleted => {},
-            .unavailable => |detail| return fail(req, 503, detail),
+            .timeout => return fail(req, 503, store_mod.timeout_message),
             else => return fail(req, 500, "the store answered a delete with something else"),
         }
         req.index += 1;

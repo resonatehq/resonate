@@ -324,9 +324,6 @@ const Actor = struct {
     new_timer_generation: u64 = 0,
     effects: std.ArrayListUnmanaged(handle.Effect) = .{},
     attempt: u32 = 0,
-    /// True when the commit failed with a conflict rather than a refused
-    /// precondition: the same write is retried, not re-decided.
-    retry_same_write: bool = false,
 
     op: store_mod.Operation = undefined,
     /// Initialized rather than left undefined: `destroy` has to be able to ask
@@ -396,7 +393,6 @@ const Actor = struct {
         }
         self.batch = self.mailbox.take();
         self.attempt = 0;
-        self.retry_same_write = false;
         self.load();
     }
 
@@ -482,7 +478,7 @@ const Actor = struct {
                     return self.fail_batch(503, "out of memory");
                 self.before_bytes = buf.items;
             },
-            .unavailable => |detail| return self.fail_batch(503, detail),
+            .timeout => return self.fail_batch(503, store_mod.timeout_message),
             else => return self.fail_batch(500, "the store answered a read with a write's result"),
         }
         self.decide();
@@ -626,7 +622,7 @@ const Actor = struct {
             .written => self.commit(),
             // Committing now would leave a deadline nothing will fire. The
             // caller is told this did not happen, and it did not.
-            .unavailable => |detail| self.fail_batch(503, detail),
+            .timeout => self.fail_batch(503, store_mod.timeout_message),
             else => self.fail_batch(503, "the deadline could not be armed"),
         }
     }
@@ -659,23 +655,16 @@ const Actor = struct {
                 // again — never replay.
                 self.applier.cache.invalidate(self.origin);
                 self.applier.contentions += 1;
-                self.retry_same_write = false;
                 self.retry();
             },
-            .conflict => {
-                // The store would not say whether this landed. Retry the same
-                // conditional write; if it is refused, that is the re-decide
-                // path and the version check will catch up.
-                self.applier.conflicts += 1;
-                self.retry_same_write = true;
-                self.retry();
-            },
-            .unavailable => |detail| {
-                // It may have landed. The caller is told nothing happened,
-                // which is the honest answer, and every operation is idempotent
-                // so the retry reports whatever is true.
+            .timeout => {
+                // It may have landed. The caller is told exactly that — not
+                // that it failed — and every operation is idempotent, so the
+                // caller's retry reports whatever is true. Nothing here guesses
+                // which: the cached copy is dropped, because whether the bucket
+                // moved past it is precisely what is not known.
                 self.applier.cache.invalidate(self.origin);
-                self.fail_batch(503, detail);
+                self.fail_batch(503, store_mod.timeout_message);
             },
             else => self.fail_batch(500, "the store answered a write with a read's result"),
         }
@@ -699,11 +688,10 @@ const Actor = struct {
         // handing control back to the applier has to hold the applier, not the
         // actor.
         const applier = self.applier;
-        if (self.retry_same_write) {
-            self.commit();
-        } else {
-            self.load();
-        }
+        // A retry is always a re-decision: the only write failure that comes
+        // back here is a refused precondition, and what was decided against the
+        // old version is void.
+        self.load();
         applier.drain();
     }
 
@@ -809,7 +797,6 @@ pub const Applier = struct {
 
     commits: u64 = 0,
     contentions: u64 = 0,
-    conflicts: u64 = 0,
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -1453,10 +1440,23 @@ test "contention past the retry limit is reported rather than hidden" {
     defer h.destroy();
     h.mem.random = &h.rng;
     // Every conditional write is refused, so no attempt can ever land.
-    h.mem.faults.conflict_percent = 100;
+    h.mem.faults.contend_percent = 100;
     const r = try h.call("promise.create", "{\"id\":\"o:a\",\"timeoutAt\":9000000000000}");
     try testing.expectEqual(@as(i32, 503), r.status);
     try testing.expect(std.mem.indexOf(u8, r.data, "contended") != null);
+}
+
+test "a write the store could not order is a timeout, not a retry" {
+    const h = try Harness.create(testing.allocator);
+    defer h.destroy();
+    h.mem.random = &h.rng;
+    // S3's 409: nothing is known about whether it landed, so nothing here
+    // pretends to know — no quiet retry on the assumption that it did not.
+    h.mem.faults.conflict_percent = 100;
+    const r = try h.call("promise.create", "{\"id\":\"o:a\",\"timeoutAt\":9000000000000}");
+    try testing.expectEqual(@as(i32, 503), r.status);
+    try testing.expect(std.mem.indexOf(u8, r.data, "may or may not") != null);
+    try testing.expectEqual(@as(u64, 0), h.applier.contentions);
 }
 
 test "a store that will not answer becomes a 503, and nothing is sent" {

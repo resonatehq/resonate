@@ -58,13 +58,23 @@ Two preconditions, and no others:
 * `If-None-Match: *` — create only. The first writer of an origin wins.
 * `If-Match: <etag>` — replace what was read, and only that.
 
-Three failure outcomes, which are not interchangeable:
+Three kinds of answer, and only three:
 
 | the store says | what is known | what to do |
 |---|---|---|
+| data — `200`, `304`, `404`, `204` | it happened, and this is what is there | carry on |
 | `412` precondition failed | it did not land, and the state has moved | **re-decide**: read again, decide again, never replay |
-| `409` conflict | nothing — it could not be ordered against another write | retry the same conditional write |
-| no answer | nothing — it may have landed | tell the caller 503 and let it retry, because every operation is idempotent |
+| anything else | nothing — it may or may not have landed | tell the caller 503, *"may or may not have taken effect"*, and let it retry, because every operation is idempotent |
+
+"Anything else" is a `timeout`, and it is deliberately one outcome with no
+reason attached: a deadline (every request has one), a reset, a body cut off
+after its headers, a 5xx, a `409` ("could not order two conditional writes"), a
+200 without an ETag, a listing that does not parse. Each leaves the server
+knowing exactly the same thing — nothing — so none is allowed to tell it more.
+Handling that one case correctly is handling every failure correctly, including
+the ones nobody has listed. A `409` used to be retried here as "the same write
+again"; that assumed it had not landed, which is the one thing a `409` does not
+say.
 
 Re-deciding rather than replaying is the important one. A decision made against
 state that no longer exists is not a decision that can be re-applied: the promise

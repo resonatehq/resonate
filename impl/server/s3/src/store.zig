@@ -1,26 +1,27 @@
 //! The object store port, the key layout, and an in-memory store that honours
 //! it exactly.
 //!
-//! ## The port is six operations and three errors
+//! ## The port is six operations and three kinds of answer
 //!
 //! Six operations, because that is all an object store has to offer for this to
 //! work: read with a version, create-if-absent, replace-if-unchanged, write
 //! blindly, delete, and list in key order.
 //!
-//! The three errors are the load-bearing part. A conditional write can fail two
-//! ways and they demand opposite responses:
+//! Three kinds of answer, because that is all a caller can act on:
 //!
-//! * `precondition_failed` — someone else wrote first. Everything decided
-//!   against the old version was decided against state that no longer exists,
-//!   so it must be **re-decided**. Replaying it would be wrong.
-//! * `conflict` — the service could not order two concurrent conditional
-//!   writes. Nothing is known about whether this one landed, so **retry the
-//!   same write**; if that comes back `precondition_failed`, fall into the
-//!   re-decide path.
-//! * `unavailable` — no answer at all.
+//! * **data** — the store did it, and says what is there.
+//! * `precondition_failed` — someone else wrote first, so this write did not
+//!   happen. Everything decided against the old version was decided against
+//!   state that no longer exists, so it must be **re-decided**. Replaying it
+//!   would be wrong.
+//! * `timeout` — the caller stopped waiting. It may or may not have happened.
 //!
-//! Collapsing the first two into one "write failed" is the classic way to lose
-//! a write, which is why they are separate variants rather than a flag.
+//! The second and third demand opposite responses, and collapsing them into one
+//! "write failed" is the classic way to lose a write — which is why they are
+//! separate variants rather than a flag. Everything that is *not* a definite
+//! answer, on the other hand, collapses into the third on purpose: a 409, a 5xx,
+//! a reset, a truncated body and a deadline all leave the caller knowing exactly
+//! the same thing, which is nothing. See `Result`.
 //!
 //! ## Not every S3-compatible store qualifies
 //!
@@ -83,6 +84,22 @@ pub const Precondition = union(enum) {
 
 pub const Kind = enum { get, put, delete, list };
 
+/// What the store answered. Three kinds of answer and no more:
+///
+/// * **data** — `found`, `not_found`, `not_modified`, `written`, `deleted`,
+///   `keys`: the store did what was asked and says what is there.
+/// * **a definite no** — `precondition_failed`: the write's condition did not
+///   hold, so it did not happen. Re-read and re-decide.
+/// * **`timeout`** — everything else.
+///
+/// `timeout` does not mean a clock ran out. It means *the caller stopped
+/// waiting*, for whatever reason: a deadline, a reset, a truncated body, a 5xx,
+/// a 409, an answer without an ETag, a listing that does not parse, an
+/// allocation that failed. It carries no reason on purpose. Every one of those
+/// leaves the caller in the same position — the operation may or may not have
+/// happened — and a reason would only invite the caller to guess which. The
+/// code above this port handles the ambiguity once, and is then correct for
+/// every failure, including the ones nobody has thought of yet.
 pub const Result = union(enum) {
     /// Not yet completed. Every operation starts here, and a store that
     /// completes an operation twice is a bug this catches.
@@ -101,20 +118,23 @@ pub const Result = union(enum) {
     deleted,
     /// `list` returned these keys, in ascending key order.
     keys: []const []const u8,
-    /// The write's precondition did not hold. Re-read and re-decide.
+    /// The write's precondition did not hold, so it did not happen. Re-read and
+    /// re-decide.
     precondition_failed,
-    /// Two conditional writes the store could not order. Retry this one.
-    conflict,
-    /// No answer. The caller may already have been applied.
-    unavailable: []const u8,
+    /// The caller stopped waiting. The operation may or may not have happened.
+    timeout,
 
     pub fn is_error(self: Result) bool {
         return switch (self) {
-            .precondition_failed, .conflict, .unavailable => true,
+            .precondition_failed, .timeout => true,
             else => false,
         };
     }
 };
+
+/// What a client is told when the store answered `timeout`: the one thing that
+/// is true, and nothing else.
+pub const timeout_message = "the store did not answer; the request may or may not have taken effect";
 
 /// One submitted operation. The caller owns it until its callback runs, and the
 /// store writes the answer into `result`.
@@ -454,13 +474,17 @@ pub fn decode_key(arena: std.mem.Allocator, s: []const u8) !?[]const u8 {
 /// badly as a real service does.
 pub const MemoryStore = struct {
     pub const Faults = struct {
-        /// Percent of operations answered `unavailable` instead of being served.
+        /// Percent of operations answered `timeout` instead of being served.
         unavailable_percent: u64 = 0,
-        /// Percent of conditional writes answered `conflict` — the store could
-        /// not order two of them — without saying whether they landed.
+        /// Percent of conditional writes the store "could not order" — S3's 409
+        /// — answered `timeout` without landing.
         conflict_percent: u64 = 0,
+        /// Percent of conditional writes refused with `precondition_failed`
+        /// although nothing moved: another writer always gets there first. What
+        /// drives an origin to its re-decide limit.
+        contend_percent: u64 = 0,
         /// Percent of writes that *land* and are then reported as
-        /// `unavailable`. The nastiest case a caller has to survive: it must
+        /// `timeout`. The nastiest case a caller has to survive: it must
         /// retry, and the retry must be idempotent.
         lost_ack_percent: u64 = 0,
         /// Percent of operations held back to complete on a later drain.
@@ -470,7 +494,7 @@ pub const MemoryStore = struct {
         /// everything inline makes a concurrent workload sequential, and a
         /// linearizability check over a sequential history says nothing.
         defer_percent: u64 = 0,
-        /// Serve this many operations and answer `unavailable` to every one
+        /// Serve this many operations and answer `timeout` to every one
         /// after. Deterministic where a percentage is not, which is what a test
         /// that has to fail one *particular* operation needs.
         unavailable_after: ?u64 = null,
@@ -572,13 +596,13 @@ pub const MemoryStore = struct {
     fn serve(self: *MemoryStore, op: *Operation) void {
         if (self.faults.unavailable_after) |after| {
             if (self.gets + self.puts + self.deletes + self.lists >= after) {
-                op.complete(.{ .unavailable = "injected: the store stopped answering" });
+                op.complete(.timeout);
                 return;
             }
         }
         if (self.random) |rng| {
             if (rng.chance(self.faults.unavailable_percent)) {
-                op.complete(.{ .unavailable = "injected: the store did not answer" });
+                op.complete(.timeout);
                 return;
             }
         }
@@ -603,7 +627,7 @@ pub const MemoryStore = struct {
             }
         }
         const body = op.arena.dupe(u8, entry.body) catch {
-            op.complete(.{ .unavailable = "out of memory reading an object" });
+            op.complete(.timeout);
             return;
         };
         op.complete(.{ .found = .{ .body = body, .etag = entry.etag } });
@@ -614,9 +638,16 @@ pub const MemoryStore = struct {
         if (self.random) |rng| {
             if (op.precondition != .none and rng.chance(self.faults.conflict_percent)) {
                 // The store could not order this against another conditional
-                // write. Nothing is known about whether it landed — and here it
-                // did not, which is the honest half of "nothing is known".
-                op.complete(.conflict);
+                // write — S3's 409. That is not an answer, so it is a timeout:
+                // nothing is known about whether it landed, and here it did not,
+                // which is the honest half of "nothing is known".
+                op.complete(.timeout);
+                return;
+            }
+        }
+        if (self.random) |rng| {
+            if (op.precondition != .none and rng.chance(self.faults.contend_percent)) {
+                op.complete(.precondition_failed);
                 return;
             }
         }
@@ -642,7 +673,7 @@ pub const MemoryStore = struct {
 
         const etag = self.mint_etag();
         const body = self.allocator.dupe(u8, op.body) catch {
-            op.complete(.{ .unavailable = "out of memory writing an object" });
+            op.complete(.timeout);
             return;
         };
         if (existing) |e| {
@@ -652,13 +683,13 @@ pub const MemoryStore = struct {
         } else {
             const key = self.allocator.dupe(u8, op.key) catch {
                 self.allocator.free(body);
-                op.complete(.{ .unavailable = "out of memory writing a key" });
+                op.complete(.timeout);
                 return;
             };
             self.objects.put(self.allocator, key, .{ .body = body, .etag = etag }) catch {
                 self.allocator.free(key);
                 self.allocator.free(body);
-                op.complete(.{ .unavailable = "out of memory writing an object" });
+                op.complete(.timeout);
                 return;
             };
         }
@@ -666,8 +697,9 @@ pub const MemoryStore = struct {
         if (self.random) |rng| {
             if (rng.chance(self.faults.lost_ack_percent)) {
                 // It landed. The caller will never know, and has to retry
-                // something idempotent.
-                op.complete(.{ .unavailable = "injected: the write landed and the answer was lost" });
+                // something idempotent. Indistinguishable, from above, from the
+                // two faults that did not land: that is the point.
+                op.complete(.timeout);
                 return;
             }
         }
@@ -690,10 +722,10 @@ pub const MemoryStore = struct {
         while (it.next()) |k| {
             if (std.mem.startsWith(u8, k.*, op.key)) {
                 matches.append(op.arena.dupe(u8, k.*) catch {
-                    op.complete(.{ .unavailable = "out of memory listing" });
+                    op.complete(.timeout);
                     return;
                 }) catch {
-                    op.complete(.{ .unavailable = "out of memory listing" });
+                    op.complete(.timeout);
                     return;
                 };
             }
@@ -962,18 +994,18 @@ test "injected faults reach the caller" {
     var d: Sync = .{};
 
     mem.faults.unavailable_percent = 100;
-    try testing.expect(d.run(s, a, .{ .kind = .get, .key = "k", .arena = a, .callback = undefined }) == .unavailable);
+    try testing.expect(d.run(s, a, .{ .kind = .get, .key = "k", .arena = a, .callback = undefined }) == .timeout);
 
     mem.faults.unavailable_percent = 0;
     mem.faults.conflict_percent = 100;
-    try testing.expect(d.run(s, a, .{ .kind = .put, .key = "k", .body = "x", .precondition = .absent, .arena = a, .callback = undefined }) == .conflict);
+    try testing.expect(d.run(s, a, .{ .kind = .put, .key = "k", .body = "x", .precondition = .absent, .arena = a, .callback = undefined }) == .timeout);
     // An unconditional write cannot conflict: there is nothing to order it against.
     try testing.expect(d.run(s, a, .{ .kind = .put, .key = "k", .body = "x", .arena = a, .callback = undefined }) == .written);
 
     // A lost acknowledgement: it landed, and the caller is told nothing.
     mem.faults.conflict_percent = 0;
     mem.faults.lost_ack_percent = 100;
-    try testing.expect(d.run(s, a, .{ .kind = .put, .key = "j", .body = "landed", .precondition = .absent, .arena = a, .callback = undefined }) == .unavailable);
+    try testing.expect(d.run(s, a, .{ .kind = .put, .key = "j", .body = "landed", .precondition = .absent, .arena = a, .callback = undefined }) == .timeout);
     mem.faults.lost_ack_percent = 0;
     try testing.expectEqualStrings("landed", d.run(s, a, .{ .kind = .get, .key = "j", .arena = a, .callback = undefined }).found.body);
 }

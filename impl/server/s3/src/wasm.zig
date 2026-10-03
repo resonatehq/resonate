@@ -118,7 +118,8 @@ fn leave(p: *Process) void {
 }
 
 /// Start the server. `flags`: bit 0 is debug mode, bit 1 keeps state in memory
-/// instead of the bucket. Returns 0, or 1 if it could not start.
+/// instead of the bucket. `request_timeout_ms` bounds every store request; 0
+/// takes the default. Returns 0, or 1 if it could not start.
 export fn init(
     endpoint_ptr: [*]const u8,
     endpoint_len: usize,
@@ -129,6 +130,7 @@ export fn init(
     server_url_ptr: [*]const u8,
     server_url_len: usize,
     flags: u32,
+    request_timeout_ms: u32,
 ) u32 {
     if (process != null) return 1;
     start(
@@ -138,6 +140,7 @@ export fn init(
         server_url_ptr[0..server_url_len],
         flags & 1 != 0,
         flags & 2 != 0,
+        request_timeout_ms,
     ) catch |e| {
         log("could not start: {s}", .{@errorName(e)});
         return 1;
@@ -145,16 +148,28 @@ export fn init(
     return 0;
 }
 
-fn start(endpoint_in: []const u8, bucket_in: []const u8, prefix_in: []const u8, server_url_in: []const u8, debug: bool, in_memory: bool) !void {
+fn start(
+    endpoint_in: []const u8,
+    bucket_in: []const u8,
+    prefix_in: []const u8,
+    server_url_in: []const u8,
+    debug: bool,
+    in_memory: bool,
+    request_timeout_ms: u32,
+) !void {
     const p = try allocator.create(Process);
     p.* = .{
         .sim = env.Simulated.init(allocator, now()),
-        .client = net.Client.init(allocator),
+        .client = undefined,
         .push = undefined,
         .runtime = undefined,
         .rng = stdx.Random.init(@bitCast(now())),
         .strings = std.heap.ArenaAllocator.init(allocator),
     };
+    // After `p` has its address: the client keeps pointers to the clock and the
+    // timer, which live in `p.sim`.
+    p.client = net.Client.init(allocator, p.sim.clock(), p.sim.timer());
+    if (request_timeout_ms > 0) p.client.request_timeout_ms = request_timeout_ms;
     p.push = bus_mod.HttpPush.init(allocator, &p.client);
     const a = p.strings.allocator();
     const endpoint = try a.dupe(u8, endpoint_in);
@@ -330,7 +345,6 @@ export fn metrics(id: u32) void {
         .{ "resonate_requests_total", "Protocol requests answered", runtime.server.requests },
         .{ "resonate_commits_total", "Documents committed", runtime.applier.commits },
         .{ "resonate_contentions_total", "Commits that lost a race and were re-decided", runtime.applier.contentions },
-        .{ "resonate_conflicts_total", "Conditional writes the store could not order", runtime.applier.conflicts },
         .{ "resonate_cache_hits_total", "Documents served from memory", runtime.applier.cache.hits },
         .{ "resonate_cache_misses_total", "Documents read from the store", runtime.applier.cache.misses },
         .{ "resonate_messages_sent_total", "Messages handed to a transport", runtime.sender.sent },

@@ -34,7 +34,10 @@ const usage =
     \\  --operations <n>       requests per run                     [default: 200]
     \\  --crash <percent>      chance per step a server is killed   [default: 0]
     \\  --unavailable <pct>    store operations with no answer      [default: 0]
-    \\  --conflict <pct>       conditional writes it will not order [default: 0]
+    \\  --conflict <pct>       conditional writes it will not order — a timeout
+    \\                         that did not land                    [default: 0]
+    \\  --contend <pct>        conditional writes refused as if another writer
+    \\                         got there first                     [default: 0]
     \\  --lost-ack <pct>       writes that land and report failure  [default: 0]
     \\  --defer <pct>          operations completed on a later turn [default: 80]
     \\  --reorder <pct>        held operations completed out of order [default: 0]
@@ -198,6 +201,8 @@ pub fn main() u8 {
             options.faults.unavailable_percent = number;
         } else if (std.mem.eql(u8, arg, "--conflict")) {
             options.faults.conflict_percent = number;
+        } else if (std.mem.eql(u8, arg, "--contend")) {
+            options.faults.contend_percent = number;
         } else if (std.mem.eql(u8, arg, "--lost-ack")) {
             options.faults.lost_ack_percent = number;
         } else if (std.mem.eql(u8, arg, "--defer")) {
@@ -249,7 +254,7 @@ pub fn main() u8 {
                     // is a different run.
                     stdout.print(
                         "\nreproduce with: simulator run --seed {d} --servers {d} --clients {d}" ++
-                            " --operations {d} --conflict {d} --reorder {d} --defer {d}" ++
+                            " --operations {d} --conflict {d} --contend {d} --reorder {d} --defer {d}" ++
                             " --unavailable {d} --lost-ack {d} --crash {d}",
                         .{
                             options.seed,
@@ -257,6 +262,7 @@ pub fn main() u8 {
                             options.clients,
                             options.operations,
                             options.faults.conflict_percent,
+                            options.faults.contend_percent,
                             options.faults.reorder_percent,
                             options.faults.defer_percent,
                             options.faults.unavailable_percent,

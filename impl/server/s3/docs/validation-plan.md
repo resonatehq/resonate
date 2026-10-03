@@ -32,9 +32,10 @@ The simulator owns the environment through the same ports production uses:
 * **the clock** — time moves only when the simulator moves it, and every request
   carries the instant it is decided at (`resonate:debug_time`);
 * **the object store** — an in-memory S3 with real conditional-write semantics,
-  and five knobs: `--unavailable` (no answer), `--lost-ack` (the write lands and
+  and six knobs: `--unavailable` (no answer), `--lost-ack` (the write lands and
   is reported as failed), `--conflict` (two conditional writes the store could
-  not order), `--defer` (held back to complete on a later drain — not a fault,
+  not order — answered as a timeout, like the first two), `--contend` (a
+  conditional write refused as if another writer got there first), `--defer` (held back to complete on a later drain — not a fault,
   but the only way two requests are ever really in flight) and `--reorder`
   (completed out of submission order, which *is* a fault);
 * **the servers** — several against one bucket, and `--crash` kills one at an
@@ -107,7 +108,7 @@ said nothing.
 ```
 zig build -Doptimize=ReleaseSafe
 zig-out/bin/simulator run  --seed 1 --servers 3 --clients 4 --operations 200 \
-    --conflict 15 --reorder 30 --unavailable 3 --lost-ack 3
+    --contend 15 --reorder 30 --unavailable 3 --lost-ack 3
 zig-out/bin/simulator soak --runs 200 --servers 3 --clients 4 --operations 200 \
     --unavailable 5 --lost-ack 5 --crash 2
 ```
@@ -119,7 +120,7 @@ statuses: three thousand runs in twenty seconds.
 
 ```
 zig-out/bin/simulator soak --runs 3000 --servers 4 --clients 6 --operations 400 \
-    --conflict 20 --reorder 40 --unavailable 5 --lost-ack 5 --crash 2 --no-check
+    --contend 20 --reorder 40 --unavailable 5 --lost-ack 5 --crash 2 --no-check
 ```
 
 A search that runs out of steps says so and proves nothing either way, which is
@@ -150,7 +151,7 @@ is, is a claim about answers, so the search is what settles it:
 
 ```
 zig-out/bin/simulator soak --runs 200 --servers 3 --clients 4 --operations 200 \
-    --conflict 15 --reorder 30 --cache-entries 1 --cache-bytes 64
+    --contend 15 --reorder 30 --cache-entries 1 --cache-bytes 64
 ```
 
 One document, sixty-four bytes: nearly every commit evicts, and the validated
@@ -164,7 +165,7 @@ when it passes:
 
 ```
 simulator soak --runs 3 --servers 3 --clients 4 --operations 200 \
-    --conflict 15 --reorder 30 --trust-cache
+    --contend 15 --reorder 30 --trust-cache
 ```
 
 `--trust-cache` answers from a cached document without asking the store whether
@@ -444,7 +445,7 @@ check fails below forty.
 
 `simulator --dump-spec` writes a simulated run in the form this checker reads, so
 a fault-injected run across three servers can be put to it as well. Fifty seeds of
-`--conflict 15 --reorder 30`: forty-four proved, six refuted. Every one of the six
+`--contend 15 --reorder 30`: forty-four proved, six refuted. Every one of the six
 registers a callback on a promise that had **already settled**, and that turns out
 to be a disagreement between the specification and both implementations rather
 than a defect in either.

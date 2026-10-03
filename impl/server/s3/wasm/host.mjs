@@ -21,6 +21,7 @@ const usage = `Usage: host.mjs serve [options]
   --port <n>              port to listen on                   [default: 8001]
   --server-url <url>      the URL workers answer              [default: http://<bind>:<port>]
   --debug                 the clock belongs to the caller
+  --request-timeout <ms>  how long one store request may take [default: 10000]
   --wasm <file>           the module                          [default: zig-out/bin/resonate.wasm]
 `;
 
@@ -38,6 +39,7 @@ function parseArgs(argv) {
     port: 8001,
     serverUrl: null,
     debug: false,
+    requestTimeout: 10_000,
     wasm: new URL("../zig-out/bin/resonate.wasm", import.meta.url),
   };
   for (let i = 1; i < argv.length; i++) {
@@ -55,6 +57,7 @@ function parseArgs(argv) {
       case "--port": args.port = Number(value()); break;
       case "--server-url": args.serverUrl = value(); break;
       case "--debug": args.debug = true; break;
+      case "--request-timeout": args.requestTimeout = Number(value()); break;
       case "--wasm": args.wasm = value(); break;
       default: fail(`unknown option: ${flag}`);
     }
@@ -79,6 +82,7 @@ const resonate = await createResonate({
   prefix: args.prefix,
   serverUrl: args.serverUrl,
   debug: args.debug,
+  requestTimeout: args.requestTimeout,
 }).catch((e) => fail(e.message));
 
 const server = http.createServer(async (req, res) => {

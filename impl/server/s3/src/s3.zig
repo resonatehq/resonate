@@ -16,6 +16,14 @@
 //! totally orders the commits to it, and every operation the protocol admits
 //! touches exactly one object.
 //!
+//! ## Three kinds of answer
+//!
+//! A status this file names is an answer: data (`200`, `304`, `404`, `204`) or
+//! the definite no (`412`). **Every other outcome is `timeout`**, with no reason
+//! attached: a 409, a 5xx, a 4xx nobody expected, a reset, a deadline, a
+//! truncated body, a missing ETag, a listing that does not parse. The caller
+//! cannot tell them apart and is not meant to — see `store.Result`.
+//!
 //! **Not every S3-compatible store qualifies.** A store that accepts a stale
 //! `If-Match` loses writes under this design, silently, and no amount of care
 //! here can detect it — the write simply succeeds when it should not. S3, R2, GCS
@@ -62,10 +70,6 @@ pub const S3 = struct {
 
     requests: u64 = 0,
     failures: u64 = 0,
-    /// The most recent failure's text, kept alive because it goes into a reply
-    /// built after the request's own arena is gone. One live string, replaced on
-    /// the next failure.
-    detail_owned: []const u8 = &.{},
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -94,7 +98,7 @@ pub const S3 = struct {
 
     pub fn submit(self: *S3, op: *store_mod.Operation) void {
         const pending = self.allocator.create(Pending) catch {
-            op.complete(.{ .unavailable = "out of memory submitting to the store" });
+            op.complete(.timeout);
             return;
         };
         pending.* = .{
@@ -112,7 +116,7 @@ pub const S3 = struct {
         self.requests += 1;
 
         const url = self.build_url(a, op, pending.continuation) catch {
-            return self.finish(pending, .{ .unavailable = "out of memory building a request" });
+            return self.finish(pending, .timeout);
         };
 
         var headers = std.ArrayList(http.Header).init(a);
@@ -185,56 +189,44 @@ pub const S3 = struct {
         const self = pending.s3;
         const op = pending.op;
 
-        if (call.status == 0) {
-            return self.finish(pending, .{ .unavailable = self.own(call.failure) });
-        }
-
+        // An allowlist: a status is an answer only where it is named below.
+        // Anything else — status 0 included, which is every failure of the
+        // exchange itself — falls through to `timeout`.
         switch (op.kind) {
             .get => switch (call.status) {
                 200 => {
-                    const etag = call.response_headers.get("etag") orelse {
-                        // Without a version there is no conditional write, and
-                        // without conditional writes this design cannot be
-                        // correct. Better to stop than to proceed unsafely.
-                        return self.finish(pending, .{
-                            .unavailable = "the store reported no ETag; conditional writes are impossible without one",
-                        });
-                    };
-                    const body = op.arena.dupe(u8, call.response_body) catch {
-                        return self.finish(pending, .{ .unavailable = "out of memory reading an object" });
-                    };
+                    // Without a version there is no conditional write, and
+                    // without conditional writes this design cannot be correct:
+                    // a 200 without an ETag is not an answer.
+                    const etag = call.response_headers.get("etag") orelse return self.finish(pending, .timeout);
+                    const body = op.arena.dupe(u8, call.response_body) catch return self.finish(pending, .timeout);
                     self.finish(pending, .{ .found = .{ .body = body, .etag = Etag.from(etag) } });
                 },
                 304 => self.finish(pending, .not_modified),
                 404 => self.finish(pending, .not_found),
-                else => self.finish(pending, self.error_for(pending, call)),
+                else => self.finish(pending, .timeout),
             },
             .put => switch (call.status) {
                 200, 201 => {
-                    const etag = call.response_headers.get("etag") orelse {
-                        return self.finish(pending, .{
-                            .unavailable = "the store reported no ETag; conditional writes are impossible without one",
-                        });
-                    };
+                    const etag = call.response_headers.get("etag") orelse return self.finish(pending, .timeout);
                     self.finish(pending, .{ .written = Etag.from(etag) });
                 },
-                // The version required is not the version there. Re-read and
-                // re-decide; never replay.
+                // The version required is not the version there, so the write
+                // did not happen. Re-read and re-decide; never replay.
                 412 => self.finish(pending, .precondition_failed),
-                // Two conditional writes the service could not order. Nothing is
-                // known about whether this one landed, so retry the same write.
-                409 => self.finish(pending, .conflict),
-                else => self.finish(pending, self.error_for(pending, call)),
+                // 409 included: "two conditional writes the service could not
+                // order" says nothing about whether this one landed.
+                else => self.finish(pending, .timeout),
             },
             .delete => switch (call.status) {
                 // Deleting what is not there succeeds, which is what makes
                 // collecting an orphan free.
                 200, 204, 404 => self.finish(pending, .deleted),
-                else => self.finish(pending, self.error_for(pending, call)),
+                else => self.finish(pending, .timeout),
             },
             .list => switch (call.status) {
                 200 => self.on_listed(pending, call),
-                else => self.finish(pending, self.error_for(pending, call)),
+                else => self.finish(pending, .timeout),
             },
         }
     }
@@ -243,12 +235,12 @@ pub const S3 = struct {
         const a = pending.arena.allocator();
         const op = pending.op;
         const page = parse_list(a, call.response_body) catch {
-            return self.finish(pending, .{ .unavailable = "the listing was not the XML S3 sends" });
+            return self.finish(pending, .timeout);
         };
         for (page.keys) |key| {
             if (pending.keys.items.len >= op.max_keys) break;
             pending.keys.append(a, key) catch {
-                return self.finish(pending, .{ .unavailable = "out of memory listing" });
+                return self.finish(pending, .timeout);
             };
         }
         const want_more = pending.keys.items.len < op.max_keys;
@@ -263,41 +255,15 @@ pub const S3 = struct {
         // nothing at these sizes and makes the guarantee this code's rather than
         // the service's.
         const keys = op.arena.alloc([]const u8, pending.keys.items.len) catch {
-            return self.finish(pending, .{ .unavailable = "out of memory listing" });
+            return self.finish(pending, .timeout);
         };
         for (pending.keys.items, 0..) |key, i| {
             keys[i] = op.arena.dupe(u8, key) catch {
-                return self.finish(pending, .{ .unavailable = "out of memory listing" });
+                return self.finish(pending, .timeout);
             };
         }
         std.mem.sort([]const u8, keys, {}, stdx.less_than_bytes);
         self.finish(pending, .{ .keys = keys });
-    }
-
-    /// A status this operation has no meaning for.
-    ///
-    /// Everything is `unavailable`: the caller must assume its request may
-    /// already have been applied, which is the only safe reading of "the store
-    /// said something I do not understand".
-    fn error_for(self: *S3, pending: *Pending, call: *net.Call) store_mod.Result {
-        const detail = std.fmt.allocPrint(
-            pending.arena.allocator(),
-            "the store answered {d}: {s}",
-            .{ call.status, first_line(call.response_body) },
-        ) catch "the store answered with a status this operation has no meaning for";
-        return .{ .unavailable = self.own(detail) };
-    }
-
-    /// Copy a detail string into the store's own allocator.
-    ///
-    /// The reason lives longer than the request's arena: it goes into the
-    /// caller's reply, which is built after this arena is gone. There is one of
-    /// these per failure and it is freed on the next, so the cost is one live
-    /// string.
-    fn own(self: *S3, detail: []const u8) []const u8 {
-        if (self.detail_owned.len > 0) self.allocator.free(self.detail_owned);
-        self.detail_owned = self.allocator.dupe(u8, detail) catch "";
-        return self.detail_owned;
     }
 
     fn finish(self: *S3, pending: *Pending, result: store_mod.Result) void {
@@ -309,16 +275,9 @@ pub const S3 = struct {
     }
 
     pub fn deinit(self: *S3) void {
-        if (self.detail_owned.len > 0) self.allocator.free(self.detail_owned);
-        self.detail_owned = &.{};
+        _ = self;
     }
 };
-
-fn first_line(body: []const u8) []const u8 {
-    const capped = body[0..@min(body.len, 200)];
-    const end = std.mem.indexOfAny(u8, capped, "\r\n") orelse capped.len;
-    return capped[0..end];
-}
 
 // ── The listing's XML ─────────────────────────────────────────────────────────
 
@@ -637,25 +596,25 @@ test "a listing pages until it has what was asked for" {
     try testing.expect(std.mem.endsWith(u8, capped.keys[0], "00000000000000000000_o"));
 }
 
-test "a status the operation has no meaning for is unavailable, not a guess" {
+test "a status that is not an answer is a timeout, whatever it was" {
     const rig = try Rig.create(testing.allocator);
     defer rig.destroy();
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
 
-    rig.fake.inject_status = 503;
-    const unavailable = try rig.run(a, .{ .kind = .get, .key = "wf/o", .arena = a, .callback = undefined });
-    try testing.expect(unavailable == .unavailable);
-    try testing.expect(std.mem.indexOf(u8, unavailable.unavailable, "503") != null);
+    // 409 included: "could not order two conditional writes" says nothing
+    // about whether this one landed, so it is not an answer either.
+    for ([_]u16{ 400, 403, 409, 500, 503 }) |status| {
+        rig.fake.inject_status = status;
+        const read = try rig.run(a, .{ .kind = .get, .key = "wf/o", .arena = a, .callback = undefined });
+        try testing.expect(read == .timeout);
+        rig.fake.inject_status = status;
+        const write = try rig.run(a, .{ .kind = .put, .key = "wf/o", .body = "x", .precondition = .absent, .arena = a, .callback = undefined });
+        try testing.expect(write == .timeout);
+    }
 
-    // 409 on a conditional write is the one the caller must retry rather than
-    // re-decide.
-    rig.fake.inject_status = 409;
-    const conflict = try rig.run(a, .{ .kind = .put, .key = "wf/o", .body = "x", .precondition = .absent, .arena = a, .callback = undefined });
-    try testing.expect(conflict == .conflict);
-
-    // 412 is the re-decide path.
+    // 412 is the one definite no: the re-decide path.
     rig.fake.inject_status = 412;
     const stale = try rig.run(a, .{ .kind = .put, .key = "wf/o", .body = "x", .precondition = .absent, .arena = a, .callback = undefined });
     try testing.expect(stale == .precondition_failed);
@@ -670,11 +629,10 @@ test "a store that reports no version is refused rather than trusted" {
     _ = try rig.run(a, .{ .kind = .put, .key = "wf/o", .body = "x", .arena = a, .callback = undefined });
     rig.fake.omit_etag = true;
     const result = try rig.run(a, .{ .kind = .get, .key = "wf/o", .arena = a, .callback = undefined });
-    try testing.expect(result == .unavailable);
-    try testing.expect(std.mem.indexOf(u8, result.unavailable, "no ETag") != null);
+    try testing.expect(result == .timeout);
 }
 
-test "an endpoint that is not there is unavailable, not a hang" {
+test "an endpoint that is not there is a timeout, not a hang" {
     var loop = io_mod.Loop.init(testing.allocator) catch return error.SkipZigTest;
     defer loop.deinit();
     var client = net.Client.init(testing.allocator, &loop);
@@ -706,5 +664,5 @@ test "an endpoint that is not there is unavailable, not a hang" {
         if (guard > 4_000) return error.NeverAnswered;
         try loop.tick();
     }
-    try testing.expect(Done.result == .unavailable);
+    try testing.expect(Done.result == .timeout);
 }

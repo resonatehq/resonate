@@ -37,6 +37,9 @@ const decoder = new TextDecoder();
  * @param {string} [options.prefix] A key prefix inside the bucket.
  * @param {string} [options.serverUrl] The URL workers answer. Default: http://localhost:8001.
  * @param {boolean} [options.debug] The clock belongs to the caller (`resonate:debug_time`).
+ * @param {number} [options.requestTimeout] How long one store request may take, in ms.
+ *   Past it the module stops waiting and treats the request as "may or may not
+ *   have happened". Default: 10000.
  * @param {typeof fetch} [options.fetch] Carries every S3 and worker request. Sign
  *   them here: the module sends them unsigned.
  * @param {(line: string) => void} [options.log] Default: console.error.
@@ -50,6 +53,7 @@ export async function createResonate(options) {
     prefix = "",
     serverUrl = "http://localhost:8001",
     debug = false,
+    requestTimeout = 10_000,
     fetch: fetchImpl = globalThis.fetch.bind(globalThis),
     log = (line) => console.error(line),
   } = options ?? {};
@@ -140,7 +144,11 @@ export async function createResonate(options) {
         (async () => {
           let status, head, payload;
           try {
-            const res = await fetchImpl(url, { method, headers, body });
+            // The module keeps its own deadline and stops waiting at
+            // `requestTimeout`; this one is only so the socket is not held on to
+            // forever after it has.
+            const signal = AbortSignal.timeout(requestTimeout + 1_000);
+            const res = await fetchImpl(url, { method, headers, body, signal });
             // Inside the `try`: a body cut off after the headers arrived fails
             // *here*, not at `fetch`, and a truncated answer must never be read
             // as a short one — nor escape as an unhandled rejection.
@@ -171,7 +179,7 @@ export async function createResonate(options) {
     withBuffer(bucket, (bP, bL) =>
       withBuffer(prefix, (pP, pL) =>
         withBuffer(serverUrl, (uP, uL) =>
-          exports.init(eP, eL, bP, bL, pP, pL, uP, uL, (debug ? 1 : 0) | (store === "memory" ? 2 : 0)),
+          exports.init(eP, eL, bP, bL, pP, pL, uP, uL, (debug ? 1 : 0) | (store === "memory" ? 2 : 0), requestTimeout),
         ),
       ),
     ),

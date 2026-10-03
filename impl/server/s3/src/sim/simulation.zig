@@ -120,7 +120,6 @@ pub const Report = struct {
     crashes: u32 = 0,
     commits: u64 = 0,
     contentions: u64 = 0,
-    conflicts: u64 = 0,
     store_objects: usize = 0,
     /// Whether the order the search found also leaves the state a cold server
     /// reads out of the bucket. Part of the search rather than a second pass:
@@ -187,7 +186,7 @@ pub const Report = struct {
             \\  statuses        {d} 2xx, {d} 3xx, {d} 4xx, {d} 503, {d} other 5xx
             \\  concurrency     {d} at once, {d} overlapping pairs
             \\  crashes         {d}
-            \\  commits         {d} ({d} lost races, {d} unordered conflicts)
+            \\  commits         {d} ({d} lost races)
             \\  objects         {d}
             \\  messages        {d} executes, {d} unblocks
             \\  checked         {d} operations -> {s}
@@ -209,7 +208,6 @@ pub const Report = struct {
             self.crashes,
             self.commits,
             self.contentions,
-            self.conflicts,
             self.store_objects,
             self.executes,
             self.unblocks,
@@ -837,7 +835,6 @@ pub const Simulation = struct {
         for (self.instances) |instance| {
             report.commits += instance.runtime.applier.commits;
             report.contentions += instance.runtime.applier.contentions;
-            report.conflicts += instance.runtime.applier.conflicts;
         }
         for (self.history.items) |op| {
             if (!op.answered) {
@@ -1162,13 +1159,31 @@ test "a store that loses races is survived, and nothing is lost" {
         .servers = 3,
         .clients = 3,
         .operations = 120,
-        .faults = .{ .defer_percent = 80, .conflict_percent = 20, .reorder_percent = 30 },
+        .faults = .{ .defer_percent = 80, .contend_percent = 20, .reorder_percent = 30 },
     });
-    // Conflicts and contention are expected; failing the callers is not.
+    // Contention is expected, and re-decided; failing the callers is not.
     try testing.expectEqual(@as(usize, 0), report.status_5xx);
     try testing.expectEqual(@as(usize, 0), report.status_503);
     try testing.expectEqual(Verdict.linearizable, report.verdict);
     try testing.expect(report.refined);
+}
+
+test "a store that cannot order writes produces timeouts and no wrong answers" {
+    const report = try run(testing.allocator, .{
+        .seed = 99,
+        .servers = 3,
+        .clients = 3,
+        .operations = 120,
+        .faults = .{ .defer_percent = 80, .conflict_percent = 20, .reorder_percent = 30 },
+        // As below: a 503 is an outcome nobody knows, which this run's search
+        // does not model. `simulator check` does.
+        .check = false,
+    });
+    // A 409 is not an answer, so the caller hears what is true — it may or may
+    // not have happened — and never anything worse.
+    try testing.expect(report.status_503 > 0);
+    try testing.expectEqual(@as(usize, 0), report.status_5xx);
+    try testing.expect(report.succeeded > 0);
 }
 
 test "a store that stops answering produces 503s and no wrong answers" {

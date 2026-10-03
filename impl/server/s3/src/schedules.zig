@@ -223,7 +223,7 @@ pub const Service = struct {
                     }
                 }
             },
-            .unavailable => |detail| return fail(req, 503, detail),
+            .timeout => return fail(req, 503, store_mod.timeout_message),
             else => return fail(req, 500, "the store answered a read with something else"),
         }
         switch (req.kind) {
@@ -356,7 +356,7 @@ pub const Service = struct {
     fn on_armed(self: *Service, req: *Request, result: store_mod.Result) void {
         switch (result) {
             .written => self.commit(req),
-            .unavailable => |detail| fail(req, 503, detail),
+            .timeout => fail(req, 503, store_mod.timeout_message),
             else => fail(req, 503, "the schedule's deadline could not be armed"),
         }
     }
@@ -422,8 +422,7 @@ pub const Service = struct {
                     else => fail(req, 409, "the schedule changed while it was being written"),
                 }
             },
-            .conflict => self.commit(req),
-            .unavailable => |detail| fail(req, 503, detail),
+            .timeout => fail(req, 503, store_mod.timeout_message),
             else => fail(req, 500, "the store answered a write with something else"),
         }
     }
