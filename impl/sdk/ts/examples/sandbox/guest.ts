@@ -8,33 +8,22 @@ import { chromium } from "playwright-core";
 import type { Context } from "../../src/async/index.js";
 import { serve } from "./serve.js";
 
-export type Selectors = { item: string; name: string; price: string };
-export type Item = { name: string; price: string };
-export type Scrape = { url: string; at: number; items: Item[] };
+export type Book = { name: string; price: string };
+export type Scrape = { url: string; items: Book[] };
 
-async function scrape(_ctx: Context, url: string, sel: Selectors): Promise<Scrape> {
+async function scrape(_ctx: Context, url: string): Promise<Scrape> {
   // CHROMIUM picks a browser binary outside an image that ships one.
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || undefined });
   try {
     const page = await browser.newPage();
-    await page.goto(url, { waitUntil: "networkidle", timeout: 30_000 });
-    await page.waitForSelector(sel.item, { timeout: 10_000 });
-
-    const items = await page.$$eval(
-      sel.item,
-      (els, s) =>
-        els.map((el) => {
-          const name = el.querySelector(s.name);
-          return {
-            name: (name?.getAttribute("title") ?? name?.textContent ?? "").trim(),
-            price: (el.querySelector(s.price)?.textContent ?? "").trim(),
-          };
-        }),
-      sel,
+    await page.goto(url, { waitUntil: "networkidle" });
+    const items = await page.$$eval("article.product_pod", (books) =>
+      books.map((b) => ({
+        name: b.querySelector("h3 a")?.getAttribute("title") ?? "",
+        price: b.querySelector(".price_color")?.textContent ?? "",
+      })),
     );
-
-    console.log(`scraped ${items.length} items from ${url}`);
-    return { url, at: Date.now(), items };
+    return { url, items };
   } finally {
     await browser.close();
   }

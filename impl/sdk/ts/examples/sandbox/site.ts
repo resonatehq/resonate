@@ -1,16 +1,11 @@
 // A stand-in for books.toscrape.com, for running the example offline.
 //
-// Same markup, but the products are rendered by JavaScript after load — a
-// plain fetch sees an empty page, so scraping it takes a browser. Prices move
-// with DAY, so two runs on different days have something to report.
+// Same markup, but rendered by JavaScript after load: a plain fetch sees an
+// empty page, so scraping it takes a browser.
 //
-//   npx tsx site.ts            # port 8099, DAY=1
-//   DAY=2 npx tsx site.ts
+//   npx tsx site.ts    # http://127.0.0.1:8099
 
 import http from "node:http";
-
-const PORT = Number(process.env.SITE_PORT ?? 8099);
-const DAY = Number(process.env.DAY ?? 1);
 
 const TITLES = [
   "A Light in the Attic",
@@ -27,32 +22,21 @@ const TITLES = [
   "Shakespeare's Sonnets",
 ];
 
-function books(page: number) {
-  return TITLES.slice((page - 1) * 4, page * 4).map((title, i) => {
-    // A price per book, with one book a page moving each day.
-    const base = 10 + ((page * 7 + i * 13) % 40);
-    const drift = i === DAY % 4 ? DAY : 0;
-    return { title, price: `£${(base + drift).toFixed(2)}` };
-  });
-}
-
 http
   .createServer((req, res) => {
-    const m = req.url?.match(/^\/catalogue\/page-(\d+)\.html$/);
-    if (!m) {
-      res.writeHead(404).end();
-      return;
-    }
-    const data = JSON.stringify(books(Number(m[1])));
+    const page = Number(req.url?.match(/^\/catalogue\/page-(\d+)\.html$/)?.[1]);
+    if (!page) return void res.writeHead(404).end();
+    const books = TITLES.slice((page - 1) * 4, page * 4).map((title, i) => ({
+      title,
+      price: `£${(10 + ((page * 7 + i * 13) % 40)).toFixed(2)}`,
+    }));
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-    res.end(`<!doctype html><html><body><ol class="row"></ol>
-<script>
-  // Rendered late, like a real storefront.
+    res.end(`<!doctype html><ol></ol><script>
   setTimeout(() => {
-    document.querySelector("ol").innerHTML = ${data}.map((b) =>
-      '<li><article class="product_pod"><h3><a title="' + b.title + '">' + b.title.slice(0, 12) +
-      '…</a></h3><p class="price_color">' + b.price + '</p></article></li>').join("");
+    document.querySelector("ol").innerHTML = ${JSON.stringify(books)}.map((b) =>
+      '<li><article class="product_pod"><h3><a title="' + b.title + '">' + b.title + '</a></h3>' +
+      '<p class="price_color">' + b.price + '</p></article></li>').join("");
   }, 200);
-</script></body></html>`);
+</script>`);
   })
-  .listen(PORT, "127.0.0.1", () => console.log(`site on http://127.0.0.1:${PORT} (day ${DAY})`));
+  .listen(8099, "127.0.0.1", () => console.log("site on http://127.0.0.1:8099"));

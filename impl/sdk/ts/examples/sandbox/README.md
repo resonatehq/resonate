@@ -1,30 +1,25 @@
-# Price watch in sandboxes
+# Scraping in sandboxes
 
-The host orchestrates; each page is scraped by a real browser in a sandbox of
-its own.
+The host fans out; each page is scraped by a real browser in a sandbox of its
+own.
 
 ```ts
-async function priceWatch(ctx: Context, pages: Page[]) {
-  const scrapes = pages.map((p) =>
-    ctx.rpc<Scrape>("scrape", p.url, p.selectors,
-      ctx.options({ target: BROWSER, retryPolicy: new Exponential({ maxRetries: 3 }) })));
-  const settled = await Promise.allSettled(scrapes);
-  ...
+async function scrapeAll(ctx: Context, urls: string[]) {
+  const scrapes = urls.map((url) => ctx.rpc<Scrape>("scrape", url, ctx.options({ target: BROWSER })));
+  return await Promise.all(scrapes);
 }
 ```
 
-| File | Runs | Holds |
+| File | Runs | |
 |---|---|---|
-| `host.ts` | on the host | the store of yesterday's prices, the alert webhook |
-| `guest.ts` | in a sandbox, behind rn8 | nothing: a browser, and the page it was sent to |
+| `host.ts` | on the host | `scrapeAll`: one `ctx.rpc` per page, to a `sandbox://` target |
+| `guest.ts` | in a sandbox, behind rn8 | `scrape`: open the page in Chromium, read the books |
 | `serve.ts` | in a sandbox | takes rn8's push and runs it through the async engine |
 | `site.ts` | anywhere | a stand-in for books.toscrape.com, rendered by JavaScript |
 
 `ctx.rpc` with a `sandbox://` target is all that sends work to a sandbox. The
 browser — the part that runs whatever JavaScript a page sends it — lands in a
-throwaway VM that holds no secrets and is destroyed when the step ends. A
-page that fails retries in its own sandbox and, if it keeps failing, is
-counted as failed without stopping the others.
+throwaway VM that holds no secrets and is destroyed when the step ends.
 
 ## Run it locally
 
@@ -33,7 +28,6 @@ whole path: the server dispatches to `sandbox://local/browser`, the plugin
 starts rn8, rn8 starts the guest and relays every request it makes.
 
 ```shell
-# the server, with the sandbox plugin on the local provider
 cargo build --manifest-path impl/server/core/Cargo.toml --bin resonate --bin rn8
 resonate dev \
   --set workers.worker_sandbox.enabled=true \
@@ -42,17 +36,11 @@ resonate dev \
   --set workers.worker_sandbox.require_digest=false \
   --set 'workers.worker_sandbox.command=["…/target/debug/rn8", "--worker-port", "0", "--", "…/node_modules/.bin/tsx", "…/examples/sandbox/guest.ts"]'
 
-# the pages, and the host
 cd impl/sdk/ts/examples/sandbox && npm install
-DAY=1 npx tsx site.ts &
+npx tsx site.ts &
 BROWSER=sandbox://local/browser SITE=http://127.0.0.1:8099 npx tsx host.ts
-# { scraped: 3, failed: 0, changes: 0 }
-
-# a day later, prices have moved
-DAY=2 npx tsx site.ts &
-BROWSER=sandbox://local/browser SITE=http://127.0.0.1:8099 npx tsx host.ts
-# price changes: …
-# { scraped: 3, failed: 0, changes: 6 }
+# http://127.0.0.1:8099/catalogue/page-1.html: 4 books, first: A Light in the Attic £17.00
+# …
 ```
 
 `--worker-port 0` lets several guests share the host; in a real sandbox each
@@ -106,9 +94,9 @@ With `TENSORLAKE_API_KEY` in the server's environment.
 **3. Run the host.**
 
 ```shell
-BROWSER=sandbox://tensorlake/resonate-browser SITE=https://books.toscrape.com npx tsx host.ts
-# { scraped: 3, failed: 0, changes: 0 }
-npx tsx host.ts --schedule   # daily at 07:00
+BROWSER=sandbox://tensorlake/resonate-browser npx tsx host.ts
+# https://books.toscrape.com/catalogue/page-1.html: 20 books, first: A Light in the Attic £51.77
+# …
 ```
 
 With a quota smaller than the fan-out, the sandboxes take turns: the plugin's
