@@ -1,4 +1,4 @@
-# The browser image: rn8, Node, Playwright's Chromium, and guest.ts.
+# The browser image: rn8, Node, Playwright's Chromium, and scraper.ts.
 #
 # Built from the repository root, since it needs both the server workspace (for
 # rn8) and the TypeScript SDK:
@@ -25,4 +25,4 @@ RUN cd examples/sandbox && npm install --no-audit --no-fund
 
 # rn8 first: it reads the task frame, starts the worker with RESONATE_URL on
 # its relay, and pushes it the task.
-ENTRYPOINT ["rn8", "--", "/sdk/node_modules/.bin/tsx", "/sdk/examples/sandbox/guest.ts"]
+ENTRYPOINT ["rn8", "--", "/sdk/node_modules/.bin/tsx", "/sdk/examples/sandbox/scraper.ts"]

@@ -35,6 +35,37 @@ export interface HttpAdapter {
 }
 
 // =============================================================================
+// PushMessageSource
+// =============================================================================
+
+/**
+ * The adapter of a worker that is handed its work rather than asking for it:
+ * a sandbox guest behind rn8, a serverless function. It receives nothing on
+ * its own — `Resonate.handle()` is how a pushed message gets in — and opens
+ * no connection, so a process that has handled its message has nothing left
+ * holding it open. Requests still go out through `HttpNetwork.send`.
+ */
+export class PushMessageSource implements HttpAdapter {
+  readonly unicast: string;
+  readonly anycast: string;
+
+  constructor({ group = "default", pid = "" }: { group?: string; pid?: string } = {}) {
+    this.unicast = `poll://uni@${group}/${pid}`;
+    this.anycast = `poll://any@${group}/${pid}`;
+  }
+
+  match(target: string): string {
+    return `poll://any@${target}`;
+  }
+
+  async init(): Promise<void> {}
+
+  async stop(): Promise<void> {}
+
+  onReceive(_callback: (msg: Message) => void): void {}
+}
+
+// =============================================================================
 // HttpNetwork
 // =============================================================================
 

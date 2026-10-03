@@ -7,7 +7,7 @@ export { type Encryptor, NoopEncryptor } from "./encryptor.js";
 export { ResonateTimeoutException } from "./exceptions.js";
 export { AsyncHeartbeat, NoopHeartbeat } from "./heartbeat.js";
 export { ConsoleLogger, type Logger, type LogLevel } from "./logger.js";
-export { type HttpAdapter, HttpNetwork, PollMessageSource } from "./network/http.js";
+export { type HttpAdapter, HttpNetwork, PollMessageSource, PushMessageSource } from "./network/http.js";
 export { LocalNetwork } from "./network/local.js";
 export type { Network, Recv, Send } from "./network/network.js";
 export {

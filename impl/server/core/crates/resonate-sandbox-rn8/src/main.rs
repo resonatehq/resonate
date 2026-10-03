@@ -12,7 +12,7 @@
 //! is pointed at a loopback port, it speaks HTTP, and it gets HTTP back.
 //!
 //! - **Start**: read the task frame, listen on a loopback port, start the
-//!   worker with `RESONATE_URL` set to that port.
+//!   worker with `RESONATE_URL` set to that port and `RESONATE_PUSH=1`.
 //! - **Push**: wait until the worker accepts connections, then POST it the task.
 //! - **Relay**: each SDK request becomes a `req` frame, answered by the `res`
 //!   with the same id.
@@ -173,6 +173,9 @@ async fn run(args: args::Args) -> i32 {
     let mut env = vec![
         ("RESONATE_URL".to_string(), relay_url.clone()),
         ("PORT".to_string(), args.worker_port.to_string()),
+        // The SDK's cue that work is pushed, not polled for: no poller, no
+        // connection held open, `handle()` takes the one task.
+        ("RESONATE_PUSH".to_string(), "1".to_string()),
     ];
     env.extend(args.env.iter().cloned());
     let child = match worker::Worker::spawn(&args.command, &env, out.clone()) {

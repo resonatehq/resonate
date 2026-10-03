@@ -1,25 +1,37 @@
 # Scraping in sandboxes
 
-The host fans out; each page is scraped by a real browser in a sandbox of its
-own.
+A worker fans out; each page is scraped by a real browser in a sandbox of its
+own. Both sides use the same API.
 
 ```ts
-async function scrapeAll(ctx: Context, urls: string[]) {
-  const scrapes = urls.map((url) => ctx.rpc<Scrape>("scrape", url, ctx.options({ target: BROWSER })));
-  return await Promise.all(scrapes);
-}
+// worker.ts — on the host
+const resonate = new Resonate();
+
+resonate.register("scrapeAll", async (ctx: Context, urls: string[]) => {
+  return await Promise.all(urls.map((url) => ctx.rpc<Scrape>("scrape", url, ctx.options({ target: BROWSER }))));
+});
 ```
 
-| File | Runs | |
-|---|---|---|
-| `host.ts` | on the host | `scrapeAll`: one `ctx.rpc` per page, to a `sandbox://` target |
-| `guest.ts` | in a sandbox, behind rn8 | `scrape`: open the page in Chromium, read the books |
-| `serve.ts` | in a sandbox | takes rn8's push and runs it through the async engine |
-| `site.ts` | anywhere | a stand-in for books.toscrape.com, rendered by JavaScript |
+```ts
+// scraper.ts — in the sandbox
+const resonate = new Resonate();
 
-`ctx.rpc` with a `sandbox://` target is all that sends work to a sandbox. The
-browser — the part that runs whatever JavaScript a page sends it — lands in a
-throwaway VM that holds no secrets and is destroyed when the step ends.
+resonate.register("scrape", async (_ctx: Context, url: string): Promise<Scrape> => {
+  // open the page in Chromium, read the books
+});
+
+await resonate.handle();
+```
+
+`ctx.rpc` with a `sandbox://` target is all that sends work to a sandbox. In
+the sandbox, rn8 starts `scraper.ts` with `RESONATE_PUSH=1`, so `new Resonate()`
+does not poll; `resonate.handle()` takes the one task rn8 pushes, answers when
+it is done, and shuts the instance down — nothing lingers. The browser, the
+part that runs whatever JavaScript a page sends it, lands in a throwaway VM
+that holds no secrets.
+
+`site.ts` is a stand-in for books.toscrape.com, rendered by JavaScript, for
+running offline.
 
 ## Run it locally
 
@@ -34,11 +46,11 @@ resonate dev \
   --set workers.worker_sandbox.backend=local \
   --set workers.worker_sandbox.egress=all \
   --set workers.worker_sandbox.require_digest=false \
-  --set 'workers.worker_sandbox.command=["…/target/debug/rn8", "--worker-port", "0", "--", "…/node_modules/.bin/tsx", "…/examples/sandbox/guest.ts"]'
+  --set 'workers.worker_sandbox.command=["…/target/debug/rn8", "--worker-port", "0", "--", "…/node_modules/.bin/tsx", "…/examples/sandbox/scraper.ts"]'
 
 cd impl/sdk/ts/examples/sandbox && npm install
 npx tsx site.ts &
-BROWSER=sandbox://local/browser SITE=http://127.0.0.1:8099 npx tsx host.ts
+BROWSER=sandbox://local/browser SITE=http://127.0.0.1:8099 npx tsx worker.ts
 # http://127.0.0.1:8099/catalogue/page-1.html: 4 books, first: A Light in the Attic £17.00
 # …
 ```
@@ -55,8 +67,7 @@ by Chromium in a Tensorlake sandbox, in about 13 seconds.
 side and registers it under a name — no local Docker, no registry. The build
 context is `Dockerfile` (this directory's, with paths flattened), a static or
 glibc-compatible `rn8`, the SDK's `package.json`, `package-lock.json` and
-`src/`, and this example's `guest.ts`, `serve.ts`, `package.json`,
-`package-lock.json`.
+`src/`, and this example's `scraper.ts`, `package.json`, `package-lock.json`.
 
 ```python
 from tensorlake.image.sandbox_builder import build_sandbox_image
@@ -86,7 +97,7 @@ concurrency = 1            # a project quota of one sandbox at a time
 [[workers.worker_sandbox.images]]
 image = "resonate-browser"
 egress = { allow = ["books.toscrape.com"] }
-command = ["rn8", "--", "/sdk/node_modules/.bin/tsx", "/sdk/examples/sandbox/guest.ts"]
+command = ["rn8", "--", "/sdk/node_modules/.bin/tsx", "/sdk/examples/sandbox/scraper.ts"]
 ```
 
 With `TENSORLAKE_API_KEY` in the server's environment.
@@ -94,7 +105,7 @@ With `TENSORLAKE_API_KEY` in the server's environment.
 **3. Run the host.**
 
 ```shell
-BROWSER=sandbox://tensorlake/resonate-browser npx tsx host.ts
+BROWSER=sandbox://tensorlake/resonate-browser npx tsx worker.ts
 # https://books.toscrape.com/catalogue/page-1.html: 20 books, first: A Light in the Attic £51.77
 # …
 ```

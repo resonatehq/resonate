@@ -5,7 +5,7 @@ import exceptions, { ResonateTimeoutException } from "../exceptions.js";
 import { AsyncHeartbeat, type Heartbeat, NoopHeartbeat } from "../heartbeat.js";
 import { validateRootId } from "../ids.js";
 import { ConsoleLogger, type Logger, type LogLevel } from "../logger.js";
-import { HttpNetwork, PollMessageSource } from "../network/http.js";
+import { HttpNetwork, PollMessageSource, PushMessageSource } from "../network/http.js";
 import { LocalNetwork } from "../network/local.js";
 import type { Network } from "../network/network.js";
 import type { TokenProvider } from "../network/token.js";
@@ -28,7 +28,7 @@ import { Schedules } from "../schedules.js";
 import type { Func, Send } from "../types.js";
 import * as util from "../util.js";
 import type { AnyFunc, ParamsWithOptions, Return } from "./context.js";
-import { Core } from "./core.js";
+import { Core, type Status } from "./core.js";
 
 export interface ResonateHandle<T> {
   id: string;
@@ -75,7 +75,7 @@ export class Resonate {
   private optsBuilder: OptionsBuilder;
   private subscriptions: Map<string, SubscriptionEntry> = new Map();
   private subscribeEvery: number;
-  private intervalId: ReturnType<typeof setInterval>;
+  private intervalId: ReturnType<typeof setInterval> | undefined;
 
   public readonly promises: Promises;
   public readonly schedules: Schedules;
@@ -93,6 +93,7 @@ export class Resonate {
     logger = undefined,
     encryptor = undefined,
     network = undefined,
+    push = getEnv("RESONATE_PUSH") === "1",
   }: {
     url?: string;
     group?: string;
@@ -106,6 +107,13 @@ export class Resonate {
     logger?: Logger;
     encryptor?: Encryptor;
     network?: Network;
+    /**
+     * Handed work rather than asking for it: no polling, no connection held
+     * open — work arrives through {@link Resonate.handle}. For a sandbox
+     * guest behind rn8, or a serverless function. Defaults to
+     * `RESONATE_PUSH=1`, which rn8 sets.
+     */
+    push?: boolean;
   } = {}) {
     this.clock = new WallClock();
     this.ttl = ttl;
@@ -122,6 +130,17 @@ export class Resonate {
     let heartbeat: boolean;
     if (network) {
       this.network = network;
+      heartbeat = true;
+    } else if (push) {
+      this.network = new HttpNetwork({
+        url: resolvedUrl,
+        token,
+        tokenProvider,
+        timeout,
+        headers: {},
+        adapter: new PushMessageSource({ group, pid: this.pid }),
+        logger: this.logger,
+      });
       heartbeat = true;
     } else if (resolvedUrl) {
       const adapter = new PollMessageSource({
@@ -180,6 +199,10 @@ export class Resonate {
         "Failed to start network",
       );
     });
+
+    // Pushed work is one task at a time and needs no subscriptions — nor a
+    // timer that would keep a handled process from exiting.
+    if (push) return;
 
     this.intervalId = setInterval(async () => {
       for (const [id, sub] of this.subscriptions.entries()) {
@@ -421,6 +444,68 @@ export class Resonate {
 
   public setDependency(name: string, obj: any): void {
     this.dependencies.set(name, obj);
+  }
+
+  /**
+   * Handle one pushed task, then stop.
+   *
+   * With a message — the `execute` a serverless platform delivered — run it
+   * until it completes or suspends and resolve with the outcome; the caller
+   * answers its own request.
+   *
+   * Without one, take it over HTTP: listen on `PORT` (default 8080, loopback),
+   * accept one push, run it, answer when the step is over, and close. That is
+   * the whole life of a sandbox guest — rn8 pushes one task and the process
+   * should be gone once it is done:
+   *
+   * ```ts
+   * const resonate = new Resonate();
+   * resonate.register("scrape", scrape);
+   * await resonate.handle();
+   * ```
+   *
+   * Either way the instance is stopped afterwards: heartbeat, timers and
+   * network are released and nothing keeps the process alive.
+   */
+  public async handle(msg?: Message): Promise<Status | undefined> {
+    try {
+      if (msg !== undefined) {
+        return await this.core.onMessage(msg);
+      }
+      return await this.handleOnePush();
+    } finally {
+      await this.stop();
+    }
+  }
+
+  private async handleOnePush(): Promise<Status | undefined> {
+    // Loaded here, not at the top: the async engine also runs where there is
+    // no node:http, and only this path needs it.
+    const http = await import("node:http");
+    const port = Number(getEnv("PORT") ?? 8080);
+    const host = getEnv("HOST") ?? "127.0.0.1";
+
+    return await new Promise<Status | undefined>((resolve, reject) => {
+      const server = http.createServer(async (req, res) => {
+        // One push, and only one: anything after it is turned away.
+        server.close();
+        try {
+          const chunks: Uint8Array[] = [];
+          for await (const chunk of req) chunks.push(chunk as Uint8Array);
+          const message = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Message;
+          const status = await this.core.onMessage(message);
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ status: status?.kind === "done" ? "completed" : "suspended" }));
+          resolve(status);
+        } catch (err) {
+          res.writeHead(500, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+          reject(err);
+        }
+      });
+      server.on("error", reject);
+      server.listen(port, host);
+    });
   }
 
   public async stop(): Promise<void> {
