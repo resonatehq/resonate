@@ -2701,9 +2701,15 @@ fanout AS (
                 THEN NULL ELSE q.ttl END,
     pid = CASE WHEN q.id = ANY(:AWAITERS) AND q.task_state = 'suspended'
                 THEN NULL ELSE q.pid END
+  -- The candidates first, each half through its own index (the primary key,
+  -- and the GIN index on callbacks). The same predicate ORed in the WHERE
+  -- defeats both and scans every row of the table, on every settlement.
   WHERE q.id <> :AWAITED
-    AND ( q.id = ANY(:AWAITERS)
-          OR (:FULFILLED AND q.callbacks @> ARRAY[:AWAITED]) )
+    AND q.id IN (
+      SELECT unnest(:AWAITERS)
+      UNION
+      SELECT p2.id FROM promises p2 WHERE :FULFILLED AND p2.callbacks @> ARRAY[:AWAITED]
+    )
   RETURNING q.id
 ),
 emit_resume AS (
@@ -2830,9 +2836,14 @@ fanout AS (
                    THEN NULL ELSE q.ttl END,
     pid = CASE WHEN q.task_state = 'suspended' AND EXISTS (SELECT 1 FROM ready_agg r WHERE r.awaiter = q.id)
                    THEN NULL ELSE q.pid END
+  -- Candidates through indexes, as in the settlement fan-out: ORing these in
+  -- the WHERE scans the whole table on every request's expiry pass.
   WHERE q.id NOT IN (SELECT id FROM expired)
-    AND ( EXISTS (SELECT 1 FROM ready_agg r WHERE r.awaiter = q.id)
-          OR q.callbacks && (SELECT ids FROM fulfilled_ids) )
+    AND q.id IN (
+      SELECT awaiter FROM ready_agg
+      UNION
+      SELECT p2.id FROM promises p2 WHERE p2.callbacks && (SELECT ids FROM fulfilled_ids)
+    )
   RETURNING q.id
 ),
 emit_resume AS (
