@@ -39,6 +39,9 @@
 //! and rewrites each owner's peer URL to its gateway (`--gateway-port`).
 //! Retries, and requests whose owner is unknown, fall back to round-robin.
 //!
+//! `--deadline-spread-ms` gives lifecycle promises distinct deadlines and
+//! `--random-ids true` non-ascending ids, so inserts spread over an index.
+//!
 //! `--timeline` writes one CSV row per second of the whole run (warm-up
 //! included), and the last line printed is `RESULT {json}` for scripts.
 //!
@@ -94,6 +97,8 @@ struct Args {
     group: Option<String>,
     partitions: u32,
     gateway_port: String,
+    deadline_spread_ms: i64,
+    random_ids: bool,
 }
 
 fn args() -> Args {
@@ -122,6 +127,8 @@ fn args() -> Args {
         group: None,
         partitions: 128,
         gateway_port: "8001".into(),
+        deadline_spread_ms: 0,
+        random_ids: false,
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -163,6 +170,8 @@ fn args() -> Args {
             "--group" => a.group = Some(v),
             "--partitions" => a.partitions = v.parse().expect("--partitions"),
             "--gateway-port" => a.gateway_port = v,
+            "--deadline-spread-ms" => a.deadline_spread_ms = v.parse().expect("--deadline-spread-ms"),
+            "--random-ids" => a.random_ids = v.parse().expect("--random-ids true|false"),
             other => panic!("unknown flag {other}"),
         }
     }
@@ -234,6 +243,11 @@ fn id_of(data: &Value) -> Option<&str> {
 }
 
 struct Shared {
+    /// Lifecycle promises' deadlines: FAR minus up to this many ms, so they
+    /// differ (0: all FAR, every insert on the same index key).
+    deadline_spread_ms: i64,
+    /// Lifecycle ids lead with a random component instead of ascending.
+    random_ids: bool,
     router: Option<Router>,
     http: reqwest::Client,
     urls: Vec<String>,
@@ -367,10 +381,15 @@ const FAR: i64 = 4_000_000_000_000;
 // --- the workloads ------------------------------------------------------------
 
 async fn lifecycle(s: &Shared, i: u64) -> Result<(), String> {
-    let id = format!("load-{}-{i}", s.run);
+    let id = if s.random_ids {
+        format!("load-{:016x}-{}-{i}", fastrand::u64(..), s.run)
+    } else {
+        format!("load-{}-{i}", s.run)
+    };
+    let timeout_at = FAR - fastrand::i64(0..s.deadline_spread_ms.max(1));
     s.expect(
         "promise.create",
-        json!({ "id": id, "timeoutAt": FAR, "param": { "data": s.data }, "tags": {} }),
+        json!({ "id": id, "timeoutAt": timeout_at, "param": { "data": s.data }, "tags": {} }),
         &[],
     )
     .await?;
@@ -841,6 +860,8 @@ async fn main() {
         None
     };
     let s = Arc::new(Shared {
+        deadline_spread_ms: a.deadline_spread_ms,
+        random_ids: a.random_ids,
         router,
         http: http.clone(),
         urls: urls.clone(),
