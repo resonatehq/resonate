@@ -31,7 +31,8 @@
 const std = @import("std");
 const stdx = @import("stdx.zig");
 const http = @import("http.zig");
-const net = @import("net.zig");
+// A wasm build has no sockets: the host carries the request (`wasm_net.zig`).
+const net = if (@import("builtin").cpu.arch.isWasm()) @import("wasm_net.zig") else @import("net.zig");
 const store_mod = @import("store.zig");
 
 const assert = stdx.assert;

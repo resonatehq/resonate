@@ -69,14 +69,14 @@ pub const Schedule = struct {
             if (year < year_min or year > year_max) return false;
             const i: u64 = @intCast(year - year_min);
             if (i >= 256) return self.star;
-            return (self.bits[i / 64] & (@as(u64, 1) << @intCast(i % 64))) != 0;
+            return (self.bits[@intCast(i / 64)] & (@as(u64, 1) << @intCast(i % 64))) != 0;
         }
 
         fn set(self: *Field2, year: i64) void {
             if (year < year_min or year > year_max) return;
             const i: u64 = @intCast(year - year_min);
             if (i >= 256) return;
-            self.bits[i / 64] |= @as(u64, 1) << @intCast(i % 64);
+            self.bits[@intCast(i / 64)] |= @as(u64, 1) << @intCast(i % 64);
         }
     };
 };

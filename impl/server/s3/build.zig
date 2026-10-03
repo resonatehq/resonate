@@ -33,6 +33,22 @@ pub fn build(b: *std.Build) void {
     if (b.args) |args| run_cmd.addArgs(args);
     b.step("run", "Run the server").dependOn(&run_cmd.step);
 
+    // ── The server as a wasm module ───────────────────────────────────────────
+    //
+    // Its own step, not part of the default install: it is a library for a host
+    // (`wasm/host.mjs`) rather than a program, and freestanding rather than WASI
+    // because everything it needs from the world arrives through its imports.
+    const wasm = b.addExecutable(.{
+        .name = "resonate",
+        .root_source_file = b.path("src/wasm.zig"),
+        .target = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .freestanding }),
+        .optimize = optimize,
+    });
+    wasm.entry = .disabled;
+    wasm.rdynamic = true;
+    b.step("wasm", "Build the server as a wasm module, for wasm/host.mjs")
+        .dependOn(&b.addInstallArtifact(wasm, .{}).step);
+
     // ── The simulator (VOPR) ──────────────────────────────────────────────────
     const sim = b.addExecutable(.{
         .name = "simulator",

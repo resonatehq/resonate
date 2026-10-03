@@ -555,7 +555,7 @@ pub const MemoryStore = struct {
                 var i = held.len;
                 while (i > 1) {
                     i -= 1;
-                    const j = rng.below(i + 1);
+                    const j: usize = @intCast(rng.below(i + 1));
                     const swap = held[i];
                     held[i] = held[j];
                     held[j] = swap;
