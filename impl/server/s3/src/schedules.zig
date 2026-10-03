@@ -137,6 +137,18 @@ pub const Service = struct {
     /// fires deadlines can hold it in memory instead of listing for it.
     deadline_hook: ?*const fn (context: ?*anyopaque, id: []const u8, at: i64, generation: u64) void = null,
     deadline_context: ?*anyopaque = null,
+    /// Requests backing off after a timeout, each with its timer armed. The
+    /// service is what armed those timers, so it is what must cancel them
+    /// before anything they point into goes away.
+    waiting: std.ArrayListUnmanaged(*Request) = .{},
+
+    /// Cancel every backoff still armed. Call before the requests' owners are
+    /// torn down: a timer that fires into a freed request is a use after free,
+    /// and the simulator's crash faults found exactly that.
+    pub fn deinit(self: *Service) void {
+        for (self.waiting.items) |req| self.applier.timer.cancel(&req.backoff);
+        self.waiting.deinit(self.allocator);
+    }
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -380,13 +392,21 @@ pub const Service = struct {
         req.etag = null;
         req.phase = .waiting;
         const at = self.applier.clock.now_ms() + self.applier.backoff_ms(req.attempt);
+        self.waiting.append(self.allocator, req) catch return fail(req, 503, "out of memory");
         req.backoff = .{ .at_ms = at };
         req.backoff.listen(*Request, req, on_backoff);
         self.applier.timer.arm(&req.backoff, at);
     }
 
     fn on_backoff(req: *Request, _: *env.Timeout) void {
-        req.service.load(req);
+        const self = req.service;
+        for (self.waiting.items, 0..) |w, i| {
+            if (w == req) {
+                _ = self.waiting.swapRemove(i);
+                break;
+            }
+        }
+        self.load(req);
     }
 
     fn commit(self: *Service, req: *Request) void {

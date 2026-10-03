@@ -435,6 +435,10 @@ pub const Runtime = struct {
     }
 
     pub fn destroy(self: *Runtime) void {
+        // First: schedule requests waiting out a backoff are owned by the timer
+        // daemon and the protocol layer, and their timers must be cancelled
+        // while they still exist.
+        self.schedule_service.deinit();
         self.timerd.deinit();
         self.applier.deinit();
         self.sender.deinit();
