@@ -683,9 +683,11 @@ fn create_promise(ctx: *Ctx, c: Creation) !*Promise {
         .timeout_at = c.timeout_at,
         .created_at = created_at,
         .settled_at = settled_at,
-        // Armed only for a promise that carries a task, and only while pending.
-        // A promise nobody can be blocked on costs the server nothing.
-        .timeout_armed = !already_timedout and address != null,
+        // Armed only for an external promise, and only while pending: someone can
+        // be blocked on it — a worker on its task, or an awaiter on a global
+        // promise or a timer. A promise nobody can be blocked on costs the
+        // server nothing.
+        .timeout_armed = !already_timedout and protocol.is_external(tags),
         .callbacks = .empty,
         .listeners = .empty,
     });
@@ -752,6 +754,7 @@ fn op_promise_create(ctx: *Ctx, data: json.Value) !Outcome {
     var p = Parse.init(ctx.scratch, data);
     const c = read_creation(&p);
     if (p.failure) |message| return ctx.fail(400, message);
+    if (protocol.timer_targeted(c.tags)) return ctx.fail(400, protocol.timer_targeted_message);
     if (c.tags.get(protocol.tag_target)) |addr| {
         if (!protocol.is_valid_address(addr)) return ctx.fail(400, "Invalid resonate:target address");
     }
@@ -953,6 +956,7 @@ fn op_task_create(ctx: *Ctx, data: json.Value) !Outcome {
     if (!p.failed()) {
         if (!c.tags.has(protocol.tag_target)) p.set("Action must have a resonate:target tag");
         if (c.tags.has(protocol.tag_delay)) p.set("Action must not have a resonate:delay tag");
+        if (protocol.timer_targeted(c.tags)) p.set(protocol.timer_targeted_message);
     }
     if (p.failure) |message| return ctx.fail(400, message);
     if (c.tags.get(protocol.tag_target)) |addr| {
@@ -1324,6 +1328,11 @@ fn op_task_fence(ctx: *Ctx, data: json.Value) !Outcome {
         if (c.tags.get(protocol.tag_target)) |addr| {
             if (!protocol.is_valid_address(addr)) return ctx.fail(400, "Invalid resonate:target address");
         }
+        // The fence holds — the task is acquired at this version — and it is the
+        // create inside it that is refused, so the refusal is the action's.
+        if (protocol.timer_targeted(c.tags)) {
+            return try reply_fence_refused(ctx, id, action_kind, 400, protocol.timer_targeted_message);
+        }
         try try_timeout(ctx, &.{c.id});
         const existing = ctx.doc.promise(c.id);
         const inner_now: i64 = if (existing == null) 0 else ctx.now;
@@ -1351,7 +1360,7 @@ fn op_task_fence(ctx: *Ctx, data: json.Value) !Outcome {
         // is the promise, not what settling it set off.
         const promise_opt = ctx.doc.promise(settle_id);
         if (promise_opt == null) {
-            return try reply_fence_missing(ctx, id, action_kind);
+            return try reply_fence_refused(ctx, id, action_kind, 404, "Promise not found");
         }
         const out = try reply_fence(ctx, id, action_kind, 200, promise_opt.?, if (settled_now) 0 else ctx.now);
         if (settled_now) {
@@ -1394,7 +1403,15 @@ fn reply_fence(
     return ctx.done(200);
 }
 
-fn reply_fence_missing(ctx: *Ctx, task_id: []const u8, action_kind: []const u8) !Outcome {
+/// A fence that held around an action that did not: the outer answer is 200,
+/// the action's own status and message are inside.
+fn reply_fence_refused(
+    ctx: *Ctx,
+    task_id: []const u8,
+    action_kind: []const u8,
+    inner_status: i32,
+    message: []const u8,
+) !Outcome {
     var w = ctx.writer();
     try w.object_begin();
     try w.key("action");
@@ -1403,10 +1420,10 @@ fn reply_fence_missing(ctx: *Ctx, task_id: []const u8, action_kind: []const u8) 
     try w.key("head");
     try w.object_begin();
     try w.field_string("corrId", ctx.corr_id);
-    try w.field_int("status", 404);
+    try w.field_int("status", inner_status);
     try w.field_string("version", protocol.protocol_version);
     try w.object_end();
-    try w.field_string("data", "Promise not found");
+    try w.field_string("data", message);
     try w.object_end();
     try w.key("preload");
     try write_preload(&w, ctx.doc, task_id, ctx.cfg.preload_limit);
@@ -1625,7 +1642,7 @@ pub fn schedule_fire(
         .timeout_at = timeout_at,
         .created_at = fired_at,
         .settled_at = if (already_timedout) timeout_at else null,
-        .timeout_armed = !already_timedout and address != null,
+        .timeout_armed = !already_timedout and protocol.is_external(owned_tags),
         .callbacks = .empty,
         .listeners = .empty,
     });
@@ -1939,6 +1956,54 @@ test "a timer resolves rather than rejects when its deadline falls" {
         \\{"id":"o:t","timeoutAt":5,"tags":{"resonate:timer":"true"}}
     );
     try testing.expectEqual(PromiseState.resolved, f.doc.promise("o:t").?.state);
+}
+
+test "a timer with a target is refused at every door that creates a promise" {
+    var f = Fixture.init();
+    defer f.deinit();
+    const created = try f.call("promise.create",
+        \\{"id":"o:t","timeoutAt":9000000000000,"tags":{"resonate:timer":"true","resonate:target":"http://w:1"}}
+    );
+    try testing.expectEqual(@as(i32, 400), created.status);
+    try testing.expect(f.doc.promise("o:t") == null);
+
+    const task = try f.call("task.create",
+        \\{"pid":"w1","ttl":60000,"action":{"kind":"promise.create","head":{},"data":{"id":"o:t","timeoutAt":9000000000000,"tags":{"resonate:timer":"true","resonate:target":"http://w:1"}}}}
+    );
+    try testing.expectEqual(@as(i32, 400), task.status);
+    try testing.expect(f.doc.promise("o:t") == null);
+
+    // Inside a fence the fence holds and the create is what is refused: 200
+    // outside, 400 inside, as the specification's taskFence answers.
+    _ = try f.call("promise.create",
+        \\{"id":"o:w","timeoutAt":9000000000000,"tags":{"resonate:target":"http://w:1"}}
+    );
+    _ = try f.call("task.acquire", "{\"id\":\"o:w\",\"version\":0,\"pid\":\"w1\",\"ttl\":60000}");
+    const fenced = try f.call("task.fence",
+        \\{"id":"o:w","version":1,"action":{"kind":"promise.create","head":{},"data":{"id":"o:w.1","timeoutAt":9000000000000,"tags":{"resonate:timer":"true","resonate:target":"http://w:1"}}}}
+    );
+    try testing.expectEqual(@as(i32, 200), fenced.status);
+    try testing.expect(std.mem.indexOf(u8, fenced.data, "\"status\":400") != null);
+    try testing.expect(f.doc.promise("o:w.1") == null);
+}
+
+test "a timer without a target is armed, and its deadline resolves it" {
+    var f = Fixture.init();
+    defer f.deinit();
+    const deadline = f.now + 5_000;
+    const body = try std.fmt.allocPrint(f.arena.allocator(),
+        \\{{"id":"o:t","timeoutAt":{d},"tags":{{"resonate:timer":"true"}}}}
+    , .{deadline});
+    const created = try f.call("promise.create", body);
+    try testing.expectEqual(@as(i32, 200), created.status);
+    try testing.expect(f.doc.promise("o:t").?.timeout_armed);
+    f.doc.reseat_timer();
+    try testing.expectEqual(deadline, f.doc.timer_at.?);
+
+    f.now = deadline;
+    try f.sweep();
+    try testing.expectEqual(PromiseState.resolved, f.doc.promise("o:t").?.state);
+    try testing.expectEqual(@as(usize, 0), f.executes());
 }
 
 test "settling is idempotent and the first verdict stands" {

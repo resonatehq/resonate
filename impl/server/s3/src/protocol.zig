@@ -322,6 +322,16 @@ pub fn is_external(tags: StringMap) bool {
         is_timer(tags);
 }
 
+/// A timer with somewhere to run. Refused at every door that creates a
+/// promise: a timer names no function, so a target would only dispatch a task
+/// with nothing to do. Its deadline needs no target — a timer is external, and
+/// external promises are armed.
+pub fn timer_targeted(tags: StringMap) bool {
+    return is_timer(tags) and tags.has(tag_target);
+}
+
+pub const timer_targeted_message = "A resonate:timer promise must not have a resonate:target tag";
+
 /// A promise carries a task exactly when it names somewhere to run.
 pub fn has_task(tags: StringMap) bool {
     return tags.has(tag_target);

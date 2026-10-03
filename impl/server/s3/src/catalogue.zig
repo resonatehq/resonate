@@ -79,6 +79,7 @@ pub const well_formed_promise_pending_has_no_value = E("well_formed_promise_pend
 pub const well_formed_promise_deadline_verdict_matches_timer_tag = E("well_formed_promise_deadline_verdict_matches_timer_tag");
 pub const well_formed_promise_deadline_settlement_has_no_value = E("well_formed_promise_deadline_settlement_has_no_value");
 pub const well_formed_promise_timedout_is_server_owned = E("well_formed_promise_timedout_is_server_owned");
+pub const well_formed_promise_timer_not_targeted = E("well_formed_promise_timer_not_targeted");
 pub const well_formed_promise_callbacks_unique = E("well_formed_promise_callbacks_unique");
 pub const well_formed_promise_listeners_unique = E("well_formed_promise_listeners_unique");
 pub const well_formed_promise_obligations_require_external = E("well_formed_promise_obligations_require_external");
@@ -211,6 +212,7 @@ fn check_promise_row(now: i64, p: *const Promise) void {
     verdict(well_formed_promise_deadline_verdict_matches_timer_tag, !settled_by_deadline or p.state == deadline_verdict, id);
     verdict(well_formed_promise_deadline_settlement_has_no_value, !settled_by_deadline or value_is_empty(p.value), id);
     verdict(well_formed_promise_timedout_is_server_owned, p.state != .rejected_timedout or settled_by_deadline, id);
+    verdict(well_formed_promise_timer_not_targeted, !protocol.timer_targeted(p.tags), id);
 
     verdict(well_formed_promise_callbacks_unique, all_unique(p.callbacks.items), id);
     verdict(well_formed_promise_listeners_unique, all_unique(p.listeners.items), id);
@@ -526,4 +528,25 @@ test "the task edges are the spec's list" {
     try testing.expect(!task_edge_admissible(.fulfilled, .pending));
     try testing.expect(task_edge_admissible(.halted, .pending));
     try testing.expect(!task_edge_admissible(.halted, .acquired));
+}
+
+var test_timer_target_tags = [_]protocol.StringMap.Entry{
+    .{ .key = protocol.tag_target, .value = "http://w" },
+    .{ .key = protocol.tag_timer, .value = "true" },
+};
+
+test "a timer that carries a target is caught" {
+    var a = try one_row_doc(test_promise("o:a", .pending, null, null), test_task("o:a", .pending, 1));
+    defer a.deinit();
+    var timer = test_promise("o:a", .pending, null, null);
+    timer.tags = .{ .entries = &test_timer_target_tags };
+    var b = try one_row_doc(timer, test_task("o:a", .pending, 1));
+    defer b.deinit();
+    var found = try violations(&a, &b);
+    defer found.deinit();
+    var hit = false;
+    for (found.items) |name| {
+        if (std.mem.eql(u8, name, "well_formed_promise_timer_not_targeted")) hit = true;
+    }
+    try testing.expect(hit);
 }

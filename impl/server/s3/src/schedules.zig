@@ -296,6 +296,9 @@ pub const Service = struct {
             if (!p.failed() and !promise_tags.has(protocol.tag_target)) {
                 p.set("promiseTags must include a resonate:target tag");
             }
+            if (!p.failed() and protocol.timer_targeted(promise_tags)) {
+                p.set(protocol.timer_targeted_message);
+            }
         }
         if (p.failure) |message| return fail(req, 400, message);
         if (!cron.is_valid(cron_text)) return fail(req, 400, "Invalid cron expression");
