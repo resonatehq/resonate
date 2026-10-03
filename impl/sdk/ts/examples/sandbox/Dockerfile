@@ -17,7 +17,8 @@ FROM mcr.microsoft.com/playwright:v1.56.1-noble
 COPY --from=rn8 /src/target/x86_64-unknown-linux-musl/release/rn8 /usr/local/bin/rn8
 WORKDIR /sdk
 COPY impl/sdk/ts/package.json impl/sdk/ts/package-lock.json ./
-RUN npm ci
+# --ignore-scripts: `prepare` compiles the SDK, which tsx does not need.
+RUN npm ci --ignore-scripts
 COPY impl/sdk/ts/src ./src
 COPY impl/sdk/ts/examples/sandbox ./examples/sandbox
 RUN cd examples/sandbox && npm install --no-audit --no-fund
