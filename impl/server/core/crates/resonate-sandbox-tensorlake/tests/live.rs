@@ -9,6 +9,9 @@ use resonate_sandbox::{Backend, Command, Egress, Limits, Process};
 use resonate_sandbox_tensorlake::{Options, Tensorlake};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
+/// One test at a time: an account's sandbox quota may be a single sandbox.
+static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 fn backend() -> Option<Tensorlake> {
     let key = std::env::var("TENSORLAKE_API_KEY")
         .ok()
@@ -32,6 +35,7 @@ async fn live_stdio_round_trip_and_exit_status() {
         eprintln!("skipped: no TENSORLAKE_API_KEY");
         return;
     };
+    let _one = ONE_AT_A_TIME.lock().await;
     let image = std::env::var("TL_IMAGE").unwrap_or_else(|_| "tensorlake/ubuntu-minimal".into());
 
     let t = Instant::now();
@@ -105,4 +109,74 @@ async fn live_stdio_round_trip_and_exit_status() {
         .await
         .expect("destroyed again: idempotent");
     result
+}
+
+/// An allow-list lets the guest reach what is on it and nothing else.
+#[tokio::test(flavor = "multi_thread")]
+async fn live_allow_list_is_enforced() {
+    let Some(key) = std::env::var("TENSORLAKE_API_KEY")
+        .ok()
+        .filter(|k| !k.is_empty())
+    else {
+        eprintln!("skipped: no TENSORLAKE_API_KEY");
+        return;
+    };
+    let _one = ONE_AT_A_TIME.lock().await;
+    let tl = Tensorlake::new(
+        Options {
+            api_key: Some(key),
+            timeout_secs: 300,
+            ..Options::default()
+        },
+        Limits {
+            egress: Egress::Allow(vec!["books.toscrape.com".into()]),
+            ..Limits::default()
+        },
+    );
+    let handle = tl
+        .create("tensorlake/ubuntu-minimal")
+        .await
+        .expect("created");
+    let probe = "import urllib.request\n\
+                 for url in ['https://books.toscrape.com/', 'https://example.com/']:\n\
+                 \x20   try:\n\
+                 \x20       print(url, urllib.request.urlopen(url, timeout=8).status, flush=True)\n\
+                 \x20   except Exception as e:\n\
+                 \x20       print(url, 'blocked', type(e).__name__, flush=True)\n";
+    let result = async {
+        let mut p = tl
+            .exec(
+                &handle,
+                Command {
+                    argv: vec!["python3".into(), "-c".into(), probe.into()],
+                    env: vec![],
+                },
+            )
+            .await
+            .expect("started");
+        drop(p.stdin());
+        let mut out = BufReader::new(p.stdout().unwrap()).lines();
+        let mut lines = Vec::new();
+        while let Ok(Ok(Some(l))) =
+            tokio::time::timeout(Duration::from_secs(30), out.next_line()).await
+        {
+            eprintln!("{l}");
+            lines.push(l);
+        }
+        lines
+    }
+    .await;
+    tl.destroy(handle).await.expect("destroyed");
+    assert!(
+        result
+            .iter()
+            .any(|l| l.starts_with("https://books.toscrape.com/ 200")),
+        "{result:?}"
+    );
+    assert!(
+        result
+            .iter()
+            .any(|l| l.starts_with("https://example.com/ blocked")),
+        "{result:?}"
+    );
 }

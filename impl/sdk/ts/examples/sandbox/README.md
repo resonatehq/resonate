@@ -60,22 +60,57 @@ has its own network and the default port is fine.
 
 ## Run it in Tensorlake
 
-Build the image (`Dockerfile`, from the repository root), import it into
-Tensorlake, and point `BROWSER` at it by its immutable id. Give the browser the
-sites it scrapes and nothing else:
+Verified end to end: three pages of the real books.toscrape.com, each scraped
+by Chromium in a Tensorlake sandbox, in about 13 seconds.
+
+**1. Build the image into Tensorlake.** Tensorlake builds the Dockerfile on its
+side and registers it under a name — no local Docker, no registry. The build
+context is `Dockerfile` (this directory's, with paths flattened), a static or
+glibc-compatible `rn8`, the SDK's `package.json`, `package-lock.json` and
+`src/`, and this example's `guest.ts`, `serve.ts`, `package.json`,
+`package-lock.json`.
+
+```python
+from tensorlake.image.sandbox_builder import build_sandbox_image
+
+build_sandbox_image(
+    "Dockerfile",
+    registered_name="resonate-browser",
+    # Within a free project's per-sandbox limits: 1 vCPU, 1 GiB, 10 GiB disk.
+    cpus=1.0, memory_mb=1024, disk_mb=6144, builder_disk_mb=10240,
+    verbose=True,
+)
+```
+
+**2. Point the plugin at it.** Tensorlake does not report a registered image's
+`ENTRYPOINT`, so the image rule names the command; the allow-list gives the
+browser the site it scrapes and nothing else.
 
 ```toml
 [workers.worker_sandbox]
 enabled = true
 backend = "tensorlake"
+require_digest = false     # a registered name, not an OCI digest
+cpus = 1
+memory_mib = 1024
+concurrency = 1            # a project quota of one sandbox at a time
 
 [[workers.worker_sandbox.images]]
-image = "cas-v1:<sha256>"
+image = "resonate-browser"
 egress = { allow = ["books.toscrape.com"] }
-memory_mib = 2048
+command = ["rn8", "--", "/sdk/node_modules/.bin/tsx", "/sdk/examples/sandbox/guest.ts"]
 ```
 
+With `TENSORLAKE_API_KEY` in the server's environment.
+
+**3. Run the host.**
+
 ```shell
-BROWSER=sandbox://tensorlake/cas-v1:<sha256> npx tsx host.ts
+BROWSER=sandbox://tensorlake/resonate-browser SITE=https://books.toscrape.com npx tsx host.ts
+# { scraped: 3, failed: 0, changes: 0 }
 npx tsx host.ts --schedule   # daily at 07:00
 ```
+
+With a quota smaller than the fan-out, the sandboxes take turns: the plugin's
+`concurrency` queues dispatches, and a create refused for quota waits and
+retries rather than failing.

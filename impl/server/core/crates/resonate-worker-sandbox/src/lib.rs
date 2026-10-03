@@ -102,6 +102,12 @@ fn configure(
                  every other image",
             ));
         }
+        if rule.command.as_ref().is_some_and(|c| c.is_empty()) {
+            return Err(settings.reject(
+                &format!("images[{i}].command"),
+                "an empty command is no command; leave it out to use the default",
+            ));
+        }
         if rule.cpus == Some(0) || rule.memory_mib == Some(0) {
             return Err(settings.reject(
                 &format!("images[{i}]"),
@@ -321,6 +327,7 @@ pub struct Config {
 /// image = "cas-v1:4f2a…"                       # exact, or a prefix ending in '*'
 /// egress = { allow = ["books.toscrape.com"] }
 /// memory_mib = 2048
+/// command = ["rn8", "--", "node", "worker.js"]
 /// ```
 ///
 /// Matched against the image as the address names it, without the provider.
@@ -334,6 +341,12 @@ pub struct ImageRule {
     pub memory_mib: Option<u32>,
     #[serde(default)]
     pub egress: Option<Egress>,
+    /// The command to run for these images, instead of `command`. For a
+    /// provider that cannot read an image's entrypoint — Tensorlake does not
+    /// report a registered image's — this is how an image says how its rn8
+    /// starts.
+    #[serde(default)]
+    pub command: Option<Vec<String>>,
 }
 
 impl ImageRule {
@@ -655,6 +668,15 @@ impl ResonateWorker for SandboxWorker {
             .map_err(|e| Unavailable::unroutable(format!("sandbox: {e}")))?;
         let provider = target.provider.unwrap_or(self.default);
         let rule = self.images.iter().position(|r| r.matches(target.image));
+        // The rule's command, if it names one; the environment is always the
+        // plugin's.
+        let command = match rule.and_then(|i| self.images[i].command.clone()) {
+            Some(argv) => resonate_sandbox::Command {
+                argv,
+                env: self.shared.command.env.clone(),
+            },
+            None => self.shared.command.clone(),
+        };
         let backend = self
             .backends
             .get(&(provider, rule))
@@ -681,6 +703,7 @@ impl ResonateWorker for SandboxWorker {
                 backend,
                 provider,
                 image,
+                command,
                 message,
                 scope::Claim::new(task.id, task.version),
             )

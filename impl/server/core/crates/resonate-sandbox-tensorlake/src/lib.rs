@@ -274,15 +274,30 @@ impl Backend for Tensorlake {
     type Error = Error;
 
     async fn create(&self, image: &str) -> Result<Handle, Error> {
-        let resp = self
-            .client()?
-            .post(self.api("/sandboxes"))
-            .bearer_auth(self.key()?)
-            .json(&self.create_body(image))
-            .send()
-            .await
-            .map_err(err)?;
-        let created: Created = json_or_error(resp, "create sandbox").await?;
+        // A project at its sandbox quota is refused at once, not queued — and
+        // a sandbox just destroyed still counts for a moment. Waiting here,
+        // within the time a sandbox may take to start anyway, turns a
+        // fan-out wider than the quota into a queue rather than a burst of
+        // failed dispatches the server has to retry.
+        let deadline = tokio::time::Instant::now() + self.inner.options.ready_timeout;
+        let mut backoff = self.inner.options.poll_interval;
+        let created: Created = loop {
+            let resp = self
+                .client()?
+                .post(self.api("/sandboxes"))
+                .bearer_auth(self.key()?)
+                .json(&self.create_body(image))
+                .send()
+                .await
+                .map_err(err)?;
+            match json_or_error(resp, "create sandbox").await {
+                Err(e) if is_quota(&e) && tokio::time::Instant::now() + backoff < deadline => {
+                    tokio::time::sleep(backoff).await;
+                    backoff = (backoff * 2).min(Duration::from_secs(5));
+                }
+                other => break other?,
+            }
+        };
         let id = created.sandbox_id.clone();
         match self.until_running(created).await {
             Ok(url) => Ok(Handle { id, url }),
@@ -496,6 +511,11 @@ async fn pump_output(proxy: Proxy, pid: i64, stream: &'static str, mut to: Duple
             }
         }
     }
+}
+
+/// Tensorlake's answer when the project has as many sandboxes as it may.
+fn is_quota(e: &Error) -> bool {
+    e.0.contains("quota")
 }
 
 async fn json_or_error<T: for<'de> Deserialize<'de>>(

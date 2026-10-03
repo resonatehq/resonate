@@ -96,6 +96,19 @@ server-sent events of `…/stdout/follow`, one output line per frame. With
 `command` empty it runs the entrypoint Tensorlake reports for the sandbox.
 `timeout_secs` doubles as cleanup for a sandbox orphaned by a plugin crash.
 
+Verified against the live service (`resonate-sandbox-tensorlake/tests/live.rs`,
+run with `TENSORLAKE_API_KEY` set): create in ~0.7s, live stdio round trips of
+~100ms, exit status and stderr, idempotent destroy, and an allow-list that
+reaches its hosts and refuses the rest. What the live runs taught:
+
+- Tensorlake does not report a registered image's `ENTRYPOINT`; name the
+  command in the image's rule (`command = ["rn8", "--", …]`).
+- A create refused for quota is retried with backoff within `ready_timeout`,
+  so a fan-out wider than the project's quota queues instead of failing.
+- Images are registered by name in the project (built from a Dockerfile on
+  Tensorlake's side); with a name rather than an OCI digest, set
+  `require_digest = false` for now.
+
 The `microsandbox` backend needs `msb` on the host (Linux with KVM, or macOS on
 Apple Silicon). It drives the CLI rather than linking the `microsandbox` SDK
 crate, which links a SQLite this workspace's sqlx already links at another

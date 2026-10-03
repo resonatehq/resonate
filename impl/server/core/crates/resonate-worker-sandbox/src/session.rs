@@ -21,6 +21,7 @@ pub(crate) async fn run(
     backend: Arc<dyn AnyBackend>,
     provider: Provider,
     image: String,
+    command: resonate_sandbox::Command,
     message: Value,
     claim: Claim,
 ) {
@@ -53,6 +54,7 @@ pub(crate) async fn run(
         &shared,
         backend.as_ref(),
         &handle,
+        command,
         message,
         claim,
         start_deadline,
@@ -105,12 +107,13 @@ async fn drive(
     shared: &Arc<Shared>,
     backend: &dyn AnyBackend,
     handle: &AnyHandle,
+    command: resonate_sandbox::Command,
     message: Value,
     claim: Claim,
     start_deadline: Instant,
 ) -> Result<End, String> {
     let task_id = claim.id.clone();
-    let mut process = timeout_at(start_deadline, backend.exec(handle, shared.command.clone()))
+    let mut process = timeout_at(start_deadline, backend.exec(handle, command))
         .await
         .map_err(|_| "exec did not start before the start timeout".to_string())?
         .map_err(|e| format!("exec failed: {e}"))?;
