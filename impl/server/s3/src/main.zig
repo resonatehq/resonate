@@ -24,6 +24,10 @@ const server_mod = @import("server.zig");
 const skull = @import("skull.zig");
 const properties = @import("properties.zig");
 
+/// Under skulld, a panic — every `unreachable` included — is reported before
+/// the process ends, so a crash arrives as a finding with its message.
+pub const panic = skull.Panic(properties.panicked);
+
 const assert = stdx.assert;
 
 const usage =

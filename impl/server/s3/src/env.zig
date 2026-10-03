@@ -11,6 +11,7 @@
 //! to lock.
 
 const std = @import("std");
+const properties = @import("properties.zig");
 const stdx = @import("stdx.zig");
 
 /// Wall time, in Unix milliseconds.
@@ -79,8 +80,7 @@ pub const Timer = struct {
     };
 
     pub fn arm(self: Timer, timeout: *Timeout, at_ms: i64) void {
-        stdx.assert(!timeout.armed);
-        stdx.assert(timeout.callback != &Timeout.no_callback);
+        properties.timeout_armed_once.assert(!timeout.armed and timeout.callback != &Timeout.no_callback, .{ .armed = timeout.armed });
         timeout.at_ms = at_ms;
         timeout.armed = true;
         self.vtable.arm(self.ptr, timeout);
@@ -135,7 +135,7 @@ pub const Delivery = struct {
     }
 
     pub fn complete(self: *Delivery, outcome: Outcome, detail: []const u8) void {
-        stdx.assert(self.outcome == .pending);
+        properties.delivery_completes_once.assert(self.outcome == .pending, .{ .address = self.address });
         self.outcome = outcome;
         self.detail = detail;
         self.callback(self);
@@ -160,7 +160,7 @@ pub const MessageBus = struct {
     };
 
     pub fn send(self: MessageBus, delivery: *Delivery) void {
-        stdx.assert(delivery.callback != &Delivery.no_callback);
+        properties.delivery_has_callback.assert(delivery.callback != &Delivery.no_callback, .{ .address = delivery.address });
         self.vtable.send(self.ptr, delivery);
     }
 

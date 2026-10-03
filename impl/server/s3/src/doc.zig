@@ -20,6 +20,7 @@
 //! recognise its own landed write after a lost response.
 
 const std = @import("std");
+const properties = @import("properties.zig");
 const stdx = @import("stdx.zig");
 const json = @import("json.zig");
 const protocol = @import("protocol.zig");
@@ -440,14 +441,14 @@ pub const Doc = struct {
     /// present — a caller that meant "create or return the existing one" has to
     /// look first, because which of the two happened is the answer it sends.
     pub fn promise_insert(self: *Doc, p: Promise) !*Promise {
-        assert(self.promise(p.id) == null);
+        properties.document_ids_unique.assert(self.promise(p.id) == null, .{ .promise = p.id });
         const at = insertion_point(Promise, self.promises.items, p.id);
         try self.promises.insert(self.allocator(), at, p);
         return &self.promises.items[at];
     }
 
     pub fn task_insert(self: *Doc, t: Task) !*Task {
-        assert(self.task(t.id) == null);
+        properties.document_ids_unique.assert(self.task(t.id) == null, .{ .task = t.id });
         const at = insertion_point(Task, self.tasks.items, t.id);
         try self.tasks.insert(self.allocator(), at, t);
         return &self.tasks.items[at];

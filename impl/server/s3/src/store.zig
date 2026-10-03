@@ -38,6 +38,7 @@
 //! million operations in a second.
 
 const std = @import("std");
+const properties = @import("properties.zig");
 const stdx = @import("stdx.zig");
 const assert = stdx.assert;
 
@@ -179,7 +180,7 @@ pub const Operation = struct {
     }
 
     pub fn complete(self: *Operation, result: Result) void {
-        assert(self.result == .pending);
+        properties.operation_completes_once.assert(self.result == .pending, .{ .key = self.key });
         self.result = result;
         self.callback(self);
     }
@@ -197,8 +198,7 @@ pub const Store = struct {
     };
 
     pub fn submit(self: Store, op: *Operation) void {
-        assert(op.result == .pending);
-        assert(op.callback != &Operation.no_callback);
+        properties.operation_submitted_ready.assert(op.result == .pending and op.callback != &Operation.no_callback, .{ .key = op.key });
         self.vtable.submit(self.ptr, op);
     }
 };
@@ -225,7 +225,7 @@ pub const KeySpace = struct {
     pub const default_timer_shards: u32 = 4;
 
     pub fn init(prefix: []const u8, timer_shards: u32) KeySpace {
-        assert(prefix.len == 0 or prefix[prefix.len - 1] == '/');
+        properties.key_prefix_normalized.assert(prefix.len == 0 or prefix[prefix.len - 1] == '/', .{ .prefix = prefix });
         return .{ .prefix = prefix, .timer_shards = @max(timer_shards, 1) };
     }
 

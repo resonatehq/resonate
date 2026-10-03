@@ -384,7 +384,7 @@ pub const Timerd = struct {
         self.allocator.free(f.key);
         f.arena.deinit();
         self.allocator.destroy(f);
-        assert(self.in_flight > 0);
+        properties.completion_was_in_flight.assert(self.in_flight > 0, .{ .where = "timerd" });
         self.in_flight -= 1;
         if (owner) |t| {
             t.on_fire_done();
@@ -498,7 +498,7 @@ pub const Timerd = struct {
         list_attempts: u32 = 0,
 
         fn on_fire_done(self: *Tick) void {
-            assert(self.outstanding > 0);
+            properties.completion_was_in_flight.assert(self.outstanding > 0, .{ .where = "timerd sweep" });
             self.outstanding -= 1;
             if (self.outstanding > 0) return;
             self.timerd.applier.drain();

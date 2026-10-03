@@ -17,6 +17,7 @@
 //! moved its schedules when a zone's rules changed would be a worse server.
 
 const std = @import("std");
+const properties = @import("properties.zig");
 const stdx = @import("stdx.zig");
 const assert = stdx.assert;
 
@@ -40,12 +41,12 @@ const Field = struct {
     star: bool = false,
 
     fn contains(self: Field, v: u32) bool {
-        assert(v < 64);
+        properties.cron_values_in_range.assert(v < 64, .{ .bit = v });
         return (self.bits & (@as(u64, 1) << @intCast(v))) != 0;
     }
 
     fn set(self: *Field, v: u32) void {
-        assert(v < 64);
+        properties.cron_values_in_range.assert(v < 64, .{ .bit = v });
         self.bits |= @as(u64, 1) << @intCast(v);
     }
 };
@@ -326,7 +327,7 @@ pub fn civil_from_days(z_in: i64) struct { year: i64, month: u32, day: u32 } {
 pub fn from_unix_seconds(secs: i64) DateTime {
     const days = @divFloor(secs, 86400);
     var rem = secs - days * 86400;
-    assert(rem >= 0 and rem < 86400);
+    properties.cron_values_in_range.assert(rem >= 0 and rem < 86400, .{ .seconds_into_day = rem });
     const civil = civil_from_days(days);
     const hour: u32 = @intCast(@divTrunc(rem, 3600));
     rem -= @as(i64, hour) * 3600;

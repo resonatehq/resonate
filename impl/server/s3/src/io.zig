@@ -19,6 +19,7 @@
 //! Deadlines in this protocol are measured in seconds.
 
 const std = @import("std");
+const properties = @import("properties.zig");
 const builtin = @import("builtin");
 const linux = std.os.linux;
 const posix = std.posix;
@@ -191,7 +192,7 @@ pub const IO = struct {
             const count = self.ring.copy_cqes(&cqes, 0) catch return error.SubmissionFailed;
             if (count == 0) break;
             for (cqes[0..count]) |cqe| {
-                assert(self.in_flight > 0);
+                properties.completion_was_in_flight.assert(self.in_flight > 0, .{ .where = "io_uring" });
                 self.in_flight -= 1;
                 if (cqe.user_data == 0) continue;
                 const completion: *Completion = @ptrFromInt(cqe.user_data);

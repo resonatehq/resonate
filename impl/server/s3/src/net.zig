@@ -28,6 +28,7 @@
 //! under memory the kernel still points into. An expired call is never retried.
 
 const std = @import("std");
+const properties = @import("properties.zig");
 const posix = std.posix;
 const stdx = @import("stdx.zig");
 const io_mod = @import("io.zig");
@@ -175,7 +176,7 @@ pub const Connection = struct {
     }
 
     fn respond(self: *Connection, status: u16, content_type: []const u8, body: []const u8) void {
-        assert(self.state == .handling);
+        properties.exchange_answered_while_handling.assert(self.state == .handling, .{ .state = @tagName(self.state) });
         self.out = .{};
         var out = std.ArrayList(u8).init(self.server.allocator);
         http.write_response(&out, status, content_type, body, self.keep_alive) catch {
@@ -202,7 +203,7 @@ pub const Connection = struct {
     /// trade than this. The bytes are copied, because the connection frees what
     /// it writes with its own allocator.
     pub fn respond_raw(self: *Connection, bytes: []const u8) void {
-        assert(self.state == .handling);
+        properties.exchange_answered_while_handling.assert(self.state == .handling, .{ .state = @tagName(self.state) });
         var out = std.ArrayList(u8).init(self.server.allocator);
         out.appendSlice(bytes) catch {
             out.deinit();

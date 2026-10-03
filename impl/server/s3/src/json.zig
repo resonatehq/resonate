@@ -13,6 +13,7 @@
 //!   anything individually.
 
 const std = @import("std");
+const properties = @import("properties.zig");
 const stdx = @import("stdx.zig");
 const assert = stdx.assert;
 
@@ -545,13 +546,13 @@ pub const Writer = struct {
     }
 
     fn push(self: *Writer) void {
-        assert(self.depth < max_depth);
+        properties.json_depth_balanced.assert(self.depth < max_depth, .{ .depth = self.depth });
         self.comma[self.depth] = false;
         self.depth += 1;
     }
 
     fn pop(self: *Writer) void {
-        assert(self.depth > 0);
+        properties.json_depth_balanced.assert(self.depth > 0, .{ .depth = self.depth });
         self.depth -= 1;
     }
 

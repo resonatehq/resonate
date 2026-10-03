@@ -147,7 +147,7 @@ const Queue = struct {
     len: usize = 0,
 
     fn push(self: *Queue, work: *Work) void {
-        assert(work.next == null);
+        properties.work_queued_once.assert(work.next == null, .{});
         if (self.tail) |t| t.next = work else self.head = work;
         self.tail = work;
         self.len += 1;
@@ -393,8 +393,7 @@ const Actor = struct {
     }
 
     fn begin(self: *Actor) void {
-        assert(self.phase == .idle);
-        assert(self.batch.is_empty());
+        properties.actor_starts_idle.assert(self.phase == .idle and self.batch.is_empty(), .{ .phase = @tagName(self.phase) });
         if (self.mailbox.is_empty()) {
             // Nothing left to do. The actor goes; the cache keeps the document,
             // so the next request for this origin costs nothing extra.
@@ -445,22 +444,22 @@ const Actor = struct {
     // `idle()` and the assertions; it is no longer how an answer finds its way
     // back, which is what the `else => unreachable` used to be guarding.
     fn on_load_complete(self: *Actor, op: *store_mod.Operation) void {
-        assert(self.phase == .loading);
+        properties.completion_matches_phase.assert(self.phase == .loading, .{ .expected = "loading", .phase = @tagName(self.phase) });
         self.on_loaded(op.result);
     }
 
     fn on_arm_complete(self: *Actor, op: *store_mod.Operation) void {
-        assert(self.phase == .arming);
+        properties.completion_matches_phase.assert(self.phase == .arming, .{ .expected = "arming", .phase = @tagName(self.phase) });
         self.on_armed(op.result);
     }
 
     fn on_commit_complete(self: *Actor, op: *store_mod.Operation) void {
-        assert(self.phase == .committing);
+        properties.completion_matches_phase.assert(self.phase == .committing, .{ .expected = "committing", .phase = @tagName(self.phase) });
         self.on_committed(op.result);
     }
 
     fn on_disarm_complete(self: *Actor, _: *store_mod.Operation) void {
-        assert(self.phase == .disarming);
+        properties.completion_matches_phase.assert(self.phase == .disarming, .{ .expected = "disarming", .phase = @tagName(self.phase) });
         self.on_disarmed();
     }
 
@@ -473,7 +472,7 @@ const Actor = struct {
             // Still at the version this process holds, so the copy in hand is
             // current and the store sent no body.
             .not_modified => {
-                assert(self.cached_bytes.len > 0);
+                properties.not_modified_has_cache.assert(self.cached_bytes.len > 0, .{ .origin = self.origin });
                 self.before_bytes = self.cached_bytes;
             },
             .not_found => {
@@ -887,10 +886,10 @@ pub const Applier = struct {
     /// An idle actor with an empty mailbox has nothing to hold. The cache keeps
     /// the document, so retiring it costs the next request nothing.
     fn retire(self: *Applier, actor: *Actor) void {
-        assert(actor.phase == .idle);
-        assert(actor.mailbox.is_empty());
-        assert(actor.batch.is_empty());
-        assert(!actor.queued);
+        properties.actor_retired_clean.assert(
+            actor.phase == .idle and actor.mailbox.is_empty() and actor.batch.is_empty() and !actor.queued,
+            .{ .phase = @tagName(actor.phase), .queued = actor.queued },
+        );
         _ = self.actors.remove(actor.origin);
         actor.destroy();
     }

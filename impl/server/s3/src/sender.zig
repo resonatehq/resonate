@@ -25,6 +25,7 @@
 //! order `debug.snap` reports and the order two servers have to agree on.
 
 const std = @import("std");
+const properties = @import("properties.zig");
 const stdx = @import("stdx.zig");
 const json = @import("json.zig");
 const env = @import("env.zig");
@@ -220,7 +221,7 @@ pub const Sender = struct {
         self.allocator.free(flight.address);
         self.allocator.free(flight.body);
         self.allocator.destroy(flight);
-        assert(self.in_flight > 0);
+        properties.completion_was_in_flight.assert(self.in_flight > 0, .{ .where = "sender" });
         self.in_flight -= 1;
         self.pump();
     }

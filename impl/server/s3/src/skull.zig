@@ -14,16 +14,25 @@
 //! program announces it at startup, which is what lets skulld report a
 //! `sometimes` that never held or a `reachable` never reached.
 //!
-//! **A call that only costs anything under skulld.** At a site:
+//! **A call at the site.** Three verbs:
 //!
-//!     properties.acked_never_lost.check(found, .{ .id = id });
-//!     properties.store_never_answered.reached(.{});
+//!     properties.queue_bounded.assert(len <= cap, .{ .len = len });  // the program's own invariant
+//!     properties.document_decodes.check(ok, .{ .key = key });        // reported, not enforced
+//!     properties.store_never_answered.reached(.{});                  // a reachability site
+//!
+//! `assert` is `stdx.assert` with a name: it reports, then — if the condition
+//! is false — it is `unreachable`, exactly as before. An `Unreachable`'s
+//! `reached` is `unreachable` the same way. `check` only reports: for
+//! properties about what came from outside, where the program answers rather
+//! than stops. `Sometimes` and `Reachable` are evidence across a campaign, which
+//! one process cannot violate.
 //!
 //! Each property sends at most one event per condition value, like `skull.h`.
 //! Where skulld cannot be — wasm, anything but Linux, or a root that declares
-//! `pub const skull_enabled = false` — every call compiles to nothing. Where it
-//! can, the first call looks for the agent's socket; a process not under skulld
-//! finds none and every later call is a load and a branch.
+//! `pub const skull_enabled = false` — reporting compiles to nothing: an
+//! `assert` is then exactly `if (!ok) unreachable`, a `Sometimes` is nothing at
+//! all. Where it can, the first report looks for the agent's socket; a process
+//! not under skulld finds none and every later one is a load and a branch.
 //!
 //! ## The wire
 //!
@@ -56,13 +65,13 @@ pub const Kind = enum {
     always_or_unreachable,
     sometimes,
     reachable,
-    unreachable_,
+    @"unreachable",
 
     fn assert_type(kind: Kind) []const u8 {
         return switch (kind) {
             .always, .always_or_unreachable => "always",
             .sometimes => "sometimes",
-            .reachable, .unreachable_ => "reachability",
+            .reachable, .@"unreachable" => "reachability",
         };
     }
 
@@ -72,7 +81,7 @@ pub const Kind = enum {
             .always_or_unreachable => "AlwaysOrUnreachable",
             .sometimes => "Sometimes",
             .reachable => "Reachable",
-            .unreachable_ => "Unreachable",
+            .@"unreachable" => "Unreachable",
         };
     }
 
@@ -80,7 +89,7 @@ pub const Kind = enum {
     fn must_hit(kind: Kind) bool {
         return switch (kind) {
             .always, .sometimes, .reachable => true,
-            .always_or_unreachable, .unreachable_ => false,
+            .always_or_unreachable, .@"unreachable" => false,
         };
     }
 };
@@ -107,7 +116,7 @@ pub fn Reachable(comptime message: []const u8) type {
 
 /// Must never be reached.
 pub fn Unreachable(comptime message: []const u8) type {
-    return Property(.unreachable_, message);
+    return Property(.@"unreachable", message);
 }
 
 /// One property: its metadata at compile time, and its own record of which
@@ -126,21 +135,38 @@ pub fn Property(comptime kind_: Kind, comptime message_: []const u8) type {
         /// Bit 0: reported true. Bit 1: reported false.
         var reported: u2 = 0;
 
-        /// Evaluate an `always`, `always_or_unreachable` or `sometimes`.
+        /// The program's own invariant: report it, and stop if it is false —
+        /// `stdx.assert` with a name. The report goes out before the stop, so
+        /// skulld sees which invariant failed, with `details`.
+        pub inline fn assert(condition: bool, details: anytype) void {
+            comptime std.debug.assert(kind == .always or kind == .always_or_unreachable);
+            if (enabled) report(condition, details);
+            if (!condition) unreachable;
+        }
+
+        /// Evaluate an `always`, `always_or_unreachable` or `sometimes`
+        /// without enforcing it.
         /// `details` is anything `std.json` can write, or `.{}`; it goes with
         /// the first report of each condition value, which for an `always`
         /// means the first violation.
         pub inline fn check(condition: bool, details: anytype) void {
-            comptime std.debug.assert(kind != .reachable and kind != .unreachable_);
+            comptime std.debug.assert(kind != .reachable and kind != .@"unreachable");
             if (!enabled) return;
             report(condition, details);
         }
 
-        /// Reach a `reachable` or `unreachable` site.
-        pub inline fn reached(details: anytype) void {
-            comptime std.debug.assert(kind == .reachable or kind == .unreachable_);
-            if (!enabled) return;
-            report(true, details);
+        /// Reach a `reachable` site, or an `unreachable` one — which then stops,
+        /// as `unreachable` does.
+        pub inline fn reached(details: anytype) if (kind == .@"unreachable") noreturn else void {
+            comptime std.debug.assert(kind == .reachable or kind == .@"unreachable");
+            if (enabled) report(true, details);
+            if (kind == .@"unreachable") unreachable;
+        }
+
+        /// Report without enforcing anything. For the panic handler, which
+        /// must not stop twice.
+        pub fn record(condition: bool, details: anytype) void {
+            if (enabled) report(condition, details);
         }
 
         fn report(condition: bool, details: anytype) void {
@@ -185,6 +211,28 @@ pub fn declare(comptime Namespace: type) void {
     inline for (comptime catalog(Namespace)) |entry| {
         send_assert(entry.kind, entry.message, entry.name, false, false, .{});
     }
+}
+
+/// A panic handler that tells skulld first. Every `unreachable` the program
+/// reaches, and every panic, then becomes a finding with a message and an
+/// address rather than a container that exited:
+///
+///     pub const panic = skull.Panic(properties.panicked);
+pub fn Panic(comptime Panicked: type) type {
+    comptime std.debug.assert(Panicked.kind == .@"unreachable");
+    return std.debug.FullPanic(struct {
+        var panicking: bool = false;
+        fn call(message: []const u8, first_trace_addr: ?usize) noreturn {
+            if (!panicking) {
+                panicking = true;
+                Panicked.record(true, .{
+                    .message = message,
+                    .address = first_trace_addr orelse @returnAddress(),
+                });
+            }
+            std.debug.defaultPanic(message, first_trace_addr);
+        }
+    }.call);
 }
 
 /// The run's seeded randomness under skulld, the OS's otherwise.
@@ -317,7 +365,7 @@ test "the catalog is the namespace's properties, known at compile time" {
     try testing.expectEqualStrings("held", entries[0].name);
     try testing.expectEqual(Kind.always, entries[0].kind);
     try testing.expectEqualStrings("test: this happens", entries[1].message);
-    try testing.expectEqual(Kind.unreachable_, entries[2].kind);
+    try testing.expectEqual(Kind.@"unreachable", entries[2].kind);
 }
 
 test "the wire: a catalog entry, then each condition value once, then randomness" {

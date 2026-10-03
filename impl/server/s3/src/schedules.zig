@@ -23,6 +23,7 @@
 //! rather than in one unbounded one.
 
 const std = @import("std");
+const properties = @import("properties.zig");
 const stdx = @import("stdx.zig");
 const json = @import("json.zig");
 const protocol = @import("protocol.zig");
@@ -564,7 +565,7 @@ pub const Service = struct {
 
     fn on_fired(work: *applier_mod.Work) void {
         const req: *Request = @ptrCast(@alignCast(work.context.?));
-        assert(req.fires_outstanding > 0);
+        properties.completion_was_in_flight.assert(req.fires_outstanding > 0, .{ .where = "schedule fire" });
         req.fires_outstanding -= 1;
         // A run nobody could store is a run that did not happen, and the schedule
         // must not move past it: advancing would retire the deadline and the
