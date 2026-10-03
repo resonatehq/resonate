@@ -8,7 +8,9 @@ own. Both sides use the same API.
 const resonate = new Resonate();
 
 resonate.register("scrapeAll", async (ctx: Context, urls: string[]) => {
-  return await Promise.all(urls.map((url) => ctx.rpc<Scrape>("scrape", url, ctx.options({ target: BROWSER }))));
+  return await Promise.all(
+    urls.map((url) => ctx.rpc<Scrape>("scrape", url, ctx.options({ target: "sandbox://tensorlake/resonate-browser" }))),
+  );
 });
 ```
 
@@ -54,9 +56,11 @@ resonate dev \
 
 cd impl/sdk/ts/examples/sandbox && npm install
 npx tsx site.ts &
-BROWSER=sandbox://local/browser SITE=http://127.0.0.1:8099 npx tsx worker.ts
-# http://127.0.0.1:8099/catalogue/page-1.html: 4 books, first: A Light in the Attic £17.00
-# …
+# with the target in worker.ts set to "sandbox://local/browser"
+npx tsx worker.ts &
+resonate invoke scrape-1 --func scrapeAll \
+  --arg '["http://127.0.0.1:8099/catalogue/page-1.html", "http://127.0.0.1:8099/catalogue/page-2.html"]'
+resonate promises get scrape-1
 ```
 
 `--worker-port 0` lets several guests share the host; in a real sandbox each
@@ -106,12 +110,13 @@ command = ["rn8", "--", "/sdk/node_modules/.bin/tsx", "/sdk/examples/sandbox/scr
 
 With `TENSORLAKE_API_KEY` in the server's environment.
 
-**3. Run the host.**
+**3. Run the worker, and invoke it.**
 
 ```shell
-BROWSER=sandbox://tensorlake/resonate-browser npx tsx worker.ts
-# https://books.toscrape.com/catalogue/page-1.html: 20 books, first: A Light in the Attic £51.77
-# …
+npx tsx worker.ts &
+resonate invoke scrape-1 --func scrapeAll --arg '["https://books.toscrape.com/catalogue/page-1.html",
+  "https://books.toscrape.com/catalogue/page-2.html", "https://books.toscrape.com/catalogue/page-3.html"]'
+resonate promises get scrape-1   # resolved: three pages, 20 books each
 ```
 
 With a quota smaller than the fan-out, the sandboxes take turns: the plugin's
