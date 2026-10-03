@@ -10,7 +10,7 @@ echo "## build $(date -u +%T)"
 SRC_TGZ=$HOME/src.tgz ./build.sh 2>&1 | tail -2
 echo "## differential against the oracle, on Cloud SQL $(date -u +%T)"
 url=$(fresh_db diff)
-ssh_to $PREFIX-builder $(zone_of 1) "source \$HOME/.cargo/env; cd ~/src/impl/server/core && TEST_POSTGRES_URL='$url' TEST_BACKENDS=postgres CARGO_TARGET_DIR=~/target cargo test --release --test differential 2>&1 | grep -E 'test result|FAILED|panicked|diverge|mismatch' | head -20"
+ssh_to $PREFIX-builder $(zone_of 1) "source \$HOME/.cargo/env; cd ~/src/impl/server/core && TEST_POSTGRES_URL='$url' CARGO_TARGET_DIR=~/target cargo test --release --test differential 2>&1 | grep -E 'test result|FAILED|panicked|diverge|mismatch' | head -20"
 $G compute instances delete $PREFIX-builder --zone $(zone_of 1) >/dev/null 2>&1 &
 echo "## postgres, 1 node, after the fix $(date -u +%T)"
 export PG_POOL=${PG_POOL:-64}
@@ -20,4 +20,4 @@ PG_URL=$(fresh_db life) BACKEND=postgres ROUTES=any ./ab.sh 1 c4 c16 c64 250 500
 PG_URL=$(fresh_db wf) BACKEND=postgres ROUTES=any MODE=workflow ./ab.sh 1 c4 c16 c64 100 250 500 1000 2>&1 | show
 kill $w; echo "-- postgres samples:"; cut -c1-200 /tmp/pgwatch.log | sed 's/^/   /' | tail -20
 echo "## plans and scans $(date -u +%T)"
-bash /tmp/pgscan.sh 2>/dev/null | grep -E 'promises' | tail -2
+for db in $($G sql databases list --instance=$PREFIX-pg --format='value(name)' | grep -E '^rb_(life|wf)_' | tail -2); do ./pgaudit.sh $db; done
