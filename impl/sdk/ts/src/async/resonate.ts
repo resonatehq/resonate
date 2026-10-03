@@ -46,6 +46,9 @@ export interface ResonateSchedule {
   delete(): Promise<void>;
 }
 
+/** What one push came to: the task's status, or why there was none. */
+type Outcome = { ok: true; status: Status | undefined } | { ok: false; error: unknown };
+
 type SubscriptionEntry = {
   promise: Promise<PromiseRecord>;
   resolve: (r: PromiseRecord) => void;
@@ -76,7 +79,7 @@ export class Resonate {
   private subscriptions: Map<string, SubscriptionEntry> = new Map();
   private subscribeEvery: number;
   private intervalId: ReturnType<typeof setInterval> | undefined;
-  /** The push listener, while `handle()` or `serve()` has one open. */
+  /** The push listener, while `handle()` or `listen()` has one open. */
   private listener: { close(): void } | undefined;
 
   public readonly promises: Promises;
@@ -111,7 +114,8 @@ export class Resonate {
     network?: Network;
     /**
      * Handed work rather than asking for it: no polling, no connection held
-     * open — work arrives through {@link Resonate.handle}. For a sandbox
+     * open — work arrives through {@link Resonate.fetch}, {@link Resonate.handle}
+     * or {@link Resonate.listen}. For a sandbox
      * guest behind rn8, or a serverless function. Defaults to
      * `RESONATE_PUSH=1`, which rn8 sets.
      */
@@ -449,16 +453,34 @@ export class Resonate {
   }
 
   /**
+   * The push endpoint, as a web-standard fetch handler: one pushed `execute`
+   * in, its answer out — once the step is over, `{"status":"completed"}` or
+   * `{"status":"suspended"}`.
+   *
+   * The primitive the rest is built on, and what a fetch runtime takes as is:
+   *
+   * ```ts
+   * Deno.serve(resonate.fetch);
+   * Bun.serve({ fetch: resonate.fetch });
+   * export default { fetch: resonate.fetch };   // Cloudflare Workers
+   * ```
+   *
+   * Bound, so it can be passed around without its instance.
+   */
+  public readonly fetch = async (request: Request): Promise<Response> => {
+    return (await this.respond(request)).response;
+  };
+
+  /**
    * Handle one pushed task, then stop.
    *
-   * With a message — the `execute` a serverless platform delivered — run it
-   * until it completes or suspends and resolve with the outcome; the caller
-   * answers its own request.
+   * With a message — the `execute` a platform delivered — run it until it
+   * completes or suspends and resolve with the outcome.
    *
    * Without one, take it over HTTP: listen on `PORT` (default 8080, on `HOST`,
-   * default loopback), accept one push, run it, answer when the step is over,
-   * and close. That is the whole life of a sandbox guest — rn8 pushes one
-   * task and the process should be gone once it is done:
+   * default loopback), answer one push through {@link Resonate.fetch}, and
+   * close. That is the whole life of a sandbox guest — rn8 pushes one task and
+   * the process should be gone once it is done:
    *
    * ```ts
    * const resonate = new Resonate();
@@ -468,7 +490,7 @@ export class Resonate {
    *
    * Either way the instance is stopped afterwards: heartbeat, timers and
    * network are released and nothing keeps the process alive. To keep taking
-   * pushes, use {@link Resonate.serve}.
+   * pushes, use {@link Resonate.listen}.
    */
   public async handle(msg?: Message): Promise<Status | undefined> {
     try {
@@ -476,7 +498,7 @@ export class Resonate {
         return await this.core.onMessage(msg);
       }
       return await new Promise<Status | undefined>((resolve, reject) => {
-        this.listen(true, (outcome) => (outcome.ok ? resolve(outcome.status) : reject(outcome.error))).catch(reject);
+        this.serveHttp(true, (outcome) => (outcome.ok ? resolve(outcome.status) : reject(outcome.error))).catch(reject);
       });
     } finally {
       await this.stop();
@@ -484,23 +506,49 @@ export class Resonate {
   }
 
   /**
-   * Take pushed tasks until stopped.
+   * Take pushed tasks over HTTP until stopped.
    *
-   * Listens on `PORT` (default 8080, on `HOST`, default loopback) and runs
-   * every `execute` POSTed to it, each answered when its step is over — for a
-   * push worker that stays warm between tasks, such as a serverless container
-   * that is reused. Resolves once listening; {@link Resonate.stop} closes the
-   * listener along with everything else.
+   * Listens on `PORT` (default 8080, on `HOST`, default loopback) and answers
+   * every push through {@link Resonate.fetch} — for a push worker that stays
+   * warm between tasks, such as a reused serverless container. Resolves once
+   * listening; {@link Resonate.stop} closes the listener with everything else.
    */
-  public async serve(): Promise<void> {
-    await this.listen(false, () => {});
+  public async listen(): Promise<void> {
+    await this.serveHttp(false, () => {});
   }
 
-  /** Accept pushes over HTTP: one, then close (`once`), or until stopped. */
-  private async listen(
-    once: boolean,
-    done: (outcome: { ok: true; status: Status | undefined } | { ok: false; error: unknown }) => void,
-  ): Promise<void> {
+  /** A push, answered: the Response, and the outcome behind it. */
+  private async respond(request: Request): Promise<{ response: Response; outcome: Outcome }> {
+    const json = (status: number, body: unknown) =>
+      new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+
+    if (request.method !== "POST") {
+      const error = new Error("method not allowed: push with POST");
+      return { response: json(405, { error: error.message }), outcome: { ok: false, error } };
+    }
+    let message: Message;
+    try {
+      message = (await request.json()) as Message;
+    } catch (error) {
+      return { response: json(400, { error: "the body is not JSON" }), outcome: { ok: false, error } };
+    }
+    try {
+      const status = await this.core.onMessage(message);
+      return {
+        response: json(200, { status: status?.kind === "done" ? "completed" : "suspended" }),
+        outcome: { ok: true, status },
+      };
+    } catch (error) {
+      const text = error instanceof Error ? error.message : String(error);
+      return { response: json(500, { error: text }), outcome: { ok: false, error } };
+    }
+  }
+
+  /**
+   * Node's HTTP server in front of {@link Resonate.respond}: one push, then
+   * close (`once`), or until stopped.
+   */
+  private async serveHttp(once: boolean, done: (outcome: Outcome) => void): Promise<void> {
     // Loaded here, not at the top: the async engine also runs where there is
     // no node:http, and only this path needs it.
     const http = await import("node:http");
@@ -510,19 +558,22 @@ export class Resonate {
     const server = http.createServer(async (req, res) => {
       // One push, and only one: anything after it is turned away.
       if (once) server.close();
-      try {
-        const chunks: Uint8Array[] = [];
-        for await (const chunk of req) chunks.push(chunk as Uint8Array);
-        const message = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Message;
-        const status = await this.core.onMessage(message);
-        res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({ status: status?.kind === "done" ? "completed" : "suspended" }));
-        done({ ok: true, status });
-      } catch (error) {
-        res.writeHead(500, { "content-type": "application/json" });
-        res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
-        done({ ok: false, error });
+      const chunks: Uint8Array[] = [];
+      for await (const chunk of req) chunks.push(chunk as Uint8Array);
+      const headers = new Headers();
+      for (const [k, v] of Object.entries(req.headers)) {
+        if (typeof v === "string") headers.set(k, v);
       }
+      const request = new Request(`http://${req.headers.host ?? `${host}:${port}`}${req.url ?? "/"}`, {
+        method: req.method,
+        headers,
+        body: req.method === "GET" || req.method === "HEAD" ? undefined : Buffer.concat(chunks),
+      });
+
+      const { response, outcome } = await this.respond(request);
+      res.writeHead(response.status, Object.fromEntries(response.headers));
+      res.end(await response.text());
+      done(outcome);
     });
     this.listener = server;
 

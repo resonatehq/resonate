@@ -28,7 +28,9 @@ the sandbox, rn8 starts `scraper.ts` with `RESONATE_PUSH=1`, so `new Resonate()`
 does not poll; `resonate.handle()` takes the one task rn8 pushes, answers when
 it is done, and shuts the instance down — nothing lingers. (A push worker that
 should stay up between tasks, like a reused serverless container, calls
-`resonate.serve()` instead: same pushes, until `stop()`.) The browser, the
+`resonate.listen()` instead: same pushes, until `stop()`. Both sit on
+`resonate.fetch(request)`, a web-standard fetch handler that Deno, Bun and
+Cloudflare Workers take as is.) The browser, the
 part that runs whatever JavaScript a page sends it, lands in a throwaway VM
 that holds no secrets.
 
