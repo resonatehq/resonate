@@ -296,14 +296,29 @@ impl Backend for Unikraft {
     async fn exec(&self, handle: &Handle, command: Command) -> Result<UnikraftProcess, Error> {
         let api = self.api()?;
         let token = format!("{:016x}{:016x}", fastrand::u64(..), fastrand::u64(..));
-        let resp = api
-            .request(reqwest::Method::POST, "/v1/instances")
-            .json(&self.create_body(&handle.image, &command, &token))
-            .send()
-            .await
-            .map_err(err)?;
-        let created: Instance =
-            serde_json::from_value(api.instance(resp, "create instance").await?).map_err(err)?;
+        let body = self.create_body(&handle.image, &command, &token);
+        let o = &self.inner.options;
+        // Refused for quota — the account's memory or instances all in use —
+        // is retried until the instance would have had to be up: a fan-out
+        // wider than the quota queues rather than fails.
+        let deadline = Instant::now() + o.ready_timeout;
+        let mut backoff = Duration::from_millis(500);
+        let created = loop {
+            let resp = api
+                .request(reqwest::Method::POST, "/v1/instances")
+                .json(&body)
+                .send()
+                .await
+                .map_err(err)?;
+            match api.instance(resp, "create instance").await {
+                Err(e) if is_quota(&e) && Instant::now() + backoff < deadline => {
+                    tokio::time::sleep(backoff).await;
+                    backoff = (backoff * 2).min(Duration::from_secs(5));
+                }
+                other => break other?,
+            }
+        };
+        let created: Instance = serde_json::from_value(created).map_err(err)?;
         let uuid = created
             .uuid
             .ok_or_else(|| err(format!("create instance: no uuid ({:?})", created.message)))?;
@@ -314,7 +329,6 @@ impl Backend for Unikraft {
             .and_then(|g| g.domains.into_iter().next())
             .map(|d| d.fqdn)
             .ok_or_else(|| err("create instance: no domain"))?;
-        let o = &self.inner.options;
         Ok(UnikraftProcess::start(
             api,
             Edge {
@@ -523,6 +537,11 @@ async fn pump_log(api: Api, uuid: String, poll: Duration, mut to: DuplexStream) 
             tokio::time::sleep(poll).await;
         }
     }
+}
+
+/// Unikraft's answer when the account has no room for another instance.
+fn is_quota(e: &Error) -> bool {
+    e.0.to_ascii_lowercase().contains("quota")
 }
 
 #[cfg(test)]

@@ -1,0 +1,4 @@
+spec: v0.6
+runtime: base-compat:latest
+rootfs: ./Dockerfile
+cmd: ["/usr/local/bin/rn8", "--", "/sdk/node_modules/.bin/tsx", "/sdk/examples/sandbox/scraper.ts"]

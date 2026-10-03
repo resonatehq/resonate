@@ -125,3 +125,48 @@ resonate promises get scrape-1   # resolved: three pages, 20 books each
 With a quota smaller than the fan-out, the sandboxes take turns: the plugin's
 `concurrency` queues dispatches, and a create refused for quota waits and
 retries rather than failing.
+
+## Run it in Unikraft Cloud
+
+Verified end to end: the same three pages, each scraped by Chromium in its own
+Unikraft instance, in about 8 seconds; an instance boots and runs its step in
+2–4.
+
+Unikraft gives an instance no stdin, so rn8 takes its frames over HTTP
+instead (`--listen`), behind Unikraft's edge and a token only the plugin
+holds. The image is the same scraper, but small: an account's images are
+capped at 1 GiB, and Playwright's image alone is 2.6 GB.
+
+**1. Build and push the image.** `unikraft/Dockerfile` copies only what the
+scraper runs out of Playwright's image (~580 MB). Its build context holds a
+static `rn8` and the SDK with its dependencies already installed — only
+`cron-parser`, `eventsource` and `tsx` at the top level, and this example's
+`playwright-core`:
+
+```shell
+cargo build --release -p resonate-sandbox-rn8 --target x86_64-unknown-linux-musl
+# context/rn8, context/sdk/{src,examples/sandbox,node_modules}, then:
+cp unikraft/Dockerfile unikraft/Kraftfile context/
+cd context && UKC_TOKEN=… kraft pkg --push --plat kraftcloud --arch x86_64 \
+  --name index.unikraft.io/<user>/resonate-browser:latest .
+```
+
+**2. Point the plugin at it.** Unikraft has no outbound-network policy, so the
+provider requires `egress = "all"`; the image's own command is rn8.
+
+```toml
+[workers.worker_sandbox]
+enabled = true
+backend = "unikraft"
+require_digest = false     # a registry tag, not an OCI digest
+egress = "all"             # Unikraft cannot restrict an instance's network
+cpus = 1
+memory_mib = 2048
+```
+
+With `UKC_TOKEN` in the server's environment.
+
+**3. Run the worker, and invoke it**, with the target in `worker.ts` set to
+`"sandbox://unikraft/<user>/resonate-browser:latest"` — as for Tensorlake.
+Wider than the account's memory quota, a fan-out queues: a create refused for
+quota waits and retries.

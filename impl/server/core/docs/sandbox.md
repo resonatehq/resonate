@@ -12,13 +12,14 @@ into the image as its entrypoint. SDKs run unchanged.
 | `resonate-sandbox` | The frame protocol and the `Backend` / `Process` traits, shared by both ends |
 | `resonate-sandbox-microsandbox` | A microsandbox microVM per task, through the `msb` CLI |
 | `resonate-sandbox-tensorlake` | A Tensorlake sandbox per task, through Tensorlake's HTTP API |
+| `resonate-sandbox-unikraft` | A Unikraft Cloud instance per task, through its HTTP API |
 | `resonate-sandbox-rn8` | `rn8`, the relay in the guest |
 
 ## Addressing
 
 ```text
 sandbox://<image>              the default provider (`backend`)
-sandbox://<provider>/<image>   microsandbox, tensorlake or local
+sandbox://<provider>/<image>   microsandbox, tensorlake, unikraft or local
 ```
 
 `<image>` is an OCI reference pinned by digest, e.g.
@@ -50,7 +51,7 @@ its step by more than `exit_grace`.
 ```toml
 [workers.worker_sandbox]
 enabled = true
-backend = "microsandbox"   # the default provider: microsandbox, tensorlake, local
+backend = "microsandbox"   # the default provider: microsandbox, tensorlake, unikraft, local
 cpus = 2                   # per sandbox; absent = provider default
 memory_mib = 1024          # per sandbox; absent = provider default
 egress = "none"            # "all", or { allow = ["example.com", …] }
@@ -83,6 +84,13 @@ proxy_url = "https://sandbox.tensorlake.ai"
 timeout_secs = 900         # Tensorlake reaps the sandbox after this, plugin or not
 ready_timeout = 120000     # ms for a new sandbox to start running
 
+[workers.worker_sandbox.unikraft]
+enabled = false
+token = "…"                # absent: UKC_TOKEN; required either way
+metro = "fra"              # api_url defaults to https://api.<metro>.unikraft.cloud
+port = 9000                # rn8's --listen port inside; not the worker's 8080
+ready_timeout = 120000     # ms for a new instance to boot and answer
+
 [workers.worker_sandbox.local]
 enabled = false            # no isolation: development and tests only
 ```
@@ -108,6 +116,24 @@ reaches its hosts and refuses the rest. What the live runs taught:
 - Images are registered by name in the project (built from a Dockerfile on
   Tensorlake's side); with a name rather than an OCI digest, set
   `require_digest = false` for now.
+
+The `unikraft` provider has no stdin to write to: Unikraft fixes an
+instance's arguments and environment at creation, and an instance is an HTTP
+service behind Unikraft's edge. So `exec` creates the instance — started, with
+443 at the edge to rn8's port inside — and sets `RN8_LISTEN` and a fresh
+`RN8_TOKEN`, which turns rn8's frames to HTTP: `GET /frames` streams them out,
+`POST /frames` sends them in, `POST /frames/close` is EOF, each with the token
+as a bearer. rn8's diagnostics are the console log; the exit status is the
+instance's once it stops; `destroy` deletes it. A create refused for quota is
+retried within `ready_timeout`. Unikraft has no outbound-network policy, so
+the provider requires `egress = "all"`, and refuses an image whose rule asks
+for less.
+
+Verified against the live service (`resonate-sandbox-unikraft/tests/live.rs`,
+run with `UKC_TOKEN` and `UKC_LIVE_IMAGE`): first relayed request ~1.6s after
+create, step over ~2.4s, exit status from the instance, the console's last
+lines, nothing left behind; and the browser example end to end. Images go to
+Unikraft's registry with `kraft pkg --push`, under a 1 GiB per-account cap.
 
 The `microsandbox` backend needs `msb` on the host (Linux with KVM, or macOS on
 Apple Silicon). It drives the CLI rather than linking the `microsandbox` SDK
@@ -156,8 +182,8 @@ completed or suspended — and rn8 exits then.
 
 ## Frames
 
-Newline-delimited JSON on rn8's stdin and stdout; rn8's own diagnostics go to
-stderr.
+Newline-delimited JSON on rn8's stdin and stdout — or, with `--listen`, over
+HTTP as above; rn8's own diagnostics go to stderr.
 
 ```text
 plugin → rn8
