@@ -10,6 +10,9 @@
 //!   actually ships.
 
 const std = @import("std");
+
+/// Check the spec's catalogue on every step every simulated server takes.
+pub const catalogue_always = true;
 const stdx = @import("stdx.zig");
 const json = @import("json.zig");
 const store_mod = @import("store.zig");

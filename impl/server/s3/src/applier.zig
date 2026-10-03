@@ -65,6 +65,7 @@ const KeySpace = store_mod.KeySpace;
 const Failure = enum { contended, timeout };
 
 const properties = @import("properties.zig");
+const catalogue = @import("catalogue.zig");
 
 pub const Config = struct {
     machine: handle.Config = .{},
@@ -521,9 +522,15 @@ const Actor = struct {
         var it = self.batch.head;
         while (it) |work| : (it = work.next) {
             if (work.now > latest) latest = work.now;
+            // The spec's catalogue, on this one step: a copy of the document
+            // before it, compared with the document after. Nothing at all
+            // unless the catalogue is on.
+            var before = catalogue.Snapshot.take(d, self.origin, self.applier.allocator);
+            defer before.release();
             const outcome = self.apply_one(d, work, a) catch {
                 return self.fail_batch(503, "out of memory deciding");
             };
+            before.check(work.now, d);
             work.staged_status = outcome.reply.status;
             work.staged_data = outcome.reply.data;
             self.effects.appendSlice(a, outcome.effects) catch {

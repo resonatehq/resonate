@@ -192,6 +192,7 @@ pub const Report = struct {
             \\  checked         {d} operations -> {s}
             \\  final state     {s}
             \\  coverage        {d} operation kinds never succeeded
+            \\  catalogue       {d} steps checked against the spec
             \\
         , .{
             self.seed,
@@ -221,6 +222,7 @@ pub const Report = struct {
                 "not checked"
             else if (self.refined) "matches the order found" else "BROKEN",
             self.uncovered,
+            @import("../catalogue.zig").steps_checked,
         });
         if (self.blocked_kind.len > 0) {
             try writer.print("  blocked on     {s} after {d} operations\n", .{ self.blocked_kind, self.prefix_length });

@@ -196,8 +196,10 @@ pub fn catalog(comptime Namespace: type) []const Entry {
     comptime {
         var entries: []const Entry = &.{};
         for (@typeInfo(Namespace).@"struct".decls) |decl| {
+            // The type first: a `var` in the namespace has no value at
+            // compile time, but it does have a type, and it is not `type`.
+            if (@TypeOf(@field(Namespace, decl.name)) != type) continue;
             const value = @field(Namespace, decl.name);
-            if (@TypeOf(value) != type) continue;
             if (!@hasDecl(value, "skull_property")) continue;
             entries = entries ++ [_]Entry{.{ .name = decl.name, .kind = value.kind, .message = value.message }};
         }
@@ -233,6 +235,13 @@ pub fn Panic(comptime Panicked: type) type {
             std.debug.defaultPanic(message, first_trace_addr);
         }
     }.call);
+}
+
+/// Whether this process is talking to a skulld agent: false outside skulld,
+/// after one failed look for the socket.
+pub fn active() bool {
+    if (!enabled) return false;
+    return connection() != null;
 }
 
 /// The run's seeded randomness under skulld, the OS's otherwise.

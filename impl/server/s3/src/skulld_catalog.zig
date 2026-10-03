@@ -5,10 +5,11 @@
 const std = @import("std");
 const skull = @import("skull.zig");
 const properties = @import("properties.zig");
+const catalogue = @import("catalogue.zig");
 
 pub fn main() !void {
     const out = std.io.getStdOut().writer();
-    inline for (comptime skull.catalog(properties)) |entry| {
+    inline for (comptime skull.catalog(properties) ++ skull.catalog(catalogue)) |entry| {
         try std.json.stringify(.{
             .name = entry.name,
             .kind = @tagName(entry.kind),

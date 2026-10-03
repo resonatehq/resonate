@@ -568,6 +568,7 @@ fn run(allocator: std.mem.Allocator, args: Args) !void {
     install_signal_handlers();
     // Under skulld, the full list of properties, before any is evaluated.
     skull.declare(properties);
+    skull.declare(@import("catalogue.zig"));
 
     var process = Process{
         .allocator = allocator,
