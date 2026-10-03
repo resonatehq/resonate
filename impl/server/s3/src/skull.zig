@@ -10,7 +10,7 @@
 //!     pub const acked_never_lost = skull.Always("an acknowledged write is never lost");
 //!
 //! `catalog(properties)` walks that namespace at compile time, so the full list
-//! is known before anything runs: `zig build skull-catalog` prints it, and the
+//! is known before anything runs: `zig build skulld-catalog` prints it, and the
 //! program announces it at startup, which is what lets skulld report a
 //! `sometimes` that never held or a `reachable` never reached.
 //!

@@ -1,4 +1,4 @@
-//! `zig build skull-catalog`: the properties this server reports to skulld,
+//! `zig build skulld-catalog`: the properties this server reports to skulld,
 //! as JSON, one per line. Nothing here runs the server: the list is computed
 //! at compile time from `properties.zig`.
 

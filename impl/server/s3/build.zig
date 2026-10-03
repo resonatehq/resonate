@@ -54,13 +54,13 @@ pub fn build(b: *std.Build) void {
     // The static list of properties, as JSON, without running the server: it is
     // computed at compile time from `src/properties.zig`.
     const catalog = b.addExecutable(.{
-        .name = "skull-catalog",
-        .root_source_file = b.path("src/skull_catalog.zig"),
+        .name = "skulld-catalog",
+        .root_source_file = b.path("src/skulld_catalog.zig"),
         .target = target,
         .optimize = optimize,
     });
     const run_catalog = b.addRunArtifact(catalog);
-    b.step("skull-catalog", "Print the properties this server reports to skulld").dependOn(&run_catalog.step);
+    b.step("skulld-catalog", "Print the properties this server reports to skulld").dependOn(&run_catalog.step);
 
     // ── The simulator (VOPR) ──────────────────────────────────────────────────
     const sim = b.addExecutable(.{

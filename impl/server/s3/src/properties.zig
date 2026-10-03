@@ -1,7 +1,7 @@
 //! Every property this server reports to skulld, declared once.
 //!
 //! The static list is this file: `skull.catalog(@This())` walks it at compile
-//! time, `zig build skull-catalog` prints it, and the server announces it at
+//! time, `zig build skulld-catalog` prints it, and the server announces it at
 //! startup. A property is a `pub const` here and a `check` or `reached` at the
 //! place it is decided; see `skull.zig`.
 
