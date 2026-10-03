@@ -18,7 +18,10 @@ fi
 cpu() { ssh_to $PREFIX-n1 $(zone_of 1) "sleep 18; top -bn2 -d5 | grep '^%Cpu' | tail -1" | awk '{print 100-$8}'; }
 for r in "$@"; do for route in ${ROUTES:-any owner}; do
   cpu > /tmp/ab-cpu &
-  echo "-- $n nodes, $r ops/s, route=$route"
-  ROUTE=$route NODES=$n ./run.sh load ab$n-${BACKEND:-kafka}-p$PARTITIONS-${MODE:-lifecycle}-$route-$r 2 --mode ${MODE:-lifecycle} --rate $r --seconds 30 --warmup 5 --max-inflight 30000 2>&1 | sed -n 2,4p | cut -c1-170
+  # A rate cN is a closed loop: N clients per load generator, one op in flight each.
+  if [[ $r == c* ]]; then drive="--clients ${r#c}"; label="${r#c} clients per loadgen (closed loop)"
+  else drive="--rate $r"; label="$r ops/s"; fi
+  echo "-- $n nodes, $label, route=$route"
+  ROUTE=$route NODES=$n ./run.sh load ab$n-${BACKEND:-kafka}-p$PARTITIONS-${MODE:-lifecycle}-$route-$r 2 --mode ${MODE:-lifecycle} $drive --seconds 30 --warmup 5 --max-inflight 30000 2>&1 | sed -n 2,4p | cut -c1-170
   wait; echo "   node 1 CPU: $(cat /tmp/ab-cpu)%"
 done; done
