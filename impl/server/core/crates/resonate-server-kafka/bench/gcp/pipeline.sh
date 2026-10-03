@@ -15,7 +15,7 @@ wait_for $PREFIX-builder $(zone_of 1) true || exit 1
 step build;    SRC_TGZ=$HOME/src.tgz ./build.sh 2>&1 | tail -20; gcloud storage cat $BUCKET/bin/REVISION
 $G compute instances delete $PREFIX-builder --zone $(zone_of 1) >/dev/null 2>&1 &
 step brokers;  for t in 1 2 3; do ./up.sh brokers 2>&1 | grep -vE "^NAME|^$|Updated"; [ -s .brokers ] && break; sleep 30; done
-for i in 1 2 3; do wait_for $PREFIX-b$i $(zone_of $i) "sudo docker ps | grep -q kafka" || exit 1; done
+for i in 1 2 3; do wait_for $PREFIX-b$i $(zone_of $i) "sudo docker ps --format {{.Names}} | grep -qE \"^(kafka|redpanda)\$\"" || exit 1; done
 step nodes;    for t in 1 2 3; do ./up.sh nodes $nodes 2>&1 | grep -E "ERROR|stockout" || break; sleep 30; done
 step loadgens; for t in 1 2 3; do ./up.sh loadgens $loadgens 2>&1 | grep -E "ERROR|stockout" || break; sleep 30; done
 for i in $(seq 1 $nodes); do wait_for $PREFIX-n$i $(zone_of $i) "systemctl is-enabled resonate" || exit 1; done

@@ -52,10 +52,17 @@ brokers)
     ip=$($G compute instances describe $PREFIX-b$i --zone $(zone_of $i) --format='value(networkInterfaces[0].networkIP)')
     voters+="${voters:+,}$i@$ip:9093"; brokers+="${brokers:+,}$ip:9092"
   done
+  # BROKER_KIND=redpanda: Redpanda instead of Kafka, on the same machines.
+  seeds=""; for i in 1 2 3; do ip=$($G compute instances describe $PREFIX-b$i --zone $(zone_of $i) --format='value(networkInterfaces[0].networkIP)'); seeds+="${seeds:+,}$ip:33145"; done
   for i in 1 2 3; do
-    $G compute instances add-metadata $PREFIX-b$i --zone $(zone_of $i) \
-      "--metadata=^;^broker-id=$i;voters=$voters;cluster-id=$cluster" \
-      --metadata-from-file=startup-script=broker-startup.sh &
+    if [ "${BROKER_KIND:-kafka}" = redpanda ]; then
+      $G compute instances add-metadata $PREFIX-b$i --zone $(zone_of $i) \
+        "--metadata=^;^seeds=$seeds" --metadata-from-file=startup-script=redpanda-startup.sh &
+    else
+      $G compute instances add-metadata $PREFIX-b$i --zone $(zone_of $i) \
+        "--metadata=^;^broker-id=$i;voters=$voters;cluster-id=$cluster" \
+        --metadata-from-file=startup-script=broker-startup.sh &
+    fi
   done; wait
   for i in 1 2 3; do ssh_to $PREFIX-b$i $(zone_of $i) "sudo google_metadata_script_runner startup" >/dev/null 2>&1 & done; wait
   echo "$brokers" > .brokers
