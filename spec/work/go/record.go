@@ -110,17 +110,19 @@ func (r *Recorder) Len() int {
 	return len(r.events)
 }
 
-// Network wraps a transport and records everything crossing it.
+// Network wraps the SSE transport and records everything crossing it.
 func (r *Recorder) Network(url, client string) resonate.Network {
-	return &recordingNet{
-		inner:  httpnet.NewHTTP(url, httpnet.HTTPOptions{}),
-		rec:    r,
-		client: client,
-	}
+	return r.Wrap(httpnet.NewHTTP(url, httpnet.HTTPOptions{}), client)
+}
+
+// Wrap records everything crossing any transport — `httpnet`, or the push
+// network for a server that delivers by POST.
+func (r *Recorder) Wrap(inner resonate.Network, client string) resonate.Network {
+	return &recordingNet{inner: inner, rec: r, client: client}
 }
 
 type recordingNet struct {
-	inner  *httpnet.HTTPNetwork
+	inner  resonate.Network
 	rec    *Recorder
 	client string
 }

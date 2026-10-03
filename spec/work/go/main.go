@@ -128,6 +128,9 @@ func main() {
 		batch      = fs.Uint64("batch", 4, "requests sharing one debug instant")
 		debug      = fs.Bool("debug-time", true, "stamp resonate:debug_time (needs RESONATE_DEBUG=true and debug.start)")
 		timeout    = fs.Duration("timeout", 60*time.Second, "per-run timeout")
+		transport  = fs.String("transport", "poll", "how workers receive work: poll (SSE, as the SDK ships) or push (the server POSTs to each client)")
+		pushHost   = fs.String("push-host", "127.0.0.1", "push: the host the server reaches clients at")
+		pushPort   = fs.Int("push-port", 0, "push: client i listens on push-port+i; 0 takes any free port")
 	)
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: scenarios %s [flags]\n\n  %s\n\nflags:\n", name, sc.help)
@@ -179,7 +182,23 @@ func main() {
 		go func(cid int) {
 			defer wg.Done()
 			client := origins[cid]
-			r, err := resonate.New(resonate.Config{Network: rec.Network(*url, client)})
+			var network resonate.Network
+			switch *transport {
+			case "push":
+				port := 0
+				if *pushPort > 0 {
+					port = *pushPort + cid
+				}
+				push, err := NewPushNetwork(*url, client, *pushHost, port)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "client %s: %v\n", client, err)
+					return
+				}
+				network = rec.Wrap(push, client)
+			default:
+				network = rec.Network(*url, client)
+			}
+			r, err := resonate.New(resonate.Config{Network: network})
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "client %s: %v\n", client, err)
 				return
