@@ -31,7 +31,11 @@ builder)
     --machine-type $BUILDER_TYPE $COMMON $META --boot-disk-size=100GB --boot-disk-type=pd-ssd
   ;;
 brokers)
-  cluster=$(python3 -c 'import uuid,base64;print(base64.urlsafe_b64encode(uuid.uuid4().bytes).decode().rstrip("="))')
+  # The brokers' cluster id: kept if they already have one, since their data
+  # directories are stamped with it and a broker refuses any other.
+  cluster=$($G compute instances describe $PREFIX-b1 --zone $(zone_of 1) \
+    --format='value(metadata.items.cluster-id)' 2>/dev/null)
+  [ -n "$cluster" ] || cluster=$(python3 -c 'import uuid,base64;print(base64.urlsafe_b64encode(uuid.uuid4().bytes).decode().rstrip("="))')
   # Create first without starting Kafka, to learn the IPs the voters need.
   for i in 1 2 3; do
     z=$(zone_of $i)
