@@ -345,6 +345,7 @@ export fn metrics(id: u32) void {
         .{ "resonate_requests_total", "Protocol requests answered", runtime.server.requests },
         .{ "resonate_commits_total", "Documents committed", runtime.applier.commits },
         .{ "resonate_contentions_total", "Commits that lost a race and were re-decided", runtime.applier.contentions },
+        .{ "resonate_timeouts_total", "Commits the store did not answer, which were re-decided", runtime.applier.timeouts },
         .{ "resonate_cache_hits_total", "Documents served from memory", runtime.applier.cache.hits },
         .{ "resonate_cache_misses_total", "Documents read from the store", runtime.applier.cache.misses },
         .{ "resonate_messages_sent_total", "Messages handed to a transport", runtime.sender.sent },

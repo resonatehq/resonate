@@ -83,9 +83,12 @@ pub const Request = struct {
         committing,
         disarming,
         firing,
+        /// Backing off before reading again, after the store did not answer.
+        waiting,
         done,
     } = .start,
     service: *Service = undefined,
+    backoff: env.Timeout = .{ .at_ms = 0 },
     sched: ?ScheduleDoc = null,
     etag: ?store_mod.Etag = null,
     /// What the schedule pointed at when this round started, and which write
@@ -107,12 +110,13 @@ pub const Request = struct {
     /// `create` only: what the request asked for, held between the validation
     /// and the read that decides whether there is anything to create.
     create_fields: ?CreateFields = null,
-    /// How many times a contended write has been re-decided.
+    /// How many times this request has been re-decided, after contention or a
+    /// store that did not answer.
     attempt: u32 = 0,
 };
 
-/// How many times a contended schedule is re-read before the caller is told the
-/// truth: this did not happen, try again.
+/// How many times a schedule is re-read — after contention, or after the store
+/// did not answer — before the caller is told the truth.
 pub const max_cas_retries: u32 = 8;
 
 const CreateFields = struct {
@@ -223,7 +227,7 @@ pub const Service = struct {
                     }
                 }
             },
-            .timeout => return fail(req, 503, store_mod.timeout_message),
+            .timeout => return self.retry_after_timeout(req),
             else => return fail(req, 500, "the store answered a read with something else"),
         }
         switch (req.kind) {
@@ -356,9 +360,32 @@ pub const Service = struct {
     fn on_armed(self: *Service, req: *Request, result: store_mod.Result) void {
         switch (result) {
             .written => self.commit(req),
-            .timeout => fail(req, 503, store_mod.timeout_message),
+            // As in the applier: the schedule is not written over a deadline
+            // that may not exist. A timer object that did land is rewritten by
+            // the same decision or collected as an orphan.
+            .timeout => self.retry_after_timeout(req),
             else => fail(req, 503, "the schedule's deadline could not be armed"),
         }
+    }
+
+    /// The store did not answer. The core decides what that means for this
+    /// request — nothing, yet — and starts it over from a fresh read, after a
+    /// backoff, until the attempts run out. Only then is the caller told "may or
+    /// may not".
+    fn retry_after_timeout(self: *Service, req: *Request) void {
+        req.attempt += 1;
+        if (req.attempt > max_cas_retries) return fail(req, 503, store_mod.timeout_message);
+        req.sched = null;
+        req.etag = null;
+        req.phase = .waiting;
+        const at = self.applier.clock.now_ms() + self.applier.backoff_ms(req.attempt);
+        req.backoff = .{ .at_ms = at };
+        req.backoff.listen(*Request, req, on_backoff);
+        self.applier.timer.arm(&req.backoff, at);
+    }
+
+    fn on_backoff(req: *Request, _: *env.Timeout) void {
+        req.service.load(req);
     }
 
     fn commit(self: *Service, req: *Request) void {
@@ -422,7 +449,9 @@ pub const Service = struct {
                     else => fail(req, 409, "the schedule changed while it was being written"),
                 }
             },
-            .timeout => fail(req, 503, store_mod.timeout_message),
+            // It may have landed. Read again and decide again, exactly as after
+            // a refused precondition: if it landed, the re-decision sees it.
+            .timeout => self.retry_after_timeout(req),
             else => fail(req, 500, "the store answered a write with something else"),
         }
     }
@@ -807,14 +836,24 @@ const Fixture = struct {
             .context = &reply,
         };
         self.service.submit(&req);
+        try self.settle(&reply.done);
+        return reply;
+    }
+
+    /// Run until `done`: land what the store holds back, and when nothing is
+    /// left to do but wait, let the clock reach the next thing waiting — a
+    /// request backing off after a timeout is one.
+    fn settle(self: *Fixture, done: *const bool) !void {
         var guard: usize = 0;
-        while (!reply.done) {
+        while (true) {
             guard += 1;
             if (guard > 1_000) return error.NeverAnswered;
             self.mem.drain_delayed();
             self.applier.drain();
+            if (done.*) return;
+            const next = self.sim.next_deadline() orelse continue;
+            _ = self.sim.advance_to(next);
         }
-        return reply;
     }
 
     fn fire(self: *Fixture, arena: *std.heap.ArenaAllocator, id: []const u8) !Reply {
@@ -828,8 +867,7 @@ const Fixture = struct {
             .context = &reply,
         };
         self.service.submit(&req);
-        self.applier.drain();
-        try testing.expect(reply.done);
+        try self.settle(&reply.done);
         return reply;
     }
 
@@ -859,8 +897,7 @@ const Fixture = struct {
             .context = &got,
         };
         self.applier.submit(protocol.origin(id), &work);
-        self.applier.drain();
-        try testing.expect(got.done);
+        try self.settle(&got.done);
         if (got.status != 200) return null;
         return got.data;
     }

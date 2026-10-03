@@ -943,6 +943,15 @@ test "a deadline whose sweep did not commit is put back, not lost" {
 
     _ = f.sim.advance_to(1_000_002_000);
     f.applier.drain();
+    // The sweep's commit is decided again after each timeout, with a backoff;
+    // let the clock run until the core has used every attempt and given up.
+    var guard: usize = 0;
+    while (f.timerd.failed == 0) : (guard += 1) {
+        if (guard > 200) return error.NeverGaveUp;
+        const next = f.sim.next_deadline() orelse break;
+        _ = f.sim.advance_to(next);
+        f.applier.drain();
+    }
     try testing.expect(f.timerd.failed >= 1);
     // Still armed, a little later.
     try testing.expectEqual(@as(usize, 1), f.timerd.armed_count());

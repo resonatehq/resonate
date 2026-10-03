@@ -1168,22 +1168,21 @@ test "a store that loses races is survived, and nothing is lost" {
     try testing.expect(report.refined);
 }
 
-test "a store that cannot order writes produces timeouts and no wrong answers" {
+test "a store that cannot order writes is absorbed by deciding again" {
     const report = try run(testing.allocator, .{
         .seed = 99,
         .servers = 3,
         .clients = 3,
         .operations = 120,
         .faults = .{ .defer_percent = 80, .conflict_percent = 20, .reorder_percent = 30 },
-        // As below: a 503 is an outcome nobody knows, which this run's search
-        // does not model. `simulator check` does.
-        .check = false,
     });
-    // A 409 is not an answer, so the caller hears what is true — it may or may
-    // not have happened — and never anything worse.
-    try testing.expect(report.status_503 > 0);
+    // A 409 is not an answer. The core treats it as "may or may not", decides
+    // again from a fresh read, and every caller gets a definite answer — which
+    // is also what makes the run checkable.
+    try testing.expectEqual(@as(usize, 0), report.status_503);
     try testing.expectEqual(@as(usize, 0), report.status_5xx);
-    try testing.expect(report.succeeded > 0);
+    try testing.expectEqual(Verdict.linearizable, report.verdict);
+    try testing.expect(report.refined);
 }
 
 test "a store that stops answering produces 503s and no wrong answers" {

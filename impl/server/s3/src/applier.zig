@@ -61,10 +61,15 @@ const Store = store_mod.Store;
 const Etag = store_mod.Etag;
 const KeySpace = store_mod.KeySpace;
 
+/// Why an attempt at an origin did not commit.
+const Failure = enum { contended, timeout };
+
 pub const Config = struct {
     machine: handle.Config = .{},
-    /// How many times a contended origin is re-decided before the caller is
-    /// told the truth: this did not happen, try again.
+    /// How many times an origin is re-decided — after it was contended, or after
+    /// the store did not answer — before the caller is told the truth. Contended
+    /// to the end: this did not happen. A timeout to the end: this may or may
+    /// not have happened.
     max_cas_retries: u32 = 8,
     /// Documents held in memory, and what they are allowed to weigh.
     ///
@@ -324,6 +329,9 @@ const Actor = struct {
     new_timer_generation: u64 = 0,
     effects: std.ArrayListUnmanaged(handle.Effect) = .{},
     attempt: u32 = 0,
+    /// Why the last attempt did not commit: what the caller is told if it was
+    /// the last one.
+    last_failure: Failure = .contended,
 
     op: store_mod.Operation = undefined,
     /// Initialized rather than left undefined: `destroy` has to be able to ask
@@ -478,7 +486,8 @@ const Actor = struct {
                     return self.fail_batch(503, "out of memory");
                 self.before_bytes = buf.items;
             },
-            .timeout => return self.fail_batch(503, store_mod.timeout_message),
+            // Nothing was decided yet, so there is nothing to undo: read again.
+            .timeout => return self.retry(.timeout),
             else => return self.fail_batch(500, "the store answered a read with a write's result"),
         }
         self.decide();
@@ -620,9 +629,11 @@ const Actor = struct {
     fn on_armed(self: *Actor, result: store_mod.Result) void {
         switch (result) {
             .written => self.commit(),
-            // Committing now would leave a deadline nothing will fire. The
-            // caller is told this did not happen, and it did not.
-            .timeout => self.fail_batch(503, store_mod.timeout_message),
+            // Committing now could leave a deadline nothing will fire, so the
+            // document is not written. The timer object may have landed; if the
+            // re-decision arms the same one, writing it again is a no-op, and if
+            // not, it is an orphan, which costs a wasted sweep and nothing else.
+            .timeout => self.retry(.timeout),
             else => self.fail_batch(503, "the deadline could not be armed"),
         }
     }
@@ -655,25 +666,33 @@ const Actor = struct {
                 // again — never replay.
                 self.applier.cache.invalidate(self.origin);
                 self.applier.contentions += 1;
-                self.retry();
+                self.retry(.contended);
             },
             .timeout => {
-                // It may have landed. The caller is told exactly that — not
-                // that it failed — and every operation is idempotent, so the
-                // caller's retry reports whatever is true. Nothing here guesses
-                // which: the cached copy is dropped, because whether the bucket
-                // moved past it is precisely what is not known.
+                // It may have landed. Nothing here guesses which: the cached copy
+                // is dropped, because whether the bucket moved past it is
+                // precisely what is not known, and the batch is decided again
+                // against whatever a fresh read finds. If the write landed, the
+                // re-decision sees it and answers what an idempotent retry
+                // would; if not, it writes again. Either way the caller gets an
+                // answer that is true, and is told "may or may not" only when
+                // every attempt ran out.
                 self.applier.cache.invalidate(self.origin);
-                self.fail_batch(503, store_mod.timeout_message);
+                self.applier.timeouts += 1;
+                self.retry(.timeout);
             },
             else => self.fail_batch(500, "the store answered a write with a read's result"),
         }
     }
 
-    fn retry(self: *Actor) void {
+    fn retry(self: *Actor, why: Failure) void {
         self.attempt += 1;
+        self.last_failure = why;
         if (self.attempt > self.applier.cfg.max_cas_retries) {
-            return self.fail_batch(503, "the origin was contended for too long");
+            return switch (self.last_failure) {
+                .contended => self.fail_batch(503, "the origin was contended for too long"),
+                .timeout => self.fail_batch(503, store_mod.timeout_message),
+            };
         }
         const at = self.applier.clock.now_ms() + self.applier.backoff_ms(self.attempt);
         self.phase = .waiting;
@@ -797,6 +816,8 @@ pub const Applier = struct {
 
     commits: u64 = 0,
     contentions: u64 = 0,
+    /// Commits the store did not answer, which were then decided again.
+    timeouts: u64 = 0,
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -935,7 +956,7 @@ pub const Applier = struct {
         }
     }
 
-    fn backoff_ms(self: *Applier, attempt: u32) i64 {
+    pub fn backoff_ms(self: *Applier, attempt: u32) i64 {
         const base: i64 = @as(i64, 5) * (@as(i64, 1) << @intCast(@min(attempt, 6)));
         const jitter: i64 = if (self.random) |rng|
             @intCast(rng.below(@intCast(base + 1)))
@@ -1446,17 +1467,19 @@ test "contention past the retry limit is reported rather than hidden" {
     try testing.expect(std.mem.indexOf(u8, r.data, "contended") != null);
 }
 
-test "a write the store could not order is a timeout, not a retry" {
+test "a store that never answers is decided again, and then reported as may-or-may-not" {
     const h = try Harness.create(testing.allocator);
     defer h.destroy();
     h.mem.random = &h.rng;
-    // S3's 409: nothing is known about whether it landed, so nothing here
-    // pretends to know — no quiet retry on the assumption that it did not.
+    // S3's 409 on every write: nothing is known about whether any landed. The
+    // core re-decides from a fresh read each time — never replays — and when
+    // the attempts run out, says exactly what it knows.
     h.mem.faults.conflict_percent = 100;
     const r = try h.call("promise.create", "{\"id\":\"o:a\",\"timeoutAt\":9000000000000}");
     try testing.expectEqual(@as(i32, 503), r.status);
     try testing.expect(std.mem.indexOf(u8, r.data, "may or may not") != null);
     try testing.expectEqual(@as(u64, 0), h.applier.contentions);
+    try testing.expectEqual(@as(u64, h.applier.cfg.max_cas_retries + 1), h.applier.timeouts);
 }
 
 test "a store that will not answer becomes a 503, and nothing is sent" {
@@ -1472,16 +1495,22 @@ test "a store that will not answer becomes a 503, and nothing is sent" {
     try testing.expectEqual(@as(u64, 0), h.applier.commits);
 }
 
-test "a write that landed under a lost acknowledgement is safe to retry" {
+test "a write that landed under a lost acknowledgement is answered, once" {
     const h = try Harness.create(testing.allocator);
     defer h.destroy();
     h.mem.random = &h.rng;
     h.mem.faults.lost_ack_percent = 100;
 
+    // The write lands and the store says nothing. The core decides again
+    // against a fresh read, finds its own write there, and answers what is
+    // true — without writing it a second time.
     const first = try h.call("promise.create", "{\"id\":\"o:a\",\"timeoutAt\":9000000000000}");
-    try testing.expectEqual(@as(i32, 503), first.status);
+    try testing.expectEqual(@as(i32, 200), first.status);
+    try testing.expect(std.mem.indexOf(u8, first.data, "\"createdAt\":1000000000") != null);
+    try testing.expectEqual(@as(u64, 1), h.applier.timeouts);
+    try testing.expectEqual(@as(u64, 1), h.mem.puts);
 
-    // It landed. The retry says so, and says it only once.
+    // And a caller's own retry says the same.
     h.mem.faults.lost_ack_percent = 0;
     const retry = try h.call("promise.create", "{\"id\":\"o:a\",\"timeoutAt\":9000000000000}");
     try testing.expectEqual(@as(i32, 200), retry.status);

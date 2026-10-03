@@ -64,7 +64,7 @@ Three kinds of answer, and only three:
 |---|---|---|
 | data — `200`, `304`, `404`, `204` | it happened, and this is what is there | carry on |
 | `412` precondition failed | it did not land, and the state has moved | **re-decide**: read again, decide again, never replay |
-| anything else | nothing — it may or may not have landed | tell the caller 503, *"may or may not have taken effect"*, and let it retry, because every operation is idempotent |
+| anything else | nothing — it may or may not have landed | **decide again** from a fresh read, after a backoff; only when the attempts run out, tell the caller 503, *"may or may not have taken effect"* |
 
 "Anything else" is a `timeout`, and it is deliberately one outcome with no
 reason attached: a deadline (every request has one), a reset, a body cut off
@@ -72,7 +72,14 @@ after its headers, a 5xx, a `409` ("could not order two conditional writes"), a
 200 without an ETag, a listing that does not parse. Each leaves the server
 knowing exactly the same thing — nothing — so none is allowed to tell it more.
 Handling that one case correctly is handling every failure correctly, including
-the ones nobody has listed. A `409` used to be retried here as "the same write
+the ones nobody has listed.
+
+The core handles it by deciding again, the same way it handles a lost race: drop
+the cached copy, read, decide, write. If the write that timed out had landed,
+the fresh read shows it, and the decision answers what an idempotent retry
+would — without writing it twice. If it had not, it is written now. The caller
+sees a definite answer either way, and "may or may not" only once
+`--cas-retries` attempts have all gone unanswered. A `409` used to be retried here as "the same write
 again"; that assumed it had not landed, which is the one thing a `409` does not
 say.
 
