@@ -37,6 +37,8 @@ start)
 #!/bin/bash
 set -e
 systemctl stop resonate
+# The binaries as last built, so a node never runs a stale one.
+gcloud storage cp -q $BUCKET/bin/server $BUCKET/bin/resonate /opt/resonate/ && chmod +x /opt/resonate/server /opt/resonate/resonate
 sed -i '/TOPIC_PREFIX/d; /__PARTITIONS=/d; /__PIPELINE_DEPTH=/d' /etc/resonate.env
 printf 'RESONATE_SERVERS__SERVER_KAFKA__TOPIC_PREFIX=%s\nRESONATE_SERVERS__SERVER_KAFKA__PARTITIONS=%s\nRESONATE_SERVERS__SERVER_KAFKA__PIPELINE_DEPTH=%s\n' \
   '${TOPIC:-resonate}' '$PARTITIONS' '${PIPELINE:-1}' >> /etc/resonate.env
