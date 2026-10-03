@@ -26,7 +26,9 @@ await resonate.handle();
 `ctx.rpc` with a `sandbox://` target is all that sends work to a sandbox. In
 the sandbox, rn8 starts `scraper.ts` with `RESONATE_PUSH=1`, so `new Resonate()`
 does not poll; `resonate.handle()` takes the one task rn8 pushes, answers when
-it is done, and shuts the instance down — nothing lingers. The browser, the
+it is done, and shuts the instance down — nothing lingers. (A push worker that
+should stay up between tasks, like a reused serverless container, calls
+`resonate.serve()` instead: same pushes, until `stop()`.) The browser, the
 part that runs whatever JavaScript a page sends it, lands in a throwaway VM
 that holds no secrets.
 

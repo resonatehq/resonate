@@ -76,6 +76,8 @@ export class Resonate {
   private subscriptions: Map<string, SubscriptionEntry> = new Map();
   private subscribeEvery: number;
   private intervalId: ReturnType<typeof setInterval> | undefined;
+  /** The push listener, while `handle()` or `serve()` has one open. */
+  private listener: { close(): void } | undefined;
 
   public readonly promises: Promises;
   public readonly schedules: Schedules;
@@ -453,10 +455,10 @@ export class Resonate {
    * until it completes or suspends and resolve with the outcome; the caller
    * answers its own request.
    *
-   * Without one, take it over HTTP: listen on `PORT` (default 8080, loopback),
-   * accept one push, run it, answer when the step is over, and close. That is
-   * the whole life of a sandbox guest — rn8 pushes one task and the process
-   * should be gone once it is done:
+   * Without one, take it over HTTP: listen on `PORT` (default 8080, on `HOST`,
+   * default loopback), accept one push, run it, answer when the step is over,
+   * and close. That is the whole life of a sandbox guest — rn8 pushes one
+   * task and the process should be gone once it is done:
    *
    * ```ts
    * const resonate = new Resonate();
@@ -465,50 +467,74 @@ export class Resonate {
    * ```
    *
    * Either way the instance is stopped afterwards: heartbeat, timers and
-   * network are released and nothing keeps the process alive.
+   * network are released and nothing keeps the process alive. To keep taking
+   * pushes, use {@link Resonate.serve}.
    */
   public async handle(msg?: Message): Promise<Status | undefined> {
     try {
       if (msg !== undefined) {
         return await this.core.onMessage(msg);
       }
-      return await this.handleOnePush();
+      return await new Promise<Status | undefined>((resolve, reject) => {
+        this.listen(true, (outcome) => (outcome.ok ? resolve(outcome.status) : reject(outcome.error))).catch(reject);
+      });
     } finally {
       await this.stop();
     }
   }
 
-  private async handleOnePush(): Promise<Status | undefined> {
+  /**
+   * Take pushed tasks until stopped.
+   *
+   * Listens on `PORT` (default 8080, on `HOST`, default loopback) and runs
+   * every `execute` POSTed to it, each answered when its step is over — for a
+   * push worker that stays warm between tasks, such as a serverless container
+   * that is reused. Resolves once listening; {@link Resonate.stop} closes the
+   * listener along with everything else.
+   */
+  public async serve(): Promise<void> {
+    await this.listen(false, () => {});
+  }
+
+  /** Accept pushes over HTTP: one, then close (`once`), or until stopped. */
+  private async listen(
+    once: boolean,
+    done: (outcome: { ok: true; status: Status | undefined } | { ok: false; error: unknown }) => void,
+  ): Promise<void> {
     // Loaded here, not at the top: the async engine also runs where there is
     // no node:http, and only this path needs it.
     const http = await import("node:http");
     const port = Number(getEnv("PORT") ?? 8080);
     const host = getEnv("HOST") ?? "127.0.0.1";
 
-    return await new Promise<Status | undefined>((resolve, reject) => {
-      const server = http.createServer(async (req, res) => {
-        // One push, and only one: anything after it is turned away.
-        server.close();
-        try {
-          const chunks: Uint8Array[] = [];
-          for await (const chunk of req) chunks.push(chunk as Uint8Array);
-          const message = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Message;
-          const status = await this.core.onMessage(message);
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ status: status?.kind === "done" ? "completed" : "suspended" }));
-          resolve(status);
-        } catch (err) {
-          res.writeHead(500, { "content-type": "application/json" });
-          res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
-          reject(err);
-        }
-      });
-      server.on("error", reject);
-      server.listen(port, host);
+    const server = http.createServer(async (req, res) => {
+      // One push, and only one: anything after it is turned away.
+      if (once) server.close();
+      try {
+        const chunks: Uint8Array[] = [];
+        for await (const chunk of req) chunks.push(chunk as Uint8Array);
+        const message = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Message;
+        const status = await this.core.onMessage(message);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ status: status?.kind === "done" ? "completed" : "suspended" }));
+        done({ ok: true, status });
+      } catch (error) {
+        res.writeHead(500, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+        done({ ok: false, error });
+      }
+    });
+    this.listener = server;
+
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(port, host, () => resolve());
     });
   }
 
   public async stop(): Promise<void> {
+    this.listener?.close();
+    this.listener = undefined;
     await this.network.stop();
     this.heartbeat.stop();
     clearInterval(this.intervalId);
