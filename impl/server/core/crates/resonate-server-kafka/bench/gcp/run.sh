@@ -3,6 +3,7 @@
 #
 #   ./run.sh start N             start resonate on nodes 1..N, wiping local copies; TOPIC picks
 #                                the topic prefix, PARTITIONS the partition count (new topics only),
+#                                PIPELINE the rounds in flight per partition,
 #                                the topic prefix, LIBRDKAFKA adds client properties (toml lines)
 #   ./run.sh stop                stop resonate on every node
 #   ./run.sh load NAME K ARGS..  run the load generator on loadgens 1..K at once,
@@ -30,7 +31,7 @@ case "$cmd" in
 start)
   n=$1
   for i in $(seq 1 $n); do
-    node $i "sudo systemctl stop resonate && sudo sed -i '/TOPIC_PREFIX/d; /__PARTITIONS=/d' /etc/resonate.env && printf 'RESONATE_SERVERS__SERVER_KAFKA__TOPIC_PREFIX=${TOPIC:-resonate}\\nRESONATE_SERVERS__SERVER_KAFKA__PARTITIONS=$PARTITIONS\\n' | sudo tee -a /etc/resonate.env >/dev/null \
+    node $i "sudo systemctl stop resonate && sudo sed -i '/TOPIC_PREFIX/d; /__PARTITIONS=/d; /__PIPELINE_DEPTH=/d' /etc/resonate.env && printf 'RESONATE_SERVERS__SERVER_KAFKA__TOPIC_PREFIX=${TOPIC:-resonate}\\nRESONATE_SERVERS__SERVER_KAFKA__PARTITIONS=$PARTITIONS\\nRESONATE_SERVERS__SERVER_KAFKA__PIPELINE_DEPTH=${PIPELINE:-1}\\n' | sudo tee -a /etc/resonate.env >/dev/null \
       && sudo mkdir -p /etc/systemd/system/resonate.service.d && printf '[Service]\nWorkingDirectory=/opt/resonate\n' | sudo tee /etc/systemd/system/resonate.service.d/cwd.conf >/dev/null \
       && printf '[servers.server_kafka.librdkafka]\n${LIBRDKAFKA:-}\n' | sudo tee /opt/resonate/resonate.toml >/dev/null \
       && sudo systemctl daemon-reload && sudo rm -rf /mnt/ssd/rocks && sudo systemctl start resonate" &
@@ -61,6 +62,9 @@ cut-node|heal-node)
   op=$([ $cmd = cut-node ] && echo -I || echo -D)
   rules=""; for b in $(tr ',' ' ' < .brokers); do rules+="sudo iptables $op OUTPUT -d ${b%:*} -j DROP; "; done
   node $1 "$rules"; echo "$cmd n$1 $(date +%T)" ;;
+place-leaders)  # each partition led from its owner's zone (TOPIC)
+  $G compute scp ${SSH_FLAGS:-} place_leaders.py $PREFIX-b1:/tmp/place_leaders.py --zone $(zone_of 1) >/dev/null
+  ssh_to $PREFIX-b1 $(zone_of 1) "python3 /tmp/place_leaders.py ${TOPIC:-resonate}" ;;
 metrics) node $1 "curl -s localhost:9090/metrics | grep -E '^resonate_kafka_(takeover|replayed|partitions_served|commit_errors|forwarded)'" ;;
 load)
   name=$1 k=$2; shift 2
