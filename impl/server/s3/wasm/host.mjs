@@ -82,19 +82,27 @@ const resonate = await createResonate({
 }).catch((e) => fail(e.message));
 
 const server = http.createServer(async (req, res) => {
-  const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
-  const request = new Request(`http://${req.headers.host ?? "localhost"}${req.url}`, {
-    method: req.method,
-    body: req.method === "GET" || req.method === "HEAD" ? undefined : Buffer.concat(chunks),
-  });
-  const response = await resonate.fetch(request);
-  const body = Buffer.from(await response.arrayBuffer());
-  res.writeHead(response.status, {
-    "content-type": response.headers.get("content-type"),
-    "content-length": body.length,
-  });
-  res.end(body);
+  // A caller that hangs up mid-request is the caller's problem, not a reason
+  // for the process to die of an unhandled rejection.
+  try {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const request = new Request(`http://${req.headers.host ?? "localhost"}${req.url}`, {
+      method: req.method,
+      body: req.method === "GET" || req.method === "HEAD" ? undefined : Buffer.concat(chunks),
+    });
+    const response = await resonate.fetch(request);
+    const body = Buffer.from(await response.arrayBuffer());
+    res.writeHead(response.status, {
+      "content-type": response.headers.get("content-type"),
+      "content-length": body.length,
+    });
+    res.end(body);
+  } catch (e) {
+    process.stderr.write(`resonate: request failed: ${e?.message ?? e}\n`);
+    if (!res.headersSent) res.writeHead(500, { "content-type": "text/plain" });
+    res.end();
+  }
 });
 
 server.keepAliveTimeout = 60_000;

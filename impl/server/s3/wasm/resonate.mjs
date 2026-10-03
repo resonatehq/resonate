@@ -137,19 +137,29 @@ export async function createResonate(options) {
         }
         const body = method === "GET" || method === "DELETE" ? undefined : read(bPtr, bLen);
         // Always answered on a later turn, never inside this call.
-        fetchImpl(url, { method, headers, body }).then(
-          async (res) => {
-            const payload = new Uint8Array(await res.arrayBuffer());
+        (async () => {
+          let status, head, payload;
+          try {
+            const res = await fetchImpl(url, { method, headers, body });
+            // Inside the `try`: a body cut off after the headers arrived fails
+            // *here*, not at `fetch`, and a truncated answer must never be read
+            // as a short one — nor escape as an unhandled rejection.
+            payload = new Uint8Array(await res.arrayBuffer());
+            status = res.status;
             // The ETag first: the module keeps a bounded number of headers, and
             // that is the one the whole design rests on.
-            let head = "";
+            head = "";
             const etag = res.headers.get("etag");
             if (etag !== null) head += `etag: ${etag}\n`;
             for (const [name, value] of res.headers) if (name !== "etag") head += `${name}: ${value}\n`;
-            deliver(id, res.status, head, payload);
-          },
-          (err) => deliver(id, 0, "", encoder.encode(String(err?.cause?.message ?? err?.message ?? err))),
-        );
+          } catch (err) {
+            deliver(id, 0, "", encoder.encode(String(err?.cause?.message ?? err?.message ?? err)));
+            return;
+          }
+          // Outside it: a fault in the module is not a fault in the exchange,
+          // and must not be delivered a second time as one.
+          deliver(id, status, head, payload);
+        })();
       },
     },
   };
