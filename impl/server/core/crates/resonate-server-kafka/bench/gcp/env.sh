@@ -10,6 +10,9 @@
 : "${LOADGEN_TYPE:=n2-standard-8}"
 : "${BUILDER_TYPE:=n2-standard-16}"
 : "${PARTITIONS:=128}"
+# Cloud SQL for the Postgres comparison: priced like the three brokers (HA).
+: "${PG_TIER:=db-custom-6-16384}"
+: "${PG_STORAGE_GB:=500}"
 : "${IMAGE:=--image-family=debian-12 --image-project=debian-cloud}"
 read -r -a ZONE <<< "$ZONES"
 G="gcloud --project $PROJECT --quiet"

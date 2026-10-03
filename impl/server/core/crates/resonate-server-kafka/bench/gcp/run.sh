@@ -29,15 +29,39 @@ ready() {
 cmd=$1; shift
 case "$cmd" in
 start)
-  n=$1
+  n=$1 script=/tmp/$PREFIX-node-start-$$.sh
+  # The node's configuration, as a script each node runs: Kafka (topic,
+  # partitions, pipeline, librdkafka extras) or Postgres (BACKEND=postgres,
+  # PG_URL, PG_POOL) — then a fresh local copy and a start.
+  cat > $script <<EOS
+#!/bin/bash
+set -e
+systemctl stop resonate
+sed -i '/TOPIC_PREFIX/d; /__PARTITIONS=/d; /__PIPELINE_DEPTH=/d' /etc/resonate.env
+printf 'RESONATE_SERVERS__SERVER_KAFKA__TOPIC_PREFIX=%s\nRESONATE_SERVERS__SERVER_KAFKA__PARTITIONS=%s\nRESONATE_SERVERS__SERVER_KAFKA__PIPELINE_DEPTH=%s\n' \
+  '${TOPIC:-resonate}' '$PARTITIONS' '${PIPELINE:-1}' >> /etc/resonate.env
+mkdir -p /etc/systemd/system/resonate.service.d
+printf '[Service]\nWorkingDirectory=/opt/resonate\n' > /etc/systemd/system/resonate.service.d/cwd.conf
+if [ '${BACKEND:-kafka}' = postgres ]; then
+  : > /opt/resonate/resonate.toml
+  printf 'RESONATE_SERVERS__ACTIVE=server_postgres\nRESONATE_SERVERS__SERVER_POSTGRES__URL=%s\nRESONATE_SERVERS__SERVER_POSTGRES__POOL_SIZE=%s\nRESONATE_GATEWAYS__GATEWAY_HTTP__BIND=0.0.0.0:8001\nRESONATE_GATEWAYS__GATEWAY_METRICS__BIND=0.0.0.0:9090\nRESONATE_LEVEL=warn\n' \
+    '${PG_URL:-}' '${PG_POOL:-32}' > /etc/resonate-pg.env
+  printf '[Service]\nEnvironmentFile=\nEnvironmentFile=/etc/resonate-pg.env\nExecStart=\nExecStart=/opt/resonate/resonate serve\n' \
+    > /etc/systemd/system/resonate.service.d/backend.conf
+else
+  printf '[servers.server_kafka.librdkafka]\n%b\n' '${LIBRDKAFKA:-}' > /opt/resonate/resonate.toml
+  rm -f /etc/systemd/system/resonate.service.d/backend.conf
+fi
+systemctl daemon-reload
+rm -rf /mnt/ssd/rocks
+systemctl start resonate
+EOS
   for i in $(seq 1 $n); do
-    node $i "sudo systemctl stop resonate && sudo sed -i '/TOPIC_PREFIX/d; /__PARTITIONS=/d; /__PIPELINE_DEPTH=/d' /etc/resonate.env && printf 'RESONATE_SERVERS__SERVER_KAFKA__TOPIC_PREFIX=${TOPIC:-resonate}\\nRESONATE_SERVERS__SERVER_KAFKA__PARTITIONS=$PARTITIONS\\nRESONATE_SERVERS__SERVER_KAFKA__PIPELINE_DEPTH=${PIPELINE:-1}\\n' | sudo tee -a /etc/resonate.env >/dev/null \
-      && sudo mkdir -p /etc/systemd/system/resonate.service.d && printf '[Service]\nWorkingDirectory=/opt/resonate\n' | sudo tee /etc/systemd/system/resonate.service.d/cwd.conf >/dev/null \
-      && printf '[servers.server_kafka.librdkafka]\n${LIBRDKAFKA:-}\n' | sudo tee /opt/resonate/resonate.toml >/dev/null \
-      && sudo systemctl daemon-reload && sudo rm -rf /mnt/ssd/rocks && sudo systemctl start resonate" &
+    ( $G compute scp ${SSH_FLAGS:-} $script $PREFIX-n$i:/tmp/node-start.sh --zone $(zone_of $i) >/dev/null 2>&1
+      node $i "sudo bash /tmp/node-start.sh" ) &
   done; wait
   for i in $(seq 1 $n); do ready $i & done; wait
-  echo "started $n node(s) on topic prefix ${TOPIC:-resonate}"
+  echo "started $n node(s): ${BACKEND:-kafka}, topic prefix ${TOPIC:-resonate}"
   ;;
 stop)
   for i in $(seq 1 ${1:-12}); do node $i "sudo systemctl stop resonate" 2>/dev/null & done; wait ;;

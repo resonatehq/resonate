@@ -8,7 +8,7 @@ if ! mountpoint -q /mnt/ssd; then
   mkdir -p /mnt/ssd && mount -o discard,noatime /dev/disk/by-id/google-local-nvme-ssd-0 /mnt/ssd
 fi
 mkdir -p /opt/resonate
-gcloud storage cp "$(md bucket)/bin/server" /opt/resonate/server && chmod +x /opt/resonate/server
+gcloud storage cp "$(md bucket)/bin/server" "$(md bucket)/bin/resonate" /opt/resonate/ && chmod +x /opt/resonate/server /opt/resonate/resonate
 cat > /etc/resonate.env <<ENV
 RESONATE_SERVERS__ACTIVE=server_kafka
 RESONATE_SERVERS__SERVER_KAFKA__BROKERS=$(md brokers)

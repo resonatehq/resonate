@@ -17,6 +17,7 @@ ssh_to $PREFIX-builder $z "set -e
   rm -rf ~/src && mkdir -p ~/src && tar -xzf /tmp/src.tgz -C ~/src
   cd ~/src/impl/server/core
   CARGO_TARGET_DIR=~/target cargo build --release -p resonate-server-kafka --example server --example load --example produce_latency 2>&1 | tail -3
-  gcloud storage cp ~/target/release/examples/server ~/target/release/examples/load ~/target/release/examples/produce_latency $BUCKET/bin/
+  CARGO_TARGET_DIR=~/target cargo build --release -p resonate --bin resonate 2>&1 | tail -1
+  gcloud storage cp ~/target/release/examples/server ~/target/release/examples/load ~/target/release/examples/produce_latency ~/target/release/resonate $BUCKET/bin/
   echo $rev | gcloud storage cp - $BUCKET/bin/REVISION"
 echo "built $rev"
