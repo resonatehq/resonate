@@ -7,6 +7,11 @@ if ! mountpoint -q /mnt/ssd; then
   mkfs.ext4 -F /dev/disk/by-id/google-local-nvme-ssd-0
   mkdir -p /mnt/ssd && mount -o discard,noatime /dev/disk/by-id/google-local-nvme-ssd-0 /mnt/ssd
 fi
+# Tight clocks: timesyncd leaves nodes tens of ms apart, and the Postgres
+# backend stamps rows with the serving node's clock.
+apt-get install -y -qq chrony >/dev/null
+echo "server metadata.google.internal prefer iburst" > /etc/chrony/sources.d/gce.sources
+systemctl restart chrony
 mkdir -p /opt/resonate
 gcloud storage cp "$(md bucket)/bin/server" "$(md bucket)/bin/resonate" /opt/resonate/ && chmod +x /opt/resonate/server /opt/resonate/resonate
 cat > /etc/resonate.env <<ENV
