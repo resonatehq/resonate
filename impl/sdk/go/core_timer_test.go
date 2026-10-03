@@ -3,12 +3,12 @@ package resonate
 // Timer tasks (durable sleep).
 //
 // A resonate:timer promise is a durable sleep: the wake IS its deadline, and
-// resonate:timer makes timing out settle it *resolved*. It carries a
-// resonate:target only because the server refuses to schedule a deadline for
-// a promise without one — which also spawns a task, dispatched right away
-// rather than at the wake. That task names no function, so Core must neither
-// run it nor hand it back (a release is re-dispatched immediately, which
-// would spin): it drops it and lets the deadline do the waking.
+// resonate:timer makes timing out settle it *resolved*. Sleeps carry no
+// resonate:target now, so they have no task; but a timer an older SDK created
+// with one still has a task, dispatched right away rather than at the wake.
+// That task names no function, so Core must neither run it nor hand it back
+// (a release is re-dispatched immediately, which would spin): it drops it and
+// lets the deadline do the waking.
 
 import (
 	stdctx "context"

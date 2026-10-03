@@ -121,10 +121,11 @@ func (c *Core) ExecuteUntilBlocked(ctx stdctx.Context, taskID string, taskVersio
 	promise PromiseRecord, preload []PromiseRecord, retryPolicy RetryPolicy) (status Status, retErr error) {
 
 	// A still-pending resonate:timer promise is a durable sleep that has not
-	// come due (see Context.Sleep). It names no function to run; it only
-	// carries a task at all because the target that gets the server to
-	// *schedule* its deadline also spawns one. Drop it and let the deadline
-	// settle the promise, which is what wakes the sleepers.
+	// come due (see Context.Sleep). It names no function to run. Sleeps no
+	// longer carry a target, so they have no task; this only meets a timer an
+	// older SDK created with one, back when that was how its deadline got
+	// scheduled. Drop it and let the deadline settle the promise, which is
+	// what wakes the sleepers.
 	//
 	// Dropping means exactly that: no fulfill (that would end the sleep
 	// early), no suspend (a task cannot await its own promise), and no

@@ -273,14 +273,11 @@ func (c *Context) promiseCreateReq(id string, timeout time.Duration, data any) (
 
 func (c *Context) sleepCreateReq(id string, duration time.Duration) PromiseCreateReq {
 	tags := c.baseTags("global", id)
+	// No resonate:target: a timer names no function to run, and the server
+	// refuses one that carries a target. It needs none for its deadline — a
+	// timer is external, and the server arms a deadline for every external
+	// promise, which settles it RESOLVED and wakes the sleepers.
 	tags["resonate:timer"] = "true"
-	// The resonate:target is what makes the deadline *happen*: the server only
-	// schedules timeouts for promises carrying an address, so a target-less
-	// timer would simply never fire. The flip side is that a target also spawns
-	// a task, dispatched immediately rather than at the wake; a timer names no
-	// function to run, so the worker that receives it drops it and lets the
-	// deadline do the waking (see Core.ExecuteUntilBlocked).
-	tags["resonate:target"] = c.targetResolver(nil)
 	return PromiseCreateReq{
 		ID:        id,
 		TimeoutAt: c.childTimeout(duration),

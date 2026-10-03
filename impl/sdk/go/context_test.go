@@ -168,10 +168,10 @@ func TestContext_SleepCreateReq_Tags(t *testing.T) {
 	if req.Tags["resonate:scope"] != "global" {
 		t.Fatalf("scope: %q", req.Tags["resonate:scope"])
 	}
-	// The server only schedules a timeout for a promise carrying a target, so
-	// a target-less timer would never fire — the timer must carry one.
-	if req.Tags["resonate:target"] != "default-target" {
-		t.Fatalf("missing target tag: %v", req.Tags)
+	// A timer names no function to run: the server refuses one with a target,
+	// and arms its deadline without one, because a timer is external.
+	if _, ok := req.Tags["resonate:target"]; ok {
+		t.Fatalf("timer must not carry a target: %v", req.Tags)
 	}
 }
 
