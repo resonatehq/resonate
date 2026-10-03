@@ -13,9 +13,14 @@ exists() { $G compute instances describe "$1" --zone "$2" --format='value(name)'
 # list when the zone is out of it (stockouts are common in single zones).
 create() {
   local name=$1 zone=$2 type=$3; shift 3
-  for t in $type ${FALLBACK_TYPES:-n2d-standard-4}; do
+  for t in $type ${FALLBACK_TYPES:-n2d-standard-4 c3-standard-4-lssd}; do
     [ "$t" = "$type" ] || echo "$name: $type unavailable in $zone, trying $t"
-    $G compute instances create $name --zone $zone --machine-type $t "$@" && return 0
+    # -lssd shapes come with their local SSD; asking for another is an error.
+    local args=() a
+    for a in "$@"; do
+      case $t:$a in *-lssd:--local-ssd=*) ;; *) args+=("$a") ;; esac
+    done
+    $G compute instances create $name --zone $zone --machine-type $t "${args[@]}" && return 0
   done
   return 1
 }
@@ -34,7 +39,7 @@ brokers)
   # The brokers' cluster id: kept if they already have one, since their data
   # directories are stamped with it and a broker refuses any other.
   cluster=$($G compute instances describe $PREFIX-b1 --zone $(zone_of 1) \
-    --format='value(metadata.items.cluster-id)' 2>/dev/null)
+    --format='value(metadata.items.cluster-id)' 2>/dev/null || true)
   [ -n "$cluster" ] || cluster=$(python3 -c 'import uuid,base64;print(base64.urlsafe_b64encode(uuid.uuid4().bytes).decode().rstrip("="))')
   # Create first without starting Kafka, to learn the IPs the voters need.
   for i in 1 2 3; do
