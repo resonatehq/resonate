@@ -179,7 +179,14 @@ impl Tensorlake {
         let mut body = json!({
             "image": image,
             "timeout_secs": self.inner.options.timeout_secs,
-            "network": { "allow_internet_access": limits.egress == Egress::All },
+            "network": match &limits.egress {
+                Egress::None => json!({ "allow_internet_access": false }),
+                Egress::All => json!({ "allow_internet_access": true }),
+                // A non-empty allow_out is default-deny; the flag then only
+                // decides whether DNS is implicitly allowed, and the names
+                // in the list need it.
+                Egress::Allow(hosts) => json!({ "allow_internet_access": true, "allow_out": hosts }),
+            },
         });
         let mut resources = serde_json::Map::new();
         if let Some(cpus) = limits.cpus {
@@ -537,6 +544,20 @@ mod tests {
         let body = t.create_body("img");
         assert_eq!(body["network"]["allow_internet_access"], true);
         assert!(body.get("resources").is_none());
+    }
+
+    #[test]
+    fn an_allow_list_is_allow_out_with_dns() {
+        let t = Tensorlake::new(
+            Options::default(),
+            Limits {
+                egress: Egress::Allow(vec!["books.toscrape.com".into()]),
+                ..Limits::default()
+            },
+        );
+        let body = t.create_body("img");
+        assert_eq!(body["network"]["allow_internet_access"], true);
+        assert_eq!(body["network"]["allow_out"], json!(["books.toscrape.com"]));
     }
 
     #[test]

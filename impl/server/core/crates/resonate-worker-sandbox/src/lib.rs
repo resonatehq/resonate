@@ -94,69 +94,112 @@ fn configure(
         return Err(settings.reject("memory_mib", "must be at least 1"));
     }
 
-    let mut backends: HashMap<Provider, Arc<dyn AnyBackend>> = HashMap::new();
+    for (i, rule) in config.images.iter().enumerate() {
+        if rule.image.is_empty() || rule.image == "*" {
+            return Err(settings.reject(
+                &format!("images[{i}].image"),
+                "name an image, or an image prefix ending in '*'; the defaults above are for \
+                 every other image",
+            ));
+        }
+        if rule.cpus == Some(0) || rule.memory_mib == Some(0) {
+            return Err(settings.reject(
+                &format!("images[{i}]"),
+                "cpus and memory_mib must be at least 1",
+            ));
+        }
+    }
+
+    // One backend per provider for the defaults, and one per provider for
+    // each image rule: limits are what a backend is built with, not what it
+    // is asked for, so different limits are different backends.
+    let mut limits = vec![(None, config.limits())];
+    limits.extend(
+        config
+            .images
+            .iter()
+            .enumerate()
+            .map(|(i, rule)| (Some(i), rule.limits(&config.limits()))),
+    );
+    let mut backends: HashMap<(Provider, Option<usize>), Arc<dyn AnyBackend>> = HashMap::new();
     for provider in config.providers() {
-        let backend: Arc<dyn AnyBackend> = match provider {
-            Provider::Microsandbox => Arc::new(Microsandbox::new(
-                config.microsandbox.msb.clone(),
-                config.limits(),
-            )),
-            Provider::Tensorlake => {
-                let tl = &config.tensorlake;
-                // The key is the operator's, in this section or by the name
-                // Tensorlake's own tools read it from.
-                let api_key = tl
-                    .api_key
-                    .clone()
-                    .or_else(|| std::env::var("TENSORLAKE_API_KEY").ok())
-                    .filter(|k| !k.is_empty());
-                if api_key.is_none() {
-                    return Err(settings.reject(
-                        "tensorlake.api_key",
-                        "the tensorlake provider needs an API key: set it here, or \
-                         TENSORLAKE_API_KEY",
-                    ));
-                }
-                if tl.timeout_secs == 0 {
-                    return Err(settings.reject("tensorlake.timeout_secs", "must be at least 1"));
-                }
-                Arc::new(Tensorlake::new(
-                    resonate_sandbox_tensorlake::Options {
-                        api_url: tl.api_url.clone(),
-                        proxy_url: tl.proxy_url.clone(),
-                        api_key,
-                        timeout_secs: tl.timeout_secs,
-                        ready_timeout: Duration::from_millis(tl.ready_timeout),
-                        ..resonate_sandbox_tensorlake::Options::default()
-                    },
-                    config.limits(),
-                ))
-            }
-            Provider::Local => {
-                if config.command.is_empty() {
-                    return Err(settings.reject(
-                        "command",
-                        "the local provider has no image to take an entrypoint from; name the \
-                         command to run (rn8 and the worker)",
-                    ));
-                }
-                if config.egress == Egress::None {
-                    return Err(settings.reject(
-                        "egress",
-                        "the local provider runs on the host and cannot take the network away; \
-                         set egress = \"all\" to say you know",
-                    ));
-                }
-                Arc::new(Local::new())
-            }
-        };
-        backends.insert(provider, backend);
+        check_provider(settings, &config, provider)?;
+        for (rule, limits) in &limits {
+            backends.insert(
+                (provider, *rule),
+                build_backend(&config, provider, limits.clone()),
+            );
+        }
     }
     Ok(Some(Arc::new(SandboxWorker::new(
         deps.server,
         backends,
         config,
     ))))
+}
+
+/// What a provider needs before anything is built.
+fn check_provider(
+    settings: &resonate_plugin::Settings<'_>,
+    config: &Config,
+    provider: Provider,
+) -> Result<(), resonate_plugin::ConfigError> {
+    match provider {
+        Provider::Microsandbox => {}
+        Provider::Tensorlake => {
+            if config.tensorlake_key().is_none() {
+                return Err(settings.reject(
+                    "tensorlake.api_key",
+                    "the tensorlake provider needs an API key: set it here, or TENSORLAKE_API_KEY",
+                ));
+            }
+            if config.tensorlake.timeout_secs == 0 {
+                return Err(settings.reject("tensorlake.timeout_secs", "must be at least 1"));
+            }
+        }
+        Provider::Local => {
+            if config.command.is_empty() {
+                return Err(settings.reject(
+                    "command",
+                    "the local provider has no image to take an entrypoint from; name the \
+                     command to run (rn8 and the worker)",
+                ));
+            }
+            // It enforces no limit at all — egress included, whatever an
+            // image rule says — so the operator says so once, here.
+            if config.egress != Egress::All {
+                return Err(settings.reject(
+                    "egress",
+                    "the local provider runs on the host and cannot restrict the network; \
+                     set egress = \"all\" to say you know",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn build_backend(config: &Config, provider: Provider, limits: Limits) -> Arc<dyn AnyBackend> {
+    match provider {
+        Provider::Microsandbox => {
+            Arc::new(Microsandbox::new(config.microsandbox.msb.clone(), limits))
+        }
+        Provider::Tensorlake => {
+            let tl = &config.tensorlake;
+            Arc::new(Tensorlake::new(
+                resonate_sandbox_tensorlake::Options {
+                    api_url: tl.api_url.clone(),
+                    proxy_url: tl.proxy_url.clone(),
+                    api_key: config.tensorlake_key(),
+                    timeout_secs: tl.timeout_secs,
+                    ready_timeout: Duration::from_millis(tl.ready_timeout),
+                    ..resonate_sandbox_tensorlake::Options::default()
+                },
+                limits,
+            ))
+        }
+        Provider::Local => Arc::new(Local::new()),
+    }
 }
 
 /// Who creates the sandboxes.
@@ -253,6 +296,11 @@ pub struct Config {
     #[serde(default = "default_exit_grace")]
     pub exit_grace: u64,
 
+    /// Per-image overrides of cpus, memory_mib and egress, first match wins:
+    /// `[[workers.worker_sandbox.images]]` [default: none]
+    #[serde(default)]
+    pub images: Vec<ImageRule>,
+
     /// `[workers.worker_sandbox.microsandbox]`
     #[serde(default)]
     pub microsandbox: MicrosandboxConfig,
@@ -264,6 +312,49 @@ pub struct Config {
     /// `[workers.worker_sandbox.local]`
     #[serde(default)]
     pub local: LocalConfig,
+}
+
+/// Limits for the images that match, instead of the defaults.
+///
+/// ```toml
+/// [[workers.worker_sandbox.images]]
+/// image = "cas-v1:4f2a…"                       # exact, or a prefix ending in '*'
+/// egress = { allow = ["books.toscrape.com"] }
+/// memory_mib = 2048
+/// ```
+///
+/// Matched against the image as the address names it, without the provider.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImageRule {
+    pub image: String,
+    #[serde(default)]
+    pub cpus: Option<u8>,
+    #[serde(default)]
+    pub memory_mib: Option<u32>,
+    #[serde(default)]
+    pub egress: Option<Egress>,
+}
+
+impl ImageRule {
+    pub fn matches(&self, image: &str) -> bool {
+        match self.image.strip_suffix('*') {
+            Some(prefix) => image.starts_with(prefix),
+            None => image == self.image,
+        }
+    }
+
+    /// The defaults, with what this rule sets in their place.
+    fn limits(&self, defaults: &Limits) -> Limits {
+        Limits {
+            cpus: self.cpus.or(defaults.cpus),
+            memory_mib: self.memory_mib.or(defaults.memory_mib),
+            egress: self
+                .egress
+                .clone()
+                .unwrap_or_else(|| defaults.egress.clone()),
+        }
+    }
 }
 
 /// The microsandbox provider.
@@ -385,6 +476,7 @@ impl Default for Config {
             token: None,
             start_timeout: default_start_timeout(),
             exit_grace: default_exit_grace(),
+            images: Vec::new(),
             microsandbox: MicrosandboxConfig::default(),
             tensorlake: TensorlakeConfig::default(),
             local: LocalConfig::default(),
@@ -397,8 +489,18 @@ impl Config {
         Limits {
             cpus: self.cpus,
             memory_mib: self.memory_mib,
-            egress: self.egress,
+            egress: self.egress.clone(),
         }
+    }
+
+    /// The Tensorlake key: this section's, or the name Tensorlake's own
+    /// tools read it from.
+    fn tensorlake_key(&self) -> Option<String> {
+        self.tensorlake
+            .api_key
+            .clone()
+            .or_else(|| std::env::var("TENSORLAKE_API_KEY").ok())
+            .filter(|k| !k.is_empty())
     }
 
     /// The providers to build: the default, and every one switched on.
@@ -494,7 +596,9 @@ pub(crate) struct Shared {
 
 pub struct SandboxWorker {
     shared: Arc<Shared>,
-    backends: HashMap<Provider, Arc<dyn AnyBackend>>,
+    /// By provider, and by the image rule that built it (`None`: the defaults).
+    backends: HashMap<(Provider, Option<usize>), Arc<dyn AnyBackend>>,
+    images: Vec<ImageRule>,
     default: Provider,
     require_digest: bool,
     permits: Arc<Semaphore>,
@@ -505,10 +609,11 @@ pub struct SandboxWorker {
 const STOP_TIMEOUT: Duration = Duration::from_secs(10);
 
 impl SandboxWorker {
-    /// `backends` must hold `config.backend`, the default.
+    /// `backends` must hold `(config.backend, None)`, the default, and one
+    /// entry per enabled provider for each of `config.images`.
     pub fn new(
         server: Weak<dyn ResonateServer>,
-        backends: HashMap<Provider, Arc<dyn AnyBackend>>,
+        backends: HashMap<(Provider, Option<usize>), Arc<dyn AnyBackend>>,
         config: Config,
     ) -> Self {
         Self {
@@ -523,6 +628,7 @@ impl SandboxWorker {
                 exit_grace: Duration::from_millis(config.exit_grace),
             }),
             backends,
+            images: config.images,
             default: config.backend,
             require_digest: config.require_digest,
             permits: Arc::new(Semaphore::new(config.concurrency)),
@@ -548,12 +654,17 @@ impl ResonateWorker for SandboxWorker {
         let target = parse_address(address, self.require_digest)
             .map_err(|e| Unavailable::unroutable(format!("sandbox: {e}")))?;
         let provider = target.provider.unwrap_or(self.default);
-        let backend = self.backends.get(&provider).cloned().ok_or_else(|| {
-            Unavailable::unroutable(format!(
-                "sandbox: the {} provider is not enabled ({address})",
-                provider.name()
-            ))
-        })?;
+        let rule = self.images.iter().position(|r| r.matches(target.image));
+        let backend = self
+            .backends
+            .get(&(provider, rule))
+            .cloned()
+            .ok_or_else(|| {
+                Unavailable::unroutable(format!(
+                    "sandbox: the {} provider is not enabled ({address})",
+                    provider.name()
+                ))
+            })?;
         let image = target.image.to_string();
         let task = execute.data.task.clone();
         let message = serde_json::to_value(msg)
@@ -716,8 +827,8 @@ mod tests {
     /// quietly sent to the default: the image was meant for somewhere else.
     #[tokio::test]
     async fn a_provider_that_is_not_enabled_is_unroutable() {
-        let mut backends: HashMap<Provider, Arc<dyn AnyBackend>> = HashMap::new();
-        backends.insert(Provider::Local, Arc::new(Local::new()));
+        let mut backends: HashMap<(Provider, Option<usize>), Arc<dyn AnyBackend>> = HashMap::new();
+        backends.insert((Provider::Local, None), Arc::new(Local::new()));
         let worker = SandboxWorker::new(
             Weak::<NoServer>::new(),
             backends,
@@ -732,6 +843,44 @@ mod tests {
             e.message.contains("tensorlake provider is not enabled"),
             "{e}"
         );
+    }
+
+    #[test]
+    fn an_image_rule_overrides_what_it_sets() {
+        let c: Config = serde_json::from_value(serde_json::json!({
+            "memory_mib": 512,
+            "images": [
+                { "image": "cas-v1:browser*", "egress": { "allow": ["books.toscrape.com"] } },
+                { "image": "converter@sha256:00", "memory_mib": 4096 },
+            ],
+        }))
+        .unwrap();
+        let first = &c.images[0];
+        assert!(first.matches("cas-v1:browser-2026"));
+        assert!(!first.matches("cas-v1:other"));
+        let l = first.limits(&c.limits());
+        assert_eq!(l.egress, Egress::Allow(vec!["books.toscrape.com".into()]));
+        assert_eq!(l.memory_mib, Some(512), "unset in the rule: the default");
+
+        let second = &c.images[1];
+        assert!(second.matches("converter@sha256:00"));
+        assert!(!second.matches("converter@sha256:001"));
+        let l = second.limits(&c.limits());
+        assert_eq!(l.memory_mib, Some(4096));
+        assert_eq!(l.egress, Egress::None);
+    }
+
+    #[test]
+    fn egress_reads_as_a_word_or_an_allow_list() {
+        let e = |v| serde_json::from_value::<Egress>(v);
+        assert_eq!(e(serde_json::json!("none")).unwrap(), Egress::None);
+        assert_eq!(e(serde_json::json!("all")).unwrap(), Egress::All);
+        assert_eq!(
+            e(serde_json::json!({ "allow": ["a.example"] })).unwrap(),
+            Egress::Allow(vec!["a.example".into()])
+        );
+        assert!(e(serde_json::json!("some")).is_err());
+        assert!(e(serde_json::json!({ "allow": [] })).is_err());
     }
 
     #[test]

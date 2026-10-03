@@ -40,13 +40,18 @@ use tokio::sync::mpsc;
 const LOG_DRAIN: Duration = Duration::from_secs(1);
 
 fn main() -> ExitCode {
-    let args = match args::Args::parse(std::env::args().skip(1)) {
+    let mut args = match args::Args::parse(std::env::args().skip(1)) {
         Ok(a) => a,
         Err(e) => {
             diag(&format!("{e}\n\n{}", args::USAGE));
             return ExitCode::from(exit::FRAMING as u8);
         }
     };
+
+    if let Err(e) = args.resolve_worker_port() {
+        diag(&format!("cannot pick a worker port: {e}"));
+        return ExitCode::from(exit::WORKER as u8);
+    }
 
     // One thread. rn8 relays bytes; it is never the bottleneck, and a single
     // thread keeps the signal handling and the reaping simple to reason about.

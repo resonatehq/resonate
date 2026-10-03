@@ -93,8 +93,15 @@ impl Microsandbox {
         if let Some(mib) = limits.memory_mib {
             args.extend(["--memory".to_string(), format!("{mib}M")]);
         }
-        if limits.egress == Egress::None {
-            args.push("--no-net".to_string());
+        match &limits.egress {
+            Egress::None => args.push("--no-net".to_string()),
+            Egress::All => {}
+            Egress::Allow(hosts) => {
+                args.extend(["--net-default-egress".to_string(), "deny".to_string()]);
+                for host in hosts {
+                    args.extend(["--net-rule".to_string(), format!("allow@{host}")]);
+                }
+            }
         }
         args
     }
@@ -275,6 +282,25 @@ mod tests {
         assert!(!args
             .iter()
             .any(|a| a == "--no-net" || a == "--cpus" || a == "--memory"));
+    }
+
+    #[test]
+    fn an_allow_list_denies_by_default_and_allows_each_host() {
+        let b = Microsandbox::new(
+            "msb",
+            Limits {
+                egress: Egress::Allow(vec!["a.example".into(), "10.0.0.0/8".into()]),
+                ..Limits::default()
+            },
+        );
+        let joined = b.create_args("n", "img").join(" ");
+        assert!(
+            joined.ends_with(
+                "--net-default-egress deny --net-rule allow@a.example --net-rule allow@10.0.0.0/8"
+            ),
+            "{joined}"
+        );
+        assert!(!joined.contains("--no-net"));
     }
 
     #[test]

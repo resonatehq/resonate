@@ -53,7 +53,7 @@ enabled = true
 backend = "microsandbox"   # the default provider: microsandbox, tensorlake, local
 cpus = 2                   # per sandbox; absent = provider default
 memory_mib = 1024          # per sandbox; absent = provider default
-egress = "none"            # or "all"
+egress = "none"            # "all", or { allow = ["example.com", …] }
 require_digest = true      # refuse sandbox://<image> not pinned by @sha256:…
 command = []               # empty = the image's own entrypoint (rn8)
 env = {}                   # extra, non-secret environment for that command
@@ -61,6 +61,14 @@ concurrency = 16           # sandboxes at once
 token = "…"                # attached to every forwarded request; the guest's is dropped
 start_timeout = 120000     # ms from dispatch to acquire, create included
 exit_grace = 5000          # ms the guest has to exit once its step has ended
+
+# Per image, first match wins: cpus, memory_mib and egress instead of the
+# defaults above. `image` is exact, or a prefix ending in '*', and is matched
+# without the provider.
+[[workers.worker_sandbox.images]]
+image = "cas-v1:4f2a…"
+egress = { allow = ["books.toscrape.com"] }   # hostnames, IPs or CIDRs
+memory_mib = 2048
 
 # Each provider: on when it is `backend`, or when its own section says so.
 [workers.worker_sandbox.microsandbox]
@@ -92,6 +100,14 @@ The `microsandbox` backend needs `msb` on the host (Linux with KVM, or macOS on
 Apple Silicon). It drives the CLI rather than linking the `microsandbox` SDK
 crate, which links a SQLite this workspace's sqlx already links at another
 version. `msb exec --stream` gives the same live, byte-faithful stdio.
+
+An allow-list is enforced by the provider: microsandbox as
+`--net-default-egress deny` with one `--net-rule allow@<host>` each, Tensorlake
+as `allow_out` (which is default-deny) with DNS left on. The `local` provider
+enforces nothing, so it insists on `egress = "all"`.
+
+For a worked example — a browser in a sandbox per page, orchestrated from the
+host — see `impl/sdk/ts/examples/sandbox/`.
 
 ## Building an image
 

@@ -46,13 +46,55 @@ pub struct Limits {
 ///
 /// `none` is the point of the design: the plugin is the only thing that talks
 /// to the server, and it does so over the guest's stdio, which needs no
-/// network at all.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
+/// network at all. A guest whose work *is* the network — a browser — gets an
+/// allow-list rather than everything, so that what it can reach is the sites
+/// it was sent to and not the host's neighbours.
+///
+/// In configuration: `"none"`, `"all"`, or `{ allow = ["example.com", …] }`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum Egress {
     #[default]
     None,
     All,
+    /// Hostnames, IPs or CIDRs; everything else is refused.
+    Allow(Vec<String>),
+}
+
+impl serde::Serialize for Egress {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        match self {
+            Egress::None => s.serialize_str("none"),
+            Egress::All => s.serialize_str("all"),
+            Egress::Allow(hosts) => {
+                let mut m = s.serialize_map(Some(1))?;
+                m.serialize_entry("allow", hosts)?;
+                m.end()
+            }
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Egress {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        #[serde(untagged)]
+        enum Wire {
+            Mode(String),
+            Allow { allow: Vec<String> },
+        }
+        match Wire::deserialize(d)? {
+            Wire::Mode(m) if m == "none" => Ok(Egress::None),
+            Wire::Mode(m) if m == "all" => Ok(Egress::All),
+            Wire::Mode(m) => Err(serde::de::Error::custom(format!(
+                "egress is \"none\", \"all\" or {{ allow = [...] }}, not {m:?}"
+            ))),
+            Wire::Allow { allow } if allow.is_empty() => Err(serde::de::Error::custom(
+                "an empty allow-list is egress = \"none\"; say that instead",
+            )),
+            Wire::Allow { allow } => Ok(Egress::Allow(allow)),
+        }
+    }
 }
 
 pub trait Backend: Send + Sync + 'static {

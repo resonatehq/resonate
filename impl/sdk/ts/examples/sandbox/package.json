@@ -1,0 +1,9 @@
+{
+  "name": "resonate-example-sandbox",
+  "private": true,
+  "type": "module",
+  "description": "Price watch: the host orchestrates, each page is scraped in a browser in its own sandbox.",
+  "dependencies": {
+    "playwright-core": "1.56.1"
+  }
+}

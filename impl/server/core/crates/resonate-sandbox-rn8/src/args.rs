@@ -11,6 +11,7 @@ usage: rn8 [options] -- <worker command> [args...]
 options:
   --worker-port <port>     the port the worker listens on for the push
                            [env RN8_WORKER_PORT, default 8080; passed to the worker as PORT]
+                           0 picks a free one: for several guests sharing a host
   --push-path <path>       the path the task is POSTed to [env RN8_PUSH_PATH, default /]
   --ready-timeout <ms>     how long to wait for the worker to accept connections
                            [env RN8_READY_TIMEOUT, default 60000]
@@ -71,9 +72,7 @@ impl Args {
             None => 8080,
             Some(p) => p
                 .parse::<u16>()
-                .ok()
-                .filter(|p| *p != 0)
-                .ok_or_else(|| format!("worker port must be 1-65535, got {p:?}"))?,
+                .map_err(|_| format!("worker port must be 0-65535, got {p:?}"))?,
         };
         let push_path = push_path.unwrap_or_else(|| "/".into());
         if !push_path.starts_with('/') {
@@ -93,6 +92,21 @@ impl Args {
             env: extra,
             command,
         })
+    }
+
+    /// A worker port of 0 is a free one, chosen now.
+    ///
+    /// Inside a sandbox the guest has its own network and 8080 is always
+    /// free. Several guests sharing one host — the local provider — do not, so
+    /// each asks for a port of its own. The port is released before the worker
+    /// binds it, which leaves a window; on loopback, for a port the kernel just
+    /// handed out, that is a window nobody else is aiming at.
+    pub fn resolve_worker_port(&mut self) -> std::io::Result<()> {
+        if self.worker_port == 0 {
+            let probe = std::net::TcpListener::bind(("127.0.0.1", 0))?;
+            self.worker_port = probe.local_addr()?.port();
+        }
+        Ok(())
     }
 
     /// Where the task is pushed: always loopback.
@@ -157,7 +171,8 @@ mod tests {
         assert!(parse(&[]).is_err());
         assert!(parse(&["--"]).is_err());
         assert!(parse(&["node"]).is_err());
-        assert!(parse(&["--worker-port", "0", "--", "x"]).is_err());
+        assert!(parse(&["--worker-port", "70000", "--", "x"]).is_err());
+        assert!(parse(&["--worker-port", "x", "--", "x"]).is_err());
         assert!(parse(&["--push-path", "push", "--", "x"]).is_err());
         assert!(parse(&["--env", "novalue", "--", "x"]).is_err());
     }
