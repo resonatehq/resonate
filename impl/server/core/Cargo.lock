@@ -3271,6 +3271,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "resonate-sandbox-tensorlake"
+version = "0.10.1"
+dependencies = [
+ "axum",
+ "fastrand",
+ "futures-util",
+ "reqwest 0.12.28",
+ "resonate-sandbox",
+ "resonate-sandbox-tensorlake",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "resonate-server-blob"
 version = "0.10.1"
 dependencies = [
@@ -3481,6 +3496,7 @@ dependencies = [
  "resonate-plugin",
  "resonate-sandbox",
  "resonate-sandbox-microsandbox",
+ "resonate-sandbox-tensorlake",
  "resonate-server-sqlite",
  "serde",
  "serde_json",

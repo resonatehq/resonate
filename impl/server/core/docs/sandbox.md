@@ -1,6 +1,6 @@
 # Sandbox plugin
 
-`worker_sandbox` runs each task dispatched to `sandbox://<image>` inside an
+`worker_sandbox` runs each task dispatched to `sandbox://` inside an
 isolated sandbox booted from that image. The plugin is the only component that
 talks to the Resonate server; the guest has no network by default and reaches
 the server only through its own stdio, relayed by **rn8**, a static binary baked
@@ -10,8 +10,25 @@ into the image as its entrypoint. SDKs run unchanged.
 |---|---|
 | `resonate-worker-sandbox` | The plugin: sandbox lifecycle, relay, scope check, lease watch |
 | `resonate-sandbox` | The frame protocol and the `Backend` / `Process` traits, shared by both ends |
-| `resonate-sandbox-microsandbox` | The first backend: a microsandbox microVM per task, through the `msb` CLI |
+| `resonate-sandbox-microsandbox` | A microsandbox microVM per task, through the `msb` CLI |
+| `resonate-sandbox-tensorlake` | A Tensorlake sandbox per task, through Tensorlake's HTTP API |
 | `resonate-sandbox-rn8` | `rn8`, the relay in the guest |
+
+## Addressing
+
+```text
+sandbox://<image>              the default provider (`backend`)
+sandbox://<provider>/<image>   microsandbox, tensorlake or local
+```
+
+`<image>` is an OCI reference pinned by digest, e.g.
+`sandbox://tensorlake/ghcr.io/acme/worker@sha256:…`. The provider is the first
+segment when it is a provider's name; those names have no `.` or `:`, so they
+never read as a registry host. They can read as a Docker Hub namespace, and the
+provider wins — name such an image in full: `sandbox://docker.io/tensorlake/…`.
+
+A provider named in an address must be enabled; if it is not, the message is
+refused as unroutable rather than sent to the default.
 
 ## Task flow
 
@@ -33,9 +50,9 @@ its step by more than `exit_grace`.
 ```toml
 [workers.worker_sandbox]
 enabled = true
-backend = "microsandbox"   # or "local": no isolation, for development and tests
-cpus = 2                   # per sandbox; absent = backend default
-memory_mib = 1024          # per sandbox; absent = backend default
+backend = "microsandbox"   # the default provider: microsandbox, tensorlake, local
+cpus = 2                   # per sandbox; absent = provider default
+memory_mib = 1024          # per sandbox; absent = provider default
 egress = "none"            # or "all"
 require_digest = true      # refuse sandbox://<image> not pinned by @sha256:…
 command = []               # empty = the image's own entrypoint (rn8)
@@ -44,8 +61,32 @@ concurrency = 16           # sandboxes at once
 token = "…"                # attached to every forwarded request; the guest's is dropped
 start_timeout = 120000     # ms from dispatch to acquire, create included
 exit_grace = 5000          # ms the guest has to exit once its step has ended
+
+# Each provider: on when it is `backend`, or when its own section says so.
+[workers.worker_sandbox.microsandbox]
+enabled = false
 msb = "msb"                # the microsandbox CLI
+
+[workers.worker_sandbox.tensorlake]
+enabled = false
+api_key = "…"              # absent: TENSORLAKE_API_KEY; required either way
+api_url = "https://api.tensorlake.ai"
+proxy_url = "https://sandbox.tensorlake.ai"
+timeout_secs = 900         # Tensorlake reaps the sandbox after this, plugin or not
+ready_timeout = 120000     # ms for a new sandbox to start running
+
+[workers.worker_sandbox.local]
+enabled = false            # no isolation: development and tests only
 ```
+
+The `tensorlake` provider creates a sandbox with `POST /sandboxes` (image,
+`resources`, `network.allow_internet_access` from `egress`, `timeout_secs`),
+waits for it to run, and starts the command with
+`POST /api/v1/processes` and `stdin_mode: "pipe"`. Frames to the guest go as
+`POST …/stdin` (and `…/stdin/close` at EOF); frames from it arrive as the
+server-sent events of `…/stdout/follow`, one output line per frame. With
+`command` empty it runs the entrypoint Tensorlake reports for the sandbox.
+`timeout_secs` doubles as cleanup for a sandbox orphaned by a plugin crash.
 
 The `microsandbox` backend needs `msb` on the host (Linux with KVM, or macOS on
 Apple Silicon). It drives the CLI rather than linking the `microsandbox` SDK

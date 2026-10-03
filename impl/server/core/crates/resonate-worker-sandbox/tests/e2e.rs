@@ -14,6 +14,7 @@ use base64::Engine;
 use resonate_base::{build, Options, Registry};
 use resonate_plugin::types::{RequestEnvelope, RequestHead, PROTOCOL_VERSION};
 use resonate_plugin::{Loader, ResonateServer};
+use resonate_sandbox_tensorlake::testing::{FakeTensorlake, KEY};
 use serde_json::{json, Value};
 
 const IMAGE: &str =
@@ -76,7 +77,7 @@ async fn call(server: &Arc<dyn ResonateServer>, kind: &str, data: Value) -> (i32
 
 /// A server carrying the sandbox plugin on the local backend, its command rn8
 /// in front of the fixture worker.
-async fn start(env: Value) -> resonate_base::Running {
+async fn start(env: Value, extra: &[(&str, String)]) -> resonate_base::Running {
     // RUST_LOG=debug to watch the session.
     let _ = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
@@ -117,14 +118,17 @@ async fn start(env: Value) -> resonate_base::Running {
         .set("workers.worker_sandbox.command", &command.to_string())
         .unwrap()
         .set("workers.worker_sandbox.env", &format!("{{ {env} }}"))
-        .unwrap()
+        .unwrap();
+    let config = extra
+        .iter()
+        .fold(config, |c, (k, v)| c.set(k, v).unwrap())
         .load();
     let running = build(&registry, &config, &Options::default()).expect("builds");
     running.start(false).await.expect("starts");
     running
 }
 
-async fn dispatch(server: &Arc<dyn ResonateServer>, id: &str) {
+async fn dispatch(server: &Arc<dyn ResonateServer>, id: &str, target: &str) {
     let (status, _) = call(
         server,
         "promise.create",
@@ -132,26 +136,18 @@ async fn dispatch(server: &Arc<dyn ResonateServer>, id: &str) {
             "id": id,
             "timeoutAt": now_ms() + 60_000,
             "param": {},
-            "tags": { "resonate:target": format!("sandbox://{IMAGE}") }
+            "tags": { "resonate:target": target }
         }),
     )
     .await;
     assert!(status == 200 || status == 201, "promise.create: {status}");
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn a_task_runs_in_a_sandbox_and_settles_its_own_promise() {
-    if !python() {
-        eprintln!("skipped: no python3");
-        return;
-    }
-    let running = start(json!({})).await;
-    let server = Arc::clone(running.server());
-    dispatch(&server, "e2e").await;
-
+/// Poll until the promise settles, and decode the worker's report from its value.
+async fn settled(server: &Arc<dyn ResonateServer>, id: &str) -> Value {
     let deadline = Instant::now() + Duration::from_secs(30);
     let promise = loop {
-        let (_, data) = call(&server, "promise.get", json!({ "id": "e2e" })).await;
+        let (_, data) = call(server, "promise.get", json!({ "id": id })).await;
         if data["promise"]["state"] != "pending" {
             break data["promise"].clone();
         }
@@ -162,13 +158,25 @@ async fn a_task_runs_in_a_sandbox_and_settles_its_own_promise() {
         tokio::time::sleep(Duration::from_millis(50)).await;
     };
     assert_eq!(promise["state"], "resolved", "{promise}");
-
-    let report: Value = serde_json::from_slice(
+    serde_json::from_slice(
         &base64::engine::general_purpose::STANDARD
             .decode(promise["value"]["data"].as_str().unwrap())
             .unwrap(),
     )
-    .unwrap();
+    .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_task_runs_in_a_sandbox_and_settles_its_own_promise() {
+    if !python() {
+        eprintln!("skipped: no python3");
+        return;
+    }
+    let running = start(json!({}), &[]).await;
+    let server = Arc::clone(running.server());
+    dispatch(&server, "e2e", &format!("sandbox://{IMAGE}")).await;
+    let report = settled(&server, "e2e").await;
+
     // Its own task, acquired through the relay.
     assert_eq!(report["acquire"], 200, "{report}");
     // Someone else's task, and a schedule: refused by the plugin.
@@ -190,13 +198,16 @@ async fn a_sandbox_is_destroyed_when_its_lease_expires() {
     }
     let pidfile = std::env::temp_dir().join(format!("rn8-hang-{}.pid", std::process::id()));
     let _ = std::fs::remove_file(&pidfile);
-    let running = start(json!({
-        "WORKER_MODE": "hang",
-        "WORKER_PIDFILE": pidfile.to_string_lossy(),
-    }))
+    let running = start(
+        json!({
+            "WORKER_MODE": "hang",
+            "WORKER_PIDFILE": pidfile.to_string_lossy(),
+        }),
+        &[],
+    )
     .await;
     let server = Arc::clone(running.server());
-    dispatch(&server, "hang").await;
+    dispatch(&server, "hang", &format!("sandbox://{IMAGE}")).await;
 
     let deadline = Instant::now() + Duration::from_secs(20);
     let pid = loop {
@@ -225,4 +236,57 @@ fn zombie(pid: &str) -> bool {
     std::fs::read_to_string(format!("/proc/{pid}/stat"))
         .map(|s| s.split_whitespace().nth(2) == Some("Z"))
         .unwrap_or(false)
+}
+
+/// `sandbox://tensorlake/<image>` goes to Tensorlake — here a fake one, whose
+/// "sandbox" runs rn8 and the worker on the host — while `sandbox://<image>`
+/// would still go to the default. The whole relay runs over Tensorlake's
+/// process API: stdin as requests, stdout and stderr as events.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_provider_in_the_address_picks_the_backend() {
+    if !python() {
+        eprintln!("skipped: no python3");
+        return;
+    }
+    let fake = FakeTensorlake::start().await;
+    let running = start(
+        json!({}),
+        &[
+            ("workers.worker_sandbox.tensorlake.enabled", "true".into()),
+            (
+                "workers.worker_sandbox.tensorlake.api_url",
+                format!("\"{}\"", fake.url),
+            ),
+            (
+                "workers.worker_sandbox.tensorlake.api_key",
+                format!("\"{KEY}\""),
+            ),
+        ],
+    )
+    .await;
+    let server = Arc::clone(running.server());
+    dispatch(
+        &server,
+        "via-tensorlake",
+        &format!("sandbox://tensorlake/{IMAGE}"),
+    )
+    .await;
+
+    let report = settled(&server, "via-tensorlake").await;
+    assert_eq!(report["acquire"], 200, "{report}");
+    assert_eq!(report["other_task"], 403, "{report}");
+    assert_eq!(report["server_url_rewritten"], true, "{report}");
+
+    // One Tensorlake sandbox, for the image named after the provider, and gone.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !fake.seen(|s| s.live.is_empty()) {
+        assert!(Instant::now() < deadline, "the sandbox was not destroyed");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let creates = fake.seen(|s| s.creates.clone());
+    assert_eq!(creates.len(), 1);
+    assert_eq!(creates[0]["image"], IMAGE);
+    assert_eq!(creates[0]["network"]["allow_internet_access"], true);
+
+    running.stop(Duration::from_secs(10)).await;
 }

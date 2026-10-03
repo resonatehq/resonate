@@ -11,6 +11,7 @@ members = [
     "crates/resonate-sandbox",
     "crates/resonate-sandbox-microsandbox",
     "crates/resonate-sandbox-rn8",
+    "crates/resonate-sandbox-tensorlake",
     "crates/resonate-sql",
     "crates/resonate-server-scylladb",
     "crates/resonate-server-blob",

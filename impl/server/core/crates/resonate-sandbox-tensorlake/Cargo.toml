@@ -1,0 +1,27 @@
+[package]
+name = "resonate-sandbox-tensorlake"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Resonate sandbox backend: Tensorlake sandboxes, through Tensorlake's HTTP API."
+
+[dependencies]
+resonate-sandbox = { path = "../resonate-sandbox" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { version = "1", features = ["rt", "io-util", "sync", "time", "macros"] }
+reqwest = { version = "0.12", features = ["json"] }
+fastrand = "2"
+axum = { version = "0.7", optional = true }
+futures-util = { version = "0.3", optional = true }
+
+[features]
+# `testing::FakeTensorlake`: the control plane and the sandbox proxy, in
+# process, running each "sandbox" process on the host. For this crate's tests
+# and for anything that wants to drive the backend end to end without an
+# account.
+fake = ["dep:axum", "dep:futures-util", "tokio/process", "tokio/net"]
+
+[dev-dependencies]
+resonate-sandbox-tensorlake = { path = ".", features = ["fake"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

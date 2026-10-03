@@ -4,32 +4,36 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use resonate_plugin::types::{self, RequestEnvelope, ResponseEnvelope};
+use resonate_sandbox::exit;
 use resonate_sandbox::frame::{self, FrameReader, FromGuest, LogStream, ToGuest};
-use resonate_sandbox::{exit, Backend, Process};
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc;
 use tokio::time::{sleep_until, timeout_at, Instant};
 
+use crate::dynamic::{AnyBackend, AnyHandle};
 use crate::scope::Claim;
-use crate::Shared;
+use crate::{Provider, Shared};
 
 /// Run the task in a fresh sandbox, and destroy it whatever happens.
-pub(crate) async fn run<B: Backend>(
-    shared: Arc<Shared<B>>,
+pub(crate) async fn run(
+    shared: Arc<Shared>,
+    backend: Arc<dyn AnyBackend>,
+    provider: Provider,
     image: String,
     message: Value,
     claim: Claim,
 ) {
     let task_id = claim.id.clone();
+    let provider = provider.name();
     // Creating the sandbox and getting the guest to acquire its task share
     // one clock: until the guest holds a lease, this is the only deadline.
     let start_deadline = Instant::now() + shared.start_timeout;
 
-    let handle = match timeout_at(start_deadline, shared.backend.create(&image)).await {
+    let handle = match timeout_at(start_deadline, backend.create(&image)).await {
         Ok(Ok(h)) => h,
         Ok(Err(e)) => {
-            tracing::warn!(task_id, image, error = %e, "sandbox: create failed");
+            tracing::warn!(task_id, provider, image, error = %e, "sandbox: create failed");
             return;
         }
         Err(_) => {
@@ -43,9 +47,18 @@ pub(crate) async fn run<B: Backend>(
             return;
         }
     };
-    tracing::debug!(task_id, image, "sandbox: created");
+    tracing::debug!(task_id, provider, image, "sandbox: created");
 
-    match drive(&shared, &handle, message, claim, start_deadline).await {
+    match drive(
+        &shared,
+        backend.as_ref(),
+        &handle,
+        message,
+        claim,
+        start_deadline,
+    )
+    .await
+    {
         Ok(End::Exited(code)) => match code {
             exit::OK => tracing::debug!(task_id, "sandbox: step ended"),
             exit::WORKER => {
@@ -65,7 +78,7 @@ pub(crate) async fn run<B: Backend>(
         Err(e) => tracing::warn!(task_id, error = %e, "sandbox: session failed"),
     }
 
-    if let Err(e) = shared.backend.destroy(handle).await {
+    if let Err(e) = backend.destroy(handle).await {
         tracing::warn!(task_id, error = %e, "sandbox: destroy failed");
     }
 }
@@ -88,21 +101,19 @@ enum Lease {
     Ended,
 }
 
-async fn drive<B: Backend>(
-    shared: &Arc<Shared<B>>,
-    handle: &B::Handle,
+async fn drive(
+    shared: &Arc<Shared>,
+    backend: &dyn AnyBackend,
+    handle: &AnyHandle,
     message: Value,
     claim: Claim,
     start_deadline: Instant,
 ) -> Result<End, String> {
     let task_id = claim.id.clone();
-    let mut process = timeout_at(
-        start_deadline,
-        shared.backend.exec(handle, shared.command.clone()),
-    )
-    .await
-    .map_err(|_| "exec did not start before the start timeout".to_string())?
-    .map_err(|e| format!("exec failed: {e}"))?;
+    let mut process = timeout_at(start_deadline, backend.exec(handle, shared.command.clone()))
+        .await
+        .map_err(|_| "exec did not start before the start timeout".to_string())?
+        .map_err(|e| format!("exec failed: {e}"))?;
     let mut stdin = process.stdin().ok_or("the process has no stdin")?;
     let stdout = process.stdout().ok_or("the process has no stdout")?;
     let stderr = process.stderr().ok_or("the process has no stderr")?;
@@ -199,8 +210,8 @@ async fn drive<B: Backend>(
 /// Returns the HTTP status and body rn8 answers the SDK with — the same pair
 /// the HTTP gateway would have produced — and what the answer means for the
 /// lease.
-async fn forward<B>(
-    shared: &Shared<B>,
+async fn forward(
+    shared: &Shared,
     claim: &Mutex<Claim>,
     body: Value,
 ) -> (u16, Value, Option<Lease>) {

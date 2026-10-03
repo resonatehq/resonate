@@ -9,6 +9,7 @@ description = "Resonate worker: runs each task inside an isolated sandbox, relay
 resonate-plugin = { path = "../resonate-plugin" }
 resonate-sandbox = { path = "../resonate-sandbox" }
 resonate-sandbox-microsandbox = { path = "../resonate-sandbox-microsandbox" }
+resonate-sandbox-tensorlake = { path = "../resonate-sandbox-tensorlake" }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -24,3 +25,4 @@ resonate-server-sqlite = { path = "../resonate-server-sqlite" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 base64 = "0.22"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+resonate-sandbox-tensorlake = { path = "../resonate-sandbox-tensorlake", features = ["fake"] }
