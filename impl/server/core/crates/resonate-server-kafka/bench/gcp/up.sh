@@ -64,7 +64,12 @@ brokers)
         --metadata-from-file=startup-script=broker-startup.sh &
     fi
   done; wait
-  for i in 1 2 3; do ssh_to $PREFIX-b$i $(zone_of $i) "sudo google_metadata_script_runner startup" >/dev/null 2>&1 & done; wait
+  # Run each broker's startup script now (not at its next boot); a failure is
+  # shown, not swallowed: a broker without it never starts.
+  for i in 1 2 3; do
+    ( ssh_to $PREFIX-b$i $(zone_of $i) "sudo google_metadata_script_runner startup" >/tmp/startup-b$i.log 2>&1 \
+        || { echo "b$i startup failed:"; tail -5 /tmp/startup-b$i.log; } ) &
+  done; wait
   echo "$brokers" > .brokers
   echo "brokers: $brokers"
   ;;
