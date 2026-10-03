@@ -10,6 +10,7 @@ resonate-plugin = { path = "../resonate-plugin" }
 resonate-sandbox = { path = "../resonate-sandbox" }
 resonate-sandbox-microsandbox = { path = "../resonate-sandbox-microsandbox" }
 resonate-sandbox-tensorlake = { path = "../resonate-sandbox-tensorlake" }
+resonate-sandbox-unikraft = { path = "../resonate-sandbox-unikraft" }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

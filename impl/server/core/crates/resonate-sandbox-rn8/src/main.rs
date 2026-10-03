@@ -25,6 +25,7 @@
 //! failed, 2 a framing or version error.
 
 mod args;
+mod listen;
 mod relay;
 mod worker;
 
@@ -92,8 +93,24 @@ async fn run(args: args::Args) -> i32 {
     // reaper that is not us when rn8 is not PID 1.
     worker::become_subreaper();
 
+    // Frames on stdio, or — for a provider with no stdin — over HTTP.
+    let listen::Ends {
+        input,
+        output,
+        delivered,
+    } = match args.listen.clone() {
+        None => listen::Ends::stdio(),
+        Some((port, token)) => match listen::start(port, token).await {
+            Ok(ends) => ends,
+            Err(e) => {
+                diag(&format!("cannot listen on port {port}: {e}"));
+                return exit::WORKER;
+            }
+        },
+    };
+
     // ── Start: the task frame, first and exactly once. ──────────────────────
-    let mut frames = FrameReader::new(BufReader::new(tokio::io::stdin()));
+    let mut frames = FrameReader::new(BufReader::new(input));
     let mut task = match frames.next::<ToGuest>().await {
         Ok(Some(ToGuest::Task { v, task })) if v == VERSION => task,
         Ok(Some(ToGuest::Task { v, .. })) => {
@@ -117,7 +134,7 @@ async fn run(args: args::Args) -> i32 {
     };
 
     // Frames out: one writer owns stdout, so frames never interleave.
-    let (out, writer) = relay::Out::start();
+    let (out, writer) = relay::Out::start(output);
 
     // ── The relay port. ─────────────────────────────────────────────────────
     let relay = match relay::Relay::bind(out.clone()).await {
@@ -253,8 +270,13 @@ async fn run(args: args::Args) -> i32 {
     child.kill_group();
     relay_task.abort();
     child.drain_logs(LOG_DRAIN).await;
-    out.flush(LOG_DRAIN).await;
+    out.close(LOG_DRAIN).await;
     drop(writer);
+    // Over HTTP, the last frames are the plugin's once the response has
+    // ended on the wire, not when they were handed to it.
+    if let Some(delivered) = delivered {
+        let _ = tokio::time::timeout(LOG_DRAIN, delivered).await;
+    }
     code
 }
 

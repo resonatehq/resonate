@@ -13,7 +13,7 @@ use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use resonate_sandbox::frame::{self, FromGuest, MAX_FRAME};
 use serde_json::{json, Value};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot};
 
@@ -25,19 +25,22 @@ pub enum OutMsg {
     Frame(FromGuest),
     /// Everything queued before this has been written.
     Flush(oneshot::Sender<()>),
+    /// Write what is queued, then end the stream.
+    Close(oneshot::Sender<()>),
 }
 
-/// The one writer of stdout.
+/// The one writer of frames: stdout, or the plugin's connection.
 #[derive(Clone)]
 pub struct Out {
     tx: FrameTx,
 }
 
 impl Out {
-    pub fn start() -> (Self, tokio::task::JoinHandle<()>) {
+    pub fn start(
+        mut stdout: Box<dyn AsyncWrite + Send + Unpin>,
+    ) -> (Self, tokio::task::JoinHandle<()>) {
         let (tx, mut rx) = mpsc::unbounded_channel::<OutMsg>();
         let writer = tokio::spawn(async move {
-            let mut stdout = tokio::io::stdout();
             while let Some(msg) = rx.recv().await {
                 match msg {
                     OutMsg::Frame(f) => {
@@ -56,6 +59,11 @@ impl Out {
                         let _ = stdout.flush().await;
                         let _ = done.send(());
                     }
+                    OutMsg::Close(done) => {
+                        let _ = stdout.shutdown().await;
+                        let _ = done.send(());
+                        return;
+                    }
                 }
             }
         });
@@ -64,6 +72,15 @@ impl Out {
 
     pub fn send(&self, f: FromGuest) {
         let _ = self.tx.send(OutMsg::Frame(f));
+    }
+
+    /// Write everything sent so far and end the stream, waiting at most
+    /// `limit`. Nothing sent after this is written.
+    pub async fn close(&self, limit: Duration) {
+        let (done, wait) = oneshot::channel();
+        if self.tx.send(OutMsg::Close(done)).is_ok() {
+            let _ = tokio::time::timeout(limit, wait).await;
+        }
     }
 
     /// Wait, at most `limit`, for everything sent so far to be written.

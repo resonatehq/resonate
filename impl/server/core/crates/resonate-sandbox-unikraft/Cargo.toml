@@ -1,0 +1,19 @@
+[package]
+name = "resonate-sandbox-unikraft"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Resonate sandbox backend: a Unikraft Cloud instance per task, through its HTTP API."
+
+[dependencies]
+resonate-sandbox = { path = "../resonate-sandbox" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { version = "1", features = ["rt", "io-util", "sync", "time", "macros"] }
+reqwest = { version = "0.12", features = ["json"] }
+base64 = "0.22"
+fastrand = "2"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "net"] }
+axum = "0.7"

@@ -38,6 +38,8 @@ impl Worker {
 
         let mut cmd = std::process::Command::new(&argv[0]);
         cmd.args(&argv[1..])
+            // The token is the plugin's way in; the worker never needs it.
+            .env_remove("RN8_TOKEN")
             .envs(env.iter().map(|(k, v)| (k, v)))
             .stdin(Stdio::null())
             .stdout(Stdio::piped())

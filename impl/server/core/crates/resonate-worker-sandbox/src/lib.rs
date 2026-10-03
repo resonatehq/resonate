@@ -27,7 +27,7 @@
 //!
 //! ```text
 //! sandbox://<image>              the default backend
-//! sandbox://<provider>/<image>   that provider: microsandbox, tensorlake, local
+//! sandbox://<provider>/<image>   that provider: microsandbox, tensorlake, unikraft, local
 //! ```
 //!
 //! `<image>` is an OCI reference pinned by digest
@@ -60,6 +60,7 @@ use resonate_plugin::{ResonateServer, ResonateWorker, Unavailable};
 use resonate_sandbox::{Egress, Limits};
 use resonate_sandbox_microsandbox::Microsandbox;
 use resonate_sandbox_tensorlake::Tensorlake;
+use resonate_sandbox_unikraft::Unikraft;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Semaphore;
 
@@ -163,6 +164,24 @@ fn check_provider(
                 return Err(settings.reject("tensorlake.timeout_secs", "must be at least 1"));
             }
         }
+        Provider::Unikraft => {
+            if config.unikraft_token().is_none() {
+                return Err(settings.reject(
+                    "unikraft.token",
+                    "the unikraft provider needs an API token: set it here, or UKC_TOKEN",
+                ));
+            }
+            // Unikraft has no outbound-network policy to set. An image rule
+            // asking for less is refused when its task comes; the default
+            // is checked here, once.
+            if config.egress != Egress::All {
+                return Err(settings.reject(
+                    "egress",
+                    "the unikraft provider cannot restrict an instance's network; \
+                     set egress = \"all\" to say you know",
+                ));
+            }
+        }
         Provider::Local => {
             if config.command.is_empty() {
                 return Err(settings.reject(
@@ -204,6 +223,19 @@ fn build_backend(config: &Config, provider: Provider, limits: Limits) -> Arc<dyn
                 limits,
             ))
         }
+        Provider::Unikraft => {
+            let uk = &config.unikraft;
+            Arc::new(Unikraft::new(
+                resonate_sandbox_unikraft::Options {
+                    token: config.unikraft_token(),
+                    api_url: uk.api_url(),
+                    port: uk.port,
+                    ready_timeout: Duration::from_millis(uk.ready_timeout),
+                    ..resonate_sandbox_unikraft::Options::default()
+                },
+                limits,
+            ))
+        }
         Provider::Local => Arc::new(Local::new()),
     }
 }
@@ -217,6 +249,8 @@ pub enum Provider {
     Microsandbox,
     /// A Tensorlake sandbox per task, through Tensorlake's API.
     Tensorlake,
+    /// A Unikraft Cloud instance per task, through its API. No egress policy.
+    Unikraft,
     /// No sandbox at all: `command` runs as a host process, and the image is
     /// ignored. For developing an image's worker, and for tests — never for
     /// code you do not trust.
@@ -224,9 +258,10 @@ pub enum Provider {
 }
 
 impl Provider {
-    pub const ALL: [Provider; 3] = [
+    pub const ALL: [Provider; 4] = [
         Provider::Microsandbox,
         Provider::Tensorlake,
+        Provider::Unikraft,
         Provider::Local,
     ];
 
@@ -235,6 +270,7 @@ impl Provider {
         match self {
             Provider::Microsandbox => "microsandbox",
             Provider::Tensorlake => "tensorlake",
+            Provider::Unikraft => "unikraft",
             Provider::Local => "local",
         }
     }
@@ -314,6 +350,10 @@ pub struct Config {
     /// `[workers.worker_sandbox.tensorlake]`
     #[serde(default)]
     pub tensorlake: TensorlakeConfig,
+
+    /// `[workers.worker_sandbox.unikraft]`
+    #[serde(default)]
+    pub unikraft: UnikraftConfig,
 
     /// `[workers.worker_sandbox.local]`
     #[serde(default)]
@@ -439,6 +479,65 @@ impl Default for TensorlakeConfig {
     }
 }
 
+/// The Unikraft Cloud provider.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UnikraftConfig {
+    /// Serve `sandbox://unikraft/<image>` even when it is not the default
+    /// [default: false]
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// The API token. Absent reads UKC_TOKEN [default: none]
+    #[serde(default)]
+    pub token: Option<String>,
+
+    /// The metro instances run in [default: fra]
+    #[serde(default = "default_unikraft_metro")]
+    pub metro: String,
+
+    /// The control plane [default: https://api.<metro>.unikraft.cloud]
+    #[serde(default)]
+    pub api_url: Option<String>,
+
+    /// The port rn8 listens on inside an instance [default: 8080]
+    #[serde(default = "default_unikraft_port")]
+    pub port: u16,
+
+    /// How long a new instance may take to boot and answer, in ms
+    /// [default: 120000]
+    #[serde(default = "default_start_timeout")]
+    pub ready_timeout: u64,
+}
+
+impl UnikraftConfig {
+    fn api_url(&self) -> String {
+        self.api_url
+            .clone()
+            .unwrap_or_else(|| format!("https://api.{}.unikraft.cloud", self.metro))
+    }
+}
+
+impl Default for UnikraftConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            token: None,
+            metro: default_unikraft_metro(),
+            api_url: None,
+            port: default_unikraft_port(),
+            ready_timeout: default_start_timeout(),
+        }
+    }
+}
+
+fn default_unikraft_metro() -> String {
+    "fra".into()
+}
+fn default_unikraft_port() -> u16 {
+    8080
+}
+
 /// The local provider.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -492,6 +591,7 @@ impl Default for Config {
             images: Vec::new(),
             microsandbox: MicrosandboxConfig::default(),
             tensorlake: TensorlakeConfig::default(),
+            unikraft: UnikraftConfig::default(),
             local: LocalConfig::default(),
         }
     }
@@ -516,6 +616,16 @@ impl Config {
             .filter(|k| !k.is_empty())
     }
 
+    /// The Unikraft token: this section's, or the name Unikraft's own tools
+    /// read it from.
+    fn unikraft_token(&self) -> Option<String> {
+        self.unikraft
+            .token
+            .clone()
+            .or_else(|| std::env::var("UKC_TOKEN").ok())
+            .filter(|k| !k.is_empty())
+    }
+
     /// The providers to build: the default, and every one switched on.
     pub fn providers(&self) -> Vec<Provider> {
         Provider::ALL
@@ -525,6 +635,7 @@ impl Config {
                     || match p {
                         Provider::Microsandbox => self.microsandbox.enabled,
                         Provider::Tensorlake => self.tensorlake.enabled,
+                        Provider::Unikraft => self.unikraft.enabled,
                         Provider::Local => self.local.enabled,
                     }
             })

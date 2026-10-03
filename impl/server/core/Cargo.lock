@@ -2994,6 +2994,7 @@ dependencies = [
  "bytes",
  "encoding_rs",
  "futures-core",
+ "futures-util",
  "h2",
  "http",
  "http-body",
@@ -3015,12 +3016,14 @@ dependencies = [
  "sync_wrapper",
  "tokio",
  "tokio-native-tls",
+ "tokio-util",
  "tower",
  "tower-http",
  "tower-service",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wasm-streams 0.4.2",
  "web-sys",
 ]
 
@@ -3062,7 +3065,7 @@ dependencies = [
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
- "wasm-streams",
+ "wasm-streams 0.5.0",
  "web-sys",
 ]
 
@@ -3265,6 +3268,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "libc",
+ "reqwest 0.12.28",
  "resonate-sandbox",
  "serde_json",
  "tokio",
@@ -3280,6 +3284,20 @@ dependencies = [
  "reqwest 0.12.28",
  "resonate-sandbox",
  "resonate-sandbox-tensorlake",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "resonate-sandbox-unikraft"
+version = "0.10.1"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "fastrand",
+ "reqwest 0.12.28",
+ "resonate-sandbox",
  "serde",
  "serde_json",
  "tokio",
@@ -3497,6 +3515,7 @@ dependencies = [
  "resonate-sandbox",
  "resonate-sandbox-microsandbox",
  "resonate-sandbox-tensorlake",
+ "resonate-sandbox-unikraft",
  "resonate-server-sqlite",
  "serde",
  "serde_json",
@@ -5248,6 +5267,19 @@ dependencies = [
  "indexmap 2.13.0",
  "wasm-encoder",
  "wasmparser",
+]
+
+[[package]]
+name = "wasm-streams"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15053d8d85c7eccdbefef60f06769760a563c7f0a9d6902a13d35c7800b0ad65"
+dependencies = [
+ "futures-util",
+ "js-sys",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

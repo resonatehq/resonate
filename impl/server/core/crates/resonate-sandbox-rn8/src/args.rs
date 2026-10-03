@@ -16,6 +16,10 @@ options:
   --ready-timeout <ms>     how long to wait for the worker to accept connections
                            [env RN8_READY_TIMEOUT, default 60000]
   --env <key>=<value>      an extra variable for the worker; repeatable
+  --listen <port>          take frames over TCP instead of stdin and stdout
+                           [env RN8_LISTEN]: for a provider with no stdin.
+                           Needs RN8_TOKEN; the first connection to send it,
+                           as its first line, is the plugin's, and the only one
 
 The worker is started with RESONATE_URL set to rn8's loopback relay.";
 
@@ -26,6 +30,8 @@ pub struct Args {
     pub ready_timeout: Duration,
     pub env: Vec<(String, String)>,
     pub command: Vec<String>,
+    /// Frames over TCP on this port, behind this token.
+    pub listen: Option<(u16, String)>,
 }
 
 impl Args {
@@ -40,6 +46,7 @@ impl Args {
         let mut worker_port = env("RN8_WORKER_PORT");
         let mut push_path = env("RN8_PUSH_PATH");
         let mut ready_timeout = env("RN8_READY_TIMEOUT");
+        let mut listen = env("RN8_LISTEN");
         let mut extra = Vec::new();
         let mut command = None;
 
@@ -54,6 +61,7 @@ impl Args {
                 "--worker-port" => worker_port = Some(value("--worker-port")?),
                 "--push-path" => push_path = Some(value("--push-path")?),
                 "--ready-timeout" => ready_timeout = Some(value("--ready-timeout")?),
+                "--listen" => listen = Some(value("--listen")?),
                 "--env" => {
                     let kv = value("--env")?;
                     let (k, v) = kv
@@ -85,12 +93,28 @@ impl Args {
                     .map_err(|_| format!("ready timeout must be milliseconds, got {ms:?}"))?,
             ),
         };
+        let listen = match listen {
+            None => None,
+            Some(p) => {
+                let port = p
+                    .parse::<u16>()
+                    .ok()
+                    .filter(|p| *p != 0)
+                    .ok_or_else(|| format!("listen port must be 1-65535, got {p:?}"))?;
+                // Without it, whoever connects first would be the plugin.
+                let token = env("RN8_TOKEN")
+                    .filter(|t| t.len() >= 16)
+                    .ok_or("--listen needs RN8_TOKEN, at least 16 characters")?;
+                Some((port, token))
+            }
+        };
         Ok(Self {
             worker_port,
             push_path,
             ready_timeout,
             env: extra,
             command,
+            listen,
         })
     }
 
@@ -175,5 +199,20 @@ mod tests {
         assert!(parse(&["--worker-port", "x", "--", "x"]).is_err());
         assert!(parse(&["--push-path", "push", "--", "x"]).is_err());
         assert!(parse(&["--env", "novalue", "--", "x"]).is_err());
+        assert!(parse(&["--listen", "8443", "--", "x"]).is_err(), "no token");
+        assert!(parse(&["--listen", "0", "--", "x"]).is_err());
+    }
+
+    #[test]
+    fn listening_takes_its_token_from_the_environment() {
+        let token = "0123456789abcdef0123";
+        let env = |k: &str| (k == "RN8_TOKEN").then(|| token.to_string());
+        let a = Args::parse_with(["--listen", "8443", "--", "x"].map(String::from), env).unwrap();
+        assert_eq!(a.listen, Some((8443, token.to_string())));
+        let short = |k: &str| (k == "RN8_TOKEN").then(|| "short".to_string());
+        assert!(
+            Args::parse_with(["--listen", "8443", "--", "x"].map(String::from), short).is_err()
+        );
+        assert_eq!(parse(&["--", "x"]).unwrap().listen, None);
     }
 }
