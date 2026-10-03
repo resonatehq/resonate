@@ -131,6 +131,8 @@ func main() {
 		transport  = fs.String("transport", "poll", "how workers receive work: poll (SSE, as the SDK ships) or push (the server POSTs to each client)")
 		pushHost   = fs.String("push-host", "127.0.0.1", "push: the host the server reaches clients at")
 		pushPort   = fs.Int("push-port", 0, "push: client i listens on push-port+i; 0 takes any free port")
+		clock      = fs.String("clock", "logical", "debug instants: logical (from 1000) or wall (Unix ms, as the SDK's deadlines are); wall also ticks the server's clock forward")
+		tickEvery  = fs.Duration("tick", 5*time.Millisecond, "clock wall: how often the server's clock is moved to the recorder's")
 	)
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: scenarios %s [flags]\n\n  %s\n\nflags:\n", name, sc.help)
@@ -143,6 +145,9 @@ func main() {
 	}
 	g := &rng{r: rand.New(rand.NewSource(*seed))}
 	rec := NewRecorder(1000, *batch, *debug)
+	if *clock == "wall" {
+		rec.UseWallClock()
+	}
 
 	if *debug {
 		if err := debugStart(*url); err != nil {
@@ -175,6 +180,12 @@ func main() {
 		counter <- i
 	}
 	close(counter)
+
+	if *debug && *clock == "wall" {
+		tickCtx, stopTicking := stdctx.WithCancel(stdctx.Background())
+		defer stopTicking()
+		go debugTicker(tickCtx, *url, rec, *tickEvery)
+	}
 
 	start := time.Now()
 	for c := 0; c < *parallel; c++ {

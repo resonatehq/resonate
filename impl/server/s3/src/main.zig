@@ -55,6 +55,9 @@ const usage =
     \\  --debug                  the clock belongs to the caller: honour
     \\                           resonate:debug_time, answer debug.*, and run
     \\                           nothing on wall time
+    \\  --deliver                with --debug: send messages to workers instead of
+    \\                           holding them for debug.snap, keeping the caller's
+    \\                           clock. For drivers with real workers.
     \\  --preload-limit <n>      branch siblings carried in a task response [default: 10]
     \\  --cas-retries <n>        re-decides before a contended origin gives up [default: 8]
     \\  --cache-entries <n>      documents held in memory                     [default: 4096]
@@ -86,6 +89,7 @@ const Args = struct {
     server_url: ?[]const u8 = null,
     max_connections: u32 = 1024,
     debug: bool = false,
+    deliver: bool = false,
     preload_limit: u32 = protocol.preload_limit_default,
     cas_retries: u32 = 8,
     cache_entries: u32 = 4096,
@@ -127,6 +131,8 @@ pub fn main() u8 {
             args.sole_writer = true;
         } else if (std.mem.eql(u8, arg, "--debug")) {
             args.debug = true;
+        } else if (std.mem.eql(u8, arg, "--deliver")) {
+            args.deliver = true;
         } else if (std.mem.eql(u8, arg, "--store")) {
             const v = value orelse return fail("--store needs a value");
             i += 1;
@@ -547,6 +553,7 @@ fn run(allocator: std.mem.Allocator, args: Args) !void {
             .timer_shards = args.timer_shards,
             .server_url = server_url,
             .debug = args.debug,
+            .deliver = args.deliver,
             .applier = .{
                 .machine = .{ .preload_limit = args.preload_limit },
                 .max_cas_retries = args.cas_retries,

@@ -39,6 +39,16 @@ pub const Options = struct {
     server_url: []const u8 = "",
     /// The clock belongs to the caller. See the module comment.
     debug: bool = false,
+    /// Under `debug`, send messages instead of holding them for `debug.snap`.
+    ///
+    /// Debug mode does two things that are usually wanted together and
+    /// sometimes not: the caller's clock (`resonate:debug_time`, nothing on
+    /// wall time), which is what makes a recorded trace checkable, and holding
+    /// every message, which is what makes `debug.snap` comparable across two
+    /// servers. A driver with real workers needs the first and cannot live
+    /// with the second: a held `execute` never reaches the worker that would
+    /// run it. This keeps the clock and lets the messages go.
+    deliver: bool = false,
     applier: applier_mod.Config = .{},
 };
 
@@ -386,7 +396,7 @@ pub const Runtime = struct {
         // Under the debug flag the outbox holds rather than delivers, so that
         // `debug.snap` reports exactly what the server decided to send and no
         // background delivery settles anything a recorded trace did not ask for.
-        self.sender.hold = options.debug;
+        self.sender.hold = options.debug and !options.deliver;
 
         self.applier = applier_mod.Applier.init(
             allocator,

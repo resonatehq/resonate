@@ -47,6 +47,8 @@ type Recorder struct {
 	batch     atomic.Uint64
 	batchSize uint64
 	debug     bool
+	// wall: the instants follow wall-clock milliseconds. See UseWallClock.
+	wall bool
 }
 
 // Event is one request/response pair as it went over the wire.
@@ -72,9 +74,44 @@ func NewRecorder(startAt, batchSize uint64, debug bool) *Recorder {
 func (r *Recorder) tick() uint64 {
 	n := r.batch.Add(1)
 	if n%r.batchSize == 0 {
+		if r.wall {
+			return r.advanceTo(uint64(time.Now().UnixMilli()))
+		}
 		return r.now.Add(uint64(10 + n%37))
 	}
 	return r.now.Load()
+}
+
+// UseWallClock makes the debug instants follow wall-clock milliseconds,
+// strictly increasing, still shared within a batch. The SDK sets every
+// deadline from the wall clock — a 10 ms durable sleep is a timer due at
+// now+10 in Unix milliseconds — so a logical clock that starts at 1000
+// never reaches it.
+func (r *Recorder) UseWallClock() {
+	r.wall = true
+	r.now.Store(uint64(time.Now().UnixMilli()))
+}
+
+// Now is the instant the clock has reached, for a caller that must move the
+// server's clock to it (`debug.tick`) without recording a request.
+func (r *Recorder) Now() uint64 {
+	if r.wall {
+		return r.advanceTo(uint64(time.Now().UnixMilli()))
+	}
+	return r.now.Load()
+}
+
+func (r *Recorder) advanceTo(t uint64) uint64 {
+	for {
+		cur := r.now.Load()
+		next := cur + 1
+		if t > next {
+			next = t
+		}
+		if r.now.CompareAndSwap(cur, next) {
+			return next
+		}
+	}
 }
 
 func (r *Recorder) add(e Event) {
