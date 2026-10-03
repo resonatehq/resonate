@@ -64,6 +64,8 @@ const KeySpace = store_mod.KeySpace;
 /// Why an attempt at an origin did not commit.
 const Failure = enum { contended, timeout };
 
+const properties = @import("properties.zig");
+
 pub const Config = struct {
     machine: handle.Config = .{},
     /// How many times an origin is re-decided — after it was contended, or after
@@ -496,6 +498,7 @@ const Actor = struct {
     fn decide(self: *Actor) void {
         const a = self.scratch.allocator();
         const document = Doc.decode(self.applier.allocator, self.before_bytes, self.origin) catch |e| {
+            if (e != error.OutOfMemory) properties.document_decodes.check(false, .{ .origin = self.origin, .@"error" = @errorName(e) });
             // A document this build cannot read is not something to guess at.
             // Answering 500 keeps the object intact for an operator to look at.
             const detail = switch (e) {
@@ -506,6 +509,7 @@ const Actor = struct {
             };
             return self.fail_batch(500, detail);
         };
+        properties.document_decodes.check(true, .{});
         self.doc = document;
         const d = &self.doc.?;
 
@@ -666,6 +670,7 @@ const Actor = struct {
                 // again — never replay.
                 self.applier.cache.invalidate(self.origin);
                 self.applier.contentions += 1;
+                properties.commit_contended.check(true, .{});
                 self.retry(.contended);
             },
             .timeout => {
@@ -679,6 +684,7 @@ const Actor = struct {
                 // every attempt ran out.
                 self.applier.cache.invalidate(self.origin);
                 self.applier.timeouts += 1;
+                properties.commit_timed_out.check(true, .{});
                 self.retry(.timeout);
             },
             else => self.fail_batch(500, "the store answered a write with a read's result"),
@@ -691,7 +697,10 @@ const Actor = struct {
         if (self.attempt > self.applier.cfg.max_cas_retries) {
             return switch (self.last_failure) {
                 .contended => self.fail_batch(503, "the origin was contended for too long"),
-                .timeout => self.fail_batch(503, store_mod.timeout_message),
+                .timeout => {
+                    properties.store_never_answered.reached(.{ .origin = self.origin });
+                    return self.fail_batch(503, store_mod.timeout_message);
+                },
             };
         }
         const at = self.applier.clock.now_ms() + self.applier.backoff_ms(self.attempt);

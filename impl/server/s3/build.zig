@@ -49,6 +49,19 @@ pub fn build(b: *std.Build) void {
     b.step("wasm", "Build the server as a wasm module, for wasm/host.mjs")
         .dependOn(&b.addInstallArtifact(wasm, .{}).step);
 
+    // ── The skulld property catalog ───────────────────────────────────────────
+    //
+    // The static list of properties, as JSON, without running the server: it is
+    // computed at compile time from `src/properties.zig`.
+    const catalog = b.addExecutable(.{
+        .name = "skull-catalog",
+        .root_source_file = b.path("src/skull_catalog.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const run_catalog = b.addRunArtifact(catalog);
+    b.step("skull-catalog", "Print the properties this server reports to skulld").dependOn(&run_catalog.step);
+
     // ── The simulator (VOPR) ──────────────────────────────────────────────────
     const sim = b.addExecutable(.{
         .name = "simulator",

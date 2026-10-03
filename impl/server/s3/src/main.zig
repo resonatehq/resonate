@@ -21,6 +21,8 @@ const http = @import("http.zig");
 const s3_mod = @import("s3.zig");
 const bus_mod = @import("bus.zig");
 const server_mod = @import("server.zig");
+const skull = @import("skull.zig");
+const properties = @import("properties.zig");
 
 const assert = stdx.assert;
 
@@ -560,6 +562,8 @@ fn run(allocator: std.mem.Allocator, args: Args) !void {
     runtime.applier.random = &rng;
 
     install_signal_handlers();
+    // Under skulld, the full list of properties, before any is evaluated.
+    skull.declare(properties);
 
     var process = Process{
         .allocator = allocator,

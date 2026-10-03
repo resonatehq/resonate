@@ -6,6 +6,7 @@
 
 comptime {
     _ = @import("stdx.zig");
+    _ = @import("skull.zig");
     _ = @import("json.zig");
     _ = @import("protocol.zig");
     _ = @import("cron.zig");

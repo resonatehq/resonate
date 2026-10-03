@@ -37,6 +37,7 @@ const stdx = @import("stdx.zig");
 const json = @import("json.zig");
 const protocol = @import("protocol.zig");
 const store_mod = @import("store.zig");
+const properties = @import("properties.zig");
 const env = @import("env.zig");
 const applier_mod = @import("applier.zig");
 const schedules = @import("schedules.zig");
@@ -449,6 +450,7 @@ pub const Timerd = struct {
                         armed += 1;
                     }
                     self.timerd.seeded = true;
+                    properties.deadlines_seeded.reached(.{ .armed = armed });
                     self.finish(armed);
                 },
                 // No answer. The caller retries: firing before the queue is
