@@ -2682,9 +2682,15 @@ const SETTLE_SELF: &str = "
 /// awaiter row between this statement's snapshot and its row locks — see the
 /// module docs on lock scope.
 const SETTLE_FANOUT: &str = "
+-- Driven from the awaiter ids, through the primary key. Written as
+-- `id = ANY(:AWAITERS) AND task_state = 'suspended'`, the planner served it
+-- from the (task_state, id) index on task_state alone: every suspended task,
+-- filtered by id — as many index entries per settlement as workflows in flight.
 suspended_awaiters AS (
-  SELECT id, task_version, target FROM promises
-  WHERE id = ANY(:AWAITERS) AND task_state = 'suspended'
+  SELECT p.id, p.task_version, p.target
+  FROM unnest(COALESCE(:AWAITERS, '{}'::text[])) AS a(id)
+  JOIN promises p ON p.id = a.id
+  WHERE p.task_state = 'suspended'
 ),
 fanout AS (
   UPDATE promises q SET
@@ -2866,6 +2872,53 @@ SELECT :MESSAGES",
 // ============================================================================
 // Db implementation — one row per promise
 // ============================================================================
+
+/// The `task.fulfill` statement (`$1` task id, `$2` version, `$3` promise id,
+/// `$4` state, `$5` value headers, `$6` value data, `$7` settled at).
+fn task_fulfill_sql(task_retry_timeout: i64) -> String {
+    // `fulfilled` here is the task transition, which also drives the
+    // promise settlement — hence one shared guard.
+    let guard = "(SELECT b.task_state = 'acquired' AND b.task_version = $2 FROM before b)";
+    let settle_guard =
+        "(SELECT b.task_state = 'acquired' AND b.task_version = $2 AND b.state = 'pending' FROM before b)";
+    let self_set = settle_self(guard);
+    let unblock = settle_unblock("updated_promise", "(SELECT b.listeners FROM before b)");
+    let fanout = settle_fanout(
+        "$3",
+        &format!("(SELECT CASE WHEN {settle_guard} THEN b.callbacks END FROM before b)"),
+        guard,
+        "$7",
+        task_retry_timeout,
+    );
+
+        format!("
+            WITH before AS (
+              SELECT id, state, task_state, task_version, callbacks, listeners FROM promises WHERE id = $3
+            ),
+            updated_promise AS (
+              UPDATE promises p
+              SET state = CASE WHEN p.state = 'pending' THEN $4 ELSE p.state END,
+                  value_headers = CASE WHEN p.state = 'pending' THEN COALESCE($5::jsonb, '{{}}') ELSE p.value_headers END,
+                  value_data    = CASE WHEN p.state = 'pending' THEN $6 ELSE p.value_data END,
+                  settled_at    = CASE WHEN p.state = 'pending' THEN $7 ELSE p.settled_at END,
+                  {self_set}
+              WHERE p.id = $3 AND p.task_state = 'acquired' AND p.task_version = $2
+              RETURNING p.*
+            ),
+            {unblock},
+            {fanout},
+            result AS (
+              SELECT * FROM updated_promise
+              UNION ALL
+              SELECT * FROM promises WHERE id = $3 AND NOT EXISTS (SELECT 1 FROM updated_promise)
+            )
+            SELECT {cols},
+              EXISTS (SELECT 1 FROM updated_promise) AS task_fulfilled,
+              (SELECT b.task_state IS NOT NULL FROM before b) AS task_exists,
+              {messages}
+            FROM result r
+", cols = p_cols("r"), messages = emitted_json(&["emit_unblock", "emit_resume"]))
+}
 
 impl PostgresDb<'_> {
     fn task_retry_timeout(&self) -> i64 {
@@ -3755,48 +3808,7 @@ impl PostgresDb<'_> {
                 .fetch_optional(self.tx().as_mut()),
         )?;
 
-        // `fulfilled` here is the task transition, which also drives the
-        // promise settlement — hence one shared guard.
-        let guard = "(SELECT b.task_state = 'acquired' AND b.task_version = $2 FROM before b)";
-        let settle_guard =
-            "(SELECT b.task_state = 'acquired' AND b.task_version = $2 AND b.state = 'pending' FROM before b)";
-        let self_set = settle_self(guard);
-        let unblock = settle_unblock("updated_promise", "(SELECT b.listeners FROM before b)");
-        let fanout = settle_fanout(
-            "$3",
-            &format!("(SELECT CASE WHEN {settle_guard} THEN b.callbacks END FROM before b)"),
-            guard,
-            "$7",
-            self.task_retry_timeout,
-        );
-
-        let rows = rt_block_on(sqlx::query(&format!("
-            WITH before AS (
-              SELECT id, state, task_state, task_version, callbacks, listeners FROM promises WHERE id = $3
-            ),
-            updated_promise AS (
-              UPDATE promises p
-              SET state = CASE WHEN p.state = 'pending' THEN $4 ELSE p.state END,
-                  value_headers = CASE WHEN p.state = 'pending' THEN COALESCE($5::jsonb, '{{}}') ELSE p.value_headers END,
-                  value_data    = CASE WHEN p.state = 'pending' THEN $6 ELSE p.value_data END,
-                  settled_at    = CASE WHEN p.state = 'pending' THEN $7 ELSE p.settled_at END,
-                  {self_set}
-              WHERE p.id = $3 AND p.task_state = 'acquired' AND p.task_version = $2
-              RETURNING p.*
-            ),
-            {unblock},
-            {fanout},
-            result AS (
-              SELECT * FROM updated_promise
-              UNION ALL
-              SELECT * FROM promises WHERE id = $3 AND NOT EXISTS (SELECT 1 FROM updated_promise)
-            )
-            SELECT {cols},
-              EXISTS (SELECT 1 FROM updated_promise) AS task_fulfilled,
-              (SELECT b.task_state IS NOT NULL FROM before b) AS task_exists,
-              {messages}
-            FROM result r
-        ", cols = p_cols("r"), messages = emitted_json(&["emit_unblock", "emit_resume"])))
+let rows = rt_block_on(sqlx::query(&task_fulfill_sql(self.task_retry_timeout))
             .bind(task_id).bind(version as i32)                                                 // $1-$2
             .bind(promise_id).bind(state).bind(value_headers).bind(value_data).bind(settled_at) // $3-$7
             .fetch_all(self.tx().as_mut()))?;
@@ -4843,4 +4855,15 @@ fn configure(
         options,
     );
     Ok(resonate_plugin::Configured::single(server))
+}
+
+#[cfg(test)]
+mod sql_text {
+    /// The statement as the server sends it, for EXPLAIN against a database:
+    /// `cargo test -p resonate-server-postgres --lib sql_text -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn print_task_fulfill_sql() {
+        println!("{}", super::task_fulfill_sql(30_000));
+    }
 }
