@@ -89,7 +89,7 @@ postgres)
   gcloud services vpc-peerings connect --service=servicenetworking.googleapis.com \
     --ranges=google-managed-services-default --network=default --project $PROJECT 2>/dev/null || true
   $G sql instances describe $PREFIX-pg >/dev/null 2>&1 || $G sql instances create $PREFIX-pg \
-    --database-version=POSTGRES_16 --edition=ENTERPRISE --tier=$PG_TIER --region=$REGION \
+    --database-version=POSTGRES_16 --edition=ENTERPRISE --tier=$PG_TIER \
     --zone=$(zone_of 1) --availability-type=REGIONAL --storage-type=SSD --storage-size=$PG_STORAGE_GB \
     --network=default --no-assign-ip --database-flags=max_connections=400
   pw=$(python3 -c 'import secrets;print(secrets.token_hex(16))')

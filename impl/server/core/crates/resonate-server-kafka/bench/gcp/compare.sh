@@ -5,18 +5,21 @@
 cd "$(dirname "$0")"; source env.sh
 show() { grep -E '^--|^ops|node 1|served|server mean|verify|not all|errors|started' | cut -c1-170; }
 life="5000 10000 15000 20000 25000"; wf="1000 2000 3000"
-[ -s .pg ] || ./up.sh postgres
+[ -s .pg ] || ./up.sh postgres || { echo "postgres setup failed"; exit 1; }
 read -r pghost pgpw < .pg
 fresh_db() {
   local db=rb_$(date +%H%M%S)
   $G sql databases create $db --instance=$PREFIX-pg >/dev/null
   echo "postgres://postgres:$pgpw@$pghost:5432/$db"
 }
-echo "==== kafka: lifecycles $(date -u +%T)"
-PARTITIONS=12 ROUTES=owner ./ab.sh 3 $life 2>&1 | show
-echo "==== postgres: lifecycles $(date -u +%T)"
-PG_URL=$(fresh_db) BACKEND=postgres ROUTES=any ./ab.sh 3 $life 2>&1 | show
-echo "==== kafka: workflows $(date -u +%T)"
-PARTITIONS=12 ROUTES=owner MODE=workflow ./ab.sh 3 $wf 2>&1 | show
-echo "==== postgres: workflows $(date -u +%T)"
-PG_URL=$(fresh_db) BACKEND=postgres ROUTES=any MODE=workflow ./ab.sh 3 $wf 2>&1 | show
+# Phases to run (default all): kafka-life postgres-life kafka-wf postgres-wf
+phases=${*:-kafka-life postgres-life kafka-wf postgres-wf}
+for phase in $phases; do
+  echo "==== $phase $(date -u +%T)"
+  case $phase in
+    kafka-life)    PARTITIONS=12 ROUTES=owner ./ab.sh 3 $life 2>&1 | show ;;
+    postgres-life) PG_URL=$(fresh_db) BACKEND=postgres ROUTES=any ./ab.sh 3 $life 2>&1 | show ;;
+    kafka-wf)      PARTITIONS=12 ROUTES=owner MODE=workflow ./ab.sh 3 $wf 2>&1 | show ;;
+    postgres-wf)   PG_URL=$(fresh_db) BACKEND=postgres ROUTES=any MODE=workflow ./ab.sh 3 $wf 2>&1 | show ;;
+  esac
+done
