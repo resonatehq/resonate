@@ -114,8 +114,16 @@ Apple Silicon). It drives the CLI rather than linking the `microsandbox` SDK
 crate, which links a SQLite this workspace's sqlx already links at another
 version. `msb exec --stream` gives the same live, byte-faithful stdio.
 
+Checked against msb 0.7.6 (`resonate-sandbox-microsandbox/tests/live.rs`, run
+with `MSB` set): every flag the backend passes is accepted, and each egress
+records the policy it means — `egress = "all"` needs `--net all`, because with
+no flag msb allows public addresses only. A create that fails to boot leaves
+nothing behind. Booting itself needs KVM; the live test's boot, stdio and
+no-network checks run only where `/dev/kvm` exists.
+
 An allow-list is enforced by the provider: microsandbox as
-`--net-default-egress deny` with one `--net-rule allow@<host>` each, Tensorlake
+`--no-net` with `--net-rule allow@dns` (the gateway's resolver, without
+which no hostname resolves) and one `--net-rule allow@<host>` each, Tensorlake
 as `allow_out` (which is default-deny) with DNS left on. The `local` provider
 enforces nothing, so it insists on `egress = "all"`.
 

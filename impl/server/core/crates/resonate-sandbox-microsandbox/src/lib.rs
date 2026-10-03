@@ -95,9 +95,17 @@ impl Microsandbox {
         }
         match &limits.egress {
             Egress::None => args.push("--no-net".to_string()),
-            Egress::All => {}
+            // Without a flag msb allows only public addresses; "all" is all.
+            Egress::All => args.extend(["--net".to_string(), "all".to_string()]),
             Egress::Allow(hosts) => {
-                args.extend(["--net-default-egress".to_string(), "deny".to_string()]);
+                // Default-deny, then the gateway's DNS — without it a
+                // hostname rule allows a name nothing can resolve — then
+                // the hosts.
+                args.extend([
+                    "--no-net".to_string(),
+                    "--net-rule".to_string(),
+                    "allow@dns".to_string(),
+                ]);
                 for host in hosts {
                     args.extend(["--net-rule".to_string(), format!("allow@{host}")]);
                 }
@@ -181,6 +189,15 @@ impl Backend for Microsandbox {
             .await
             .map_err(|e| Error(format!("cannot run {}: {e}", self.inner.msb)))?;
         if !out.status.success() {
+            // A create that fails to boot still leaves the sandbox behind.
+            let _ = self
+                .msb()
+                .args(["rm", "--force", "--quiet", &name])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .await;
             return Err(Error(format!(
                 "create {image}: {}",
                 String::from_utf8_lossy(&out.stderr).trim()
@@ -270,7 +287,7 @@ mod tests {
     }
 
     #[test]
-    fn egress_all_leaves_the_network_alone() {
+    fn egress_all_opens_the_whole_network() {
         let b = Microsandbox::new(
             "msb",
             Limits {
@@ -279,13 +296,14 @@ mod tests {
             },
         );
         let args = b.create_args("n", "img");
+        assert!(args.join(" ").ends_with("--net all"), "{args:?}");
         assert!(!args
             .iter()
             .any(|a| a == "--no-net" || a == "--cpus" || a == "--memory"));
     }
 
     #[test]
-    fn an_allow_list_denies_by_default_and_allows_each_host() {
+    fn an_allow_list_denies_by_default_and_allows_dns_and_each_host() {
         let b = Microsandbox::new(
             "msb",
             Limits {
@@ -296,11 +314,10 @@ mod tests {
         let joined = b.create_args("n", "img").join(" ");
         assert!(
             joined.ends_with(
-                "--net-default-egress deny --net-rule allow@a.example --net-rule allow@10.0.0.0/8"
+                "--no-net --net-rule allow@dns --net-rule allow@a.example --net-rule allow@10.0.0.0/8"
             ),
             "{joined}"
         );
-        assert!(!joined.contains("--no-net"));
     }
 
     #[test]
