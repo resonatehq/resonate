@@ -197,12 +197,27 @@ pub trait Log: Send + Sync {
 }
 
 /// The one writer of one partition.
+/// A commit in flight ([`Writer::start`]).
+pub type Pending =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<Checkpoint, LogError>> + Send>>;
+
 #[async_trait]
 pub trait Writer: Send + Sync {
     /// Land `records`, in order. `base` is the partition's checkpoint before
     /// this commit; the result is its checkpoint after it. An error may leave
     /// any prefix of them landed — except `Unavailable`, which landed none.
-    async fn commit(&self, records: Vec<Record>, base: Checkpoint) -> Result<Checkpoint, LogError>;
+    async fn commit(&self, records: Vec<Record>, base: Checkpoint) -> Result<Checkpoint, LogError> {
+        self.start(records, base).await
+    }
+
+    /// [`Writer::commit`], without waiting: `records` are handed to the log
+    /// now, behind every commit started before, and the result resolves once
+    /// they have landed. `base` is where the commit before this one leaves
+    /// the partition, whether it has landed yet or not — so an owner can
+    /// start its next round while this one is in flight. If an earlier commit
+    /// fails, this one's records land where it did not expect them, and it
+    /// fails too.
+    fn start(&self, records: Vec<Record>, base: Checkpoint) -> Pending;
 
     /// Whether the log still ends at `at`, where this writer left it. A
     /// fenced writer's records still land, after a newer owner's claim; an

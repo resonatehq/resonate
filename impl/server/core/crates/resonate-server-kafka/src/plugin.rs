@@ -50,6 +50,9 @@ fn configure(
     if config.brokers.is_some() && config.node_id.trim().is_empty() {
         return Err(settings.reject("node_id", "every node in a cluster needs a unique id"));
     }
+    if config.pipeline_depth == 0 {
+        return Err(settings.reject("pipeline_depth", "must be at least 1 (got 0)"));
+    }
     if config.max_batch == 0 {
         return Err(settings.reject("max_batch", "must be at least 1 (got 0)"));
     }
@@ -153,6 +156,12 @@ pub struct Config {
     #[serde(default = "default_max_batch")]
     pub max_batch: usize,
 
+    /// Rounds a partition may have committing at once. 1 waits for each
+    /// commit before deciding the next round; more starts a round while
+    /// earlier ones commit, never on an origin one of them touches.
+    #[serde(default = "default_pipeline_depth")]
+    pub pipeline_depth: usize,
+
     /// Whether the search operations are answered. Each reads every record.
     #[serde(default)]
     pub search_enabled: bool,
@@ -222,6 +231,9 @@ fn default_cache_promises() -> usize {
 }
 fn default_max_batch() -> usize {
     512
+}
+fn default_pipeline_depth() -> usize {
+    1
 }
 fn default_preload_limit() -> u32 {
     10
@@ -400,6 +412,7 @@ impl ResonateServer for KafkaServer {
                         server_url: c.server_url.clone(),
                     },
                     max_batch: c.max_batch,
+                    pipeline: c.pipeline_depth,
                     cache_promises: c.cache_promises,
                     prune: c.prune_shadowed,
                     ..Default::default()

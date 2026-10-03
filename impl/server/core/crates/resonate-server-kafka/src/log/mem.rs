@@ -309,7 +309,19 @@ impl MemWriter {
 
 #[async_trait]
 impl Writer for MemWriter {
-    async fn commit(&self, records: Vec<Record>, base: Checkpoint) -> Result<Checkpoint, LogError> {
+    fn start(&self, records: Vec<Record>, base: Checkpoint) -> super::Pending {
+        // In memory, a commit lands the moment it is handed over.
+        let landed = self.land(records, base);
+        Box::pin(std::future::ready(landed))
+    }
+
+    async fn check(&self, at: Checkpoint) -> Result<(), LogError> {
+        self.check_now(at)
+    }
+}
+
+impl MemWriter {
+    fn land(&self, records: Vec<Record>, base: Checkpoint) -> Result<Checkpoint, LogError> {
         let mut inner = lock(&self.inner);
         let fault = inner.fault.take();
         if let Some(Fault::Refuse(e)) = &fault {
@@ -356,7 +368,7 @@ impl Writer for MemWriter {
         }
     }
 
-    async fn check(&self, at: Checkpoint) -> Result<(), LogError> {
+    fn check_now(&self, at: Checkpoint) -> Result<(), LogError> {
         let inner = lock(&self.inner);
         match self.moved(&inner.partitions[self.partition as usize], &at) {
             Some(e) => Err(e),

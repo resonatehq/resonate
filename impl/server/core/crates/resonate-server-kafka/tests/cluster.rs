@@ -40,15 +40,24 @@ impl Cluster {
     }
 
     async fn on(log: Arc<MemLog>, n: usize) -> Self {
-        Self::build(log, n, false).await
+        Self::with(log, n, PartitionCfg::default()).await
     }
 
     /// With `prune_shadowed` on.
     async fn pruning(n: usize) -> Self {
-        Self::build(MemLog::new(PARTITIONS), n, true).await
+        Self::with(
+            MemLog::new(PARTITIONS),
+            n,
+            PartitionCfg {
+                prune: true,
+                ..Default::default()
+            },
+        )
+        .await
     }
 
-    async fn build(log: Arc<MemLog>, n: usize, prune: bool) -> Self {
+    /// `n` nodes on `log`, every partition tuned as `partition` says.
+    async fn with(log: Arc<MemLog>, n: usize, partition: PartitionCfg) -> Self {
         let group = MemGroup::new(PARTITIONS);
         let peers = LocalPeers::new();
         let mut nodes = Vec::new();
@@ -62,8 +71,7 @@ impl Cluster {
                     search: true,
                     partition: PartitionCfg {
                         idle_check: Duration::from_millis(50),
-                        prune,
-                        ..Default::default()
+                        ..partition.clone()
                     },
                     ..Default::default()
                 },
@@ -697,5 +705,125 @@ async fn a_cut_prune_is_finished_by_the_next_decision() {
         let kept = ok(&c.nodes[0], "promise.get", json!({ "id": id("1") })).await;
         assert_eq!(kept["promise"]["state"], "resolved", "cut at {k}");
         c.nodes[0].stop().await;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Pipelined rounds
+// ---------------------------------------------------------------------------
+
+/// Small rounds, several committing at once.
+fn pipelined() -> PartitionCfg {
+    PartitionCfg {
+        pipeline: 4,
+        max_batch: 2,
+        ..Default::default()
+    }
+}
+
+/// Every origin's create-then-settle, concurrently, on one partition; and a
+/// hot origin taking concurrent creates of its own.
+async fn concurrent_load(node: &Arc<Node>, origins: &[String], hot: &str) -> Vec<String> {
+    let mut tasks = Vec::new();
+    for o in origins {
+        let (node, o) = (Arc::clone(node), o.clone());
+        tasks.push(tokio::spawn(async move {
+            ok(&node, "promise.create", create(&o)).await;
+            ok(
+                &node,
+                "promise.settle",
+                json!({ "id": o, "state": "resolved", "value": {} }),
+            )
+            .await;
+            vec![o]
+        }));
+    }
+    for i in 0..20 {
+        let (node, id) = (Arc::clone(node), format!("{hot}:{i}"));
+        tasks.push(tokio::spawn(async move {
+            ok(&node, "promise.create", create(&id)).await;
+            vec![]
+        }));
+    }
+    let mut settled = Vec::new();
+    for t in tasks {
+        settled.extend(t.await.unwrap());
+    }
+    settled
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pipelined_rounds_keep_every_origin_in_order_and_the_log_agrees() {
+    let log = MemLog::new(PARTITIONS);
+    let c = Cluster::with(Arc::clone(&log), 1, pipelined()).await;
+    let origins: Vec<String> = (0..40).map(|i| origin_in(0, &format!("o{i}"))).collect();
+    let hot = origin_in(0, "hot");
+    let settled = concurrent_load(&c.nodes[0], &origins, &hot).await;
+
+    for o in &settled {
+        let got = ok(&c.nodes[0], "promise.get", json!({ "id": o })).await;
+        assert_eq!(got["promise"]["state"], "resolved", "{o}");
+    }
+    // A node that knows only the log serves the same.
+    drop(c);
+    let fresh = Cluster::on(log, 1).await;
+    for o in &settled {
+        let got = ok(&fresh.nodes[0], "promise.get", json!({ "id": o })).await;
+        assert_eq!(got["promise"]["state"], "resolved", "{o} after replay");
+    }
+    for i in 0..20 {
+        ok(
+            &fresh.nodes[0],
+            "promise.get",
+            json!({ "id": format!("{hot}:{i}") }),
+        )
+        .await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refused_commit_with_rounds_behind_it_re_reads_the_log() {
+    use resonate_server_kafka::log::mem::Fault;
+    use resonate_server_kafka::log::LogError;
+    let log = MemLog::new(PARTITIONS);
+    let c = Cluster::with(Arc::clone(&log), 1, pipelined()).await;
+    let origins: Vec<String> = (0..40).map(|i| origin_in(0, &format!("f{i}"))).collect();
+
+    // Requests in flight when a commit is refused: the rounds behind it were
+    // sent where it was meant to end, so the partition must be read again.
+    log.fail_next(Fault::Refuse(LogError::Unavailable("injected".into())));
+    let mut tasks = Vec::new();
+    for o in &origins {
+        let (node, o) = (Arc::clone(&c.nodes[0]), o.clone());
+        tasks.push(tokio::spawn(async move {
+            match send(&node, "promise.create", create(&o)).await {
+                Ok(r) if r.head.status == 200 => Some(o),
+                _ => None,
+            }
+        }));
+    }
+    let mut acknowledged = Vec::new();
+    for t in tasks {
+        acknowledged.extend(t.await.unwrap());
+    }
+    assert!(
+        acknowledged.len() < origins.len(),
+        "the refusal reached someone"
+    );
+
+    // Every acknowledged create is there once the partition is served again.
+    c.settle(&[0]).await;
+    for o in &acknowledged {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match send(&c.nodes[0], "promise.get", json!({ "id": o })).await {
+                Ok(r) if r.head.status == 200 => break,
+                Ok(r) => panic!("{o} acknowledged, then {}", r.head.status),
+                Err(_) => {
+                    assert!(Instant::now() < deadline, "the partition never came back");
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            }
+        }
     }
 }

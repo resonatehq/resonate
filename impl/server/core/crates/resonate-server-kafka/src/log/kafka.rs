@@ -475,14 +475,17 @@ struct KafkaWriter {
 
 #[async_trait]
 impl Writer for KafkaWriter {
-    async fn commit(&self, records: Vec<Record>, base: Checkpoint) -> Result<Checkpoint, LogError> {
+    fn start(&self, records: Vec<Record>, base: Checkpoint) -> super::Pending {
         if records.is_empty() {
-            return Ok(base);
+            return Box::pin(std::future::ready(Ok(base)));
         }
         let partition = self.partition as i32;
         let promises = self.cfg.topic(Topic::Promises);
         let schedules = self.cfg.topic(Topic::Schedules);
-        let mut deliveries = Vec::with_capacity(records.len());
+        let total = records.len();
+        // Handed to the producer here, synchronously, so a commit started
+        // after this one is queued behind it.
+        let mut deliveries = Vec::with_capacity(total);
         for (i, r) in records.iter().enumerate() {
             let topic = match r.topic {
                 Topic::Promises => &promises,
@@ -501,48 +504,49 @@ impl Writer for KafkaWriter {
             }
             match self.producer.send_result(record) {
                 Ok(d) => deliveries.push((r.topic, d)),
-                // Nothing is in flight yet: nothing landed.
-                Err((e, _)) if i == 0 => return Err(unavailable(e)),
+                // Nothing of this commit is in flight yet: none of it landed.
+                Err((e, _)) if i == 0 => return Box::pin(std::future::ready(Err(unavailable(e)))),
                 // The records before it are on their way.
                 Err((e, _)) => {
-                    return Err(LogError::Uncertain(format!(
-                        "record {i} of {} not sent: {e}",
-                        records.len()
-                    )))
+                    let e = LogError::Uncertain(format!("record {i} of {total} not sent: {e}"));
+                    return Box::pin(std::future::ready(Err(e)));
                 }
             }
         }
-        // In order, per log: each must land just past the one before.
-        let mut after = base;
-        let mut failure = None;
-        for (topic, delivery) in deliveries {
-            match delivery.await {
-                Ok(Ok(d)) => {
-                    let want = after.get(topic);
-                    if d.offset != want && failure.is_none() {
-                        failure = Some(LogError::Uncertain(format!(
-                            "partition {} {topic:?}: a record landed at {}, not {want}; \
-                             someone else wrote to the log",
-                            self.partition, d.offset
-                        )));
+        let (epochs, id) = (self.epochs, self.partition);
+        Box::pin(async move {
+            // In order, per log: each must land just past the one before.
+            let mut after = base;
+            let mut failure = None;
+            for (topic, delivery) in deliveries {
+                match delivery.await {
+                    Ok(Ok(d)) => {
+                        let want = after.get(topic);
+                        if d.offset != want && failure.is_none() {
+                            failure = Some(LogError::Uncertain(format!(
+                                "partition {id} {topic:?}: a record landed at {}, not {want}; \
+                                 someone else wrote to the log",
+                                d.offset
+                            )));
+                        }
+                        after.set(topic, d.offset + 1);
                     }
-                    after.set(topic, d.offset + 1);
-                }
-                Ok(Err((e, _))) => {
-                    failure.get_or_insert(LogError::Uncertain(format!("delivery failed: {e}")));
-                }
-                Err(_) => {
-                    failure.get_or_insert(LogError::Uncertain(
-                        "the producer dropped a delivery report".into(),
-                    ));
+                    Ok(Err((e, _))) => {
+                        failure.get_or_insert(LogError::Uncertain(format!("delivery failed: {e}")));
+                    }
+                    Err(_) => {
+                        failure.get_or_insert(LogError::Uncertain(
+                            "the producer dropped a delivery report".into(),
+                        ));
+                    }
                 }
             }
-        }
-        if let Some(e) = failure {
-            return Err(e);
-        }
-        after.epochs = self.epochs;
-        Ok(after)
+            if let Some(e) = failure {
+                return Err(e);
+            }
+            after.epochs = epochs;
+            Ok(after)
+        })
     }
 
     async fn check(&self, at: Checkpoint) -> Result<(), LogError> {

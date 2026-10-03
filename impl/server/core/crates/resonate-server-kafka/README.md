@@ -176,6 +176,7 @@ oracle's answer.
 | `instance_id` | unset | `group.instance.id`, for static membership. |
 | `drop_grace_secs` | 900 | How long a revoked partition's local copy is kept. |
 | `max_batch` | 512 | The group commit's ceiling. |
+| `pipeline_depth` | 1 | Rounds a partition may have committing at once. Above 1, a round starts while earlier ones land, never on an origin one of them touches. |
 | `cache_promises` | 2000 | Per partition: decoded hot documents kept, counted in promises. 0 turns it off. |
 | `search_enabled` | false | Searches read every record of every partition. |
 | `prune_shadowed` | false | Delete a settled promise once its parent is settled ([Pruning](#pruning)). |

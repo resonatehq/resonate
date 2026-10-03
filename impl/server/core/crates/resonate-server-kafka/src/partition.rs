@@ -49,6 +49,17 @@
 //! which makes them. An idle partition checks every
 //! [`PartitionCfg::idle_check`] that nobody else wrote to its log.
 //!
+//! **Pipelining** ([`PartitionCfg::pipeline`] above 1). A round's records are
+//! handed to the log and the next round starts while they land, up to that
+//! many commits in flight. Order is per origin (and per schedule), not per
+//! partition: a request whose origin a commit in flight touches is held
+//! until that commit lands, so every round decides on committed state and
+//! nothing is ever decided on top of a write that may not happen. Rounds
+//! land in the order they were sent, and steps 4–7 follow each in that
+//! order. A partition's records are one sequence in its log, so a round that
+//! fails with rounds behind it fails them too: their records were sent where
+//! it was meant to end. That is `Uncertain` whatever the first failure was.
+//!
 //! The outcome of step 3 decides the rest. `Unavailable`: nothing landed, so
 //! the round's decisions are dropped and its callers told to retry; the
 //! partition carries on. `Fenced`: another node owns the partition; stop.
@@ -68,10 +79,11 @@
 //! The node, which takes partitions over and routes every request, timer and
 //! schedule firing to them.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use futures::stream::{FuturesOrdered, StreamExt};
 use tokio::sync::{mpsc, oneshot, watch};
 
 use resonate_core::types::{ScheduleCreateData, ScheduleResponseData, TaskState};
@@ -86,7 +98,7 @@ use resonate_server_blob::sender::Sender;
 use crate::cache::DocCache;
 use crate::keys;
 use crate::local::{LocalStore, Op, PartitionStore, LOCAL_FORMAT};
-use crate::log::{Checkpoint, Consumed, Log, LogError, Record, Topic, Writer};
+use crate::log::{Checkpoint, Consumed, Log, LogError, Pending, Record, Topic, Writer};
 use crate::metrics;
 use crate::record;
 use crate::timers::{Target, Timers};
@@ -99,6 +111,10 @@ pub struct PartitionCfg {
     pub max_batch: usize,
     /// Mailbox depth.
     pub mailbox: usize,
+    /// Rounds whose commits may be in flight at once. 1: each round waits for
+    /// the one before it to land. More: a round starts while earlier ones
+    /// commit, but never on an origin or schedule a commit in flight touches.
+    pub pipeline: usize,
     /// The hot-document cache's budget, in promises ([`DocCache`]). Zero
     /// turns it off.
     pub cache_promises: usize,
@@ -116,6 +132,7 @@ impl Default for PartitionCfg {
             kernel: KernelCfg::default(),
             max_batch: 512,
             mailbox: 4_096,
+            pipeline: 1,
             cache_promises: 2_000,
             idle_check: Duration::from_secs(1),
             prune: false,
@@ -182,6 +199,15 @@ impl Work {
         }
     }
 
+    /// What it decides on: one origin or one schedule. A reset: everything.
+    fn key(&self) -> Option<Key> {
+        match self {
+            Work::Origin { origin, .. } => Some(Key::Origin(origin.clone())),
+            Work::Schedule { id, .. } => Some(Key::Schedule(id.clone())),
+            Work::Reset { .. } => None,
+        }
+    }
+
     fn fail(self, e: &Unavailable) {
         let reply = match self {
             Work::Origin { reply, .. } | Work::Schedule { reply, .. } | Work::Reset { reply } => {
@@ -190,6 +216,34 @@ impl Work {
         };
         let _ = reply.send(Err(e.clone()));
     }
+}
+
+/// An origin or a schedule: the unit decisions are ordered by. A key with a
+/// commit in flight is decided on again only once that commit has landed.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+enum Key {
+    Origin(String),
+    Schedule(String),
+}
+
+/// A round whose commit is in flight, and everything that waits for it.
+struct InFlight {
+    started: Instant,
+    committing: Instant,
+    keys: Vec<Key>,
+    counts: (u64, u64),
+    ops: Vec<Op>,
+    overlay: Overlay,
+    sends: Vec<Effect>,
+    answers: Vec<(Answer, Result<Reply, Unavailable>)>,
+}
+
+/// What the actor waits for next.
+enum Event {
+    Stop,
+    Landed(Result<Checkpoint, LogError>),
+    Work(Work),
+    Idle,
 }
 
 /// A partition this node owns and serves.
@@ -585,74 +639,133 @@ struct Overlay {
 
 impl Actor {
     async fn run(mut self, mut rx: mpsc::Receiver<Work>, mut stop: watch::Receiver<bool>) -> Exit {
-        let exit = loop {
+        let depth = self.cfg.pipeline.max(1);
+        // Rounds in flight, oldest first, and their commits, landing in the
+        // same order: a partition's records land in the order they were sent.
+        let mut inflight: VecDeque<InFlight> = VecDeque::new();
+        let mut landing: FuturesOrdered<Pending> = FuturesOrdered::new();
+        // Arrived and not yet decided; and held because a commit in flight
+        // touches their key. Both in arrival order.
+        let mut ready: VecDeque<Work> = VecDeque::new();
+        let mut held: VecDeque<Work> = VecDeque::new();
+        let mut busy: HashSet<Key> = HashSet::new();
+        // Where the next commit starts: past every commit in flight.
+        let mut next_base = self.checkpoint;
+        let exit = 'run: loop {
+            // Start rounds while there is room and work whose keys are free.
+            while inflight.len() < depth && !ready.is_empty() {
+                if matches!(ready.front(), Some(Work::Reset { .. })) {
+                    // A reset sees everything before it: wait for it to land.
+                    if !inflight.is_empty() {
+                        break;
+                    }
+                    let work = ready.pop_front().expect("a reset");
+                    if let Err(exit) = self.reset(work).await {
+                        break 'run exit;
+                    }
+                    next_base = self.checkpoint;
+                    continue;
+                }
+                let mut batch = Vec::new();
+                while batch.len() < self.cfg.max_batch {
+                    match ready.front() {
+                        None | Some(Work::Reset { .. }) => break,
+                        Some(work) if busy.contains(&work.key().expect("not a reset")) => {
+                            held.push_back(ready.pop_front().expect("front"));
+                        }
+                        Some(_) => batch.push(ready.pop_front().expect("front")),
+                    }
+                }
+                if batch.is_empty() {
+                    continue;
+                }
+                if let Some((round, pending, after)) = self.start_round(batch, next_base).await {
+                    busy.extend(round.keys.iter().cloned());
+                    next_base = after;
+                    inflight.push_back(round);
+                    landing.push_back(pending);
+                }
+            }
+
+            let can_take = inflight.len() < depth;
             let idle = tokio::time::sleep(self.cfg.idle_check);
-            let first = tokio::select! {
+            let event = tokio::select! {
                 biased;
-                _ = stop.changed() => break Exit::Stopped,
-                work = rx.recv() => match work {
-                    Some(work) => work,
-                    None => break Exit::Stopped,
+                _ = stop.changed() => Event::Stop,
+                Some(landed) = landing.next(), if !landing.is_empty() => Event::Landed(landed),
+                work = rx.recv(), if can_take => match work {
+                    Some(work) => Event::Work(work),
+                    None => Event::Stop,
                 },
-                _ = idle => {
+                _ = idle, if inflight.is_empty() && ready.is_empty() => Event::Idle,
+            };
+            match event {
+                Event::Stop => break Exit::Stopped,
+                Event::Idle => {
                     // Nobody else may have written to the log since we did.
                     match self.writer.check(self.checkpoint).await {
-                        Ok(()) => continue,
-                        Err(LogError::Unavailable(_)) => continue,
+                        Ok(()) | Err(LogError::Unavailable(_)) => {}
                         Err(LogError::Fenced(m)) => break Exit::Fenced(m),
                         Err(LogError::Uncertain(m)) => break Exit::Uncertain(m),
                     }
                 }
-            };
-            // Group commit: take everything already queued, up to the ceiling.
-            let mut batch = vec![first];
-            while batch.len() < self.cfg.max_batch {
-                match rx.try_recv() {
-                    Ok(work) => batch.push(work),
-                    Err(_) => break,
-                }
-            }
-            // A reset is its own round, so it sees what came before it.
-            let mut segment = Vec::new();
-            let mut outcome = Ok(());
-            for work in batch {
-                if outcome.is_err() {
-                    work.fail(&Unavailable::new(format!(
-                        "partition {} stopped serving",
-                        self.id
-                    )));
-                    continue;
-                }
-                if matches!(work, Work::Reset { .. }) {
-                    outcome = self.round(std::mem::take(&mut segment)).await;
-                    if outcome.is_ok() {
-                        outcome = self.reset(work).await;
-                    } else {
-                        work.fail(&Unavailable::new("partition stopped serving"));
+                Event::Work(work) => {
+                    // Group commit: take everything already queued, up to
+                    // what the rounds about to start can hold.
+                    ready.push_back(work);
+                    while ready.len() < self.cfg.max_batch * depth {
+                        match rx.try_recv() {
+                            Ok(work) => ready.push_back(work),
+                            Err(_) => break,
+                        }
                     }
-                } else {
-                    segment.push(work);
                 }
-            }
-            if outcome.is_ok() && !segment.is_empty() {
-                outcome = self.round(segment).await;
-            } else {
-                for work in segment {
-                    work.fail(&Unavailable::new("partition stopped serving"));
+                Event::Landed(landed) => {
+                    let round = inflight.pop_front().expect("a round per commit");
+                    for key in &round.keys {
+                        busy.remove(key);
+                    }
+                    let alone = inflight.is_empty();
+                    if let Err(exit) = self.finish(round, landed, alone).await {
+                        break exit;
+                    }
+                    if inflight.is_empty() {
+                        next_base = self.checkpoint;
+                    }
+                    // Held work whose key is free goes back first: it came first.
+                    let mut still = VecDeque::new();
+                    let mut free = Vec::new();
+                    for work in held.drain(..) {
+                        if busy.contains(&work.key().expect("not a reset")) {
+                            still.push_back(work);
+                        } else {
+                            free.push(work);
+                        }
+                    }
+                    held = still;
+                    for work in free.into_iter().rev() {
+                        ready.push_front(work);
+                    }
                 }
-            }
-            if let Err(exit) = outcome {
-                break exit;
             }
         };
-        // Whatever is still queued will not be decided here.
+        // Whatever is still queued, held or in flight will not be answered here.
         rx.close();
         let reason = match &exit {
             Exit::Stopped => format!("partition {} moved", self.id),
             other => format!("partition {} stopped serving: {other:?}", self.id),
         };
+        let unavailable = Unavailable::new(reason);
+        for round in inflight {
+            for (reply, _) in round.answers {
+                let _ = reply.send(Err(unavailable.clone()));
+            }
+        }
+        for work in ready.into_iter().chain(held) {
+            work.fail(&unavailable);
+        }
         while let Ok(work) = rx.try_recv() {
-            work.fail(&Unavailable::new(reason.clone()));
+            work.fail(&unavailable);
         }
         match &exit {
             Exit::Stopped => {}
@@ -666,11 +779,15 @@ impl Actor {
         exit
     }
 
-    /// Decide, commit, apply, arm, send, answer.
-    async fn round(&mut self, batch: Vec<Work>) -> Result<(), Exit> {
-        if batch.is_empty() {
-            return Ok(());
-        }
+    /// Decide a round on committed state and hand its records to the log at
+    /// `base`. A round that changed nothing is finished at once; otherwise it
+    /// returns the round in flight, its commit, and where the log will end
+    /// after it.
+    async fn start_round(
+        &mut self,
+        batch: Vec<Work>,
+        base: Checkpoint,
+    ) -> Option<(InFlight, Pending, Checkpoint)> {
         let started = Instant::now();
         metrics::ROUND_REQUESTS.observe(batch.len() as f64);
         for work in &batch {
@@ -678,12 +795,7 @@ impl Actor {
                 metrics::QUEUE_WAIT.observe(started.duration_since(at).as_secs_f64());
             }
         }
-        let out = self.decide_and_commit(batch).await;
-        metrics::ROUND_SECONDS.observe(started.elapsed().as_secs_f64());
-        out
-    }
-
-    async fn decide_and_commit(&mut self, batch: Vec<Work>) -> Result<(), Exit> {
+        let mut keys: BTreeSet<Key> = BTreeSet::new();
         let mut overlay = Overlay::default();
         // Every decision's records, in decision order.
         let mut steps: Vec<record::Change> = Vec::new();
@@ -692,6 +804,9 @@ impl Actor {
         let mut sends: Vec<Effect> = Vec::new();
 
         for work in batch {
+            if let Some(key) = work.key() {
+                keys.insert(key);
+            }
             match work {
                 Work::Origin {
                     origin,
@@ -765,45 +880,85 @@ impl Actor {
                 });
             }
         }
+        let counts = records
+            .iter()
+            .fold((0u64, 0u64), |(p, s), r| match r.topic {
+                Topic::Promises => (p + 1, s),
+                Topic::Schedules => (p, s + 1),
+            });
+        let round = InFlight {
+            started,
+            committing: Instant::now(),
+            keys: keys.into_iter().collect(),
+            counts,
+            ops,
+            overlay,
+            sends,
+            answers,
+        };
+        if records.is_empty() {
+            // Nothing changed: nothing to wait for.
+            self.complete(round).await;
+            return None;
+        }
+        let mut after = base;
+        after.promises += counts.0 as i64;
+        after.schedules += counts.1 as i64;
+        let pending = self.writer.start(records, base);
+        Some((round, pending, after))
+    }
 
-        let result = self.commit(records, ops).await;
-        match result {
-            Ok(()) => {
-                // Arm every target the round touched, changed or not: a timer
-                // that fired early is re-armed rather than forgotten.
-                for (origin, (_, after)) in &overlay.origins {
-                    self.timers
-                        .set(Target::Origin(origin.clone()), min_deadline(after));
-                }
-                for (id, (_, after)) in &overlay.schedules {
-                    self.timers.set(
-                        Target::Schedule(id.clone()),
-                        after.as_ref().map(|s| s.next_run_at),
-                    );
-                }
-                // Committed, so these are what the store now holds.
-                for (origin, (_, after)) in overlay.origins {
-                    self.cache.put(origin, after);
-                }
-                for effect in sends {
-                    if let Effect::Send { address, msg } = effect {
-                        self.sender.dispatch(&address, *msg).await;
-                    }
-                }
-                for (reply, answer) in answers {
-                    let _ = reply.send(answer);
-                }
+    /// A round's commit has landed, or failed. `alone`: no later round is in
+    /// flight behind it.
+    async fn finish(
+        &mut self,
+        round: InFlight,
+        landed: Result<Checkpoint, LogError>,
+        alone: bool,
+    ) -> Result<(), Exit> {
+        metrics::COMMIT_SECONDS.observe(round.committing.elapsed().as_secs_f64());
+        let landed = landed.and_then(|after| {
+            // The log has it. A local copy that cannot take it now disagrees
+            // with the log, which is exactly the uncertain case.
+            self.store
+                .apply(round.ops.clone(), after)
+                .map(|()| after)
+                .map_err(|e| LogError::Uncertain(format!("local apply failed after commit: {e}")))
+        });
+        match landed {
+            Ok(after) => {
+                metrics::RECORDS_COMMITTED
+                    .with_label_values(&["promises"])
+                    .inc_by(round.counts.0 as f64);
+                metrics::RECORDS_COMMITTED
+                    .with_label_values(&["schedules"])
+                    .inc_by(round.counts.1 as f64);
+                self.checkpoint = after;
+                self.complete(round).await;
                 Ok(())
             }
             Err(e) => {
+                let kind = match &e {
+                    LogError::Unavailable(_) => "unavailable",
+                    LogError::Fenced(_) => "fenced",
+                    LogError::Uncertain(_) => "uncertain",
+                };
+                metrics::COMMIT_ERRORS.with_label_values(&[kind]).inc();
+                metrics::ROUND_SECONDS.observe(round.started.elapsed().as_secs_f64());
                 let (unavailable, exit) = match e {
-                    LogError::Unavailable(m) => (Unavailable::new(m), None),
+                    // Nothing landed and nothing follows it: carry on.
+                    LogError::Unavailable(m) if alone => (Unavailable::new(m), None),
+                    // Rounds behind it were sent where it was meant to end.
+                    LogError::Unavailable(m) => (
+                        Unavailable::new(m.clone()),
+                        Some(Exit::Uncertain(format!("{m}, with later rounds in flight"))),
+                    ),
                     LogError::Fenced(m) => (Unavailable::new(m.clone()), Some(Exit::Fenced(m))),
                     LogError::Uncertain(m) => {
                         (Unavailable::new(m.clone()), Some(Exit::Uncertain(m)))
                     }
                 };
-                for (reply, _) in answers {
+                for (reply, _) in round.answers {
                     let _ = reply.send(Err(unavailable.clone()));
                 }
                 match exit {
@@ -812,6 +967,42 @@ impl Actor {
                 }
             }
         }
+    }
+
+    /// After a round is durable (or changed nothing): arm, cache, send, answer.
+    async fn complete(&mut self, round: InFlight) {
+        let InFlight {
+            started,
+            overlay,
+            sends,
+            answers,
+            ..
+        } = round;
+        // Arm every target the round touched, changed or not: a timer that
+        // fired early is re-armed rather than forgotten.
+        for (origin, (_, after)) in &overlay.origins {
+            self.timers
+                .set(Target::Origin(origin.clone()), min_deadline(after));
+        }
+        for (id, (_, after)) in &overlay.schedules {
+            self.timers.set(
+                Target::Schedule(id.clone()),
+                after.as_ref().map(|s| s.next_run_at),
+            );
+        }
+        // Committed, so these are what the store now holds.
+        for (origin, (_, after)) in overlay.origins {
+            self.cache.put(origin, after);
+        }
+        for effect in sends {
+            if let Effect::Send { address, msg } = effect {
+                self.sender.dispatch(&address, *msg).await;
+            }
+        }
+        for (reply, answer) in answers {
+            let _ = reply.send(answer);
+        }
+        metrics::ROUND_SECONDS.observe(started.elapsed().as_secs_f64());
     }
 
     /// Commit `records` and apply them locally. Nothing is written when

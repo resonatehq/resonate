@@ -116,6 +116,17 @@ fn node_cfg() -> NodeCfg {
     }
 }
 
+/// The same trajectory, with rounds pipelined.
+#[tokio::test(flavor = "multi_thread")]
+async fn differential_random_pipelined() {
+    let mut cfg = node_cfg();
+    cfg.partition.pipeline = 4;
+    cfg.partition.max_batch = 2;
+    let server = Node::in_memory(8, Arc::new(NullRouter), cfg);
+    server.start().await.expect("every partition taken over");
+    run(server, usize::MAX, None).await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn differential_random() {
     let server = Node::in_memory(8, Arc::new(NullRouter), node_cfg());
