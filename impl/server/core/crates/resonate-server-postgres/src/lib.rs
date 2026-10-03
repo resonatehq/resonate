@@ -2878,6 +2878,21 @@ impl PostgresDb<'_> {
             return Ok(());
         }
         let ids: Vec<String> = ids.iter().map(|s| s.to_string()).collect();
+        // The cascade below is the whole settlement fan-out, and nearly always
+        // has nothing to do: the promises a request names are rarely past
+        // their deadline. Ask that first — a primary-key lookup of the same
+        // rows on the same predicate — and run the cascade only when one is.
+        let due = rt_block_on(
+            sqlx::query(
+                "SELECT 1 FROM promises WHERE id = ANY($1) AND state = 'pending' AND timeout_at <= $2 LIMIT 1",
+            )
+            .bind(&ids)
+            .bind(time)
+            .fetch_optional(self.tx().as_mut()),
+        )?;
+        if due.is_none() {
+            return Ok(());
+        }
         let sql = expire_batch_sql(
             "id = ANY($1) AND state = 'pending' AND timeout_at <= $2",
             "$2",
@@ -4212,17 +4227,25 @@ impl PostgresDb<'_> {
     fn upcoming(&self, limit: usize) -> StorageResult<Vec<Scheduled>> {
         let rows = rt_block_on(
             sqlx::query(
+                // Each branch takes only its own first $1, in deadline order, so
+                // each reads through its deadline index and stops; the outer
+                // sort merges at most 4 × $1 rows. Without the inner limits
+                // every pending row was read and sorted on every refresh.
                 "SELECT deadline, kind, id, pid FROM (
-                     SELECT timeout_at AS deadline, 'promise' AS kind, id AS id, NULL::text AS pid
-                       FROM promises WHERE state = 'pending' AND external
+                     (SELECT timeout_at AS deadline, 'promise' AS kind, id AS id, NULL::text AS pid
+                        FROM promises WHERE state = 'pending' AND external
+                        ORDER BY timeout_at ASC, id ASC LIMIT $1)
                      UNION ALL
-                     SELECT retry_timeout_at, 'retry', id, NULL
-                       FROM promises WHERE task_state = 'pending' AND retry_timeout_at IS NOT NULL
+                     (SELECT retry_timeout_at, 'retry', id, NULL
+                        FROM promises WHERE task_state = 'pending' AND retry_timeout_at IS NOT NULL
+                        ORDER BY retry_timeout_at ASC, id ASC LIMIT $1)
                      UNION ALL
-                     SELECT lease_timeout_at, 'lease', id, pid
-                       FROM promises WHERE task_state = 'acquired' AND lease_timeout_at IS NOT NULL
+                     (SELECT lease_timeout_at, 'lease', id, pid
+                        FROM promises WHERE task_state = 'acquired' AND lease_timeout_at IS NOT NULL
+                        ORDER BY lease_timeout_at ASC, id ASC LIMIT $1)
                      UNION ALL
-                     SELECT next_run_at, 'schedule', id, NULL FROM schedules
+                     (SELECT next_run_at, 'schedule', id, NULL FROM schedules
+                        ORDER BY next_run_at ASC, id ASC LIMIT $1)
                  ) d
                  ORDER BY deadline ASC, id ASC
                  LIMIT $1",
