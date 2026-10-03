@@ -105,6 +105,12 @@ impl Args {
                 let token = env("RN8_TOKEN")
                     .filter(|t| t.len() >= 16)
                     .ok_or("--listen needs RN8_TOKEN, at least 16 characters")?;
+                // Both on this guest: the push would reach rn8, not the worker.
+                if port == worker_port {
+                    return Err(format!(
+                        "listen port {port} is the worker's port; give one of them another"
+                    ));
+                }
                 Some((port, token))
             }
         };
@@ -214,5 +220,7 @@ mod tests {
             Args::parse_with(["--listen", "8443", "--", "x"].map(String::from), short).is_err()
         );
         assert_eq!(parse(&["--", "x"]).unwrap().listen, None);
+        // 8080 is the worker's port by default.
+        assert!(Args::parse_with(["--listen", "8080", "--", "x"].map(String::from), env).is_err());
     }
 }

@@ -55,7 +55,8 @@ impl Default for Options {
             token: None,
             api_url: "https://api.fra.unikraft.cloud".into(),
             edge_scheme: "https".into(),
-            port: 8080,
+            // Not 8080: that is the worker's, where rn8 pushes the task.
+            port: 9000,
             ready_timeout: Duration::from_secs(60),
             poll: Duration::from_millis(250),
         }
@@ -134,6 +135,8 @@ struct Log {
 
 #[derive(Debug, Deserialize)]
 struct Range {
+    #[serde(default)]
+    start: u64,
     end: u64,
 }
 
@@ -391,8 +394,12 @@ impl UnikraftProcess {
         let pumps = vec![
             tokio::spawn(pump_in(edge.clone(), stdin_pump)),
             tokio::spawn(pump_out(edge, stdout_pump)),
-            tokio::spawn(pump_log(api.clone(), uuid.clone(), poll, stderr_pump)),
         ];
+        // Not aborted with the rest: the console's last lines — rn8's
+        // diagnostics, the exit — come after the frames end, and are the ones
+        // worth having. It ends on its own once the instance has stopped and
+        // the log is read, or is gone.
+        tokio::spawn(pump_log(api.clone(), uuid.clone(), poll, stderr_pump));
         Self {
             stdin: Some(Box::new(stdin)),
             stdout: Some(Box::new(stdout)),
@@ -497,12 +504,18 @@ async fn pump_log(api: Api, uuid: String, poll: Duration, mut to: DuplexStream) 
             .as_deref()
             .and_then(|b| base64::engine::general_purpose::STANDARD.decode(b).ok())
             .unwrap_or_default();
-        if !text.is_empty() && to.write_all(&text).await.is_err() {
+        // The answer can overlap what was already read: `output` is the
+        // bytes from `range.start`, whatever offset was asked for.
+        let (start, end) = log
+            .range
+            .map(|r| (r.start, r.end))
+            .unwrap_or((offset, offset + text.len() as u64));
+        let fresh = &text[(offset.saturating_sub(start) as usize).min(text.len())..];
+        if !fresh.is_empty() && to.write_all(fresh).await.is_err() {
             return;
         }
-        let end = log.range.map(|r| r.end).unwrap_or(offset);
         let moved = end > offset;
-        offset = end;
+        offset = offset.max(end);
         if !moved && log.state.as_deref() == Some("stopped") {
             return;
         }
@@ -544,11 +557,11 @@ mod tests {
         assert_eq!(body["vcpus"], 1);
         assert_eq!(body["memory_mb"], 512);
         assert_eq!(body["env"]["A"], "b");
-        assert_eq!(body["env"]["RN8_LISTEN"], "8080");
+        assert_eq!(body["env"]["RN8_LISTEN"], "9000");
         assert_eq!(body["env"]["RN8_TOKEN"], "secret");
         assert_eq!(
             body["service_group"]["services"][0],
-            json!({ "port": 443, "destination_port": 8080, "handlers": ["tls", "http"] })
+            json!({ "port": 443, "destination_port": 9000, "handlers": ["tls", "http"] })
         );
         // No command: the image's own, which is rn8.
         assert!(body.get("args").is_none());

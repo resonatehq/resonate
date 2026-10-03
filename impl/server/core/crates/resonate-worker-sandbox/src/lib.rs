@@ -500,7 +500,8 @@ pub struct UnikraftConfig {
     #[serde(default)]
     pub api_url: Option<String>,
 
-    /// The port rn8 listens on inside an instance [default: 8080]
+    /// The port rn8 listens on inside an instance; not the worker's 8080
+    /// [default: 9000]
     #[serde(default = "default_unikraft_port")]
     pub port: u16,
 
@@ -535,7 +536,7 @@ fn default_unikraft_metro() -> String {
     "fra".into()
 }
 fn default_unikraft_port() -> u16 {
-    8080
+    9000
 }
 
 /// The local provider.
