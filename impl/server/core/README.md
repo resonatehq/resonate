@@ -205,6 +205,7 @@ Resonate ships with the following plugins:
 | Worker | `transport_http_poll` |
 | Worker | `transport_gcps` |
 | Worker | `worker_bash` |
+| Worker | `worker_sandbox` |
 | Gateway | `gateway_http` |
 | Gateway | `gateway_web` |
 | Gateway | `gateway_metrics` |

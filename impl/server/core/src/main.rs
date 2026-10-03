@@ -77,6 +77,7 @@ fn registry() -> Registry {
         .worker(&resonate_transport_http_poll::PLUGIN)
         .worker(&resonate_transport_gcps::PLUGIN)
         .worker(&resonate_worker_bash::PLUGIN)
+        .worker(&resonate_worker_sandbox::PLUGIN)
         .gateway(&resonate_gateway_http::PLUGIN)
         .gateway(&resonate_gateway_web::PLUGIN)
         .gateway(&resonate_gateway_metrics::PLUGIN)

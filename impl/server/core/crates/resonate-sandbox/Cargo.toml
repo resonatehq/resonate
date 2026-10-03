@@ -1,0 +1,17 @@
+[package]
+name = "resonate-sandbox"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Resonate sandbox: the frame protocol between the sandbox plugin and rn8, and the backend trait."
+
+# Shared by the plugin, which runs in the server, and rn8, which runs in the
+# guest. So it is kept to what both sides need: serde for the frames, tokio's
+# I/O traits for a process's stdio. No runtime, no HTTP.
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { version = "1", features = ["io-util", "process"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["io-util", "process", "rt", "macros", "time"] }

@@ -1,0 +1,28 @@
+[package]
+name = "resonate-sandbox-rn8"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "rn8: the relay baked into a Resonate sandbox image, between the plugin's frames and the worker's HTTP."
+
+# Not a plugin. rn8 runs inside the guest, as the image's entrypoint, and the
+# server never links it — it is in this workspace because it speaks the frame
+# protocol in `resonate-sandbox`, and the two must version together.
+#
+# Built static for the image:
+#   cargo build --release -p resonate-sandbox-rn8 --target x86_64-unknown-linux-musl
+[[bin]]
+name = "rn8"
+path = "src/main.rs"
+
+[dependencies]
+resonate-sandbox = { path = "../resonate-sandbox" }
+serde_json = { workspace = true }
+tokio = { version = "1", features = ["rt", "macros", "io-std", "io-util", "net", "process", "signal", "sync", "time"] }
+# HTTP/1.1 on loopback, both ways, and nothing more: no TLS, no pool, no
+# framework. The guest has no network, and rn8 is in every image.
+hyper = { version = "1", features = ["http1", "server", "client"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+bytes = "1"
+libc = "0.2"

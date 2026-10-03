@@ -8,6 +8,9 @@ members = [
     "crates/resonate-gateway-metrics",
     "crates/resonate-gateway-web",
     "crates/resonate-plugin",
+    "crates/resonate-sandbox",
+    "crates/resonate-sandbox-microsandbox",
+    "crates/resonate-sandbox-rn8",
     "crates/resonate-sql",
     "crates/resonate-server-scylladb",
     "crates/resonate-server-blob",
@@ -21,6 +24,7 @@ members = [
     "crates/resonate-transport-http-poll",
     "crates/resonate-transport-http-push",
     "crates/resonate-worker-bash",
+    "crates/resonate-worker-sandbox",
     "xtask",
 ]
 
@@ -88,6 +92,7 @@ resonate-transport-http-push = { path = "crates/resonate-transport-http-push" }
 resonate-transport-http-poll = { path = "crates/resonate-transport-http-poll" }
 resonate-transport-gcps = { path = "crates/resonate-transport-gcps" }
 resonate-worker-bash = { path = "crates/resonate-worker-bash" }
+resonate-worker-sandbox = { path = "crates/resonate-worker-sandbox" }
 resonate-gateway-http = { path = "crates/resonate-gateway-http" }
 resonate-gateway-web = { path = "crates/resonate-gateway-web" }
 resonate-gateway-metrics = { path = "crates/resonate-gateway-metrics" }

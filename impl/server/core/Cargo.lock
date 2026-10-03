@@ -3094,6 +3094,7 @@ dependencies = [
  "resonate-transport-http-poll",
  "resonate-transport-http-push",
  "resonate-worker-bash",
+ "resonate-worker-sandbox",
  "serde_json",
  "tokio",
 ]
@@ -3232,6 +3233,40 @@ dependencies = [
  "resonate-auth",
  "resonate-core",
  "serde",
+ "tokio",
+]
+
+[[package]]
+name = "resonate-sandbox"
+version = "0.10.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "resonate-sandbox-microsandbox"
+version = "0.10.1"
+dependencies = [
+ "fastrand",
+ "resonate-sandbox",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "resonate-sandbox-rn8"
+version = "0.10.1"
+dependencies = [
+ "bytes",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "libc",
+ "resonate-sandbox",
+ "serde_json",
  "tokio",
 ]
 
@@ -3433,6 +3468,25 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "resonate-worker-sandbox"
+version = "0.10.1"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "libc",
+ "resonate-base",
+ "resonate-plugin",
+ "resonate-sandbox",
+ "resonate-sandbox-microsandbox",
+ "resonate-server-sqlite",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

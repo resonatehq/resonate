@@ -1,0 +1,21 @@
+[package]
+name = "resonate-sandbox-microsandbox"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Resonate sandbox backend: microsandbox microVMs, driven through the msb CLI."
+
+# Through `msb`, not the `microsandbox` SDK crate. The SDK links its own SQLite
+# (libsqlite3-sys 0.37) and this workspace already links another (0.28, under
+# sqlx); Cargo allows one `links = "sqlite3"` per build graph. `msb exec
+# --stream` gives the same live, byte-faithful stdio the SDK's `exec_stream`
+# does, as a host child's pipes.
+[dependencies]
+resonate-sandbox = { path = "../resonate-sandbox" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { version = "1", features = ["process", "io-util"] }
+fastrand = "2"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["process", "io-util", "rt", "macros"] }
