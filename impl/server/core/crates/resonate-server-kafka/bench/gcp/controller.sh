@@ -8,6 +8,10 @@
 set -uo pipefail
 cd "$(dirname "$0")"; source env.sh
 export SSH_FLAGS=--internal-ip
+# The ssh key, once, before anything runs in parallel: concurrent first-time
+# `gcloud compute ssh` calls race to create it and all but one fail at an
+# interactive overwrite prompt.
+[ -f ~/.ssh/google_compute_engine ] || ssh-keygen -t rsa -b 3072 -N "" -q -f ~/.ssh/google_compute_engine
 name=$1; shift
 dest=$BUCKET/results/$name
 mkdir -p results
