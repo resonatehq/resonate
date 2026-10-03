@@ -243,6 +243,8 @@ describe("Resonate usage tests", () => {
       ran.resolve();
     });
 
+    await resonate.listen();
+
     const scheduleId = `on-schedule-${rid()}`;
     const schedule = await resonate.schedule(
       scheduleId,

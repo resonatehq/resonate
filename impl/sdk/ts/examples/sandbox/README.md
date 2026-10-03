@@ -12,6 +12,8 @@ resonate.register("scrapeAll", async (ctx: Context, urls: string[]) => {
     urls.map((url) => ctx.rpc<Scrape>("scrape", url, ctx.options({ target: "sandbox://tensorlake/resonate-browser" }))),
   );
 });
+
+await resonate.listen();
 ```
 
 ```ts
@@ -25,10 +27,11 @@ resonate.register("scrape", async (_ctx: Context, url: string): Promise<Scrape> 
 await resonate.handle();
 ```
 
-`ctx.rpc` with a `sandbox://` target is all that sends work to a sandbox. In
-the sandbox, rn8 starts `scraper.ts` with `RESONATE_PUSH=1`, so `new Resonate()`
-does not poll; `resonate.handle()` takes the one task rn8 pushes, answers when
-it is done, and shuts the instance down — nothing lingers. (A push worker that
+`ctx.rpc` with a `sandbox://` target is all that sends work to a sandbox.
+Receiving work is explicit on both sides: `listen()` takes tasks until
+`stop()`, `handle()` takes exactly one and shuts the instance down. In the
+sandbox, rn8 starts `scraper.ts` with `RESONATE_PUSH=1`, so the one task
+arrives as rn8's HTTP push rather than from the server — nothing lingers. (A push worker that
 should stay up between tasks, like a reused serverless container, calls
 `resonate.listen()` instead: same pushes, until `stop()`. Both sit on
 `resonate.fetch(request)`, a web-standard fetch handler that Deno, Bun and

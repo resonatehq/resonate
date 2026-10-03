@@ -10,3 +10,5 @@ resonate.register("scrapeAll", async (ctx: Context, urls: string[]) => {
     urls.map((url) => ctx.rpc<Scrape>("scrape", url, ctx.options({ target: "sandbox://tensorlake/resonate-browser" }))),
   );
 });
+
+await resonate.listen();

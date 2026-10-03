@@ -433,7 +433,7 @@ describe("Resonate <-> Network Wiring", () => {
     await resonate.stop();
   });
 
-  test("recv callback is properly wired during construction", async () => {
+  test("recv callback is wired by listen(), not by construction", async () => {
     let recvCalled = false;
 
     const mockNet = new MockNetwork();
@@ -448,6 +448,10 @@ describe("Resonate <-> Network Wiring", () => {
       logLevel: "error",
     });
 
+    // Receiving is explicit: constructing an instance receives nothing.
+    expect(recvCalled).toBe(false);
+
+    await resonate.listen();
     expect(recvCalled).toBe(true);
 
     await resonate.stop();

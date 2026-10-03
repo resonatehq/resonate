@@ -29,6 +29,7 @@ const url = process.env.RESONATE_URL ?? "http://localhost:8001";
 // The worker: owns `greet` and listens on the "backend" group.
 const backend = new Resonate({ url, group: "backend" });
 backend.register("greet", greet);
+await backend.listen();
 
 // The caller: a different group, with `greet` deliberately NOT registered.
 const frontend = new Resonate({ url, group: "frontend" });

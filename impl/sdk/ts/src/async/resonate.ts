@@ -81,6 +81,14 @@ export class Resonate {
   private intervalId: ReturnType<typeof setInterval> | undefined;
   /** The push listener, while `handle()` or `listen()` has one open. */
   private listener: { close(): void } | undefined;
+  /** Work is pushed over HTTP rather than received from the network. */
+  private push = false;
+  /** Whether the network is receiving: see `startReceiving`. */
+  private receiving = false;
+  /** While `handle()` waits for its one execute from the network. */
+  private takeOne: ((msg: Message) => void) | undefined;
+  /** `handle()` has taken its one: further executes are not this instance's. */
+  private handled = false;
 
   public readonly promises: Promises;
   public readonly schedules: Schedules;
@@ -198,6 +206,24 @@ export class Resonate {
     this.promises = new Promises(this.send);
     this.schedules = new Schedules(this.send);
 
+    this.push = push;
+    // Nothing is received yet: work arrives once `listen()` or `handle()` is
+    // called, so constructing an instance opens no connection, starts no timer
+    // and runs nothing on its own.
+  }
+
+  /**
+   * Start receiving over the network: execute and unblock messages, and the
+   * subscription poll that backs results. Idempotent.
+   *
+   * Called by `listen()` and `handle()` — and by `run()`/`rpc()` handing back
+   * a handle, whose result arrives over the same connection: a client that
+   * only calls `run()` gets its answer without listening first.
+   */
+  private startReceiving(): void {
+    if (this.receiving) return;
+    this.receiving = true;
+
     this.network.recv(this.onMessage.bind(this));
     this.network.init().catch((err) => {
       this.logger.error(
@@ -208,7 +234,7 @@ export class Resonate {
 
     // Pushed work is one task at a time and needs no subscriptions — nor a
     // timer that would keep a handled process from exiting.
-    if (push) return;
+    if (this.push) return;
 
     this.intervalId = setInterval(async () => {
       for (const [id, sub] of this.subscriptions.entries()) {
@@ -472,15 +498,15 @@ export class Resonate {
   };
 
   /**
-   * Handle one pushed task, then stop.
+   * Take one task, run it until it completes or suspends, then stop.
    *
-   * With a message — the `execute` a platform delivered — run it until it
-   * completes or suspends and resolve with the outcome.
+   * - With a message — the `execute` a platform delivered — that one.
+   * - In push mode, the one push answered over HTTP on `PORT` (default 8080,
+   *   on `HOST`, default loopback), through {@link Resonate.fetch}.
+   * - Otherwise, the first `execute` the network delivers.
    *
-   * Without one, take it over HTTP: listen on `PORT` (default 8080, on `HOST`,
-   * default loopback), answer one push through {@link Resonate.fetch}, and
-   * close. That is the whole life of a sandbox guest — rn8 pushes one task and
-   * the process should be gone once it is done:
+   * The whole life of a sandbox guest — rn8 pushes one task and the process
+   * should be gone once it is done:
    *
    * ```ts
    * const resonate = new Resonate();
@@ -488,33 +514,54 @@ export class Resonate {
    * await resonate.handle();
    * ```
    *
-   * Either way the instance is stopped afterwards: heartbeat, timers and
-   * network are released and nothing keeps the process alive. To keep taking
-   * pushes, use {@link Resonate.listen}.
+   * The instance is stopped afterwards: heartbeat, timers, listener and
+   * network are released and nothing keeps the process alive.
    */
   public async handle(msg?: Message): Promise<Status | undefined> {
     try {
       if (msg !== undefined) {
         return await this.core.onMessage(msg);
       }
-      return await new Promise<Status | undefined>((resolve, reject) => {
-        this.serveHttp(true, (outcome) => (outcome.ok ? resolve(outcome.status) : reject(outcome.error))).catch(reject);
+      if (this.push) {
+        return await new Promise<Status | undefined>((resolve, reject) => {
+          this.serveHttp(true, (outcome) => (outcome.ok ? resolve(outcome.status) : reject(outcome.error))).catch(
+            reject,
+          );
+        });
+      }
+      const first = await new Promise<Message>((resolve) => {
+        this.takeOne = (m) => {
+          this.handled = true;
+          resolve(m);
+        };
+        this.startReceiving();
       });
+      return await this.core.onMessage(first);
     } finally {
+      this.takeOne = undefined;
       await this.stop();
     }
   }
 
   /**
-   * Take pushed tasks over HTTP until stopped.
+   * Take tasks until {@link Resonate.stop}: from the network, or — in push
+   * mode — as HTTP pushes on `PORT` (default 8080, on `HOST`, default
+   * loopback), each answered through {@link Resonate.fetch}.
    *
-   * Listens on `PORT` (default 8080, on `HOST`, default loopback) and answers
-   * every push through {@link Resonate.fetch} — for a push worker that stays
-   * warm between tasks, such as a reused serverless container. Resolves once
-   * listening; {@link Resonate.stop} closes the listener with everything else.
+   * ```ts
+   * const resonate = new Resonate();
+   * resonate.register("scrapeAll", scrapeAll);
+   * await resonate.listen();
+   * ```
+   *
+   * Resolves once receiving has started.
    */
   public async listen(): Promise<void> {
-    await this.serveHttp(false, () => {});
+    if (this.push) {
+      await this.serveHttp(false, () => {});
+      return;
+    }
+    this.startReceiving();
   }
 
   /** A push, answered: the Response, and the outcome behind it. */
@@ -665,6 +712,8 @@ export class Resonate {
   }
 
   private createHandle(promise: PromiseRecord): ResonateHandle<any> {
+    // A handle is a result on its way, and it arrives over the network.
+    this.startReceiving();
     const registerListenerReq: PromiseRegisterListenerReq = {
       kind: "promise.register_listener",
       head: { corrId: randomUUID(), version: util.VERSION },
@@ -685,6 +734,15 @@ export class Resonate {
   }
 
   private onMessage(msg: Message): void {
+    if (msg.kind === "execute" && this.takeOne !== undefined) {
+      // `handle()` takes the first and only the first; anything after it
+      // goes back to the server when this instance stops.
+      const take = this.takeOne;
+      this.takeOne = undefined;
+      take(msg);
+      return;
+    }
+    if (msg.kind === "execute" && this.handled) return;
     if (msg.kind === "execute") {
       this.core
         .onMessage(msg)
