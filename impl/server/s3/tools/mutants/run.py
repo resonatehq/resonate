@@ -14,10 +14,13 @@ layers that catch it, not just the first:
   L4 scenarios  the Go SDK's four scenarios against the native and the wasm
                 server on one bucket (fakes3), checked by both checkers;
                 runs that fail or time out count as a liveness catch
+  L5 fuzz       resonate-fuzz (impl/server/core): guided and informed, every
+                answer and state compared with the in-memory reference model,
+                and the server's messages with the ones the model emitted
 
 A layer "catches" a mutant if it fails where it passes on the unmutated
 server (the baseline, run first). Tools come from the environment:
-ZIG, SCENARIOS, LOADGEN, LINCHECK, CONCCHECK, NODE (default: on PATH).
+ZIG, SCENARIOS, LOADGEN, LINCHECK, CONCCHECK, NODE, FUZZ (default: on PATH).
 """
 import argparse, json, os, shutil, signal, subprocess, sys, time, socket
 
@@ -32,6 +35,7 @@ LOADGEN = os.environ.get("LOADGEN", "loadgen")
 LINCHECK = os.environ.get("LINCHECK", "lincheck")
 CONCCHECK = os.environ.get("CONCCHECK", "conccheck")
 NODE = os.environ.get("NODE", "node")
+FUZZ = os.environ.get("FUZZ", "resonate-fuzz")
 SIM_RUNS = int(os.environ.get("SIM_RUNS", "100"))
 ROUNDS = int(os.environ.get("ROUNDS", "2"))
 
@@ -170,8 +174,37 @@ def layer_scenarios(root, logdir):
     return bad
 
 
+def layer_fuzz(root, logdir):
+    bad = []
+    for seed in (1, 2):
+        procs = Procs(logdir)
+        port = free_port()
+        try:
+            procs.start(f"fuzz-server-{seed}", [f"{root}/zig-out/bin/resonate", "serve", "--store", "memory",
+                                                "--debug", "--deliver", "--port", str(port)],
+                        f"http://127.0.0.1:{port}/ready")
+            # Searches off (--reset false): promise.search reports a promise past
+            # its deadline as pending where the model has it timed out, a known
+            # divergence that would otherwise mask everything else.
+            code, out = sh([FUZZ, "--url", f"http://127.0.0.1:{port}", "--programs", "40", "--seed", str(seed),
+                            "--reset", "false"],
+                           timeout=600)
+            open(f"{logdir}/fuzz-{seed}.txt", "w").write(out)
+            if code != 0:
+                first = next((l.strip() for l in out.splitlines() if l.startswith(("DISAGREE", "STATE"))), f"exit {code}")
+                bad.append(f"fuzz seed {seed}: {first}")
+            msg = next((l for l in out.splitlines() if "offers received" in l), "")
+            import re
+            m = re.search(r"; (\d+) the oracle expected never came, (\d+) came unexpected", msg)
+            if m and (int(m.group(1)) or int(m.group(2))):
+                bad.append(f"fuzz seed {seed}: messages {m.group(1)} missing, {m.group(2)} unexpected")
+        finally:
+            procs.stop()
+    return bad
+
+
 LAYERS = [("tests", layer_tests), ("simulator", layer_simulator),
-          ("loadgen", layer_loadgen), ("scenarios", layer_scenarios)]
+          ("loadgen", layer_loadgen), ("scenarios", layer_scenarios), ("fuzz", layer_fuzz)]
 
 
 def run_one(mutant, out):
@@ -204,7 +237,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", default="")
     ap.add_argument("--out", default="/tmp/resonate-mutants")
+    ap.add_argument("--layers", default="", help="comma-separated subset of: " + ",".join(l for l, _ in LAYERS))
     args = ap.parse_args()
+    if args.layers:
+        keep = args.layers.split(",")
+        LAYERS[:] = [(n, f) for n, f in LAYERS if n in keep]
     chosen = [m for m in MUTANTS if not args.only or m["name"] in args.only.split(",")]
     os.makedirs(args.out, exist_ok=True)
     results = [run_one(None, args.out)]
