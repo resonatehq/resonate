@@ -564,44 +564,15 @@ impl Oracle {
         let awaited_pending = awaited_record.state == PromiseState::Pending;
         let awaiter_pending = awaiter_state == PromiseState::Pending;
 
+        // Registered only while both are pending. An awaited promise that has
+        // already settled — by its own deadline during this very request
+        // included — registers nothing and resumes nobody: the answer carries
+        // the settled promise, and that is all a caller learns (the
+        // specification's promiseRegisterCallback). Waking an awaiter for a
+        // settled promise is task.suspend's job, which answers 300.
         if awaited_pending && awaiter_pending {
             if let Some(p) = self.promises.get_mut(&r.awaited) {
                 p.callbacks.insert(r.awaiter.clone());
-            }
-        } else if !awaited_pending && awaiter_pending {
-            // Direct resume: awaited already settled.
-            //
-            // A Suspended awaiter is woken; a Pending or Acquired one is
-            // already running and only records the resume. Either way the
-            // resume IS recorded — SQLite marks the callback ready after
-            // flipping the task to pending (`engine_sqlite.rs`, the
-            // INSERT ... ready = true that follows the resume UPDATE), so a
-            // woken awaiter carries one. This comment used to claim the
-            // opposite and skip the insert for the Suspended case, which put
-            // the model one resume behind SQLite and MySQL.
-            let task_state = self.tasks.get(&r.awaiter).map(|t| t.state);
-            let version = self.tasks.get(&r.awaiter).map(|t| t.version).unwrap_or(0);
-            let addr = self
-                .promises
-                .get(&r.awaiter)
-                .and_then(|p| p.tags.get("resonate:target").cloned());
-            match task_state {
-                Some(TaskState::Suspended) => {
-                    if let Some(t) = self.tasks.get_mut(&r.awaiter) {
-                        t.state = TaskState::Pending;
-                        t.resumes.insert(r.awaited.clone());
-                    }
-                    self.set_t_timeout(&r.awaiter, TTimeoutKind::Retry, now + PENDING_RETRY_TTL);
-                    if let Some(addr) = addr {
-                        self.send_execute(&addr, &r.awaiter, version);
-                    }
-                }
-                Some(TaskState::Pending) | Some(TaskState::Acquired) => {
-                    if let Some(t) = self.tasks.get_mut(&r.awaiter) {
-                        t.resumes.insert(r.awaited.clone());
-                    }
-                }
-                _ => {}
             }
         }
 

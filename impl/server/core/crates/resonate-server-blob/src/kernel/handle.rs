@@ -126,7 +126,7 @@ pub fn handle(doc: &OriginDoc, req: &Req, now: i64, cfg: &KernelCfg) -> (Vec<Eff
         Req::PromiseGet(r) => op_promise_get(&mut tx, r),
         Req::PromiseCreate(r) => op_promise_create(&mut tx, r, now, cfg),
         Req::PromiseSettle(r) => op_promise_settle(&mut tx, r, now, cfg),
-        Req::PromiseRegisterCallback(r) => op_promise_register_callback(&mut tx, r, now, cfg),
+        Req::PromiseRegisterCallback(r) => op_promise_register_callback(&mut tx, r),
         Req::PromiseRegisterListener(r) => op_promise_register_listener(&mut tx, r),
         Req::TaskGet(r) => op_task_get(&mut tx, r),
         Req::TaskCreate(r) => op_task_create(&mut tx, r, now, cfg),
@@ -196,8 +196,6 @@ fn op_promise_settle(
 fn op_promise_register_callback(
     tx: &mut Tx,
     r: &resonate_core::types::PromiseRegisterCallbackData,
-    now: i64,
-    cfg: &KernelCfg,
 ) -> Reply {
     let awaited_record = match tx.doc.promises.get(&r.awaited) {
         Some(p) => p.to_record(&r.awaited),
@@ -217,12 +215,14 @@ fn op_promise_register_callback(
     let awaited_pending = awaited_record.state == PromiseState::Pending;
     let awaiter_pending = awaiter_state == PromiseState::Pending;
 
+    // Registered only while both are pending. An awaited promise that has
+    // already settled — by its own deadline during this very request included —
+    // registers nothing and resumes nobody: the answer carries the settled
+    // promise, and that is all a caller learns (the specification's
+    // promiseRegisterCallback). Waking an awaiter for a settled promise is
+    // task.suspend's job, which answers 300.
     if awaited_pending && awaiter_pending {
         register_callback(tx, &r.awaited, &r.awaiter);
-    } else if !awaited_pending && awaiter_pending {
-        // The awaited promise is already settled, so there is nothing to wait
-        // for: wake the awaiter now instead of registering.
-        resume_awaiter(tx, &r.awaiter, &r.awaited, now, cfg, Wake::Registration);
     }
 
     Reply::ok(&PromiseResponseData {
@@ -926,38 +926,22 @@ pub(crate) fn trigger_callbacks(tx: &mut Tx, awaited: &str, now: i64, cfg: &Kern
             // chain fans out, and the handler runs on a swept document.
             continue;
         }
-        resume_awaiter(tx, &awaiter, awaited, now, cfg, Wake::Fanout);
+        resume_awaiter(tx, &awaiter, awaited, now, cfg);
     }
-}
-
-/// Which path is waking an awaiter. They agree on everything but one case.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Wake {
-    /// A settlement fanning out to everything registered against it.
-    ///
-    /// `resumption_enqueued` marks *every* callback of the settled promise
-    /// ready, whatever state the awaiter's task is in, so a halted awaiter
-    /// buffers the resume and sees it when it continues.
-    Fanout,
-    /// A registration against a promise that has already settled.
-    ///
-    /// `promise_register_callback`'s ready-callback insert is guarded on the
-    /// awaiter's task being pending or acquired
-    /// (`persistence_sqlite.rs:592-599`), so a halted awaiter buffers nothing.
-    Registration,
 }
 
 /// Wake one awaiter because `awaited` settled.
 ///
 /// A suspended task goes back to pending and is re-dispatched; a task that is
-/// already running only records the resume, which is what `resumes` counts.
+/// already running only records the resume, which is what `resumes` counts,
+/// and a halted one buffers it for when it continues: a settlement marks
+/// every callback of the settled promise ready, whatever the awaiter's state.
 pub(crate) fn resume_awaiter(
     tx: &mut Tx,
     awaiter: &str,
     awaited: &str,
     now: i64,
     cfg: &KernelCfg,
-    wake: Wake,
 ) {
     let state = match tx.doc.tasks.get(awaiter) {
         Some(t) => t.state,
@@ -979,13 +963,11 @@ pub(crate) fn resume_awaiter(
             let t = tx.doc.tasks.get_mut(awaiter).expect("checked above");
             t.resumes.insert(awaited.to_string());
         }
-        TaskState::Halted if wake == Wake::Fanout => {
+        TaskState::Halted => {
             let t = tx.doc.tasks.get_mut(awaiter).expect("checked above");
             t.resumes.insert(awaited.to_string());
         }
-        // A halted task registering after the fact buffers nothing, and a
-        // fulfilled one is done either way.
-        TaskState::Halted | TaskState::Fulfilled => {}
+        TaskState::Fulfilled => {}
     }
 }
 
@@ -1563,7 +1545,7 @@ mod tests {
     }
 
     #[test]
-    fn registering_against_a_settled_promise_resumes_instead() {
+    fn registering_against_a_settled_promise_does_not_wake_a_suspended_task() {
         let mut doc = with_targeted("o:awaited", 100_000);
         let (next, _, _) = step(
             &doc,
@@ -1574,18 +1556,20 @@ mod tests {
         let (mut doc, _, _) = step(&doc, settle_req("o:awaited", "resolved"), 1);
         suspend(&mut doc, "o:awaiter");
 
+        // Registers nothing and resumes nobody (the specification's
+        // promiseRegisterCallback): the suspended task stays asleep.
         let (next, sends, reply) = step(&doc, callback("o:awaited", "o:awaiter"), 2);
         assert_eq!(reply.status, 200);
         assert_eq!(reply.data["promise"]["state"], "resolved");
         assert!(next.promises["o:awaited"].callbacks.is_empty());
         let t = &next.tasks["o:awaiter"];
-        assert_eq!(t.state, TaskState::Pending);
-        assert_eq!(t.retry_at, Some(30_002));
-        assert_eq!(sends.len(), 1);
+        assert_eq!(t.state, TaskState::Suspended);
+        assert!(t.resumes.is_empty());
+        assert!(sends.is_empty());
     }
 
     #[test]
-    fn registering_against_a_settled_promise_records_a_resume_for_a_running_task() {
+    fn registering_against_a_settled_promise_records_nothing_for_a_running_task() {
         let doc = with_targeted("o:awaited", 100_000);
         let (doc, _, _) = step(
             &doc,
@@ -1593,15 +1577,13 @@ mod tests {
             0,
         );
         let (doc, _, _) = step(&doc, settle_req("o:awaited", "resolved"), 1);
-        // The awaiter's task is still pending — already running, so it is not
-        // re-dispatched; the resume is only recorded.
+        // The awaiter's task is still pending: nothing is registered and no
+        // resume is recorded — the answer, the settled promise, is all it gets.
         let (next, sends, reply) = step(&doc, callback("o:awaited", "o:awaiter"), 2);
         assert_eq!(reply.status, 200);
         assert!(sends.is_empty());
-        assert_eq!(
-            next.tasks["o:awaiter"].resumes.iter().collect::<Vec<_>>(),
-            vec!["o:awaited"]
-        );
+        assert!(next.promises["o:awaited"].callbacks.is_empty());
+        assert!(next.tasks["o:awaiter"].resumes.is_empty());
     }
 
     // --- register_listener -------------------------------------------------

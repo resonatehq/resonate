@@ -2762,7 +2762,7 @@ impl<'a> SqliteDb<'a> {
         &self,
         awaited_id: &str,
         awaiter_id: &str,
-        time: i64,
+        _time: i64,
     ) -> StorageResult<RegisterCallbackResult> {
         let awaited = self.promise_get(awaited_id)?;
         let awaiter = self.promise_get(awaiter_id)?;
@@ -2790,32 +2790,9 @@ impl<'a> SqliteDb<'a> {
             }
         }
 
-        // Direct resume if awaited is already settled
-        if let Some(ref pa) = awaited {
-            if pa.state != PromiseState::Pending {
-                // Resume awaiter if suspended (version unchanged — only claim bumps version)
-                let updated = self.conn.execute(
-                    "UPDATE promises SET task_state = 'pending', retry_timeout_at = ?2,
-                                         lease_timeout_at = NULL, ttl = NULL, pid = NULL
-                     WHERE id = ?1 AND task_state = 'suspended'",
-                    params![awaiter_id, time + self.task_retry_timeout],
-                )?;
-                if updated > 0 {
-                    self.arm_retry(awaiter_id, time + self.task_retry_timeout);
-                    self.emit_execute(awaiter_id)?;
-                }
-
-                // EnqueueResume #96/#97: insert ready callback for pending/acquired awaiters
-                self.conn.execute(
-                    "INSERT OR IGNORE INTO callbacks (awaited_id, awaiter_id, ready)
-                     SELECT ?1, ?2, true
-                     WHERE EXISTS (
-                       SELECT 1 FROM promises WHERE id = ?2 AND task_state IN ('pending', 'acquired')
-                     )",
-                    params![awaited_id, awaiter_id],
-                )?;
-            }
-        }
+        // An awaited promise that has already settled registers nothing and
+        // resumes nobody (the specification's promiseRegisterCallback); waking
+        // an awaiter for a settled promise is task.suspend's job.
 
         Ok(RegisterCallbackResult { awaited, awaiter })
     }

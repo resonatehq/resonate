@@ -434,15 +434,10 @@ impl ScyllaEngine {
             return err(req, 422, "Awaited promise is not awaitable");
         }
 
+        // Link only when both are pending. An awaited that already settled
+        // registers nothing and resumes nobody, per the specification's
+        // promiseRegisterCallback.
         if awaiter.state != "pending" || awaited.state != "pending" {
-            if awaited.state != "pending" {
-                if let Err(e) = self
-                    .resume_callback_awaiter(&mut ctx, &awaited, &awaiter, now)
-                    .await
-                {
-                    return storage_err(req, e);
-                }
-            }
             let promise = awaited.to_promise_record();
             return ok(req, ctx, &PromiseResponseData { promise });
         }
@@ -475,114 +470,6 @@ impl ScyllaEngine {
         }
         let promise = awaited.to_promise_record();
         ok(req, ctx, &PromiseResponseData { promise })
-    }
-
-    /// Go's `resumeCallbackAwaiter`: the per-awaiter half of the fanout,
-    /// for an awaited found already settled at registration time.
-    async fn resume_callback_awaiter(
-        &self,
-        ctx: &mut Ctx,
-        awaited: &PromiseRow,
-        awaiter: &PromiseRow,
-        now: i64,
-    ) -> Result<(), crate::StorageError> {
-        let origin = &awaited.origin;
-        match awaiter.task_state.as_deref() {
-            Some("fulfilled") | None => {}
-            Some("suspended") => {
-                let retry_at = now + self.task_retry_timeout;
-                self.exec(
-                    "INSERT INTO task_timeouts (bucket, shard, timeout_at, timeout_type, task_id, origin, promise_timeout_at) VALUES (?, ?, ?, 0, ?, ?, ?)",
-                    (
-                        self.bucket_for(retry_at),
-                        self.shard_for(&awaiter.id),
-                        retry_at,
-                        awaiter.id.as_str(),
-                        origin.as_str(),
-                        awaiter.timeout_at,
-                    ),
-                )
-                .await?;
-                let (applied, _row) = match self
-                    .cas(
-                        "UPDATE promises SET task_state = 'pending', task_resumes = ?, task_timeout_retry = ? WHERE origin = ? AND id = ? IF task_state = 'suspended'",
-                        (
-                            vec![awaited.id.clone()],
-                            retry_at,
-                            origin.as_str(),
-                            awaiter.id.as_str(),
-                        ),
-                    )
-                    .await
-                {
-                    Ok(v) => v,
-                    Err(e) => {
-                        let _ = self
-                            .exec(
-                                "DELETE FROM task_timeouts WHERE bucket = ? AND shard = ? AND timeout_at = ? AND timeout_type = 0 AND origin = ? AND task_id = ?",
-                                (
-                                    self.bucket_for(retry_at),
-                                    self.shard_for(&awaiter.id),
-                                    retry_at,
-                                    origin.as_str(),
-                                    awaiter.id.as_str(),
-                                ),
-                            )
-                            .await;
-                        return Err(e);
-                    }
-                };
-                if !applied {
-                    let _ = self
-                        .exec(
-                            "DELETE FROM task_timeouts WHERE bucket = ? AND shard = ? AND timeout_at = ? AND timeout_type = 0 AND origin = ? AND task_id = ?",
-                            (
-                                self.bucket_for(retry_at),
-                                self.shard_for(&awaiter.id),
-                                retry_at,
-                                origin.as_str(),
-                                awaiter.id.as_str(),
-                            ),
-                        )
-                        .await;
-                    return Err(crate::StorageError::Backend(
-                        "concurrent modification".to_string(),
-                    ));
-                }
-                self.arm_retry(ctx, &awaiter.id, retry_at);
-                if let Some(target) = &awaiter.target {
-                    ctx.messages.push(Outgoing::Execute {
-                        address: target.clone(),
-                        task_id: awaiter.id.clone(),
-                        version: awaiter.task_version,
-                    });
-                }
-            }
-            // A halted awaiter records nothing at registration time — its
-            // resume ledger fills only through the settle fanout. (The Go
-            // implementation appends here too; the protocol does not.)
-            Some("halted") => {}
-            Some(state) => {
-                let (applied, _row) = self
-                    .cas(
-                        &format!(
-                            "UPDATE promises SET task_resumes = task_resumes + ? WHERE origin = ? AND id = ? IF task_state = '{state}'"
-                        ),
-                        (
-                            vec![awaited.id.clone()],
-                            origin.as_str(),
-                            awaiter.id.as_str(),
-                        ),
-                    )
-                    .await?;
-                if !applied {
-                    return Err(crate::StorageError::Backend(
-                        "concurrent modification".to_string(),
-                    ));
-                }
-            }
-        }
-        Ok(())
     }
 
     pub(crate) async fn op_promise_register_listener(

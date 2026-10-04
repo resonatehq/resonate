@@ -290,22 +290,12 @@ impl Neo4jEngine {
                     return Ok(fail(req, 422, "Awaited promise is not awaitable"));
                 }
 
-                if awaited.is_pending() {
-                    // Link: the awaited is still pending and awaitable, the
-                    // awaiter targeted and itself pending.
-                    if awaiter.is_pending() {
-                        tx.link(&awaiter.id, &awaited.id).await?;
-                    }
-                } else if awaiter.task_is("pending")
-                    || awaiter.task_is("acquired")
-                    || awaiter.task_is("suspended")
-                {
-                    // Direct resume: the awaited already settled. The ready
-                    // callback is recorded; a suspended awaiter is woken.
-                    tx.mark_ready(&awaiter.id, &awaited.id).await?;
-                    if awaiter.task_is("suspended") {
-                        tx.wake(awaiter, now).await?;
-                    }
+                // Link: the awaited is still pending and awaitable, the
+                // awaiter targeted and itself pending. An awaited that already
+                // settled registers nothing and resumes nobody, per the
+                // specification's promiseRegisterCallback.
+                if awaited.is_pending() && awaiter.is_pending() {
+                    tx.link(&awaiter.id, &awaited.id).await?;
                 }
 
                 let promise = awaited.to_promise_record();

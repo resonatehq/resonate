@@ -637,7 +637,7 @@ impl PostgresEngine {
                     ));
                 }
                 db.try_timeout(&[&r.awaited, &r.awaiter], now)?;
-                let result = db.promise_register_callback(&r.awaited, &r.awaiter, now)?;
+                let result = db.promise_register_callback(&r.awaited, &r.awaiter)?;
                 let p_awaited = match result.awaited {
                     Some(p) => p,
                     None => {
@@ -3085,9 +3085,7 @@ impl PostgresDb<'_> {
         &self,
         awaited_id: &str,
         awaiter_id: &str,
-        time: i64,
     ) -> StorageResult<RegisterCallbackResult> {
-        let trt = self.task_retry_timeout;
         let rows = rt_block_on(sqlx::query(&format!("
             WITH awaited AS (
               SELECT * FROM promises WHERE id = $1 FOR UPDATE
@@ -3096,13 +3094,13 @@ impl PostgresDb<'_> {
               SELECT * FROM promises WHERE id = $2 FOR UPDATE
             ),
             -- An awaited that may not be awaited is refused by the caller with
-            -- a 422, so nothing below may write for it: not the link, and not
-            -- the direct resume, which would wake the awaiter for a
-            -- registration that never happened.
+            -- a 422, so nothing below may write the link for it.
             awaitable AS (
               SELECT EXISTS (SELECT 1 FROM awaited WHERE external) AS ok
             ),
-            -- link: awaited still pending and awaitable, awaiter targeted and pending
+            -- link: awaited still pending and awaitable, awaiter targeted and pending.
+            -- An awaited that already settled registers nothing and resumes
+            -- nobody, per the specification's promiseRegisterCallback.
             linked AS (
               UPDATE promises p SET callbacks = p.callbacks || $2
               WHERE p.id = $1
@@ -3111,63 +3109,17 @@ impl PostgresDb<'_> {
                 AND EXISTS (SELECT 1 FROM awaited WHERE state = 'pending')
                 AND EXISTS (SELECT 1 FROM awaiter WHERE target IS NOT NULL AND state = 'pending')
               RETURNING p.id
-            ),
-            -- direct resume: awaited already settled. A suspended awaiter is
-            -- woken; a pending/acquired one only records the ready callback.
-            resumed AS (
-              UPDATE promises p SET
-                task_state = CASE WHEN p.task_state = 'suspended' THEN 'pending' ELSE p.task_state END,
-                retry_timeout_at   = CASE WHEN p.task_state = 'suspended' THEN $3 + {trt} ELSE p.retry_timeout_at END,
-                lease_timeout_at = CASE WHEN p.task_state = 'suspended' THEN NULL ELSE p.lease_timeout_at END,
-                ttl        = CASE WHEN p.task_state = 'suspended' THEN NULL ELSE p.ttl END,
-                pid        = CASE WHEN p.task_state = 'suspended' THEN NULL ELSE p.pid END,
-                -- 'suspended' too: the row is being woken in this same
-                -- statement, so the pre-update state is what this CASE sees,
-                -- and a woken awaiter records the resume that woke it — which
-                -- is what SQLite and MySQL do by marking the callback ready
-                -- after their resume UPDATE.
-                resumes    = CASE WHEN p.task_state IN ('pending', 'acquired', 'suspended')
-                                    AND NOT (p.resumes @> ARRAY[$1])
-                                  THEN p.resumes || $1 ELSE p.resumes END
-              WHERE p.id = $2
-                AND p.task_state IN ('pending', 'acquired', 'suspended')
-                AND (SELECT ok FROM awaitable)
-                AND EXISTS (SELECT 1 FROM awaited WHERE state <> 'pending')
-              RETURNING p.id, p.task_version, p.target,
-                        (SELECT a.task_state FROM awaiter a) AS prev_task_state
-            ),
-            -- Read from the pre-update snapshot, not from `resumed`.
-            --
-            -- `outbox_resume` was a data-modifying CTE, so it ran on its own
-            -- and the final SELECT never depended on the UPDATE. A plain CTE
-            -- does not: referencing it pulls `resumed` into the final scan,
-            -- and `awaiter`'s FOR UPDATE then finds a row this same command
-            -- has already updated and yields nothing for it — losing the
-            -- awaiter from the result entirely. The emission is a function of
-            -- the pre-state anyway: a suspended, targeted awaiter of a settled
-            -- promise, at a version the resume does not change.
-            emit_resume AS (
-              SELECT 'execute'::text AS kind, a.target AS address, a.id AS task_id,
-                     a.task_version::int AS version, NULL::jsonb AS promise
-              FROM awaiter a
-              WHERE a.task_state = 'suspended' AND a.target IS NOT NULL
-                AND (SELECT ok FROM awaitable)
-                AND EXISTS (SELECT 1 FROM awaited WHERE state <> 'pending')
             )
-            SELECT 'awaited' AS type, {awaited_cols}, {messages} FROM awaited
+            SELECT 'awaited' AS type, {awaited_cols} FROM awaited
             UNION ALL
-            SELECT 'awaiter' AS type, {awaiter_cols}, {messages} FROM awaiter
+            SELECT 'awaiter' AS type, {awaiter_cols} FROM awaiter
         ",
             awaited_cols = p_cols("awaited"),
             awaiter_cols = p_cols("awaiter"),
-            messages = emitted_json(&["emit_resume"]),
         ))
-            .bind(awaited_id).bind(awaiter_id).bind(time)
+            .bind(awaited_id).bind(awaiter_id)
             .fetch_all(self.tx().as_mut()))?;
 
-        if let Some(row) = rows.first() {
-            self.absorb_and_arm_retries(row, time + trt);
-        }
         let mut awaited = None;
         let mut awaiter = None;
         for row in &rows {
@@ -3885,8 +3837,13 @@ impl PostgresDb<'_> {
               WHERE p.id = $1 AND p.task_state = 'halted'
               RETURNING p.id, p.task_version, p.target
             ),
-            -- From the snapshot, not from `continued_task` — see
-            -- `promise_register_callback` for why.
+            -- Read from the pre-update snapshot, not from `continued_task`.
+            --
+            -- A plain CTE that references a data-modifying one pulls it into
+            -- the final scan, and `locked_task`'s FOR UPDATE then finds a row
+            -- this same command has already updated and yields nothing for
+            -- it. The emission is a function of the pre-state anyway: a
+            -- halted, targeted task, at a version the continue does not change.
             emit_continued AS (
               SELECT 'execute'::text AS kind, t.target AS address, t.id AS task_id,
                      t.task_version::int AS version, NULL::jsonb AS promise

@@ -834,7 +834,6 @@ fn op_promise_register_callback(ctx: *Ctx, data: json.Value) !Outcome {
     // Only something with somewhere to run can be resumed.
     if (!awaiter.has_task()) return ctx.fail(422, "Awaiter promise has no resonate:target tag");
     const awaiter_state = awaiter.state;
-    const awaiter_address = awaiter.tags.get(protocol.tag_target);
 
     const awaited = ctx.doc.promise(awaited_id).?;
     if (!awaited.is_external()) return ctx.fail(422, "Awaited promise is not awaitable");
@@ -849,28 +848,14 @@ fn op_promise_register_callback(ctx: *Ctx, data: json.Value) !Outcome {
     try w.object_end();
     const rendered = try ctx.scratch.dupe(u8, ctx.buf.items);
 
-    const owned = ctx.owned();
+    // Registered only while both are pending. An awaited promise that has
+    // already settled — by its own deadline during this very request included —
+    // registers nothing and resumes nobody: the answer carries the settled
+    // promise, and that is all a caller learns (the specification's
+    // promiseRegisterCallback). Waking an awaiter here is task.suspend's job,
+    // which answers 300 for exactly this case.
     if (awaited_pending and awaiter_pending) {
-        _ = try ctx.doc.promise(awaited_id).?.callbacks.insert(owned, awaiter_id);
-    } else if (!awaited_pending and awaiter_pending) {
-        // Nothing to wait for: the awaited promise has already settled, so this
-        // is a resume rather than a registration. A suspended awaiter is woken;
-        // one that is still running only records it — and it *is* recorded
-        // either way, which is what a woken worker reads.
-        if (ctx.doc.task(awaiter_id)) |t| {
-            switch (t.state) {
-                .suspended => {
-                    t.state = .pending;
-                    _ = try t.resumes.insert(owned, awaited_id);
-                    set_task_timeout(t, .retry, ctx.now + ctx.cfg.pending_retry_ttl);
-                    if (awaiter_address) |addr| try ctx.emit_execute(addr, awaiter_id, t.version);
-                },
-                .pending, .acquired => {
-                    _ = try t.resumes.insert(owned, awaited_id);
-                },
-                .halted, .fulfilled => {},
-            }
-        }
+        _ = try ctx.doc.promise(awaited_id).?.callbacks.insert(ctx.owned(), awaiter_id);
     }
 
     return .{
@@ -2186,7 +2171,7 @@ test "suspend refuses a malformed action set" {
     try testing.expectEqualStrings("\"Awaiter and awaited must belong to the same origin\"", cross.data);
 }
 
-test "a callback on an already settled promise resumes immediately" {
+test "a callback on an already settled promise registers nothing and resumes nobody" {
     var f = Fixture.init();
     defer f.deinit();
     _ = try f.call("promise.create",
@@ -2199,10 +2184,28 @@ test "a callback on an already settled promise resumes immediately" {
 
     const r = try f.call("promise.register_callback", "{\"awaited\":\"o:c\",\"awaiter\":\"o:t\"}");
     try testing.expectEqual(@as(i32, 200), r.status);
-    // The answer is the awaited promise.
+    // The answer is the awaited promise, settled.
     try testing.expect(std.mem.indexOf(u8, r.data, "\"id\":\"o:c\"") != null);
-    // Pending rather than suspended, so it only records the resume.
-    try testing.expectEqual(@as(usize, 1), f.doc.task("o:t").?.resumes.len());
+    try testing.expect(std.mem.indexOf(u8, r.data, "\"state\":\"resolved\"") != null);
+    // Nothing registered, nothing recorded, nobody told.
+    try testing.expectEqual(@as(usize, 0), f.doc.promise("o:c").?.callbacks.len());
+    try testing.expectEqual(@as(usize, 0), f.doc.task("o:t").?.resumes.len());
+    try testing.expectEqual(@as(usize, 0), f.executes());
+
+    // A suspended awaiter is not woken either.
+    _ = try f.call("task.acquire", "{\"id\":\"o:t\",\"version\":0,\"pid\":\"w1\",\"ttl\":60000}");
+    _ = try f.call("promise.create",
+        \\{"id":"o:d","timeoutAt":9000000000000,"tags":{"resonate:scope":"global"}}
+    );
+    const suspended = try f.call("task.suspend",
+        \\{"id":"o:t","version":1,"actions":[{"kind":"promise.register_callback","head":{},"data":{"awaited":"o:d","awaiter":"o:t"}}]}
+    );
+    try testing.expectEqual(@as(i32, 200), suspended.status);
+    try testing.expectEqual(TaskState.suspended, f.doc.task("o:t").?.state);
+    const again = try f.call("promise.register_callback", "{\"awaited\":\"o:c\",\"awaiter\":\"o:t\"}");
+    try testing.expectEqual(@as(i32, 200), again.status);
+    try testing.expectEqual(TaskState.suspended, f.doc.task("o:t").?.state);
+    try testing.expectEqual(@as(usize, 0), f.doc.task("o:t").?.resumes.len());
     try testing.expectEqual(@as(usize, 0), f.executes());
 }
 

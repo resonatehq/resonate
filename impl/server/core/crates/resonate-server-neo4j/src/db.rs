@@ -777,20 +777,6 @@ impl<'c> Tx<'c> {
         .await
     }
 
-    /// Record a ready callback on an awaiter: its `resumes` gains the awaited
-    /// promise, whether or not it was ever in the awaited's `callbacks`.
-    pub(crate) async fn mark_ready(&mut self, awaiter: &str, awaited: &str) -> StorageResult<()> {
-        self.run(
-            query(
-                "MATCH (w:Promise {id: $w}), (p:Promise {id: $p}) \
-                 MERGE (w)-[r:AWAITS]->(p) SET r.ready = true",
-            )
-            .param("w", awaiter)
-            .param("p", awaited),
-        )
-        .await
-    }
-
     /// The branch siblings a task response preloads.
     pub(crate) async fn compute_preload(&mut self, id: &str) -> StorageResult<Vec<PromiseRecord>> {
         let q = query(&format!(

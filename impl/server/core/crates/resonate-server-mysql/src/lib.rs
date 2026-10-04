@@ -571,7 +571,7 @@ impl MysqlEngine {
                     ));
                 }
                 db.try_timeout(&[&r.awaited, &r.awaiter], now)?;
-                let result = db.promise_register_callback(&r.awaited, &r.awaiter, now)?;
+                let result = db.promise_register_callback(&r.awaited, &r.awaiter)?;
                 let p_awaited = match result.awaited {
                     Some(p) => p,
                     None => {
@@ -3018,10 +3018,7 @@ impl MysqlDb<'_> {
         &self,
         awaited_id: &str,
         awaiter_id: &str,
-        time: i64,
     ) -> StorageResult<RegisterCallbackResult> {
-        let trt = self.task_retry_timeout;
-
         // Lock both promises (ORDER BY id for consistent lock ordering to prevent deadlocks)
         let rows = rt_block_on(
             sqlx::query(
@@ -3054,61 +3051,22 @@ impl MysqlDb<'_> {
             }
         }
 
-        // An awaited that may not be awaited is refused by the caller with a
-        // 422, so neither arm below may run: not the link, and not the direct
-        // resume, which would wake the awaiter for a registration that never
-        // happened.
-        let arms = if awaited_awaitable {
-            (awaited_state.clone(), awaiter_state.clone())
-        } else {
-            (None, None)
-        };
-        match (&arms.0, &arms.1) {
-            (Some(as_), Some(aw_))
-                if as_ == "pending" && aw_ == "pending" && awaiter_target.is_some() =>
-            {
-                // Insert callback if awaited is pending and awaiter is a runnable task-promise
-                rt_block_on(
-                    sqlx::query(
-                        "INSERT IGNORE INTO callbacks (awaited_id, awaiter_id) VALUES (?, ?)",
-                    )
+        // Link only when the awaited is still pending and awaitable and the
+        // awaiter is a pending, targeted task-promise. An awaited that may not
+        // be awaited is refused by the caller with a 422, so nothing is
+        // written for it. An awaited that already settled registers nothing
+        // and resumes nobody, per the specification's promiseRegisterCallback.
+        if awaited_awaitable
+            && awaited_state.as_deref() == Some("pending")
+            && awaiter_state.as_deref() == Some("pending")
+            && awaiter_target.is_some()
+        {
+            rt_block_on(
+                sqlx::query("INSERT IGNORE INTO callbacks (awaited_id, awaiter_id) VALUES (?, ?)")
                     .bind(awaited_id)
                     .bind(awaiter_id)
                     .execute(self.tx().as_mut()),
-                )?;
-            }
-            (Some(as_), _) if as_ != "pending" => {
-                // Awaited already settled — directly resume the awaiter task if suspended
-                let upd = rt_block_on(
-                    sqlx::query(
-                        "UPDATE promises SET task_state = 'pending', retry_timeout_at = ?,
-                                             lease_timeout_at = NULL, ttl = NULL, pid = NULL
-                         WHERE id = ? AND task_state = 'suspended'",
-                    )
-                    .bind(time + trt)
-                    .bind(awaiter_id)
-                    .execute(self.tx().as_mut()),
-                )?;
-                // Only enqueue the execute message if the task was actually transitioned
-                if upd.rows_affected() > 0 {
-                    self.arm_retry(awaiter_id, time + trt);
-                    self.emit_execute(awaiter_id)?;
-                }
-
-                // EnqueueResume #96/#97: insert ready callback for pending/acquired awaiters
-                rt_block_on(
-                    sqlx::query(
-                        "INSERT IGNORE INTO callbacks (awaited_id, awaiter_id, ready)
-                         SELECT ?, ?, true FROM promises
-                         WHERE id = ? AND task_state IN ('pending', 'acquired')",
-                    )
-                    .bind(awaited_id)
-                    .bind(awaiter_id)
-                    .bind(awaiter_id)
-                    .execute(self.tx().as_mut()),
-                )?;
-            }
-            _ => {}
+            )?;
         }
 
         Ok(RegisterCallbackResult {
