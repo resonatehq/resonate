@@ -247,6 +247,21 @@ impl PostgresEngine {
                     sqlx::query("SET plan_cache_mode TO force_generic_plan")
                         .execute(&mut *conn)
                         .await?;
+                    // And no sequential scans. A generic plan is built once and
+                    // kept, and one built while the table is small — a fresh
+                    // deployment, its first minutes — finds a sequential scan
+                    // of a few pages cheaper than the primary key, and keeps
+                    // scanning as the table grows, until an ANALYZE happens
+                    // to invalidate it (measured: 643 buffers a fence instead
+                    // of 50, throughput anywhere from 1.9k to 5.3k req/s on a
+                    // table that started empty). Every statement here is meant
+                    // to reach its rows through an index, so a sequential scan
+                    // is never the plan wanted; this is a cost penalty, not a
+                    // prohibition, and a statement with no index path still
+                    // runs.
+                    sqlx::query("SET enable_seqscan TO off")
+                        .execute(&mut *conn)
+                        .await?;
                     // Durable commits, whatever the cluster's default. This is
                     // not tuning: a transition commits together with the
                     // messages it returns, and a message goes out as soon as
