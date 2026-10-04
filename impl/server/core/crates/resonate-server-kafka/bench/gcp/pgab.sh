@@ -1,24 +1,33 @@
 #!/bin/bash
-# Two builds of the Postgres engine, same fleet, same Cloud SQL instance, a
-# fresh database per run: lifecycles and workflows, profiled (pgprof.sh).
+# Builds of the Postgres engine side by side: same fleet, same Cloud SQL
+# instance, a fresh database per run, lifecycles and workflows, profiled
+# (pgprof.sh): closed loops for the ceiling, fixed rates for latency.
 #
-#   ./pgab.sh A.tgz B.tgz       source tarballs (impl/server/core); A also
-#                               provides the load generator. Labels: A_LABEL, B_LABEL.
+#   ./pgab.sh LABEL=SRC.tgz ...   source tarballs (impl/server/core); the first
+#                                 also provides the load generator.
+# LIFECYCLE and WORKFLOW override the levels (pgprof.sh: N clients, rN per second).
 cd "$(dirname "$0")"; source env.sh
-a=$1 b=$2 al=${A_LABEL:-a} bl=${B_LABEL:-b}
+labels=(); for spec in "$@"; do labels+=("${spec%%=*}"); done
 echo "## builder $(date -u +%T)"
 ./up.sh builder >/dev/null 2>&1
 for _ in $(seq 1 30); do ssh_to $PREFIX-builder $(zone_of 1) true 2>/dev/null && break; sleep 10; done
-echo "## build $al (engine, load generator) $(date -u +%T)"
-SRC_TGZ=$a ./build.sh 2>&1 | tail -1
-$G storage cp -q $BUCKET/bin/resonate $BUCKET/bin/resonate-$al
-echo "## build $bl (engine) $(date -u +%T)"
-$G compute scp ${SSH_FLAGS:-} $b $PREFIX-builder:/tmp/src-b.tgz --zone $(zone_of 1) >/dev/null
-ssh_to $PREFIX-builder $(zone_of 1) "set -e; source \$HOME/.cargo/env
-  rm -rf ~/src-b && mkdir -p ~/src-b && tar -xzf /tmp/src-b.tgz -C ~/src-b && cd ~/src-b/impl/server/core
-  CARGO_TARGET_DIR=~/target-b cargo build --release -p resonate --bin resonate 2>&1 | tail -1
-  gcloud storage cp -q ~/target-b/release/resonate $BUCKET/bin/resonate-$bl"
-$G storage ls $BUCKET/bin/resonate-$al $BUCKET/bin/resonate-$bl || { echo "a build is missing"; exit 1; }
+first=1
+for spec in "$@"; do
+  l=${spec%%=*} tgz=${spec#*=}
+  if [ $first = 1 ]; then
+    echo "## build $l (engine, load generator) $(date -u +%T)"
+    SRC_TGZ=$tgz ./build.sh 2>&1 | tail -1
+    $G storage cp -q $BUCKET/bin/resonate $BUCKET/bin/resonate-$l; first=0
+  else
+    echo "## build $l (engine) $(date -u +%T)"
+    $G compute scp ${SSH_FLAGS:-} $tgz $PREFIX-builder:/tmp/src-$l.tgz --zone $(zone_of 1) >/dev/null
+    ssh_to $PREFIX-builder $(zone_of 1) "set -e; source \$HOME/.cargo/env
+      rm -rf ~/src-$l && mkdir -p ~/src-$l && tar -xzf /tmp/src-$l.tgz -C ~/src-$l && cd ~/src-$l/impl/server/core
+      CARGO_TARGET_DIR=~/target-b cargo build --release -p resonate --bin resonate 2>&1 | tail -1
+      gcloud storage cp -q ~/target-b/release/resonate $BUCKET/bin/resonate-$l"
+  fi
+  $G storage ls $BUCKET/bin/resonate-$l >/dev/null || { echo "build $l is missing"; exit 1; }
+done
 $G compute instances delete $PREFIX-builder --zone $(zone_of 1) >/dev/null 2>&1 &
 
 echo "## node and loadgens $(date -u +%T)"
@@ -28,13 +37,13 @@ for i in 1 2; do for _ in $(seq 1 40); do ssh_to $PREFIX-l$i $(zone_of $i) "test
 for _ in $(seq 1 40); do ssh_to $PREFIX-n1 $(zone_of 1) "test -x /opt/resonate/resonate" 2>/dev/null && break; sleep 10; done
 ssh_to $PREFIX-n1 $(zone_of 1) "sudo systemctl stop resonate" 2>/dev/null
 
-# Interleaved, so drift in the instance (cache, checkpoints) hits both builds.
+# Interleaved, so drift in the instance (cache, checkpoints) hits every build.
 for mode in lifecycle workflow; do
-  for l in $al $bl; do
-    levels="8 32 128"; [ $mode = workflow ] && levels="8 32"
+  levels=${LIFECYCLE:-8 32 128 r1000 r2000 r2500}; [ $mode = workflow ] && levels=${WORKFLOW:-8 32 r100 r200}
+  for l in "${labels[@]}"; do
     MODE=$mode LABEL=$l RESONATE_BIN=resonate-$l ./pgprof.sh $levels
   done
 done
 ./run.sh stop 1 >/dev/null 2>&1
 echo "## summary"
-grep -h -A1 '^## ' ctl.log 2>/dev/null | grep -E '^## (a|b|'"$al|$bl"')|ops/s|wf/s' | sed 's/, pool 64, db .*//' | paste - - | cut -c1-200
+grep -A1 -E '^## [a-z0-9-]+: (lifecycle|workflow)' ctl.log | grep -vE '^--$' | sed 's/ (2 loadgens), pool 64, db .*//' | paste - - | cut -c1-190
