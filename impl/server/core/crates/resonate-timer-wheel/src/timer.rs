@@ -98,8 +98,9 @@ pub struct TimerConfig {
     /// This is the backstop, and the reason the timer can be wrong without
     /// being unsafe: a deadline another instance armed is invisible here until
     /// the next backfill, and this bounds how long that can last — the driver
-    /// re-reads a full wheel's worth at least this often, however full the
-    /// wheel already is.
+    /// re-reads a full wheel's worth at least this often (or every
+    /// `backfill_interval`, if that is longer), however full the wheel
+    /// already is.
     pub idle: Duration,
 }
 
@@ -262,7 +263,9 @@ where
         // front nearer. That second read is what makes `idle` the bound it
         // says it is — without it a wheel more than half full never looked.
         let since = last_backfill.map(|t| t.elapsed());
-        let refresh = since.is_none_or(|e| e >= d.config.idle);
+        // `backfill_interval` stays the floor on how often anything is read.
+        let every = d.config.idle.max(d.config.backfill_interval);
+        let refresh = since.is_none_or(|e| e >= every);
         let top_up = wheel.len() < d.config.low_watermark
             && since.is_none_or(|e| e >= d.config.backfill_interval);
         if refresh || top_up {

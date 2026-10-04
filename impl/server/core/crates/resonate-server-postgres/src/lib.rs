@@ -52,10 +52,12 @@ use resonate_core::ui;
 use resonate_core::util;
 use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Row};
-use std::cell::{RefCell, UnsafeCell};
+use std::sync::Arc;
 
 pub struct PostgresEngine {
     pool: PgPool,
+    /// The hot statements' text, built once. See [`PostgresDb::cached`].
+    sql: SqlCache,
     task_retry_timeout: i64,
     preload_limit: u32,
     /// Whether `debug.*` operations are permitted at all.
@@ -232,6 +234,7 @@ impl PostgresEngine {
             .await?;
         Ok(Self {
             pool,
+            sql: SqlCache::default(),
             task_retry_timeout,
             preload_limit,
             debug,
@@ -282,7 +285,7 @@ impl PostgresEngine {
     /// outbox got for free by being a table.
     async fn transact<F, T>(&self, f: F) -> StorageResult<(T, Vec<Outgoing>, Vec<Scheduled>)>
     where
-        F: FnMut(&PostgresDb) -> StorageResult<T> + Send + 'static,
+        F: for<'d> FnMut(&'d PostgresDb<'static>) -> DbFut<'d, T> + Send,
         T: Send + 'static,
     {
         self.execute(false, f).await
@@ -302,7 +305,7 @@ impl PostgresEngine {
         f: F,
     ) -> StorageResult<(T, Vec<Outgoing>, Vec<Scheduled>)>
     where
-        F: FnMut(&PostgresDb) -> StorageResult<T> + Send + 'static,
+        F: for<'d> FnMut(&'d PostgresDb<'static>) -> DbFut<'d, T> + Send,
         T: Send + 'static,
     {
         // One retry, unconditionally, as MySQL does. A serialization failure
@@ -329,32 +332,28 @@ impl PostgresEngine {
                 Conn::Tx(self.pool.begin().await.map_err(StorageError::from)?)
             };
 
-            let task_retry_timeout = self.task_retry_timeout;
-            let preload_limit = self.preload_limit;
-            let (result, emitted, armed, tx) = tokio::task::block_in_place(|| {
-                let db = PostgresDb {
-                    tx: UnsafeCell::new(tx),
-                    task_retry_timeout,
-                    preload_limit,
-                    emitted: RefCell::new(Vec::new()),
-                    armed: RefCell::new(Vec::new()),
-                };
+            #[cfg(feature = "concurrency-stress")]
+            {
+                let nanos = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .subsec_nanos();
+                tokio::time::sleep(std::time::Duration::from_micros((nanos % 1000) as u64 + 1))
+                    .await;
+            }
 
-                #[cfg(feature = "concurrency-stress")]
-                {
-                    let nanos = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .subsec_nanos();
-                    std::thread::sleep(std::time::Duration::from_micros((nanos % 1000) as u64 + 1));
-                }
-
-                let result = f(&db);
-                let emitted = db.emitted.into_inner();
-                let armed = db.armed.into_inner();
-                let tx = db.tx.into_inner();
-                (result, emitted, armed, tx)
-            });
+            let db = PostgresDb {
+                conn: tokio::sync::Mutex::new(tx),
+                sql: self.sql.clone(),
+                task_retry_timeout: self.task_retry_timeout,
+                preload_limit: self.preload_limit,
+                emitted: std::sync::Mutex::new(Vec::new()),
+                armed: std::sync::Mutex::new(Vec::new()),
+            };
+            let result = f(&db).await;
+            let emitted = db.emitted.into_inner().expect("emitted");
+            let armed = db.armed.into_inner().expect("armed");
+            let tx = db.conn.into_inner();
 
             let result = match result {
                 Ok(v) => v,
@@ -376,9 +375,7 @@ impl PostgresEngine {
                 // Each statement committed as it ran.
                 Conn::Auto(_) => return Ok((result, emitted, armed)),
             };
-            match tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(tx.commit())
-            }) {
+            match tx.commit().await {
                 Ok(_) => return Ok((result, emitted, armed)),
                 Err(e) => {
                     let pg_err = e
@@ -404,7 +401,7 @@ impl PostgresEngine {
     /// 503 — a CTE snapshot race committed nothing, and the caller may retry.
     async fn run<F>(&self, req: &RequestEnvelope, f: F) -> Output
     where
-        F: FnMut(&PostgresDb) -> StorageResult<ResponseEnvelope> + Send + 'static,
+        F: for<'d> FnMut(&'d PostgresDb<'static>) -> DbFut<'d, ResponseEnvelope> + Send,
     {
         match self.transact(f).await {
             Ok((response, messages, timeouts)) => Output {
@@ -429,8 +426,8 @@ impl PostgresEngine {
     /// round trip instead of five or six.
     async fn run_fast<FF, F>(&self, req: &RequestEnvelope, fast: FF, slow: F) -> Output
     where
-        FF: FnMut(&PostgresDb) -> StorageResult<Option<ResponseEnvelope>> + Send + 'static,
-        F: FnMut(&PostgresDb) -> StorageResult<ResponseEnvelope> + Send + 'static,
+        FF: for<'d> FnMut(&'d PostgresDb<'static>) -> DbFut<'d, Option<ResponseEnvelope>> + Send,
+        F: for<'d> FnMut(&'d PostgresDb<'static>) -> DbFut<'d, ResponseEnvelope> + Send,
     {
         match self.execute(true, fast).await {
             Ok((Some(response), messages, timeouts)) => Output {
@@ -472,7 +469,7 @@ impl PostgresEngine {
     /// A read. Nothing is emitted, so nothing comes back but the result.
     async fn query<F, T>(&self, f: F) -> StorageResult<T>
     where
-        F: FnMut(&PostgresDb) -> StorageResult<T> + Send + 'static,
+        F: for<'d> FnMut(&'d PostgresDb<'static>) -> DbFut<'d, T> + Send,
         T: Send + 'static,
     {
         self.transact(f).await.map(|(v, _, _)| v)
@@ -549,71 +546,81 @@ impl PostgresEngine {
         let corr_id = req.head.corr_id.clone();
         let fast = {
             let (data, kind_str, corr_id) = (data.clone(), kind_str.clone(), corr_id.clone());
-            move |db: &PostgresDb| -> StorageResult<Option<ResponseEnvelope>> {
-                let r: PromiseGetData = match parse_req(&data, &kind_str, &corr_id) {
-                    Ok(r) => r,
-                    Err(e) => return Ok(Some(e)),
-                };
-                Ok(match db.promise_get(&r.id)? {
-                    None => Some(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        404,
-                        "Promise not found",
-                    )),
-                    Some(p) if p.state == PromiseState::Pending && p.timeout_at <= now => None,
-                    Some(promise) => Some(ResponseEnvelope::success(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        &PromiseResponseData { promise },
-                    )),
+            db_fn(move |db| {
+                let data = data.clone();
+                let kind_str = kind_str.clone();
+                let corr_id = corr_id.clone();
+                Box::pin(async move {
+                    let r: PromiseGetData = match parse_req(&data, &kind_str, &corr_id) {
+                        Ok(r) => r,
+                        Err(e) => return Ok(Some(e)),
+                    };
+                    Ok(match db.promise_get(&r.id).await? {
+                        None => Some(ResponseEnvelope::error(
+                            kind_str.clone(),
+                            corr_id.clone(),
+                            404,
+                            "Promise not found",
+                        )),
+                        Some(p) if p.state == PromiseState::Pending && p.timeout_at <= now => None,
+                        Some(promise) => Some(ResponseEnvelope::success(
+                            kind_str.clone(),
+                            corr_id.clone(),
+                            &PromiseResponseData { promise },
+                        )),
+                    })
                 })
-            }
+            })
         };
         self.run_fast(req, fast, move |db| {
-            let r: PromiseGetData = match serde_json::from_value(data.clone()) {
-                Ok(d) => d,
-                Err(e) => {
+            let data = data.clone();
+            let kind_str = kind_str.clone();
+            let corr_id = corr_id.clone();
+            Box::pin(async move {
+                let r: PromiseGetData = match serde_json::from_value(data.clone()) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        return Ok(ResponseEnvelope::error(
+                            kind_str.clone(),
+                            corr_id.clone(),
+                            400,
+                            &format!("Invalid request: {}", e),
+                        ))
+                    }
+                };
+                if let Err(e) = r.validate() {
                     return Ok(ResponseEnvelope::error(
                         kind_str.clone(),
                         corr_id.clone(),
                         400,
-                        &format!("Invalid request: {}", e),
-                    ))
+                        &format_validation_errors(&e),
+                    ));
                 }
-            };
-            if let Err(e) = r.validate() {
-                return Ok(ResponseEnvelope::error(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    400,
-                    &format_validation_errors(&e),
-                ));
-            }
-            db.try_timeout(&[&r.id], now)?;
-            match db.promise_get(&r.id)? {
-                Some(promise) => {
-                    tracing::debug!(
-                        promise_id = %r.id,
-                        state = %promise.state,
-                        "Promise found"
-                    );
-                    Ok(ResponseEnvelope::success(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        &PromiseResponseData { promise },
-                    ))
+                db.try_timeout(&[&r.id], now).await?;
+                match db.promise_get(&r.id).await? {
+                    Some(promise) => {
+                        tracing::debug!(
+                            promise_id = %r.id,
+                            state = %promise.state,
+                            "Promise found"
+                        );
+                        Ok(ResponseEnvelope::success(
+                            kind_str.clone(),
+                            corr_id.clone(),
+                            &PromiseResponseData { promise },
+                        ))
+                    }
+                    None => {
+                        tracing::debug!(promise_id = %r.id, "Promise not found");
+                        Ok(ResponseEnvelope::error(
+                            kind_str.clone(),
+                            corr_id.clone(),
+                            404,
+                            "Promise not found",
+                        ))
+                    }
                 }
-                None => {
-                    tracing::debug!(promise_id = %r.id, "Promise not found");
-                    Ok(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        404,
-                        "Promise not found",
-                    ))
-                }
-            }
+            })
         })
         .await
     }
@@ -622,7 +629,7 @@ impl PostgresEngine {
         let data = req.data.clone();
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
-        self.run(req, move |db| {
+        self.run(req, move |db| { let data = data.clone(); let kind_str = kind_str.clone(); let corr_id = corr_id.clone(); Box::pin(async move {
                 let r: PromiseCreateData = match serde_json::from_value(data.clone()) {
                     Ok(d) => d,
                     Err(e) => {
@@ -658,7 +665,7 @@ impl PostgresEngine {
                         ));
                     }
                 }
-                db.try_timeout(&[&r.id], now)?;
+                db.try_timeout(&[&r.id], now).await?;
                 let tags_json = serde_json::to_string(&r.tags).unwrap();
                 let already_timedout = now >= r.timeout_at;
                 let (state, created_at, settled_at) = if already_timedout {
@@ -689,7 +696,7 @@ impl PostgresEngine {
                     settled_at,
                     already_timedout,
                     address,
-                })?;
+                }).await?;
                 if result.was_created {
                     tracing::info!(
                         promise_id = %result.promise.id,
@@ -711,7 +718,7 @@ impl PostgresEngine {
                     corr_id.clone(),
                     &PromiseResponseData { promise: result.promise },
                 ))
-            })
+            }) })
             .await
     }
 
@@ -720,75 +727,82 @@ impl PostgresEngine {
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
         self.run(req, move |db| {
-            let r: PromiseSettleData = match serde_json::from_value(data.clone()) {
-                Ok(d) => d,
-                Err(e) => {
+            let data = data.clone();
+            let kind_str = kind_str.clone();
+            let corr_id = corr_id.clone();
+            Box::pin(async move {
+                let r: PromiseSettleData = match serde_json::from_value(data.clone()) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        return Ok(ResponseEnvelope::error(
+                            kind_str.clone(),
+                            corr_id.clone(),
+                            400,
+                            &format!("Invalid request: {}", e),
+                        ))
+                    }
+                };
+                if let Err(e) = r.validate() {
                     return Ok(ResponseEnvelope::error(
                         kind_str.clone(),
                         corr_id.clone(),
                         400,
-                        &format!("Invalid request: {}", e),
-                    ))
+                        &format_validation_errors(&e),
+                    ));
                 }
-            };
-            if let Err(e) = r.validate() {
-                return Ok(ResponseEnvelope::error(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    400,
-                    &format_validation_errors(&e),
-                ));
-            }
-            db.try_timeout(&[&r.id], now)?;
-            let value_headers_json = r
-                .value
-                .headers
-                .as_ref()
-                .map(|h| serde_json::to_string(h).unwrap());
-            let result = db.promise_settle(&PromiseSettleParams {
-                id: &r.id,
-                state: r.state.as_str(),
-                value_headers: value_headers_json.as_deref(),
-                value_data: r.value.data.as_deref(),
-                settled_at: now,
-            })?;
-            match result.promise {
-                Some(promise) => {
-                    assert_ne!(
-                        promise.state,
-                        PromiseState::Pending,
-                        "invariant: returning 200 but promise is still pending"
-                    );
-                    if result.was_settled {
-                        tracing::info!(
-                            promise_id = %promise.id,
-                            state = %promise.state,
-                            "Promise settled"
+                db.try_timeout(&[&r.id], now).await?;
+                let value_headers_json = r
+                    .value
+                    .headers
+                    .as_ref()
+                    .map(|h| serde_json::to_string(h).unwrap());
+                let result = db
+                    .promise_settle(&PromiseSettleParams {
+                        id: &r.id,
+                        state: r.state.as_str(),
+                        value_headers: value_headers_json.as_deref(),
+                        value_data: r.value.data.as_deref(),
+                        settled_at: now,
+                    })
+                    .await?;
+                match result.promise {
+                    Some(promise) => {
+                        assert_ne!(
+                            promise.state,
+                            PromiseState::Pending,
+                            "invariant: returning 200 but promise is still pending"
                         );
-                    } else {
-                        tracing::debug!(
-                            promise_id = %promise.id,
-                            current_state = %promise.state,
-                            requested_state = %r.state,
-                            "Promise settle: already settled (idempotent)"
-                        );
+                        if result.was_settled {
+                            tracing::info!(
+                                promise_id = %promise.id,
+                                state = %promise.state,
+                                "Promise settled"
+                            );
+                        } else {
+                            tracing::debug!(
+                                promise_id = %promise.id,
+                                current_state = %promise.state,
+                                requested_state = %r.state,
+                                "Promise settle: already settled (idempotent)"
+                            );
+                        }
+                        Ok(ResponseEnvelope::success(
+                            kind_str.clone(),
+                            corr_id.clone(),
+                            &PromiseResponseData { promise },
+                        ))
                     }
-                    Ok(ResponseEnvelope::success(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        &PromiseResponseData { promise },
-                    ))
+                    None => {
+                        tracing::debug!(promise_id = %r.id, "Promise settle: promise not found");
+                        Ok(ResponseEnvelope::error(
+                            kind_str.clone(),
+                            corr_id.clone(),
+                            404,
+                            "Promise not found",
+                        ))
+                    }
                 }
-                None => {
-                    tracing::debug!(promise_id = %r.id, "Promise settle: promise not found");
-                    Ok(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        404,
-                        "Promise not found",
-                    ))
-                }
-            }
+            })
         })
         .await
     }
@@ -797,7 +811,7 @@ impl PostgresEngine {
         let data = req.data.clone();
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
-        self.run(req, move |db| {
+        self.run(req, move |db| { let data = data.clone(); let kind_str = kind_str.clone(); let corr_id = corr_id.clone(); Box::pin(async move {
                 let r: PromiseRegisterCallbackData = match serde_json::from_value(data.clone()) {
                     Ok(d) => d,
                     Err(e) => {
@@ -817,8 +831,8 @@ impl PostgresEngine {
                         &format_validation_errors(&e),
                     ));
                 }
-                db.try_timeout(&[&r.awaited, &r.awaiter], now)?;
-                let result = db.promise_register_callback(&r.awaited, &r.awaiter, now)?;
+                db.try_timeout(&[&r.awaited, &r.awaiter], now).await?;
+                let result = db.promise_register_callback(&r.awaited, &r.awaiter, now).await?;
                 let p_awaited = match result.awaited {
                     Some(p) => p,
                     None => {
@@ -872,7 +886,7 @@ impl PostgresEngine {
                     corr_id.clone(),
                     &PromiseResponseData { promise: p_awaited },
                 ))
-            })
+            }) })
             .await
     }
 
@@ -880,7 +894,7 @@ impl PostgresEngine {
         let data = req.data.clone();
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
-        self.run(req, move |db| {
+        self.run(req, move |db| { let data = data.clone(); let kind_str = kind_str.clone(); let corr_id = corr_id.clone(); Box::pin(async move {
                 let r: PromiseRegisterListenerData = match serde_json::from_value(data.clone()) {
                     Ok(d) => d,
                     Err(e) => {
@@ -913,8 +927,8 @@ impl PostgresEngine {
                         "Invalid listener address",
                     ));
                 }
-                db.try_timeout(&[&r.awaited], now)?;
-                match db.promise_register_listener(&r.awaited, &r.address)? {
+                db.try_timeout(&[&r.awaited], now).await?;
+                match db.promise_register_listener(&r.awaited, &r.address).await? {
                     Some(promise) => {
                         if !resonate_core::types::is_external(&promise.tags) {
                             tracing::debug!(awaited = %r.awaited, "Listener registration rejected: awaited is not awaitable");
@@ -947,7 +961,7 @@ impl PostgresEngine {
                         ))
                     }
                 }
-            })
+            }) })
             .await
     }
 
@@ -956,66 +970,73 @@ impl PostgresEngine {
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
         self.run(req, move |db| {
-            let r: PromiseSearchData = match serde_json::from_value(data.clone()) {
-                Ok(d) => d,
-                Err(e) => {
+            let data = data.clone();
+            let kind_str = kind_str.clone();
+            let corr_id = corr_id.clone();
+            Box::pin(async move {
+                let r: PromiseSearchData = match serde_json::from_value(data.clone()) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        return Ok(ResponseEnvelope::error(
+                            kind_str.clone(),
+                            corr_id.clone(),
+                            400,
+                            &format!("Invalid request: {}", e),
+                        ))
+                    }
+                };
+                if let Err(e) = r.validate() {
                     return Ok(ResponseEnvelope::error(
                         kind_str.clone(),
                         corr_id.clone(),
                         400,
-                        &format!("Invalid request: {}", e),
-                    ))
+                        &format_validation_errors(&e),
+                    ));
                 }
-            };
-            if let Err(e) = r.validate() {
-                return Ok(ResponseEnvelope::error(
+                let tags_json = r.tags.as_ref().map(|t| serde_json::to_string(t).unwrap());
+                let limit = match r.limit {
+                    Some(n) if n > 1000 => {
+                        return Ok(ResponseEnvelope::error(
+                            kind_str.clone(),
+                            corr_id.clone(),
+                            400,
+                            "Invalid 'limit' — must be between 1 and 1000",
+                        ))
+                    }
+                    Some(n) => n,
+                    None => 100,
+                };
+                let state_str = r.state.map(|s| s.as_str());
+                let results = db
+                    .promise_search(
+                        state_str,
+                        tags_json.as_deref(),
+                        r.cursor.as_deref(),
+                        limit + 1,
+                        now,
+                    )
+                    .await?;
+                let has_more = results.len() as i64 > limit;
+                let promises: Vec<_> = results.into_iter().take(limit as usize).collect();
+                let next_cursor = if has_more {
+                    promises.last().map(|p| p.id.clone())
+                } else {
+                    None
+                };
+                tracing::debug!(
+                    found = promises.len(),
+                    has_more = has_more,
+                    "Promise search completed"
+                );
+                Ok(ResponseEnvelope::success(
                     kind_str.clone(),
                     corr_id.clone(),
-                    400,
-                    &format_validation_errors(&e),
-                ));
-            }
-            let tags_json = r.tags.as_ref().map(|t| serde_json::to_string(t).unwrap());
-            let limit = match r.limit {
-                Some(n) if n > 1000 => {
-                    return Ok(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        400,
-                        "Invalid 'limit' — must be between 1 and 1000",
-                    ))
-                }
-                Some(n) => n,
-                None => 100,
-            };
-            let state_str = r.state.map(|s| s.as_str());
-            let results = db.promise_search(
-                state_str,
-                tags_json.as_deref(),
-                r.cursor.as_deref(),
-                limit + 1,
-                now,
-            )?;
-            let has_more = results.len() as i64 > limit;
-            let promises: Vec<_> = results.into_iter().take(limit as usize).collect();
-            let next_cursor = if has_more {
-                promises.last().map(|p| p.id.clone())
-            } else {
-                None
-            };
-            tracing::debug!(
-                found = promises.len(),
-                has_more = has_more,
-                "Promise search completed"
-            );
-            Ok(ResponseEnvelope::success(
-                kind_str.clone(),
-                corr_id.clone(),
-                &PromiseSearchResponseData {
-                    promises,
-                    cursor: next_cursor,
-                },
-            ))
+                    &PromiseSearchResponseData {
+                        promises,
+                        cursor: next_cursor,
+                    },
+                ))
+            })
         })
         .await
     }
@@ -1030,72 +1051,82 @@ impl PostgresEngine {
         let corr_id = req.head.corr_id.clone();
         let fast = {
             let (data, kind_str, corr_id) = (data.clone(), kind_str.clone(), corr_id.clone());
-            move |db: &PostgresDb| -> StorageResult<Option<ResponseEnvelope>> {
-                let r: TaskGetData = match parse_req(&data, &kind_str, &corr_id) {
-                    Ok(r) => r,
-                    Err(e) => return Ok(Some(e)),
-                };
-                Ok(match db.task_get_probe(&r.id, now)? {
-                    Some((_, true)) => None,
-                    Some((Some(task), false)) => Some(ResponseEnvelope::success(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        &TaskResponseData { task },
-                    )),
-                    None | Some((None, false)) => Some(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        404,
-                        "Task not found",
-                    )),
+            db_fn(move |db| {
+                let data = data.clone();
+                let kind_str = kind_str.clone();
+                let corr_id = corr_id.clone();
+                Box::pin(async move {
+                    let r: TaskGetData = match parse_req(&data, &kind_str, &corr_id) {
+                        Ok(r) => r,
+                        Err(e) => return Ok(Some(e)),
+                    };
+                    Ok(match db.task_get_probe(&r.id, now).await? {
+                        Some((_, true)) => None,
+                        Some((Some(task), false)) => Some(ResponseEnvelope::success(
+                            kind_str.clone(),
+                            corr_id.clone(),
+                            &TaskResponseData { task },
+                        )),
+                        None | Some((None, false)) => Some(ResponseEnvelope::error(
+                            kind_str.clone(),
+                            corr_id.clone(),
+                            404,
+                            "Task not found",
+                        )),
+                    })
                 })
-            }
+            })
         };
         self.run_fast(req, fast, move |db| {
-            let r: TaskGetData = match serde_json::from_value(data.clone()) {
-                Ok(d) => d,
-                Err(e) => {
+            let data = data.clone();
+            let kind_str = kind_str.clone();
+            let corr_id = corr_id.clone();
+            Box::pin(async move {
+                let r: TaskGetData = match serde_json::from_value(data.clone()) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        return Ok(ResponseEnvelope::error(
+                            kind_str.clone(),
+                            corr_id.clone(),
+                            400,
+                            &format!("Invalid request: {}", e),
+                        ))
+                    }
+                };
+                if let Err(e) = r.validate() {
                     return Ok(ResponseEnvelope::error(
                         kind_str.clone(),
                         corr_id.clone(),
                         400,
-                        &format!("Invalid request: {}", e),
-                    ))
+                        &format_validation_errors(&e),
+                    ));
                 }
-            };
-            if let Err(e) = r.validate() {
-                return Ok(ResponseEnvelope::error(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    400,
-                    &format_validation_errors(&e),
-                ));
-            }
-            db.try_timeout(&[&r.id], now)?;
-            match db.task_get(&r.id)? {
-                Some(task) => {
-                    tracing::debug!(
-                        task_id = %r.id,
-                        state = %task.state,
-                        version = task.version,
-                        "Task found"
-                    );
-                    Ok(ResponseEnvelope::success(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        &TaskResponseData { task },
-                    ))
+                db.try_timeout(&[&r.id], now).await?;
+                match db.task_get(&r.id).await? {
+                    Some(task) => {
+                        tracing::debug!(
+                            task_id = %r.id,
+                            state = %task.state,
+                            version = task.version,
+                            "Task found"
+                        );
+                        Ok(ResponseEnvelope::success(
+                            kind_str.clone(),
+                            corr_id.clone(),
+                            &TaskResponseData { task },
+                        ))
+                    }
+                    None => {
+                        tracing::debug!(task_id = %r.id, "Task not found");
+                        Ok(ResponseEnvelope::error(
+                            kind_str.clone(),
+                            corr_id.clone(),
+                            404,
+                            "Task not found",
+                        ))
+                    }
                 }
-                None => {
-                    tracing::debug!(task_id = %r.id, "Task not found");
-                    Ok(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        404,
-                        "Task not found",
-                    ))
-                }
-            }
+            })
         })
         .await
     }
@@ -1106,11 +1137,24 @@ impl PostgresEngine {
         let corr_id = req.head.corr_id.clone();
         let fast = {
             let (data, kind_str, corr_id) = (data.clone(), kind_str.clone(), corr_id.clone());
-            move |db: &PostgresDb| create_body(db, &data, &kind_str, &corr_id, now, true)
+            db_fn(move |db| {
+                let data = data.clone();
+                let kind_str = kind_str.clone();
+                let corr_id = corr_id.clone();
+                Box::pin(
+                    async move { create_body(db, &data, &kind_str, &corr_id, now, true).await },
+                )
+            })
         };
         self.run_fast(req, fast, move |db| {
-            create_body(db, &data, &kind_str, &corr_id, now, false)
-                .map(|r| r.expect("invariant: the slow path never declines"))
+            let data = data.clone();
+            let kind_str = kind_str.clone();
+            let corr_id = corr_id.clone();
+            Box::pin(async move {
+                create_body(db, &data, &kind_str, &corr_id, now, false)
+                    .await
+                    .map(|r| r.expect("invariant: the slow path never declines"))
+            })
         })
         .await
     }
@@ -1121,177 +1165,191 @@ impl PostgresEngine {
         let corr_id = req.head.corr_id.clone();
         let fast = {
             let (data, kind_str, corr_id) = (data.clone(), kind_str.clone(), corr_id.clone());
-            move |db: &PostgresDb| -> StorageResult<Option<ResponseEnvelope>> {
-                let r: TaskAcquireData = match parse_req(&data, &kind_str, &corr_id) {
-                    Ok(r) => r,
-                    Err(e) => return Ok(Some(e)),
+            db_fn(move |db| {
+                let data = data.clone();
+                let kind_str = kind_str.clone();
+                let corr_id = corr_id.clone();
+                Box::pin(async move {
+                    let r: TaskAcquireData = match parse_req(&data, &kind_str, &corr_id) {
+                        Ok(r) => r,
+                        Err(e) => return Ok(Some(e)),
+                    };
+                    let (result, expired, preload) = db
+                        .task_acquire_guarded(
+                            &TaskAcquireParams {
+                                task_id: &r.id,
+                                version: r.version,
+                                time: now,
+                                ttl: r.ttl,
+                                pid: &r.pid,
+                            },
+                            true,
+                        )
+                        .await?;
+                    if expired {
+                        return Ok(None);
+                    }
+                    let Some(promise) = result.promise else {
+                        return Ok(Some(ResponseEnvelope::error(
+                            kind_str.clone(),
+                            corr_id.clone(),
+                            404,
+                            "Task not found",
+                        )));
+                    };
+                    if !result.was_acquired {
+                        let msg = if result.task_state != Some(TaskState::Pending) {
+                            "Task is not pending"
+                        } else {
+                            "Version mismatch"
+                        };
+                        return Ok(Some(ResponseEnvelope::error(
+                            kind_str.clone(),
+                            corr_id.clone(),
+                            409,
+                            msg,
+                        )));
+                    }
+                    tracing::debug!(task_id = %r.id, version = r.version + 1, "Task acquired");
+                    Ok(Some(ResponseEnvelope::success(
+                        kind_str.clone(),
+                        corr_id.clone(),
+                        &TaskAcquireResponseData {
+                            task: TaskRecord {
+                                id: r.id.to_string(),
+                                state: TaskState::Acquired,
+                                version: r.version + 1,
+                                resumes: 0,
+                                ttl: Some(r.ttl),
+                                pid: Some(r.pid.to_string()),
+                            },
+                            promise,
+                            preload,
+                        },
+                    )))
+                })
+            })
+        };
+        self.run_fast(req, fast, move |db| {
+            let data = data.clone();
+            let kind_str = kind_str.clone();
+            let corr_id = corr_id.clone();
+            Box::pin(async move {
+                let r: TaskAcquireData = match serde_json::from_value(data.clone()) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        return Ok(ResponseEnvelope::error(
+                            kind_str.clone(),
+                            corr_id.clone(),
+                            400,
+                            &format!("Invalid request: {}", e),
+                        ))
+                    }
                 };
-                let (result, expired, preload) = db.task_acquire_guarded(
-                    &TaskAcquireParams {
+                if let Err(e) = r.validate() {
+                    return Ok(ResponseEnvelope::error(
+                        kind_str.clone(),
+                        corr_id.clone(),
+                        400,
+                        &format_validation_errors(&e),
+                    ));
+                }
+                db.try_timeout(&[&r.id], now).await?;
+                let result = db
+                    .task_acquire(&TaskAcquireParams {
                         task_id: &r.id,
                         version: r.version,
                         time: now,
                         ttl: r.ttl,
                         pid: &r.pid,
-                    },
-                    true,
-                )?;
-                if expired {
-                    return Ok(None);
-                }
-                let Some(promise) = result.promise else {
-                    return Ok(Some(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        404,
-                        "Task not found",
-                    )));
-                };
-                if !result.was_acquired {
-                    let msg = if result.task_state != Some(TaskState::Pending) {
-                        "Task is not pending"
-                    } else {
-                        "Version mismatch"
-                    };
-                    return Ok(Some(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        409,
-                        msg,
-                    )));
-                }
-                tracing::debug!(task_id = %r.id, version = r.version + 1, "Task acquired");
-                Ok(Some(ResponseEnvelope::success(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    &TaskAcquireResponseData {
-                        task: TaskRecord {
+                    })
+                    .await?;
+                match result.promise {
+                    None => {
+                        tracing::debug!(task_id = %r.id, "Task acquire: task not found");
+                        Ok(ResponseEnvelope::error(
+                            kind_str.clone(),
+                            corr_id.clone(),
+                            404,
+                            "Task not found",
+                        ))
+                    }
+                    Some(promise) => {
+                        assert!(
+                            result.task_state.is_some(),
+                            "invariant: acquired result must have a task state"
+                        );
+                        assert!(
+                            result.task_version.is_some(),
+                            "invariant: acquired result must have a task version"
+                        );
+                        // Commented out, not deleted: this fired as a 500 under concurrent
+                        // load. It claims a lost acquire implies the row moved on, but another
+                        // request can return the task to `pending` at the same version between
+                        // the acquire and this read — so the state it calls impossible is
+                        // reachable, and a race that the next line already answers with a 409
+                        // became an internal error instead.
+                        // assert!(
+                        //     result.task_state.unwrap() != TaskState::Pending || result.task_version.unwrap() != r.version,
+                        //     "invariant: task state must not be pending or version must differ from request"
+                        // );
+                        if !result.was_acquired {
+                            let state = result.task_state.unwrap();
+                            let version = result.task_version.unwrap();
+                            if state != TaskState::Pending {
+                                tracing::debug!(
+                                    task_id = %r.id,
+                                    current_state = %state,
+                                    "Task acquire rejected: not pending"
+                                );
+                                return Ok(ResponseEnvelope::error(
+                                    kind_str.clone(),
+                                    corr_id.clone(),
+                                    409,
+                                    "Task is not pending",
+                                ));
+                            }
+                            tracing::debug!(
+                                task_id = %r.id,
+                                expected_version = r.version,
+                                actual_version = version,
+                                "Task acquire rejected: version mismatch"
+                            );
+                            return Ok(ResponseEnvelope::error(
+                                kind_str.clone(),
+                                corr_id.clone(),
+                                409,
+                                "Version mismatch",
+                            ));
+                        }
+                        assert_eq!(
+                            result.task_version,
+                            Some(r.version + 1),
+                            "invariant: acquired task version must be request version + 1"
+                        );
+                        // Use known values — no separate task_get that could
+                        // see stale state from concurrent transactions.
+                        let task = TaskRecord {
                             id: r.id.to_string(),
                             state: TaskState::Acquired,
                             version: r.version + 1,
                             resumes: 0,
                             ttl: Some(r.ttl),
                             pid: Some(r.pid.to_string()),
-                        },
-                        promise,
-                        preload,
-                    },
-                )))
-            }
-        };
-        self.run_fast(req, fast, move |db| {
-            let r: TaskAcquireData = match serde_json::from_value(data.clone()) {
-                Ok(d) => d,
-                Err(e) => {
-                    return Ok(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        400,
-                        &format!("Invalid request: {}", e),
-                    ))
-                }
-            };
-            if let Err(e) = r.validate() {
-                return Ok(ResponseEnvelope::error(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    400,
-                    &format_validation_errors(&e),
-                ));
-            }
-            db.try_timeout(&[&r.id], now)?;
-            let result = db.task_acquire(&TaskAcquireParams {
-                task_id: &r.id,
-                version: r.version,
-                time: now,
-                ttl: r.ttl,
-                pid: &r.pid,
-            })?;
-            match result.promise {
-                None => {
-                    tracing::debug!(task_id = %r.id, "Task acquire: task not found");
-                    Ok(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        404,
-                        "Task not found",
-                    ))
-                }
-                Some(promise) => {
-                    assert!(
-                        result.task_state.is_some(),
-                        "invariant: acquired result must have a task state"
-                    );
-                    assert!(
-                        result.task_version.is_some(),
-                        "invariant: acquired result must have a task version"
-                    );
-                    // Commented out, not deleted: this fired as a 500 under concurrent
-                    // load. It claims a lost acquire implies the row moved on, but another
-                    // request can return the task to `pending` at the same version between
-                    // the acquire and this read — so the state it calls impossible is
-                    // reachable, and a race that the next line already answers with a 409
-                    // became an internal error instead.
-                    // assert!(
-                    //     result.task_state.unwrap() != TaskState::Pending || result.task_version.unwrap() != r.version,
-                    //     "invariant: task state must not be pending or version must differ from request"
-                    // );
-                    if !result.was_acquired {
-                        let state = result.task_state.unwrap();
-                        let version = result.task_version.unwrap();
-                        if state != TaskState::Pending {
-                            tracing::debug!(
-                                task_id = %r.id,
-                                current_state = %state,
-                                "Task acquire rejected: not pending"
-                            );
-                            return Ok(ResponseEnvelope::error(
-                                kind_str.clone(),
-                                corr_id.clone(),
-                                409,
-                                "Task is not pending",
-                            ));
-                        }
-                        tracing::debug!(
-                            task_id = %r.id,
-                            expected_version = r.version,
-                            actual_version = version,
-                            "Task acquire rejected: version mismatch"
-                        );
-                        return Ok(ResponseEnvelope::error(
+                        };
+                        let preload = db.compute_preload(&r.id).await?;
+                        Ok(ResponseEnvelope::success(
                             kind_str.clone(),
                             corr_id.clone(),
-                            409,
-                            "Version mismatch",
-                        ));
+                            &TaskAcquireResponseData {
+                                task,
+                                promise,
+                                preload,
+                            },
+                        ))
                     }
-                    assert_eq!(
-                        result.task_version,
-                        Some(r.version + 1),
-                        "invariant: acquired task version must be request version + 1"
-                    );
-                    // Use known values — no separate task_get that could
-                    // see stale state from concurrent transactions.
-                    let task = TaskRecord {
-                        id: r.id.to_string(),
-                        state: TaskState::Acquired,
-                        version: r.version + 1,
-                        resumes: 0,
-                        ttl: Some(r.ttl),
-                        pid: Some(r.pid.to_string()),
-                    };
-                    let preload = db.compute_preload(&r.id)?;
-                    Ok(ResponseEnvelope::success(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        &TaskAcquireResponseData {
-                            task,
-                            promise,
-                            preload,
-                        },
-                    ))
                 }
-            }
+            })
         })
         .await
     }
@@ -1300,7 +1358,7 @@ impl PostgresEngine {
         let data = req.data.clone();
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
-        self.run(req, move |db| {
+        self.run(req, move |db| { let data = data.clone(); let kind_str = kind_str.clone(); let corr_id = corr_id.clone(); Box::pin(async move {
                 let r: TaskReleaseData = match serde_json::from_value(data.clone()) {
                     Ok(d) => d,
                     Err(e) => {
@@ -1320,8 +1378,8 @@ impl PostgresEngine {
                         &format_validation_errors(&e),
                     ));
                 }
-                db.try_timeout(&[&r.id], now)?;
-                let (_, task_exists) = db.lock_for_update(&r.id)?;
+                db.try_timeout(&[&r.id], now).await?;
+                let (_, task_exists) = db.lock_for_update(&r.id).await?;
                 if !task_exists {
                     tracing::debug!(task_id = %r.id, "Task release: task not found");
                     return Ok(ResponseEnvelope::error(
@@ -1331,7 +1389,7 @@ impl PostgresEngine {
                         "Task not found",
                     ));
                 }
-                let result = db.task_release(&r.id, r.version, now, db.task_retry_timeout())?;
+                let result = db.task_release(&r.id, r.version, now, db.task_retry_timeout()).await?;
                 if result.task_released {
                     tracing::info!(task_id = %r.id, version = r.version, "Task released back to pending");
                     return Ok(ResponseEnvelope::new(
@@ -1357,7 +1415,7 @@ impl PostgresEngine {
                     409,
                     "Task version mismatch or invalid state",
                 ))
-            })
+            }) })
             .await
     }
 
@@ -1367,11 +1425,24 @@ impl PostgresEngine {
         let corr_id = req.head.corr_id.clone();
         let fast = {
             let (data, kind_str, corr_id) = (data.clone(), kind_str.clone(), corr_id.clone());
-            move |db: &PostgresDb| fulfill_body(db, &data, &kind_str, &corr_id, now, true)
+            db_fn(move |db| {
+                let data = data.clone();
+                let kind_str = kind_str.clone();
+                let corr_id = corr_id.clone();
+                Box::pin(
+                    async move { fulfill_body(db, &data, &kind_str, &corr_id, now, true).await },
+                )
+            })
         };
         self.run_fast(req, fast, move |db| {
-            fulfill_body(db, &data, &kind_str, &corr_id, now, false)
-                .map(|r| r.expect("invariant: the slow path never declines"))
+            let data = data.clone();
+            let kind_str = kind_str.clone();
+            let corr_id = corr_id.clone();
+            Box::pin(async move {
+                fulfill_body(db, &data, &kind_str, &corr_id, now, false)
+                    .await
+                    .map(|r| r.expect("invariant: the slow path never declines"))
+            })
         })
         .await
     }
@@ -1382,11 +1453,24 @@ impl PostgresEngine {
         let corr_id = req.head.corr_id.clone();
         let fast = {
             let (data, kind_str, corr_id) = (data.clone(), kind_str.clone(), corr_id.clone());
-            move |db: &PostgresDb| suspend_body(db, &data, &kind_str, &corr_id, now, true)
+            db_fn(move |db| {
+                let data = data.clone();
+                let kind_str = kind_str.clone();
+                let corr_id = corr_id.clone();
+                Box::pin(
+                    async move { suspend_body(db, &data, &kind_str, &corr_id, now, true).await },
+                )
+            })
         };
         self.run_fast(req, fast, move |db| {
-            suspend_body(db, &data, &kind_str, &corr_id, now, false)
-                .map(|r| r.expect("invariant: the slow path never declines"))
+            let data = data.clone();
+            let kind_str = kind_str.clone();
+            let corr_id = corr_id.clone();
+            Box::pin(async move {
+                suspend_body(db, &data, &kind_str, &corr_id, now, false)
+                    .await
+                    .map(|r| r.expect("invariant: the slow path never declines"))
+            })
         })
         .await
     }
@@ -1397,11 +1481,22 @@ impl PostgresEngine {
         let corr_id = req.head.corr_id.clone();
         let fast = {
             let (data, kind_str, corr_id) = (data.clone(), kind_str.clone(), corr_id.clone());
-            move |db: &PostgresDb| fence_body(db, &data, &kind_str, &corr_id, now, true)
+            db_fn(move |db| {
+                let data = data.clone();
+                let kind_str = kind_str.clone();
+                let corr_id = corr_id.clone();
+                Box::pin(async move { fence_body(db, &data, &kind_str, &corr_id, now, true).await })
+            })
         };
         self.run_fast(req, fast, move |db| {
-            fence_body(db, &data, &kind_str, &corr_id, now, false)
-                .map(|r| r.expect("invariant: the slow path never declines"))
+            let data = data.clone();
+            let kind_str = kind_str.clone();
+            let corr_id = corr_id.clone();
+            Box::pin(async move {
+                fence_body(db, &data, &kind_str, &corr_id, now, false)
+                    .await
+                    .map(|r| r.expect("invariant: the slow path never declines"))
+            })
         })
         .await
     }
@@ -1411,39 +1506,44 @@ impl PostgresEngine {
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
         self.run(req, move |db| {
-            let r: TaskHeartbeatData = match serde_json::from_value(data.clone()) {
-                Ok(d) => d,
-                Err(e) => {
+            let data = data.clone();
+            let kind_str = kind_str.clone();
+            let corr_id = corr_id.clone();
+            Box::pin(async move {
+                let r: TaskHeartbeatData = match serde_json::from_value(data.clone()) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        return Ok(ResponseEnvelope::error(
+                            kind_str.clone(),
+                            corr_id.clone(),
+                            400,
+                            &format!("Invalid request: {}", e),
+                        ))
+                    }
+                };
+                if let Err(e) = r.validate() {
                     return Ok(ResponseEnvelope::error(
                         kind_str.clone(),
                         corr_id.clone(),
                         400,
-                        &format!("Invalid request: {}", e),
-                    ))
+                        &format_validation_errors(&e),
+                    ));
                 }
-            };
-            if let Err(e) = r.validate() {
-                return Ok(ResponseEnvelope::error(
+                let task_pairs: Vec<(&str, i64)> =
+                    r.tasks.iter().map(|t| (t.id.as_str(), t.version)).collect();
+                db.task_heartbeat(&r.pid, &task_pairs, now).await?;
+                tracing::debug!(
+                    pid = %r.pid,
+                    task_count = task_pairs.len(),
+                    "Task heartbeat processed"
+                );
+                Ok(ResponseEnvelope::new(
                     kind_str.clone(),
                     corr_id.clone(),
-                    400,
-                    &format_validation_errors(&e),
-                ));
-            }
-            let task_pairs: Vec<(&str, i64)> =
-                r.tasks.iter().map(|t| (t.id.as_str(), t.version)).collect();
-            db.task_heartbeat(&r.pid, &task_pairs, now)?;
-            tracing::debug!(
-                pid = %r.pid,
-                task_count = task_pairs.len(),
-                "Task heartbeat processed"
-            );
-            Ok(ResponseEnvelope::new(
-                kind_str.clone(),
-                corr_id.clone(),
-                200,
-                serde_json::json!({}),
-            ))
+                    200,
+                    serde_json::json!({}),
+                ))
+            })
         })
         .await
     }
@@ -1453,52 +1553,57 @@ impl PostgresEngine {
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
         self.run(req, move |db| {
-            let r: TaskHaltData = match serde_json::from_value(data.clone()) {
-                Ok(d) => d,
-                Err(e) => {
+            let data = data.clone();
+            let kind_str = kind_str.clone();
+            let corr_id = corr_id.clone();
+            Box::pin(async move {
+                let r: TaskHaltData = match serde_json::from_value(data.clone()) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        return Ok(ResponseEnvelope::error(
+                            kind_str.clone(),
+                            corr_id.clone(),
+                            400,
+                            &format!("Invalid request: {}", e),
+                        ))
+                    }
+                };
+                if let Err(e) = r.validate() {
                     return Ok(ResponseEnvelope::error(
                         kind_str.clone(),
                         corr_id.clone(),
                         400,
-                        &format!("Invalid request: {}", e),
+                        &format_validation_errors(&e),
+                    ));
+                }
+                db.try_timeout(&[&r.id], now).await?;
+                let result = db.task_halt(&r.id).await?;
+                if !result.task_exists {
+                    tracing::debug!(task_id = %r.id, "Task halt: not found");
+                    Ok(ResponseEnvelope::error(
+                        kind_str.clone(),
+                        corr_id.clone(),
+                        404,
+                        "Task not found",
+                    ))
+                } else if result.task_fulfilled {
+                    tracing::debug!(task_id = %r.id, "Task halt rejected: already fulfilled");
+                    Ok(ResponseEnvelope::error(
+                        kind_str.clone(),
+                        corr_id.clone(),
+                        409,
+                        "Task is fulfilled",
+                    ))
+                } else {
+                    tracing::info!(task_id = %r.id, "Task halted");
+                    Ok(ResponseEnvelope::new(
+                        kind_str.clone(),
+                        corr_id.clone(),
+                        200,
+                        serde_json::json!({}),
                     ))
                 }
-            };
-            if let Err(e) = r.validate() {
-                return Ok(ResponseEnvelope::error(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    400,
-                    &format_validation_errors(&e),
-                ));
-            }
-            db.try_timeout(&[&r.id], now)?;
-            let result = db.task_halt(&r.id)?;
-            if !result.task_exists {
-                tracing::debug!(task_id = %r.id, "Task halt: not found");
-                Ok(ResponseEnvelope::error(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    404,
-                    "Task not found",
-                ))
-            } else if result.task_fulfilled {
-                tracing::debug!(task_id = %r.id, "Task halt rejected: already fulfilled");
-                Ok(ResponseEnvelope::error(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    409,
-                    "Task is fulfilled",
-                ))
-            } else {
-                tracing::info!(task_id = %r.id, "Task halted");
-                Ok(ResponseEnvelope::new(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    200,
-                    serde_json::json!({}),
-                ))
-            }
+            })
         })
         .await
     }
@@ -1508,52 +1613,57 @@ impl PostgresEngine {
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
         self.run(req, move |db| {
-            let r: TaskContinueData = match serde_json::from_value(data.clone()) {
-                Ok(d) => d,
-                Err(e) => {
+            let data = data.clone();
+            let kind_str = kind_str.clone();
+            let corr_id = corr_id.clone();
+            Box::pin(async move {
+                let r: TaskContinueData = match serde_json::from_value(data.clone()) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        return Ok(ResponseEnvelope::error(
+                            kind_str.clone(),
+                            corr_id.clone(),
+                            400,
+                            &format!("Invalid request: {}", e),
+                        ))
+                    }
+                };
+                if let Err(e) = r.validate() {
                     return Ok(ResponseEnvelope::error(
                         kind_str.clone(),
                         corr_id.clone(),
                         400,
-                        &format!("Invalid request: {}", e),
+                        &format_validation_errors(&e),
+                    ));
+                }
+                db.try_timeout(&[&r.id], now).await?;
+                let result = db.task_continue(&r.id, now).await?;
+                if !result.task_exists {
+                    tracing::debug!(task_id = %r.id, "Task continue: not found");
+                    Ok(ResponseEnvelope::error(
+                        kind_str.clone(),
+                        corr_id.clone(),
+                        404,
+                        "Task not found",
+                    ))
+                } else if result.continued {
+                    tracing::info!(task_id = %r.id, "Task continued from halted state");
+                    Ok(ResponseEnvelope::new(
+                        kind_str.clone(),
+                        corr_id.clone(),
+                        200,
+                        serde_json::json!({}),
+                    ))
+                } else {
+                    tracing::debug!(task_id = %r.id, "Task continue rejected: not halted");
+                    Ok(ResponseEnvelope::error(
+                        kind_str.clone(),
+                        corr_id.clone(),
+                        409,
+                        "Task is not halted",
                     ))
                 }
-            };
-            if let Err(e) = r.validate() {
-                return Ok(ResponseEnvelope::error(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    400,
-                    &format_validation_errors(&e),
-                ));
-            }
-            db.try_timeout(&[&r.id], now)?;
-            let result = db.task_continue(&r.id, now)?;
-            if !result.task_exists {
-                tracing::debug!(task_id = %r.id, "Task continue: not found");
-                Ok(ResponseEnvelope::error(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    404,
-                    "Task not found",
-                ))
-            } else if result.continued {
-                tracing::info!(task_id = %r.id, "Task continued from halted state");
-                Ok(ResponseEnvelope::new(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    200,
-                    serde_json::json!({}),
-                ))
-            } else {
-                tracing::debug!(task_id = %r.id, "Task continue rejected: not halted");
-                Ok(ResponseEnvelope::error(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    409,
-                    "Task is not halted",
-                ))
-            }
+            })
         })
         .await
     }
@@ -1563,59 +1673,66 @@ impl PostgresEngine {
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
         self.run(req, move |db| {
-            let r: TaskSearchData = match serde_json::from_value(data.clone()) {
-                Ok(d) => d,
-                Err(e) => {
+            let data = data.clone();
+            let kind_str = kind_str.clone();
+            let corr_id = corr_id.clone();
+            Box::pin(async move {
+                let r: TaskSearchData = match serde_json::from_value(data.clone()) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        return Ok(ResponseEnvelope::error(
+                            kind_str.clone(),
+                            corr_id.clone(),
+                            400,
+                            &format!("Invalid request: {}", e),
+                        ))
+                    }
+                };
+                if let Err(e) = r.validate() {
                     return Ok(ResponseEnvelope::error(
                         kind_str.clone(),
                         corr_id.clone(),
                         400,
-                        &format!("Invalid request: {}", e),
-                    ))
+                        &format_validation_errors(&e),
+                    ));
                 }
-            };
-            if let Err(e) = r.validate() {
-                return Ok(ResponseEnvelope::error(
+                let limit = match r.limit {
+                    Some(n) if n > 1000 => {
+                        return Ok(ResponseEnvelope::error(
+                            kind_str.clone(),
+                            corr_id.clone(),
+                            400,
+                            "Invalid 'limit' — must be between 1 and 1000",
+                        ))
+                    }
+                    Some(n) => n,
+                    None => 100,
+                };
+                let state_str = r.state.map(|s| s.as_str());
+                let results = db
+                    .task_search(state_str, r.cursor.as_deref(), limit + 1)
+                    .await?;
+                let has_more = results.len() as i64 > limit;
+                let tasks: Vec<_> = results.into_iter().take(limit as usize).collect();
+                let next_cursor = if has_more {
+                    tasks.last().map(|t| t.id.clone())
+                } else {
+                    None
+                };
+                tracing::debug!(
+                    found = tasks.len(),
+                    has_more = has_more,
+                    "Task search completed"
+                );
+                Ok(ResponseEnvelope::success(
                     kind_str.clone(),
                     corr_id.clone(),
-                    400,
-                    &format_validation_errors(&e),
-                ));
-            }
-            let limit = match r.limit {
-                Some(n) if n > 1000 => {
-                    return Ok(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        400,
-                        "Invalid 'limit' — must be between 1 and 1000",
-                    ))
-                }
-                Some(n) => n,
-                None => 100,
-            };
-            let state_str = r.state.map(|s| s.as_str());
-            let results = db.task_search(state_str, r.cursor.as_deref(), limit + 1)?;
-            let has_more = results.len() as i64 > limit;
-            let tasks: Vec<_> = results.into_iter().take(limit as usize).collect();
-            let next_cursor = if has_more {
-                tasks.last().map(|t| t.id.clone())
-            } else {
-                None
-            };
-            tracing::debug!(
-                found = tasks.len(),
-                has_more = has_more,
-                "Task search completed"
-            );
-            Ok(ResponseEnvelope::success(
-                kind_str.clone(),
-                corr_id.clone(),
-                &TaskSearchResponseData {
-                    tasks,
-                    cursor: next_cursor,
-                },
-            ))
+                    &TaskSearchResponseData {
+                        tasks,
+                        cursor: next_cursor,
+                    },
+                ))
+            })
         })
         .await
     }
@@ -1629,49 +1746,54 @@ impl PostgresEngine {
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
         self.run(req, move |db| {
-            let r: ScheduleGetData = match serde_json::from_value(data.clone()) {
-                Ok(d) => d,
-                Err(e) => {
+            let data = data.clone();
+            let kind_str = kind_str.clone();
+            let corr_id = corr_id.clone();
+            Box::pin(async move {
+                let r: ScheduleGetData = match serde_json::from_value(data.clone()) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        return Ok(ResponseEnvelope::error(
+                            kind_str.clone(),
+                            corr_id.clone(),
+                            400,
+                            &format!("Invalid request: {}", e),
+                        ))
+                    }
+                };
+                if let Err(e) = r.validate() {
                     return Ok(ResponseEnvelope::error(
                         kind_str.clone(),
                         corr_id.clone(),
                         400,
-                        &format!("Invalid request: {}", e),
-                    ))
+                        &format_validation_errors(&e),
+                    ));
                 }
-            };
-            if let Err(e) = r.validate() {
-                return Ok(ResponseEnvelope::error(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    400,
-                    &format_validation_errors(&e),
-                ));
-            }
-            match db.schedule_get(&r.id)? {
-                Some(schedule) => {
-                    tracing::debug!(
-                        schedule_id = %r.id,
-                        cron = %schedule.cron,
-                        next_run_at = schedule.next_run_at,
-                        "Schedule found"
-                    );
-                    Ok(ResponseEnvelope::success(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        &ScheduleResponseData { schedule },
-                    ))
+                match db.schedule_get(&r.id).await? {
+                    Some(schedule) => {
+                        tracing::debug!(
+                            schedule_id = %r.id,
+                            cron = %schedule.cron,
+                            next_run_at = schedule.next_run_at,
+                            "Schedule found"
+                        );
+                        Ok(ResponseEnvelope::success(
+                            kind_str.clone(),
+                            corr_id.clone(),
+                            &ScheduleResponseData { schedule },
+                        ))
+                    }
+                    None => {
+                        tracing::debug!(schedule_id = %r.id, "Schedule not found");
+                        Ok(ResponseEnvelope::error(
+                            kind_str.clone(),
+                            corr_id.clone(),
+                            404,
+                            "Schedule not found",
+                        ))
+                    }
                 }
-                None => {
-                    tracing::debug!(schedule_id = %r.id, "Schedule not found");
-                    Ok(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        404,
-                        "Schedule not found",
-                    ))
-                }
-            }
+            })
         })
         .await
     }
@@ -1681,84 +1803,91 @@ impl PostgresEngine {
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
         self.run(req, move |db| {
-            let r: ScheduleCreateData = match serde_json::from_value(data.clone()) {
-                Ok(d) => d,
-                Err(e) => {
+            let data = data.clone();
+            let kind_str = kind_str.clone();
+            let corr_id = corr_id.clone();
+            Box::pin(async move {
+                let r: ScheduleCreateData = match serde_json::from_value(data.clone()) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        return Ok(ResponseEnvelope::error(
+                            kind_str.clone(),
+                            corr_id.clone(),
+                            400,
+                            &format!("Invalid request: {}", e),
+                        ))
+                    }
+                };
+                if let Err(e) = r.validate() {
                     return Ok(ResponseEnvelope::error(
                         kind_str.clone(),
                         corr_id.clone(),
                         400,
-                        &format!("Invalid request: {}", e),
-                    ))
+                        &format_validation_errors(&e),
+                    ));
                 }
-            };
-            if let Err(e) = r.validate() {
-                return Ok(ResponseEnvelope::error(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    400,
-                    &format_validation_errors(&e),
-                ));
-            }
-            // Every promise this schedule fires carries the target, so it is
-            // held to the same standard promise create holds a target to.
-            if let Some(addr) = r.promise_tags.get("resonate:target") {
-                if !resonate_core::is_valid_address(addr) {
+                // Every promise this schedule fires carries the target, so it is
+                // held to the same standard promise create holds a target to.
+                if let Some(addr) = r.promise_tags.get("resonate:target") {
+                    if !resonate_core::is_valid_address(addr) {
+                        tracing::warn!(
+                            schedule_id = %r.id,
+                            address = addr,
+                            "Schedule create rejected: invalid resonate:target address"
+                        );
+                        return Ok(ResponseEnvelope::error(
+                            kind_str.clone(),
+                            corr_id.clone(),
+                            400,
+                            "Invalid resonate:target address",
+                        ));
+                    }
+                }
+                if !util::is_valid_cron(&r.cron) {
                     tracing::warn!(
                         schedule_id = %r.id,
-                        address = addr,
-                        "Schedule create rejected: invalid resonate:target address"
+                        cron = %r.cron,
+                        "Schedule create rejected: invalid cron expression"
                     );
                     return Ok(ResponseEnvelope::error(
                         kind_str.clone(),
                         corr_id.clone(),
                         400,
-                        "Invalid resonate:target address",
+                        "Invalid cron expression",
                     ));
                 }
-            }
-            if !util::is_valid_cron(&r.cron) {
-                tracing::warn!(
-                    schedule_id = %r.id,
-                    cron = %r.cron,
-                    "Schedule create rejected: invalid cron expression"
+                let promise_tags_json = serde_json::to_string(&r.promise_tags).unwrap();
+                let next_run_at = util::compute_next_cron(&r.cron, now);
+                let promise_param_headers_json = r
+                    .promise_param
+                    .headers
+                    .as_ref()
+                    .map(|h| serde_json::to_string(h).unwrap());
+                let schedule = db
+                    .schedule_create(&ScheduleCreateParams {
+                        id: &r.id,
+                        cron: &r.cron,
+                        promise_id: &r.promise_id,
+                        promise_timeout: r.promise_timeout,
+                        promise_param_headers: promise_param_headers_json.as_deref(),
+                        promise_param_data: r.promise_param.data.as_deref(),
+                        promise_tags: &promise_tags_json,
+                        created_at: now,
+                        next_run_at,
+                    })
+                    .await?;
+                tracing::info!(
+                    schedule_id = %schedule.id,
+                    cron = %schedule.cron,
+                    next_run_at = schedule.next_run_at,
+                    "Schedule created"
                 );
-                return Ok(ResponseEnvelope::error(
+                Ok(ResponseEnvelope::success(
                     kind_str.clone(),
                     corr_id.clone(),
-                    400,
-                    "Invalid cron expression",
-                ));
-            }
-            let promise_tags_json = serde_json::to_string(&r.promise_tags).unwrap();
-            let next_run_at = util::compute_next_cron(&r.cron, now);
-            let promise_param_headers_json = r
-                .promise_param
-                .headers
-                .as_ref()
-                .map(|h| serde_json::to_string(h).unwrap());
-            let schedule = db.schedule_create(&ScheduleCreateParams {
-                id: &r.id,
-                cron: &r.cron,
-                promise_id: &r.promise_id,
-                promise_timeout: r.promise_timeout,
-                promise_param_headers: promise_param_headers_json.as_deref(),
-                promise_param_data: r.promise_param.data.as_deref(),
-                promise_tags: &promise_tags_json,
-                created_at: now,
-                next_run_at,
-            })?;
-            tracing::info!(
-                schedule_id = %schedule.id,
-                cron = %schedule.cron,
-                next_run_at = schedule.next_run_at,
-                "Schedule created"
-            );
-            Ok(ResponseEnvelope::success(
-                kind_str.clone(),
-                corr_id.clone(),
-                &ScheduleResponseData { schedule },
-            ))
+                    &ScheduleResponseData { schedule },
+                ))
+            })
         })
         .await
     }
@@ -1768,42 +1897,47 @@ impl PostgresEngine {
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
         self.run(req, move |db| {
-            let r: ScheduleDeleteData = match serde_json::from_value(data.clone()) {
-                Ok(d) => d,
-                Err(e) => {
+            let data = data.clone();
+            let kind_str = kind_str.clone();
+            let corr_id = corr_id.clone();
+            Box::pin(async move {
+                let r: ScheduleDeleteData = match serde_json::from_value(data.clone()) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        return Ok(ResponseEnvelope::error(
+                            kind_str.clone(),
+                            corr_id.clone(),
+                            400,
+                            &format!("Invalid request: {}", e),
+                        ))
+                    }
+                };
+                if let Err(e) = r.validate() {
                     return Ok(ResponseEnvelope::error(
                         kind_str.clone(),
                         corr_id.clone(),
                         400,
-                        &format!("Invalid request: {}", e),
+                        &format_validation_errors(&e),
+                    ));
+                }
+                if db.schedule_delete(&r.id).await? {
+                    tracing::info!(schedule_id = %r.id, "Schedule deleted");
+                    Ok(ResponseEnvelope::new(
+                        kind_str.clone(),
+                        corr_id.clone(),
+                        200,
+                        serde_json::json!({}),
+                    ))
+                } else {
+                    tracing::debug!(schedule_id = %r.id, "Schedule delete: not found");
+                    Ok(ResponseEnvelope::error(
+                        kind_str.clone(),
+                        corr_id.clone(),
+                        404,
+                        "Schedule not found",
                     ))
                 }
-            };
-            if let Err(e) = r.validate() {
-                return Ok(ResponseEnvelope::error(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    400,
-                    &format_validation_errors(&e),
-                ));
-            }
-            if db.schedule_delete(&r.id)? {
-                tracing::info!(schedule_id = %r.id, "Schedule deleted");
-                Ok(ResponseEnvelope::new(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    200,
-                    serde_json::json!({}),
-                ))
-            } else {
-                tracing::debug!(schedule_id = %r.id, "Schedule delete: not found");
-                Ok(ResponseEnvelope::error(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    404,
-                    "Schedule not found",
-                ))
-            }
+            })
         })
         .await
     }
@@ -1813,61 +1947,67 @@ impl PostgresEngine {
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
         self.run(req, move |db| {
-            let r: ScheduleSearchData = match serde_json::from_value(data.clone()) {
-                Ok(d) => d,
-                Err(e) => {
+            let data = data.clone();
+            let kind_str = kind_str.clone();
+            let corr_id = corr_id.clone();
+            Box::pin(async move {
+                let r: ScheduleSearchData = match serde_json::from_value(data.clone()) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        return Ok(ResponseEnvelope::error(
+                            kind_str.clone(),
+                            corr_id.clone(),
+                            400,
+                            &format!("Invalid request: {}", e),
+                        ))
+                    }
+                };
+                if let Err(e) = r.validate() {
                     return Ok(ResponseEnvelope::error(
                         kind_str.clone(),
                         corr_id.clone(),
                         400,
-                        &format!("Invalid request: {}", e),
-                    ))
+                        &format_validation_errors(&e),
+                    ));
                 }
-            };
-            if let Err(e) = r.validate() {
-                return Ok(ResponseEnvelope::error(
+                let tags_json = r.tags.as_ref().map(|t| serde_json::to_string(t).unwrap());
+                let limit = match r.limit {
+                    Some(n) if n > 1000 => {
+                        return Ok(ResponseEnvelope::error(
+                            kind_str.clone(),
+                            corr_id.clone(),
+                            400,
+                            "Invalid 'limit' — must be between 1 and 1000",
+                        ))
+                    }
+                    Some(n) => n,
+                    None => 10,
+                };
+                let schedules = db
+                    .schedule_search(tags_json.as_deref(), r.cursor.as_deref(), limit + 1)
+                    .await?;
+                let limit_usize = limit as usize;
+                let has_more = schedules.len() > limit_usize;
+                let result_schedules: Vec<_> = schedules.into_iter().take(limit_usize).collect();
+                let next_cursor = if has_more {
+                    result_schedules.last().map(|s| s.id.clone())
+                } else {
+                    None
+                };
+                tracing::debug!(
+                    found = result_schedules.len(),
+                    has_more = has_more,
+                    "Schedule search completed"
+                );
+                Ok(ResponseEnvelope::success(
                     kind_str.clone(),
                     corr_id.clone(),
-                    400,
-                    &format_validation_errors(&e),
-                ));
-            }
-            let tags_json = r.tags.as_ref().map(|t| serde_json::to_string(t).unwrap());
-            let limit = match r.limit {
-                Some(n) if n > 1000 => {
-                    return Ok(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        400,
-                        "Invalid 'limit' — must be between 1 and 1000",
-                    ))
-                }
-                Some(n) => n,
-                None => 10,
-            };
-            let schedules =
-                db.schedule_search(tags_json.as_deref(), r.cursor.as_deref(), limit + 1)?;
-            let limit_usize = limit as usize;
-            let has_more = schedules.len() > limit_usize;
-            let result_schedules: Vec<_> = schedules.into_iter().take(limit_usize).collect();
-            let next_cursor = if has_more {
-                result_schedules.last().map(|s| s.id.clone())
-            } else {
-                None
-            };
-            tracing::debug!(
-                found = result_schedules.len(),
-                has_more = has_more,
-                "Schedule search completed"
-            );
-            Ok(ResponseEnvelope::success(
-                kind_str.clone(),
-                corr_id.clone(),
-                &ScheduleSearchResponseData {
-                    schedules: result_schedules,
-                    cursor: next_cursor,
-                },
-            ))
+                    &ScheduleSearchResponseData {
+                        schedules: result_schedules,
+                        cursor: next_cursor,
+                    },
+                ))
+            })
         })
         .await
     }
@@ -1885,26 +2025,32 @@ impl PostgresEngine {
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
         self.run(req, move |db| {
-            let q = match resonate_sql::ui_resolve::<ui::ExecutionsSearchData, _>(
-                &data,
-                &kind_str,
-                &corr_id,
-                |d| d.resolve(),
-            ) {
-                Ok(q) => q,
-                Err(resp) => return Ok(resp),
-            };
-            let rows = db.ui_executions_search(&q)?;
-            let total = if q.count_total {
-                Some(db.ui_executions_count(&q)?)
-            } else {
-                None
-            };
-            Ok(ResponseEnvelope::success(
-                kind_str.clone(),
-                corr_id.clone(),
-                &ui::finish_executions_page(&q, rows, total),
-            ))
+            let data = data.clone();
+            let kind_str = kind_str.clone();
+            let corr_id = corr_id.clone();
+            Box::pin(async move {
+                let q = match resonate_sql::ui_resolve::<ui::ExecutionsSearchData, _>(
+                    &data,
+                    &kind_str,
+                    &corr_id,
+                    |d| d.resolve(),
+                ) {
+                    Ok(q) => q,
+                    Err(resp) => return Ok(resp),
+                };
+                db.custom_plans().await?;
+                let rows = db.ui_executions_search(&q).await?;
+                let total = if q.count_total {
+                    Some(db.ui_executions_count(&q).await?)
+                } else {
+                    None
+                };
+                Ok(ResponseEnvelope::success(
+                    kind_str.clone(),
+                    corr_id.clone(),
+                    &ui::finish_executions_page(&q, rows, total),
+                ))
+            })
         })
         .await
     }
@@ -1914,24 +2060,30 @@ impl PostgresEngine {
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
         self.run(req, move |db| {
-            let q = match resonate_sql::ui_resolve::<ui::ExecutionGetData, _>(
-                &data,
-                &kind_str,
-                &corr_id,
-                |d| d.resolve(),
-            ) {
-                Ok(q) => q,
-                Err(resp) => return Ok(resp),
-            };
-            let rows = db.ui_execution_nodes(&q)?;
-            match ui::build_execution(&q, rows) {
-                Ok(view) => Ok(ResponseEnvelope::success(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    &view,
-                )),
-                Err(e) => Ok(e.to_response(kind_str.clone(), corr_id.clone())),
-            }
+            let data = data.clone();
+            let kind_str = kind_str.clone();
+            let corr_id = corr_id.clone();
+            Box::pin(async move {
+                let q = match resonate_sql::ui_resolve::<ui::ExecutionGetData, _>(
+                    &data,
+                    &kind_str,
+                    &corr_id,
+                    |d| d.resolve(),
+                ) {
+                    Ok(q) => q,
+                    Err(resp) => return Ok(resp),
+                };
+                db.custom_plans().await?;
+                let rows = db.ui_execution_nodes(&q).await?;
+                match ui::build_execution(&q, rows) {
+                    Ok(view) => Ok(ResponseEnvelope::success(
+                        kind_str.clone(),
+                        corr_id.clone(),
+                        &view,
+                    )),
+                    Err(e) => Ok(e.to_response(kind_str.clone(), corr_id.clone())),
+                }
+            })
         })
         .await
     }
@@ -1941,26 +2093,32 @@ impl PostgresEngine {
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
         self.run(req, move |db| {
-            let q = match resonate_sql::ui_resolve::<ui::SchedulesSearchData, _>(
-                &data,
-                &kind_str,
-                &corr_id,
-                |d| d.resolve(),
-            ) {
-                Ok(q) => q,
-                Err(resp) => return Ok(resp),
-            };
-            let rows = db.ui_schedules_search(&q)?;
-            let total = if q.count_total {
-                Some(db.ui_schedules_count(&q)?)
-            } else {
-                None
-            };
-            Ok(ResponseEnvelope::success(
-                kind_str.clone(),
-                corr_id.clone(),
-                &ui::finish_schedules_page(&q, rows, total),
-            ))
+            let data = data.clone();
+            let kind_str = kind_str.clone();
+            let corr_id = corr_id.clone();
+            Box::pin(async move {
+                let q = match resonate_sql::ui_resolve::<ui::SchedulesSearchData, _>(
+                    &data,
+                    &kind_str,
+                    &corr_id,
+                    |d| d.resolve(),
+                ) {
+                    Ok(q) => q,
+                    Err(resp) => return Ok(resp),
+                };
+                db.custom_plans().await?;
+                let rows = db.ui_schedules_search(&q).await?;
+                let total = if q.count_total {
+                    Some(db.ui_schedules_count(&q).await?)
+                } else {
+                    None
+                };
+                Ok(ResponseEnvelope::success(
+                    kind_str.clone(),
+                    corr_id.clone(),
+                    &ui::finish_schedules_page(&q, rows, total),
+                ))
+            })
         })
         .await
     }
@@ -1970,41 +2128,51 @@ impl PostgresEngine {
     // ============================================================================
 
     async fn op_debug_reset(&self, req: &RequestEnvelope) -> Output {
-        Output::response(match self.transact(move |db| db.debug_reset()).await {
-            Ok(((), _, _)) => {
-                tracing::warn!("Debug reset: all data cleared");
-                ResponseEnvelope::new(
-                    req.kind.clone(),
-                    req.head.corr_id.clone(),
-                    200,
-                    Value::Object(serde_json::Map::new()),
-                )
-            }
-            Err(e) => {
-                tracing::error!(error = %e, "Debug reset failed");
-                ResponseEnvelope::error(
-                    req.kind.clone(),
-                    req.head.corr_id.clone(),
-                    500,
-                    &format!("Reset failed: {}", e),
-                )
-            }
-        })
+        Output::response(
+            match self
+                .transact(move |db| Box::pin(async move { db.debug_reset().await }))
+                .await
+            {
+                Ok(((), _, _)) => {
+                    tracing::warn!("Debug reset: all data cleared");
+                    ResponseEnvelope::new(
+                        req.kind.clone(),
+                        req.head.corr_id.clone(),
+                        200,
+                        Value::Object(serde_json::Map::new()),
+                    )
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "Debug reset failed");
+                    ResponseEnvelope::error(
+                        req.kind.clone(),
+                        req.head.corr_id.clone(),
+                        500,
+                        &format!("Reset failed: {}", e),
+                    )
+                }
+            },
+        )
     }
 
     async fn op_debug_snap(&self, req: &RequestEnvelope) -> Output {
-        Output::response(match self.query(move |db| db.snap()).await {
-            Ok(snapshot) => {
-                let data = serde_json::to_value(snapshot).unwrap_or(Value::Null);
-                ResponseEnvelope::new(req.kind.clone(), req.head.corr_id.clone(), 200, data)
-            }
-            Err(e) => ResponseEnvelope::error(
-                req.kind.clone(),
-                req.head.corr_id.clone(),
-                500,
-                &format!("Snap failed: {}", e),
-            ),
-        })
+        Output::response(
+            match self
+                .query(move |db| Box::pin(async move { db.snap().await }))
+                .await
+            {
+                Ok(snapshot) => {
+                    let data = serde_json::to_value(snapshot).unwrap_or(Value::Null);
+                    ResponseEnvelope::new(req.kind.clone(), req.head.corr_id.clone(), 200, data)
+                }
+                Err(e) => ResponseEnvelope::error(
+                    req.kind.clone(),
+                    req.head.corr_id.clone(),
+                    500,
+                    &format!("Snap failed: {}", e),
+                ),
+            },
+        )
     }
 
     /// The sweep, and every message it emits.
@@ -2037,7 +2205,9 @@ impl PostgresEngine {
         }
 
         match self
-            .transact(move |db| process_all_timeouts(db, time).map(|_| ()))
+            .transact(move |db| {
+                Box::pin(async move { process_all_timeouts(db, time).await.map(|_| ()) })
+            })
             .await
         {
             Ok(((), messages, timeouts)) => Output {
@@ -2071,32 +2241,81 @@ enum Conn<'a> {
     Auto(sqlx::pool::PoolConnection<sqlx::Postgres>),
 }
 
-/// Wraps a PostgreSQL connection for use within the synchronous `Db` trait.
-/// Same `UnsafeCell` rationale as `persistence_postgres::PostgresDb`.
-struct PostgresDb<'a> {
-    tx: UnsafeCell<Conn<'a>>,
-    task_retry_timeout: i64,
-    preload_limit: u32,
-    /// What this transition has emitted so far. See `engine_sqlite.rs`
-    /// — same reasoning, and the same reason it is not in a return type.
-    emitted: RefCell<Vec<Outgoing>>,
-    /// What deadlines this transition armed or moved. A hint; see
-    /// `engine_sqlite.rs`.
-    armed: RefCell<Vec<Scheduled>>,
-}
-
-impl<'a> PostgresDb<'a> {
-    #[allow(clippy::mut_from_ref)]
-    fn tx(&self) -> &mut sqlx::PgConnection {
-        match unsafe { &mut *self.tx.get() } {
+impl Conn<'_> {
+    fn pg(&mut self) -> &mut sqlx::PgConnection {
+        match self {
             Conn::Tx(tx) => tx,
             Conn::Auto(conn) => conn,
         }
     }
+}
+
+/// Statement text by call site, shared by every operation of one engine.
+type SqlCache = Arc<std::sync::Mutex<std::collections::HashMap<&'static str, Arc<str>>>>;
+
+/// What an operation's closure returns: the operation, as a future borrowing
+/// the `PostgresDb` it runs on.
+type DbFut<'d, T> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = StorageResult<T>> + Send + 'd>>;
+
+/// Fix a closure's signature to the one `execute` takes. A closure stored in a
+/// `let` before it is passed cannot have its higher-ranked signature inferred
+/// from the call; passing it through here gives it the bound up front.
+fn db_fn<F, T>(f: F) -> F
+where
+    F: for<'d> FnMut(&'d PostgresDb<'static>) -> DbFut<'d, T>,
+{
+    f
+}
+
+/// One operation's connection and what it has emitted so far.
+///
+/// Every method is async and runs on the caller's task: no thread is parked
+/// waiting for a statement, and no runtime worker is handed off to keep the
+/// scheduler moving while one is. The locks are never contended — one task
+/// owns a `PostgresDb` for its whole life — and exist to make it `Sync`, so
+/// a future holding `&PostgresDb` across an await is `Send`.
+struct PostgresDb<'a> {
+    conn: tokio::sync::Mutex<Conn<'a>>,
+    sql: SqlCache,
+    task_retry_timeout: i64,
+    preload_limit: u32,
+    /// What this transition has emitted so far. See `engine_sqlite.rs`
+    /// — same reasoning, and the same reason it is not in a return type.
+    emitted: std::sync::Mutex<Vec<Outgoing>>,
+    /// What deadlines this transition armed or moved. A hint; see
+    /// `engine_sqlite.rs`.
+    armed: std::sync::Mutex<Vec<Scheduled>>,
+}
+
+impl<'a> PostgresDb<'a> {
+    /// A statement's text, built by `build` the first time `key` is asked for
+    /// and shared after.
+    ///
+    /// The hot statements are several kilobytes assembled from fragments, and
+    /// depend on nothing but the engine's configuration — so the assembling,
+    /// a dozen passes of `format!` and `replace`, was the same work on every
+    /// request. `key` names the call site; one site, one text.
+    fn cached(&self, key: &'static str, build: impl FnOnce() -> String) -> Arc<str> {
+        if let Some(sql) = self.sql.lock().expect("sql cache").get(key) {
+            return sql.clone();
+        }
+        let sql: Arc<str> = build().into();
+        self.sql.lock().expect("sql cache").insert(key, sql.clone());
+        sql
+    }
+
+    /// The connection, for one statement.
+    async fn tx(&self) -> tokio::sync::MutexGuard<'_, Conn<'a>> {
+        self.conn.lock().await
+    }
 
     /// Report a deadline this transition just wrote.
     fn arm(&self, at: i64, timeout: Timeout) {
-        self.armed.borrow_mut().push(Scheduled { at, timeout });
+        self.armed
+            .lock()
+            .expect("armed")
+            .push(Scheduled { at, timeout });
     }
 
     /// Announce a promise deadline the queue holds.
@@ -2144,9 +2363,9 @@ impl<'a> PostgresDb<'a> {
     /// statement returns, needs no extra SQL: the emission already names them.
     /// `at` is per statement, because the deadline each one writes differs.
     fn absorb_and_arm_retries(&self, row: &PgRow, at: i64) -> Vec<String> {
-        let before = self.emitted.borrow().len();
+        let before = self.emitted.lock().expect("emitted").len();
         self.absorb(row);
-        let armed: Vec<String> = self.emitted.borrow()[before..]
+        let armed: Vec<String> = self.emitted.lock().expect("emitted")[before..]
             .iter()
             .filter_map(|m| match m {
                 Outgoing::Execute { task_id, .. } => Some(task_id.clone()),
@@ -2170,7 +2389,7 @@ impl<'a> PostgresDb<'a> {
         let Some(items) = value.as_array() else {
             return;
         };
-        let mut out = self.emitted.borrow_mut();
+        let mut out = self.emitted.lock().expect("emitted");
         for m in items {
             let address = m
                 .get("address")
@@ -2211,10 +2430,6 @@ fn split_keyset(after: Option<&ui::Keyset>) -> (Option<i64>, Option<String>) {
         Some(k) => (Some(k.key), Some(k.id.clone())),
         None => (None, None),
     }
-}
-
-fn rt_block_on<F: std::future::Future>(f: F) -> F::Output {
-    tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(f))
 }
 
 fn parse_promise_state(s: &str) -> PromiseState {
@@ -2520,8 +2735,8 @@ SELECT :MESSAGES",
 /// statement that inserts the promise with its task acquired; anything else
 /// (the promise exists, or is created already timed out) declines to the
 /// transaction.
-fn create_body(
-    db: &PostgresDb,
+async fn create_body(
+    db: &PostgresDb<'_>,
     data: &Value,
     kind_str: &str,
     corr_id: &str,
@@ -2565,10 +2780,10 @@ fn create_body(
         }
     }
     if !fast {
-        db.try_timeout(&[action_id], now)?;
+        db.try_timeout(&[action_id], now).await?;
         // Lock preamble: ensures CTE and subsequent reads see
         // current state under READ COMMITTED.
-        let _ = db.lock_for_update(action_id)?;
+        let _ = db.lock_for_update(action_id).await?;
     }
     let tags_json = serde_json::to_string(&action_data.tags).unwrap();
     let already_timedout = now >= action_data.timeout_at;
@@ -2600,19 +2815,21 @@ fn create_body(
         .headers
         .as_ref()
         .map(|h| serde_json::to_string(h).unwrap());
-    let (res, created_preload) = db.task_create(&TaskCreateParams {
-        promise_id: action_id,
-        state: p_state.as_str(),
-        param_headers: param_headers_json.as_deref(),
-        param_data: action_data.param.data.as_deref(),
-        tags: &tags_json,
-        timeout_at: action_data.timeout_at,
-        created_at,
-        settled_at,
-        already_timedout,
-        ttl: r.ttl,
-        pid: &r.pid,
-    })?;
+    let (res, created_preload) = db
+        .task_create(&TaskCreateParams {
+            promise_id: action_id,
+            state: p_state.as_str(),
+            param_headers: param_headers_json.as_deref(),
+            param_data: action_data.param.data.as_deref(),
+            tags: &tags_json,
+            timeout_at: action_data.timeout_at,
+            created_at,
+            settled_at,
+            already_timedout,
+            ttl: r.ttl,
+            pid: &r.pid,
+        })
+        .await?;
     if fast && !res.task_created {
         return Ok(None);
     }
@@ -2622,7 +2839,7 @@ fn create_body(
     // transactions (e.g. task.suspend) that committed after
     // try_timeout's snapshot but before now.
     if res.promise.state != PromiseState::Pending {
-        db.process_callbacks(action_id, now)?;
+        db.process_callbacks(action_id, now).await?;
     }
 
     // When the CTE created the task, use CTE result directly.
@@ -2700,18 +2917,20 @@ fn create_body(
                         pid: None,
                     },
                     promise: res.promise,
-                    preload: db.compute_preload(action_id)?,
+                    preload: db.compute_preload(action_id).await?,
                 },
             )))
         }
         (Some("pending"), Some(version)) => {
-            let acquire_result = db.task_acquire(&TaskAcquireParams {
-                task_id: action_id,
-                version,
-                time: now,
-                ttl: r.ttl,
-                pid: &r.pid,
-            })?;
+            let acquire_result = db
+                .task_acquire(&TaskAcquireParams {
+                    task_id: action_id,
+                    version,
+                    time: now,
+                    ttl: r.ttl,
+                    pid: &r.pid,
+                })
+                .await?;
             if acquire_result.was_acquired {
                 let task = TaskRecord {
                     id: action_id.to_string(),
@@ -2731,7 +2950,7 @@ fn create_body(
                     Some(version + 1),
                     "invariant: acquired task version must be version + 1"
                 );
-                let preload = db.compute_preload(action_id)?;
+                let preload = db.compute_preload(action_id).await?;
                 Ok(Some(ResponseEnvelope::success(
                     kind_str.to_string(),
                     corr_id.to_string(),
@@ -2765,7 +2984,7 @@ fn create_body(
                             pid: None,
                         },
                         promise,
-                        preload: db.compute_preload(action_id)?,
+                        preload: db.compute_preload(action_id).await?,
                     },
                 )))
             } else {
@@ -2811,8 +3030,8 @@ fn create_body(
 }
 
 /// `task.suspend`, both ways — see `fence_body`.
-fn suspend_body(
-    db: &PostgresDb,
+async fn suspend_body(
+    db: &PostgresDb<'_>,
     data: &Value,
     kind_str: &str,
     corr_id: &str,
@@ -2848,14 +3067,15 @@ fn suspend_body(
     // path runs no try_timeout; its statement declines instead.
     let mut task_exists = false;
     if !fast {
-        task_exists = db.lock_for_update(&r.id)?.1;
-        db.try_timeout(&timeout_ids, now)?;
+        task_exists = db.lock_for_update(&r.id).await?.1;
+        db.try_timeout(&timeout_ids, now).await?;
     }
     // Duplicates are refused by validation, so the list is already
     // unique — no deduplication on the way to storage.
     let awaited: Vec<&str> = awaited_ids.iter().map(|s| s.as_str()).collect();
-    let (result, exists, expired, preload) =
-        db.task_suspend_guarded(&r.id, r.version, &awaited, fast.then_some(now))?;
+    let (result, exists, expired, preload) = db
+        .task_suspend_guarded(&r.id, r.version, &awaited, fast.then_some(now))
+        .await?;
     if expired {
         return Ok(None);
     }
@@ -2942,8 +3162,8 @@ fn suspend_body(
 /// `task.fulfill`, both ways — see `fence_body`. The fast path is one
 /// autocommit statement that locks, checks the fence and settles; it declines
 /// if the promise is pending past its deadline.
-fn fulfill_body(
-    db: &PostgresDb,
+async fn fulfill_body(
+    db: &PostgresDb<'_>,
     data: &Value,
     kind_str: &str,
     corr_id: &str,
@@ -2971,10 +3191,10 @@ fn fulfill_body(
     }
     let action_data = &r.action.data;
     if !fast {
-        db.try_timeout(&[&action_data.id], now)?;
+        db.try_timeout(&[&action_data.id], now).await?;
         // Lock preamble: lock promise + task to prevent stale snapshot
         // in fulfillment CTE.
-        let (_, task_exists) = db.lock_for_update(&r.id)?;
+        let (_, task_exists) = db.lock_for_update(&r.id).await?;
         if !task_exists {
             tracing::debug!(task_id = %r.id, "Task fulfill: task not found");
             return Ok(Some(ResponseEnvelope::error(
@@ -2990,18 +3210,20 @@ fn fulfill_body(
         .headers
         .as_ref()
         .map(|h| serde_json::to_string(h).unwrap());
-    let (result, expired) = db.task_fulfill_guarded(
-        &TaskFulfillParams {
-            task_id: &r.id,
-            version: r.version,
-            promise_id: &r.id,
-            state: action_data.state.as_str(),
-            value_headers: value_headers_json.as_deref(),
-            value_data: action_data.value.data.as_deref(),
-            settled_at: now,
-        },
-        fast.then_some(now),
-    )?;
+    let (result, expired) = db
+        .task_fulfill_guarded(
+            &TaskFulfillParams {
+                task_id: &r.id,
+                version: r.version,
+                promise_id: &r.id,
+                state: action_data.state.as_str(),
+                value_headers: value_headers_json.as_deref(),
+                value_data: action_data.value.data.as_deref(),
+                settled_at: now,
+            },
+            fast.then_some(now),
+        )
+        .await?;
     if expired {
         return Ok(None);
     }
@@ -3058,8 +3280,8 @@ fn unless_fast(fast: bool, response: ResponseEnvelope) -> Option<ResponseEnvelop
 /// (`None`) on a pending promise past its deadline; otherwise the expiry
 /// cascade and the lock preamble run first, in a transaction, and it never
 /// declines. One body, so the two cannot answer differently.
-fn fence_body(
-    db: &PostgresDb,
+async fn fence_body(
+    db: &PostgresDb<'_>,
     data: &Value,
     kind_str: &str,
     corr_id: &str,
@@ -3089,9 +3311,9 @@ fn fence_body(
     let action_data = &r.action.data;
     let action_id = action_data["id"].as_str().unwrap_or("");
     if !fast {
-        db.try_timeout(&[&r.id, action_id], now)?;
+        db.try_timeout(&[&r.id, action_id], now).await?;
         // Lock preamble: ensures fence check sees current task state.
-        let _ = db.lock_for_update(&r.id)?;
+        let _ = db.lock_for_update(&r.id).await?;
     }
 
     match action_kind.as_str() {
@@ -3162,23 +3384,25 @@ fn fence_body(
                 .headers
                 .as_ref()
                 .map(|h| serde_json::to_string(h).unwrap());
-            let (result, expired, preload) = db.task_fence_create_guarded(
-                &TaskFenceCreateParams {
-                    task_id: &r.id,
-                    version: r.version,
-                    promise_id: &create_data.id,
-                    state: p_state.as_str(),
-                    param_headers: param_headers_json.as_deref(),
-                    param_data: create_data.param.data.as_deref(),
-                    tags: &tags_json,
-                    timeout_at: create_data.timeout_at,
-                    created_at,
-                    settled_at,
-                    already_timedout,
-                    address,
-                },
-                fast.then_some(now),
-            )?;
+            let (result, expired, preload) = db
+                .task_fence_create_guarded(
+                    &TaskFenceCreateParams {
+                        task_id: &r.id,
+                        version: r.version,
+                        promise_id: &create_data.id,
+                        state: p_state.as_str(),
+                        param_headers: param_headers_json.as_deref(),
+                        param_data: create_data.param.data.as_deref(),
+                        tags: &tags_json,
+                        timeout_at: create_data.timeout_at,
+                        created_at,
+                        settled_at,
+                        already_timedout,
+                        address,
+                    },
+                    fast.then_some(now),
+                )
+                .await?;
             if expired {
                 return Ok(None);
             }
@@ -3256,18 +3480,20 @@ fn fence_body(
                 .headers
                 .as_ref()
                 .map(|h| serde_json::to_string(h).unwrap());
-            let (result, expired, preload) = db.task_fence_settle_guarded(
-                &TaskFenceSettleParams {
-                    task_id: &r.id,
-                    version: r.version,
-                    promise_id: &settle_data.id,
-                    state: settle_data.state.as_str(),
-                    value_headers: value_headers_json.as_deref(),
-                    value_data: settle_data.value.data.as_deref(),
-                    settled_at: now,
-                },
-                fast.then_some(now),
-            )?;
+            let (result, expired, preload) = db
+                .task_fence_settle_guarded(
+                    &TaskFenceSettleParams {
+                        task_id: &r.id,
+                        version: r.version,
+                        promise_id: &settle_data.id,
+                        state: settle_data.state.as_str(),
+                        value_headers: value_headers_json.as_deref(),
+                        value_data: settle_data.value.data.as_deref(),
+                        settled_at: now,
+                    },
+                    fast.then_some(now),
+                )
+                .await?;
             if expired {
                 return Ok(None);
             }
@@ -3352,22 +3578,23 @@ impl PostgresDb<'_> {
     }
 
     // Ghost operation — runs before every user operation.
-    fn try_timeout(&self, ids: &[&str], time: i64) -> StorageResult<()> {
+    async fn try_timeout(&self, ids: &[&str], time: i64) -> StorageResult<()> {
         if ids.is_empty() {
             return Ok(());
         }
         let ids: Vec<String> = ids.iter().map(|s| s.to_string()).collect();
-        let sql = expire_batch_sql(
-            "id = ANY($1) AND state = 'pending' AND timeout_at <= $2",
-            "$2",
-            self.task_retry_timeout,
-        );
-        let row = rt_block_on(
-            sqlx::query(&sql)
-                .bind(&ids)
-                .bind(time)
-                .fetch_optional(self.tx()),
-        )?;
+        let sql = self.cached("try_timeout", || {
+            expire_batch_sql(
+                "id = ANY($1) AND state = 'pending' AND timeout_at <= $2",
+                "$2",
+                self.task_retry_timeout,
+            )
+        });
+        let row = sqlx::query(&sql)
+            .bind(&ids)
+            .bind(time)
+            .fetch_optional(self.tx().await.pg())
+            .await?;
         if let Some(row) = row {
             self.absorb_and_arm_retries(&row, time + self.task_retry_timeout);
         }
@@ -3376,12 +3603,13 @@ impl PostgresDb<'_> {
 
     // Lock preamble. One row now, where the multi-table backend locked the
     // promise row and then the task row.
-    fn lock_for_update(&self, id: &str) -> StorageResult<(bool, bool)> {
-        let row = rt_block_on(
-            sqlx::query("SELECT (task_state IS NOT NULL) AS has_task FROM promises WHERE id = $1 FOR UPDATE")
-                .bind(id)
-                .fetch_optional(self.tx()),
-        )?;
+    async fn lock_for_update(&self, id: &str) -> StorageResult<(bool, bool)> {
+        let row = sqlx::query(
+            "SELECT (task_state IS NOT NULL) AS has_task FROM promises WHERE id = $1 FOR UPDATE",
+        )
+        .bind(id)
+        .fetch_optional(self.tx().await.pg())
+        .await?;
         match row {
             Some(r) => Ok((true, r.get::<bool, _>("has_task"))),
             None => Ok((false, false)),
@@ -3391,7 +3619,7 @@ impl PostgresDb<'_> {
     // Fire callbacks for an already-settled promise, as its own statement so it
     // gets a fresh READ COMMITTED snapshot and sees callbacks committed by
     // concurrent transactions.
-    fn process_callbacks(&self, promise_id: &str, time: i64) -> StorageResult<()> {
+    async fn process_callbacks(&self, promise_id: &str, time: i64) -> StorageResult<()> {
         let fanout = settle_fanout(
             "$1",
             "(SELECT b.callbacks FROM before b)",
@@ -3413,12 +3641,11 @@ impl PostgresDb<'_> {
             SELECT {messages}",
             messages = emitted_json(&["emit_resume"])
         );
-        let row = rt_block_on(
-            sqlx::query(&sql)
-                .bind(promise_id)
-                .bind(time)
-                .fetch_optional(self.tx()),
-        )?;
+        let row = sqlx::query(&sql)
+            .bind(promise_id)
+            .bind(time)
+            .fetch_optional(self.tx().await.pg())
+            .await?;
         if let Some(row) = row {
             self.absorb_and_arm_retries(&row, time + self.task_retry_timeout);
         }
@@ -3426,12 +3653,14 @@ impl PostgresDb<'_> {
     }
 
     // P-01: promise.get
-    fn promise_get(&self, id: &str) -> StorageResult<Option<PromiseRecord>> {
-        let row = rt_block_on(
-            sqlx::query(&format!("SELECT {P_COLS} FROM promises WHERE id = $1"))
-                .bind(id)
-                .fetch_optional(self.tx()),
-        )?;
+    async fn promise_get(&self, id: &str) -> StorageResult<Option<PromiseRecord>> {
+        let sql = self.cached("promise_get", || {
+            format!("SELECT {P_COLS} FROM promises WHERE id = $1")
+        });
+        let row = sqlx::query(&sql)
+            .bind(id)
+            .fetch_optional(self.tx().await.pg())
+            .await?;
         Ok(row.as_ref().map(row_to_promise))
     }
 
@@ -3439,7 +3668,10 @@ impl PostgresDb<'_> {
     //
     // Five CTEs in the multi-table backend — promise, promise_timeout, task,
     // task_timeout, outgoing_execute — collapse to one INSERT plus the outbox.
-    fn promise_create(&self, params: &PromiseCreateParams) -> StorageResult<PromiseCreateResult> {
+    async fn promise_create(
+        &self,
+        params: &PromiseCreateParams<'_>,
+    ) -> StorageResult<PromiseCreateResult> {
         let PromiseCreateParams {
             id,
             state,
@@ -3454,7 +3686,8 @@ impl PostgresDb<'_> {
         } = *params;
         let trt = self.task_retry_timeout;
 
-        let rows = rt_block_on(sqlx::query(&format!("
+        let sql = self.cached("promise_create", || {
+            format!("
             WITH inserted_or_skipped_promise AS (
               INSERT INTO promises (id, state, param_headers, param_data, tags, timeout_at, created_at, settled_at,
                                     task_state, task_version, retry_timeout_at)
@@ -3478,11 +3711,21 @@ impl PostgresDb<'_> {
               WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM inserted_or_skipped_promise)
             )
             SELECT {P_COLS}, was_created, {messages} FROM result
-        ", messages = emitted_json(&["emit_new"])))
-            .bind(id).bind(state).bind(param_headers).bind(param_data).bind(tags)  // $1-$5
-            .bind(timeout_at).bind(created_at).bind(settled_at)                     // $6-$8
-            .bind(already_timedout).bind(address)                                   // $9-$10
-            .fetch_all(self.tx()))?;
+        ", messages = emitted_json(&["emit_new"]))
+        });
+        let rows = sqlx::query(&sql)
+            .bind(id)
+            .bind(state)
+            .bind(param_headers)
+            .bind(param_data)
+            .bind(tags) // $1-$5
+            .bind(timeout_at)
+            .bind(created_at)
+            .bind(settled_at) // $6-$8
+            .bind(already_timedout)
+            .bind(address) // $9-$10
+            .fetch_all(self.tx().await.pg())
+            .await?;
 
         if rows.is_empty() {
             // CTE snapshot race: a concurrent INSERT committed after our
@@ -3502,7 +3745,10 @@ impl PostgresDb<'_> {
     }
 
     // P-03: promise.settle — lock preamble + one cascade statement
-    fn promise_settle(&self, params: &PromiseSettleParams) -> StorageResult<PromiseSettleResult> {
+    async fn promise_settle(
+        &self,
+        params: &PromiseSettleParams<'_>,
+    ) -> StorageResult<PromiseSettleResult> {
         let PromiseSettleParams {
             id,
             state,
@@ -3513,26 +3759,26 @@ impl PostgresDb<'_> {
 
         // Statement 1: acquire the row lock — blocks until a concurrent
         // task.suspend writing our `callbacks` finishes.
-        rt_block_on(
-            sqlx::query("SELECT id FROM promises WHERE id = $1 FOR UPDATE")
-                .bind(id)
-                .fetch_optional(self.tx()),
-        )?;
+        sqlx::query("SELECT id FROM promises WHERE id = $1 FOR UPDATE")
+            .bind(id)
+            .fetch_optional(self.tx().await.pg())
+            .await?;
 
         // Statement 2: fresh snapshot, so `before` sees those awaiters.
-        let self_set = settle_self(
-            "(SELECT b.task_state IS NOT NULL AND b.task_state <> 'fulfilled' FROM before b)",
-        );
-        let unblock = settle_unblock("updated_promise", "(SELECT b.listeners FROM before b)");
-        let fanout = settle_fanout(
-            "$1",
-            "(SELECT CASE WHEN b.state = 'pending' THEN b.callbacks END FROM before b)",
-            "(SELECT b.state = 'pending' AND b.task_state IS NOT NULL AND b.task_state <> 'fulfilled' FROM before b)",
-            "$5",
-            self.task_retry_timeout,
-        );
+        let sql = self.cached("promise_settle", || {
+            let self_set = settle_self(
+                "(SELECT b.task_state IS NOT NULL AND b.task_state <> 'fulfilled' FROM before b)",
+            );
+            let unblock = settle_unblock("updated_promise", "(SELECT b.listeners FROM before b)");
+            let fanout = settle_fanout(
+                "$1",
+                "(SELECT CASE WHEN b.state = 'pending' THEN b.callbacks END FROM before b)",
+                "(SELECT b.state = 'pending' AND b.task_state IS NOT NULL AND b.task_state <> 'fulfilled' FROM before b)",
+                "$5",
+                self.task_retry_timeout,
+            );
 
-        let rows = rt_block_on(sqlx::query(&format!("
+            format!("
             WITH before AS (
               SELECT id, state, task_state, callbacks, listeners FROM promises WHERE id = $1
             ),
@@ -3552,9 +3798,16 @@ impl PostgresDb<'_> {
               WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM updated_promise)
             )
             SELECT {P_COLS}, was_settled, {messages} FROM result
-        ", messages = emitted_json(&["emit_unblock", "emit_resume"])))
-            .bind(id).bind(state).bind(value_headers).bind(value_data).bind(settled_at)
-            .fetch_all(self.tx()))?;
+        ", messages = emitted_json(&["emit_unblock", "emit_resume"]))
+        });
+        let rows = sqlx::query(&sql)
+            .bind(id)
+            .bind(state)
+            .bind(value_headers)
+            .bind(value_data)
+            .bind(settled_at)
+            .fetch_all(self.tx().await.pg())
+            .await?;
 
         if rows.is_empty() {
             return Ok(PromiseSettleResult {
@@ -3571,14 +3824,15 @@ impl PostgresDb<'_> {
     }
 
     // P-04: promise.register_callback
-    fn promise_register_callback(
+    async fn promise_register_callback(
         &self,
         awaited_id: &str,
         awaiter_id: &str,
         time: i64,
     ) -> StorageResult<RegisterCallbackResult> {
         let trt = self.task_retry_timeout;
-        let rows = rt_block_on(sqlx::query(&format!("
+        let sql = self.cached("promise_register_callback", || {
+            format!("
             WITH awaited AS (
               SELECT * FROM promises WHERE id = $1 FOR UPDATE
             ),
@@ -3651,9 +3905,14 @@ impl PostgresDb<'_> {
             awaited_cols = p_cols("awaited"),
             awaiter_cols = p_cols("awaiter"),
             messages = emitted_json(&["emit_resume"]),
-        ))
-            .bind(awaited_id).bind(awaiter_id).bind(time)
-            .fetch_all(self.tx()))?;
+        )
+        });
+        let rows = sqlx::query(&sql)
+            .bind(awaited_id)
+            .bind(awaiter_id)
+            .bind(time)
+            .fetch_all(self.tx().await.pg())
+            .await?;
 
         if let Some(row) = rows.first() {
             self.absorb_and_arm_retries(row, time + trt);
@@ -3673,13 +3932,13 @@ impl PostgresDb<'_> {
     }
 
     // P-05: promise.register_listener
-    fn promise_register_listener(
+    async fn promise_register_listener(
         &self,
         awaited_id: &str,
         address: &str,
     ) -> StorageResult<Option<PromiseRecord>> {
-        let rows = rt_block_on(
-            sqlx::query(&format!(
+        let sql = self.cached("promise_register_listener", || {
+            format!(
                 "
             WITH locked_promise AS (
               SELECT * FROM promises WHERE id = $1 FOR UPDATE
@@ -3696,11 +3955,13 @@ impl PostgresDb<'_> {
             )
             SELECT {cols} FROM locked_promise",
                 cols = p_cols("locked_promise")
-            ))
+            )
+        });
+        let rows = sqlx::query(&sql)
             .bind(awaited_id)
             .bind(address)
-            .fetch_all(self.tx()),
-        )?;
+            .fetch_all(self.tx().await.pg())
+            .await?;
 
         if rows.is_empty() {
             return Ok(None);
@@ -3713,7 +3974,7 @@ impl PostgresDb<'_> {
     /// `resonate_sql::effective_state_sql`, and every record comes back
     /// projected, so a pending row past its deadline neither fills a
     /// "pending" page nor reads as pending on any other.
-    fn promise_search(
+    async fn promise_search(
         &self,
         state: Option<&str>,
         tags: Option<&str>,
@@ -3736,7 +3997,7 @@ impl PostgresDb<'_> {
         );
         let q = sqlx::query(&sql).bind(tags).bind(cursor).bind(limit);
         let q = if sql.contains("$4") { q.bind(now) } else { q };
-        let rows = rt_block_on(q.fetch_all(self.tx()))?;
+        let rows = q.fetch_all(self.tx().await.pg()).await?;
         Ok(rows
             .iter()
             .map(|row| {
@@ -3748,24 +4009,23 @@ impl PostgresDb<'_> {
     }
 
     // T-01: task.get — `resumes` is a local array now, not a COUNT over a join
-    fn task_get(&self, id: &str) -> StorageResult<Option<TaskRecord>> {
-        let row = rt_block_on(
-            sqlx::query(
-                "SELECT id, task_state, task_version, ttl, pid, resumes
+    async fn task_get(&self, id: &str) -> StorageResult<Option<TaskRecord>> {
+        let row = sqlx::query(
+            "SELECT id, task_state, task_version, ttl, pid, resumes
                  FROM promises WHERE id = $1 AND task_state IS NOT NULL",
-            )
-            .bind(id)
-            .fetch_optional(self.tx()),
-        )?;
+        )
+        .bind(id)
+        .fetch_optional(self.tx().await.pg())
+        .await?;
         Ok(row.as_ref().map(row_to_task))
     }
 
     // T-02: task.create
     /// `task.create`'s statement, and — when it created the task — the
     /// preload, computed in the same statement over the new row's branch.
-    fn task_create(
+    async fn task_create(
         &self,
-        params: &TaskCreateParams,
+        params: &TaskCreateParams<'_>,
     ) -> StorageResult<(TaskCreateResult, Vec<PromiseRecord>)> {
         let TaskCreateParams {
             promise_id,
@@ -3786,7 +4046,8 @@ impl PostgresDb<'_> {
             "acquired"
         };
 
-        let rows = rt_block_on(sqlx::query(&format!("
+        let sql = self.cached("task_create", || {
+            format!("
             WITH inserted_promise AS (
               INSERT INTO promises (id, state, param_headers, param_data, tags, timeout_at, created_at, settled_at,
                                     task_state, task_version, lease_timeout_at, ttl, pid)
@@ -3809,11 +4070,23 @@ impl PostgresDb<'_> {
               CASE WHEN EXISTS (SELECT 1 FROM inserted_promise) THEN {preload} END AS preload
             FROM promise p
         ", cols = p_cols("p"),
-           preload = preload_sql("(SELECT branch_id FROM inserted_promise)", "$1", None, self.preload_limit)))
-            .bind(promise_id).bind(state).bind(param_headers).bind(param_data).bind(tags) // $1-$5
-            .bind(timeout_at).bind(created_at).bind(settled_at)                            // $6-$8
-            .bind(already_timedout).bind(ttl).bind(pid).bind(task_initial_state)           // $9-$12
-            .fetch_all(self.tx()))?;
+           preload = preload_sql("(SELECT branch_id FROM inserted_promise)", "$1", None, self.preload_limit))
+        });
+        let rows = sqlx::query(&sql)
+            .bind(promise_id)
+            .bind(state)
+            .bind(param_headers)
+            .bind(param_data)
+            .bind(tags) // $1-$5
+            .bind(timeout_at)
+            .bind(created_at)
+            .bind(settled_at) // $6-$8
+            .bind(already_timedout)
+            .bind(ttl)
+            .bind(pid)
+            .bind(task_initial_state) // $9-$12
+            .fetch_all(self.tx().await.pg())
+            .await?;
 
         if rows.is_empty() {
             return Err(StorageError::Serialization);
@@ -3859,8 +4132,13 @@ impl PostgresDb<'_> {
     }
 
     // T-03: task.acquire
-    fn task_acquire(&self, params: &TaskAcquireParams) -> StorageResult<TaskAcquireResult> {
-        self.task_acquire_guarded(params, false).map(|(r, _, _)| r)
+    async fn task_acquire(
+        &self,
+        params: &TaskAcquireParams<'_>,
+    ) -> StorageResult<TaskAcquireResult> {
+        self.task_acquire_guarded(params, false)
+            .await
+            .map(|(r, _, _)| r)
     }
 
     /// `task.acquire` as one statement, its preload included.
@@ -3868,9 +4146,9 @@ impl PostgresDb<'_> {
     /// `guard`: write nothing if the promise is pending past its deadline,
     /// and say so in the second value — the fast path's contract. Without it
     /// the statement is what the slow path runs after `try_timeout`.
-    fn task_acquire_guarded(
+    async fn task_acquire_guarded(
         &self,
-        params: &TaskAcquireParams,
+        params: &TaskAcquireParams<'_>,
         guard: bool,
     ) -> StorageResult<(TaskAcquireResult, bool, Vec<PromiseRecord>)> {
         let TaskAcquireParams {
@@ -3880,8 +4158,8 @@ impl PostgresDb<'_> {
             ttl,
             pid,
         } = *params;
-        let rows = rt_block_on(
-            sqlx::query(&format!(
+        let sql = self.cached("task_acquire_guarded", || {
+            format!(
                 "
             WITH before AS (
               SELECT id, task_state, task_version, branch_id,
@@ -3909,15 +4187,17 @@ impl PostgresDb<'_> {
         ",
                 cols = p_cols("p"),
                 preload = preload_sql("b.branch_id", "$1", None, self.preload_limit)
-            ))
+            )
+        });
+        let rows = sqlx::query(&sql)
             .bind(task_id)
             .bind(version as i32)
             .bind(time)
             .bind(ttl)
             .bind(pid)
             .bind(guard)
-            .fetch_all(self.tx()),
-        )?;
+            .fetch_all(self.tx().await.pg())
+            .await?;
 
         if rows.is_empty() {
             return Ok((
@@ -3953,21 +4233,20 @@ impl PostgresDb<'_> {
     /// `task.get` with the one fact the fast path needs beside it: whether
     /// the promise is pending past its deadline. `None` when there is no row
     /// at all; a row that is no task comes back with no record.
-    fn task_get_probe(
+    async fn task_get_probe(
         &self,
         id: &str,
         now: i64,
     ) -> StorageResult<Option<(Option<TaskRecord>, bool)>> {
-        let row = rt_block_on(
-            sqlx::query(
-                "SELECT id, task_state, task_version, ttl, pid, resumes,
+        let row = sqlx::query(
+            "SELECT id, task_state, task_version, ttl, pid, resumes,
                         (state = 'pending' AND timeout_at <= $2) AS expired
                  FROM promises WHERE id = $1",
-            )
-            .bind(id)
-            .bind(now)
-            .fetch_optional(self.tx()),
-        )?;
+        )
+        .bind(id)
+        .bind(now)
+        .fetch_optional(self.tx().await.pg())
+        .await?;
         Ok(row.map(|r| {
             let task = r
                 .get::<Option<String>, _>("task_state")
@@ -3985,9 +4264,9 @@ impl PostgresDb<'_> {
     /// job, without its round trip. `guard` is the fast path's: `Some(now)`
     /// writes nothing if the task's promise or the one being created is
     /// pending past its deadline, and reports it.
-    fn task_fence_create_guarded(
+    async fn task_fence_create_guarded(
         &self,
-        params: &TaskFenceCreateParams,
+        params: &TaskFenceCreateParams<'_>,
         guard: Option<i64>,
     ) -> StorageResult<(TaskFenceResult, bool, Vec<PromiseRecord>)> {
         let TaskFenceCreateParams {
@@ -4006,7 +4285,8 @@ impl PostgresDb<'_> {
         } = *params;
         let trt = self.task_retry_timeout;
 
-        let rows = rt_block_on(sqlx::query(&format!("
+        let sql = self.cached("task_fence_create_guarded", || {
+            format!("
             WITH fence_check AS (
               SELECT id, task_state, task_version, branch_id FROM promises
               WHERE id = $1 AND task_state IS NOT NULL
@@ -4057,13 +4337,24 @@ impl PostgresDb<'_> {
             LEFT JOIN result r ON true
         ", cols = p_cols("r"), messages = emitted_json(&["emit_new"]),
            preload = preload_sql("(SELECT branch_id FROM fence_check)", "$1",
-                                 Some("inserted_or_skipped_promise"), self.preload_limit)))
-            .bind(task_id).bind(version as i32)                                            // $1-$2
-            .bind(promise_id).bind(state).bind(param_headers).bind(param_data).bind(tags)  // $3-$7
-            .bind(timeout_at).bind(created_at).bind(settled_at)                             // $8-$10
-            .bind(already_timedout).bind(address)                                           // $11-$12
-            .bind(guard)                                                                    // $13
-            .fetch_all(self.tx()))?;
+                                 Some("inserted_or_skipped_promise"), self.preload_limit))
+        });
+        let rows = sqlx::query(&sql)
+            .bind(task_id)
+            .bind(version as i32) // $1-$2
+            .bind(promise_id)
+            .bind(state)
+            .bind(param_headers)
+            .bind(param_data)
+            .bind(tags) // $3-$7
+            .bind(timeout_at)
+            .bind(created_at)
+            .bind(settled_at) // $8-$10
+            .bind(already_timedout)
+            .bind(address) // $11-$12
+            .bind(guard) // $13
+            .fetch_all(self.tx().await.pg())
+            .await?;
 
         if rows.is_empty() {
             return Err(StorageError::Serialization);
@@ -4111,9 +4402,9 @@ impl PostgresDb<'_> {
     /// same shape as `task_fence_create_guarded`. The settled promise is
     /// locked inside the statement too (`locked_promise`), so `before` reads
     /// its latest version, awaiters registered a moment ago included.
-    fn task_fence_settle_guarded(
+    async fn task_fence_settle_guarded(
         &self,
-        params: &TaskFenceSettleParams,
+        params: &TaskFenceSettleParams<'_>,
         guard: Option<i64>,
     ) -> StorageResult<(TaskFenceResult, bool, Vec<PromiseRecord>)> {
         let TaskFenceSettleParams {
@@ -4126,19 +4417,20 @@ impl PostgresDb<'_> {
             settled_at,
         } = *params;
 
-        let self_set = settle_self(
-            "(SELECT b.task_state IS NOT NULL AND b.task_state <> 'fulfilled' FROM before b)",
-        );
-        let unblock = settle_unblock("updated_promise", "(SELECT b.listeners FROM before b)");
-        let fanout = settle_fanout(
-            "$3",
-            "(SELECT CASE WHEN b.state = 'pending' THEN b.callbacks END FROM before b)",
-            "(SELECT b.state = 'pending' AND b.task_state IS NOT NULL AND b.task_state <> 'fulfilled' FROM before b)",
-            "$7",
-            self.task_retry_timeout,
-        );
+        let sql = self.cached("task_fence_settle_guarded", || {
+            let self_set = settle_self(
+                "(SELECT b.task_state IS NOT NULL AND b.task_state <> 'fulfilled' FROM before b)",
+            );
+            let unblock = settle_unblock("updated_promise", "(SELECT b.listeners FROM before b)");
+            let fanout = settle_fanout(
+                "$3",
+                "(SELECT CASE WHEN b.state = 'pending' THEN b.callbacks END FROM before b)",
+                "(SELECT b.state = 'pending' AND b.task_state IS NOT NULL AND b.task_state <> 'fulfilled' FROM before b)",
+                "$7",
+                self.task_retry_timeout,
+            );
 
-        let rows = rt_block_on(sqlx::query(&format!("
+            format!("
             WITH fence_check AS (
               SELECT id, task_state, task_version, branch_id FROM promises
               WHERE id = $1 AND task_state IS NOT NULL
@@ -4185,11 +4477,19 @@ impl PostgresDb<'_> {
             LEFT JOIN result r ON true
         ", cols = p_cols("r"), messages = emitted_json(&["emit_unblock", "emit_resume"]),
            preload = preload_sql("(SELECT branch_id FROM fence_check)", "$1",
-                                 Some("updated_promise"), self.preload_limit)))
-            .bind(task_id).bind(version as i32)                                                     // $1-$2
-            .bind(promise_id).bind(state).bind(value_headers).bind(value_data).bind(settled_at)     // $3-$7
-            .bind(guard)                                                                            // $8
-            .fetch_all(self.tx()))?;
+                                 Some("updated_promise"), self.preload_limit))
+        });
+        let rows = sqlx::query(&sql)
+            .bind(task_id)
+            .bind(version as i32) // $1-$2
+            .bind(promise_id)
+            .bind(state)
+            .bind(value_headers)
+            .bind(value_data)
+            .bind(settled_at) // $3-$7
+            .bind(guard) // $8
+            .fetch_all(self.tx().await.pg())
+            .await?;
 
         if rows.is_empty() {
             return Ok((
@@ -4228,7 +4528,12 @@ impl PostgresDb<'_> {
     }
 
     // T-05: task.heartbeat — extend the lease of every task this pid still holds
-    fn task_heartbeat(&self, pid: &str, tasks: &[(&str, i64)], time: i64) -> StorageResult<()> {
+    async fn task_heartbeat(
+        &self,
+        pid: &str,
+        tasks: &[(&str, i64)],
+        time: i64,
+    ) -> StorageResult<()> {
         if tasks.is_empty() {
             return Ok(());
         }
@@ -4239,9 +4544,8 @@ impl PostgresDb<'_> {
         // column: the caller cannot compute what was written without reading
         // it back. The only statement in this backend that needed new SQL to
         // announce its deadline.
-        let rows = rt_block_on(
-            sqlx::query(
-                "
+        let rows = sqlx::query(
+            "
             WITH task_data AS (
               SELECT unnest($1::text[]) AS id, unnest($2::int[]) AS version
             )
@@ -4256,13 +4560,13 @@ impl PostgresDb<'_> {
               AND (p.state != 'pending' OR p.timeout_at > $3)
             RETURNING p.id, p.lease_timeout_at
         ",
-            )
-            .bind(&ids)
-            .bind(&versions)
-            .bind(time)
-            .bind(pid)
-            .fetch_all(self.tx()),
-        )?;
+        )
+        .bind(&ids)
+        .bind(&versions)
+        .bind(time)
+        .bind(pid)
+        .fetch_all(self.tx().await.pg())
+        .await?;
         for row in &rows {
             let id: String = row.get("id");
             let lease_timeout_at: i64 = row.get("lease_timeout_at");
@@ -4286,7 +4590,7 @@ impl PostgresDb<'_> {
     /// `guard`: with `Some(now)`, nothing is written if any of these promises
     /// is pending past its deadline. Returns the result, whether the task
     /// exists, whether the guard tripped, and the preload.
-    fn task_suspend_guarded(
+    async fn task_suspend_guarded(
         &self,
         task_id: &str,
         version: i64,
@@ -4297,7 +4601,8 @@ impl PostgresDb<'_> {
         let mut lock_ids: Vec<String> = awaited.clone();
         lock_ids.push(task_id.to_string());
 
-        let row = rt_block_on(sqlx::query(&format!("
+        let sql = self.cached("task_suspend_guarded", || {
+            format!("
             WITH locked AS (
               SELECT id, state, external, task_state, task_version, branch_id,
                      ($4::bigint IS NOT NULL AND state = 'pending' AND timeout_at <= $4) AS expired
@@ -4367,9 +4672,16 @@ impl PostgresDb<'_> {
                         AND NOT EXISTS (SELECT 1 FROM can_suspend)
                    THEN {preload} END AS preload
             FROM verdict v
-        ", preload = preload_sql("v.branch_id", "$1", None, self.preload_limit)))
-            .bind(task_id).bind(version as i32).bind(&awaited).bind(guard).bind(&lock_ids)
-            .fetch_one(self.tx()))?;
+        ", preload = preload_sql("v.branch_id", "$1", None, self.preload_limit))
+        });
+        let row = sqlx::query(&sql)
+            .bind(task_id)
+            .bind(version as i32)
+            .bind(&awaited)
+            .bind(guard)
+            .bind(&lock_ids)
+            .fetch_one(self.tx().await.pg())
+            .await?;
 
         Ok((
             TaskSuspendResult {
@@ -4395,9 +4707,9 @@ impl PostgresDb<'_> {
     /// lock preamble's separate statement was for. `guard`: with `Some(now)`
     /// nothing is written if the promise is pending past its deadline, and
     /// the second value says so.
-    fn task_fulfill_guarded(
+    async fn task_fulfill_guarded(
         &self,
-        params: &TaskFulfillParams,
+        params: &TaskFulfillParams<'_>,
         guard: Option<i64>,
     ) -> StorageResult<(TaskFulfillResult, bool)> {
         let TaskFulfillParams {
@@ -4421,17 +4733,18 @@ impl PostgresDb<'_> {
         let settle_guard =
             "(SELECT b.task_state = 'acquired' AND b.task_version = $2 AND NOT b.expired \
              AND b.state = 'pending' FROM before b)";
-        let self_set = settle_self(guard_sql);
-        let unblock = settle_unblock("updated_promise", "(SELECT b.listeners FROM before b)");
-        let fanout = settle_fanout(
-            "$3",
-            &format!("(SELECT CASE WHEN {settle_guard} THEN b.callbacks END FROM before b)"),
-            guard_sql,
-            "$7",
-            self.task_retry_timeout,
-        );
+        let sql = self.cached("task_fulfill_guarded", || {
+            let self_set = settle_self(guard_sql);
+            let unblock = settle_unblock("updated_promise", "(SELECT b.listeners FROM before b)");
+            let fanout = settle_fanout(
+                "$3",
+                &format!("(SELECT CASE WHEN {settle_guard} THEN b.callbacks END FROM before b)"),
+                guard_sql,
+                "$7",
+                self.task_retry_timeout,
+            );
 
-        let rows = rt_block_on(sqlx::query(&format!("
+            format!("
             WITH locked AS (
               SELECT id, state, task_state, task_version, callbacks, listeners,
                      ($8::bigint IS NOT NULL AND state = 'pending' AND timeout_at <= $8) AS expired
@@ -4465,11 +4778,19 @@ impl PostgresDb<'_> {
               COALESCE((SELECT b.expired FROM before b), false) AS expired,
               {messages}
             FROM result r
-        ", cols = p_cols("r"), messages = emitted_json(&["emit_unblock", "emit_resume"])))
-            .bind(task_id).bind(version as i32)                                                 // $1-$2
-            .bind(promise_id).bind(state).bind(value_headers).bind(value_data).bind(settled_at) // $3-$7
-            .bind(guard)                                                                        // $8
-            .fetch_all(self.tx()))?;
+        ", cols = p_cols("r"), messages = emitted_json(&["emit_unblock", "emit_resume"]))
+        });
+        let rows = sqlx::query(&sql)
+            .bind(task_id)
+            .bind(version as i32) // $1-$2
+            .bind(promise_id)
+            .bind(state)
+            .bind(value_headers)
+            .bind(value_data)
+            .bind(settled_at) // $3-$7
+            .bind(guard) // $8
+            .fetch_all(self.tx().await.pg())
+            .await?;
 
         if rows.is_empty() {
             return Ok((
@@ -4508,14 +4829,14 @@ impl PostgresDb<'_> {
     }
 
     // T-08: task.release
-    fn task_release(
+    async fn task_release(
         &self,
         task_id: &str,
         version: i64,
         time: i64,
         ttl: i64,
     ) -> StorageResult<TaskReleaseResult> {
-        let row = rt_block_on(
+        let row = (
             sqlx::query(
                 "
             WITH released_task AS (
@@ -4542,8 +4863,8 @@ impl PostgresDb<'_> {
             .bind(version as i32)
             .bind(time)
             .bind(ttl)
-            .fetch_one(self.tx()),
-        )?;
+            .fetch_one(self.tx().await.pg())
+        ).await?;
 
         self.absorb_and_arm_retries(&row, time + ttl);
         Ok(TaskReleaseResult {
@@ -4553,8 +4874,8 @@ impl PostgresDb<'_> {
     }
 
     // T-09: task.halt
-    fn task_halt(&self, task_id: &str) -> StorageResult<TaskHaltResult> {
-        let row = rt_block_on(
+    async fn task_halt(&self, task_id: &str) -> StorageResult<TaskHaltResult> {
+        let row = (
             sqlx::query(
                 "
             WITH locked_task AS (
@@ -4573,8 +4894,8 @@ impl PostgresDb<'_> {
         ",
             )
             .bind(task_id)
-            .fetch_one(self.tx()),
-        )?;
+            .fetch_one(self.tx().await.pg())
+        ).await?;
 
         Ok(TaskHaltResult {
             task_exists: row.get("task_exists"),
@@ -4583,11 +4904,10 @@ impl PostgresDb<'_> {
     }
 
     // T-10: task.continue
-    fn task_continue(&self, task_id: &str, time: i64) -> StorageResult<TaskContinueResult> {
+    async fn task_continue(&self, task_id: &str, time: i64) -> StorageResult<TaskContinueResult> {
         let trt = self.task_retry_timeout;
-        let row = rt_block_on(
-            sqlx::query(&format!(
-                "
+        let row = sqlx::query(&format!(
+            "
             WITH locked_task AS (
               SELECT id, task_state, task_version, target FROM promises
               WHERE id = $1 AND task_state IS NOT NULL FOR UPDATE
@@ -4609,12 +4929,12 @@ impl PostgresDb<'_> {
               EXISTS (SELECT 1 FROM continued_task) AS continued,
               {messages}
         ",
-                messages = emitted_json(&["emit_continued"])
-            ))
-            .bind(task_id)
-            .bind(time)
-            .fetch_one(self.tx()),
-        )?;
+            messages = emitted_json(&["emit_continued"])
+        ))
+        .bind(task_id)
+        .bind(time)
+        .fetch_one(self.tx().await.pg())
+        .await?;
 
         self.absorb_and_arm_retries(&row, time + trt);
         Ok(TaskContinueResult {
@@ -4624,55 +4944,56 @@ impl PostgresDb<'_> {
     }
 
     // T-11: task.search
-    fn task_search(
+    async fn task_search(
         &self,
         state: Option<&str>,
         cursor: Option<&str>,
         limit: i64,
     ) -> StorageResult<Vec<TaskRecord>> {
-        let rows = rt_block_on(
-            sqlx::query(
-                "SELECT id, task_state, task_version, ttl, pid, resumes FROM promises
+        let rows = sqlx::query(
+            "SELECT id, task_state, task_version, ttl, pid, resumes FROM promises
                  WHERE task_state IS NOT NULL
                    AND ($1::text IS NULL OR task_state = $1)
                    AND ($2::text IS NULL OR id > $2)
                  ORDER BY id ASC LIMIT $3",
-            )
-            .bind(state)
-            .bind(cursor)
-            .bind(limit)
-            .fetch_all(self.tx()),
-        )?;
+        )
+        .bind(state)
+        .bind(cursor)
+        .bind(limit)
+        .fetch_all(self.tx().await.pg())
+        .await?;
         Ok(rows.iter().map(row_to_task).collect())
     }
 
-    fn compute_preload(&self, promise_id: &str) -> StorageResult<Vec<PromiseRecord>> {
-        let rows = rt_block_on(
-            sqlx::query(&format!(
-                "SELECT {P_COLS} FROM promises
+    async fn compute_preload(&self, promise_id: &str) -> StorageResult<Vec<PromiseRecord>> {
+        let rows = sqlx::query(&format!(
+            "SELECT {P_COLS} FROM promises
                  WHERE branch_id = (SELECT branch_id FROM promises WHERE id = $1)
                    AND branch_id IS NOT NULL AND id <> $1
                  ORDER BY id ASC LIMIT $2"
-            ))
-            .bind(promise_id)
-            .bind(self.preload_limit as i64)
-            .fetch_all(self.tx()),
-        )?;
+        ))
+        .bind(promise_id)
+        .bind(self.preload_limit as i64)
+        .fetch_all(self.tx().await.pg())
+        .await?;
         Ok(rows.iter().map(row_to_promise).collect())
     }
 
     // S-01: schedule.get
-    fn schedule_get(&self, id: &str) -> StorageResult<Option<ScheduleRecord>> {
-        let row = rt_block_on(sqlx::query(
+    async fn schedule_get(&self, id: &str) -> StorageResult<Option<ScheduleRecord>> {
+        let row = sqlx::query(
             "SELECT id, cron, promise_id, promise_timeout, NULLIF(promise_param_headers, '{}'::jsonb)::text AS promise_param_headers,
                     promise_param_data, promise_tags::text, created_at, next_run_at, last_run_at
              FROM schedules WHERE id = $1")
-            .bind(id).fetch_optional(self.tx()))?;
+            .bind(id).fetch_optional(self.tx().await.pg()).await?;
         Ok(row.as_ref().map(row_to_schedule))
     }
 
     // S-03: schedule.create — schedule_timeouts is gone, next_run_at *is* the queue
-    fn schedule_create(&self, params: &ScheduleCreateParams) -> StorageResult<ScheduleRecord> {
+    async fn schedule_create(
+        &self,
+        params: &ScheduleCreateParams<'_>,
+    ) -> StorageResult<ScheduleRecord> {
         let ScheduleCreateParams {
             id,
             cron,
@@ -4685,7 +5006,7 @@ impl PostgresDb<'_> {
             next_run_at,
         } = *params;
 
-        let row = rt_block_on(sqlx::query("
+        let row = sqlx::query("
             WITH inserted_or_skipped_schedule AS (
               INSERT INTO schedules (id, cron, promise_id, promise_timeout, promise_param_headers,
                                      promise_param_data, promise_tags, created_at, next_run_at)
@@ -4706,7 +5027,7 @@ impl PostgresDb<'_> {
             .bind(id).bind(cron).bind(promise_id).bind(promise_timeout)
             .bind(promise_param_headers).bind(promise_param_data).bind(promise_tags)
             .bind(created_at).bind(next_run_at)
-            .fetch_one(self.tx()))?;
+            .fetch_one(self.tx().await.pg()).await?;
 
         // Only a create that actually happened arms a deadline — an idempotent
         // re-create leaves the existing next_run_at where it was.
@@ -4722,29 +5043,28 @@ impl PostgresDb<'_> {
     }
 
     // S-04: schedule.delete
-    fn schedule_delete(&self, id: &str) -> StorageResult<bool> {
-        let res = rt_block_on(
-            sqlx::query("DELETE FROM schedules WHERE id = $1")
-                .bind(id)
-                .execute(self.tx()),
-        )?;
+    async fn schedule_delete(&self, id: &str) -> StorageResult<bool> {
+        let res = sqlx::query("DELETE FROM schedules WHERE id = $1")
+            .bind(id)
+            .execute(self.tx().await.pg())
+            .await?;
         Ok(res.rows_affected() > 0)
     }
 
     // S-05: schedule.search
-    fn schedule_search(
+    async fn schedule_search(
         &self,
         tags: Option<&str>,
         cursor: Option<&str>,
         limit: i64,
     ) -> StorageResult<Vec<ScheduleRecord>> {
-        let rows = rt_block_on(sqlx::query(
+        let rows = sqlx::query(
             "SELECT id, cron, promise_id, promise_timeout, NULLIF(promise_param_headers, '{}'::jsonb)::text AS promise_param_headers,
                     promise_param_data, promise_tags::text, created_at, next_run_at, last_run_at
              FROM schedules
              WHERE ($1::jsonb IS NULL OR promise_tags @> $1::jsonb) AND ($2::text IS NULL OR id > $2)
              ORDER BY id ASC LIMIT $3")
-            .bind(tags).bind(cursor).bind(limit).fetch_all(self.tx()))?;
+            .bind(tags).bind(cursor).bind(limit).fetch_all(self.tx().await.pg()).await?;
         Ok(rows.iter().map(row_to_schedule).collect())
     }
 
@@ -4761,7 +5081,10 @@ impl PostgresDb<'_> {
     /// promise with no lineage is a root. `origin_id` is a stored generated
     /// column with its own index, so this is a comparison rather than a scan
     /// of the tags.
-    fn ui_executions_search(&self, q: &ui::ExecutionsQuery) -> StorageResult<Vec<PromiseRecord>> {
+    async fn ui_executions_search(
+        &self,
+        q: &ui::ExecutionsQuery,
+    ) -> StorageResult<Vec<PromiseRecord>> {
         let (expr, cmp, dir) = (q.sort.key.expr(), q.sort.dir.cmp_sql(), q.sort.dir.sql());
         let sql = format!(
             "SELECT {P_COLS} FROM promises
@@ -4771,30 +5094,29 @@ impl PostgresDb<'_> {
                AND ($3::jsonb IS NULL OR tags @> $3::jsonb)
                AND ($4::bigint IS NULL OR created_at >= $4)
                AND ($5::bigint IS NULL OR created_at <= $5)
-               AND ($6::bigint IS NULL OR {expr} {cmp} $6 OR ({expr} = $6 AND id {cmp} $7))
+               AND ($6::bigint IS NULL OR ({expr}, id) {cmp} ($6::bigint, $7::text))
              ORDER BY {expr} {dir}, id {dir}
              LIMIT $8",
             states = q.states_sql(),
         );
         let (after_key, after_id) = split_keyset(q.after.as_ref());
-        let rows = rt_block_on(
-            sqlx::query(&sql)
-                .bind(q.id_from.as_deref())
-                .bind(q.id_to.as_deref())
-                .bind(q.tags_json.as_deref())
-                .bind(q.created_from)
-                .bind(q.created_to)
-                .bind(after_key)
-                .bind(after_id)
-                .bind(q.fetch + 1)
-                .fetch_all(self.tx()),
-        )?;
+        let rows = sqlx::query(&sql)
+            .bind(q.id_from.as_deref())
+            .bind(q.id_to.as_deref())
+            .bind(q.tags_json.as_deref())
+            .bind(q.created_from)
+            .bind(q.created_to)
+            .bind(after_key)
+            .bind(after_id)
+            .bind(q.fetch + 1)
+            .fetch_all(self.tx().await.pg())
+            .await?;
         Ok(rows.iter().map(row_to_promise).collect())
     }
 
     /// How many executions match, ignoring the cursor — the "of 240" a page
     /// number is useless without.
-    fn ui_executions_count(&self, q: &ui::ExecutionsQuery) -> StorageResult<i64> {
+    async fn ui_executions_count(&self, q: &ui::ExecutionsQuery) -> StorageResult<i64> {
         let sql = format!(
             "SELECT COUNT(*) AS n FROM promises
              WHERE id = origin_id{states}
@@ -4805,15 +5127,14 @@ impl PostgresDb<'_> {
                AND ($5::bigint IS NULL OR created_at <= $5)",
             states = q.states_sql(),
         );
-        let row = rt_block_on(
-            sqlx::query(&sql)
-                .bind(q.id_from.as_deref())
-                .bind(q.id_to.as_deref())
-                .bind(q.tags_json.as_deref())
-                .bind(q.created_from)
-                .bind(q.created_to)
-                .fetch_one(self.tx()),
-        )?;
+        let row = sqlx::query(&sql)
+            .bind(q.id_from.as_deref())
+            .bind(q.id_to.as_deref())
+            .bind(q.tags_json.as_deref())
+            .bind(q.created_from)
+            .bind(q.created_to)
+            .fetch_one(self.tx().await.pg())
+            .await?;
         Ok(row.get::<i64, _>("n"))
     }
 
@@ -4823,21 +5144,20 @@ impl PostgresDb<'_> {
     /// This is the request that replaces `resonate-ui`'s recursive fan-out —
     /// one indexed read on `origin_id` instead of one round trip per level,
     /// re-run every 5s.
-    fn ui_execution_nodes(&self, q: &ui::ExecutionQuery) -> StorageResult<Vec<ui::NodeRow>> {
-        let rows = rt_block_on(
-            sqlx::query(&format!(
-                "SELECT {P_COLS}, task_state, task_version,
+    async fn ui_execution_nodes(&self, q: &ui::ExecutionQuery) -> StorageResult<Vec<ui::NodeRow>> {
+        let rows = sqlx::query(&format!(
+            "SELECT {P_COLS}, task_state, task_version,
                         cardinality(resumes) AS resumes,
                         ttl, pid, retry_timeout_at, lease_timeout_at
                  FROM promises
                  WHERE origin_id = $1
                  ORDER BY created_at ASC, id ASC
                  LIMIT $2"
-            ))
-            .bind(&q.root_id)
-            .bind(q.max_nodes + 1)
-            .fetch_all(self.tx()),
-        )?;
+        ))
+        .bind(&q.root_id)
+        .bind(q.max_nodes + 1)
+        .fetch_all(self.tx().await.pg())
+        .await?;
         Ok(rows
             .iter()
             .map(|row| {
@@ -4856,7 +5176,10 @@ impl PostgresDb<'_> {
             .collect())
     }
 
-    fn ui_schedules_search(&self, q: &ui::SchedulesQuery) -> StorageResult<Vec<ScheduleRecord>> {
+    async fn ui_schedules_search(
+        &self,
+        q: &ui::SchedulesQuery,
+    ) -> StorageResult<Vec<ScheduleRecord>> {
         let (expr, cmp, dir) = (q.sort.key.expr(), q.sort.dir.cmp_sql(), q.sort.dir.sql());
         let sql = format!(
             "SELECT id, cron, promise_id, promise_timeout,
@@ -4866,38 +5189,50 @@ impl PostgresDb<'_> {
              WHERE ($1::text IS NULL OR id >= $1)
                AND ($2::text IS NULL OR id < $2)
                AND ($3::jsonb IS NULL OR promise_tags @> $3::jsonb)
-               AND ($4::bigint IS NULL OR {expr} {cmp} $4 OR ({expr} = $4 AND id {cmp} $5))
+               AND ($4::bigint IS NULL OR ({expr}, id) {cmp} ($4::bigint, $5::text))
              ORDER BY {expr} {dir}, id {dir}
              LIMIT $6"
         );
         let (after_key, after_id) = split_keyset(q.after.as_ref());
-        let rows = rt_block_on(
-            sqlx::query(&sql)
-                .bind(q.id_from.as_deref())
-                .bind(q.id_to.as_deref())
-                .bind(q.tags_json.as_deref())
-                .bind(after_key)
-                .bind(after_id)
-                .bind(q.limit + 1)
-                .fetch_all(self.tx()),
-        )?;
-        Ok(rows.iter().map(row_to_schedule).collect())
-    }
-
-    fn ui_schedules_count(&self, q: &ui::SchedulesQuery) -> StorageResult<i64> {
-        let row = rt_block_on(
-            sqlx::query(
-                "SELECT COUNT(*) AS n FROM schedules
-                 WHERE ($1::text IS NULL OR id >= $1)
-                   AND ($2::text IS NULL OR id < $2)
-                   AND ($3::jsonb IS NULL OR promise_tags @> $3::jsonb)",
-            )
+        let rows = sqlx::query(&sql)
             .bind(q.id_from.as_deref())
             .bind(q.id_to.as_deref())
             .bind(q.tags_json.as_deref())
-            .fetch_one(self.tx()),
-        )?;
+            .bind(after_key)
+            .bind(after_id)
+            .bind(q.limit + 1)
+            .fetch_all(self.tx().await.pg())
+            .await?;
+        Ok(rows.iter().map(row_to_schedule).collect())
+    }
+
+    async fn ui_schedules_count(&self, q: &ui::SchedulesQuery) -> StorageResult<i64> {
+        let row = sqlx::query(
+            "SELECT COUNT(*) AS n FROM schedules
+                 WHERE ($1::text IS NULL OR id >= $1)
+                   AND ($2::text IS NULL OR id < $2)
+                   AND ($3::jsonb IS NULL OR promise_tags @> $3::jsonb)",
+        )
+        .bind(q.id_from.as_deref())
+        .bind(q.id_to.as_deref())
+        .bind(q.tags_json.as_deref())
+        .fetch_one(self.tx().await.pg())
+        .await?;
         Ok(row.get::<i64, _>("n"))
+    }
+
+    /// Plan this transaction's statements for the values they are bound to.
+    ///
+    /// The console's reads are the one place a generic plan is wrong: their
+    /// `LIMIT` and keyset bounds are parameters, and planned blind Postgres
+    /// sorts every execution to return a page of 25 rather than walking
+    /// `idx_promises_roots` backwards for 25 entries (measured: 325 ms against
+    /// 0.2 ms at 470k executions). One extra round trip, on a console request.
+    async fn custom_plans(&self) -> StorageResult<()> {
+        sqlx::query("SET LOCAL plan_cache_mode TO force_custom_plan")
+            .execute(self.tx().await.pg())
+            .await?;
+        Ok(())
     }
 
     /// The nearest deadlines the tables hold, soonest first.
@@ -4910,16 +5245,15 @@ impl PostgresDb<'_> {
     ///
     /// Overdue rows are not excluded. They sort first, and a restarting timer
     /// wants exactly those.
-    fn upcoming(&self, limit: usize) -> StorageResult<Vec<Scheduled>> {
-        let rows = rt_block_on(
-            sqlx::query(
-                // Each branch is its own top-N over the index whose key is
-                // `(deadline, id)` and whose predicate is the branch's WHERE,
-                // so each reads at most `$1` index entries in order and the
-                // outer sort merges four short lists. Without the inner
-                // LIMITs Postgres may sort every armed row to keep `$1` of
-                // them — the full read the sweep used to be.
-                "SELECT deadline, kind, id, pid FROM (
+    async fn upcoming(&self, limit: usize) -> StorageResult<Vec<Scheduled>> {
+        let rows = sqlx::query(
+            // Each branch is its own top-N over the index whose key is
+            // `(deadline, id)` and whose predicate is the branch's WHERE,
+            // so each reads at most `$1` index entries in order and the
+            // outer sort merges four short lists. Without the inner
+            // LIMITs Postgres may sort every armed row to keep `$1` of
+            // them — the full read the sweep used to be.
+            "SELECT deadline, kind, id, pid FROM (
                      (SELECT timeout_at AS deadline, 'promise' AS kind, id, NULL::text AS pid
                         FROM promises WHERE state = 'pending' AND external
                         ORDER BY timeout_at, id LIMIT $1)
@@ -4937,10 +5271,10 @@ impl PostgresDb<'_> {
                  ) d
                  ORDER BY deadline ASC, id ASC
                  LIMIT $1",
-            )
-            .bind(limit as i64)
-            .fetch_all(self.tx()),
-        )?;
+        )
+        .bind(limit as i64)
+        .fetch_all(self.tx().await.pg())
+        .await?;
         Ok(rows
             .iter()
             .filter_map(|r| {
@@ -4956,28 +5290,30 @@ impl PostgresDb<'_> {
     /// Schedules due at `time`: every one (`None`, the schedule index walked up
     /// to `time`), or the named ones through the primary key — two statements
     /// for the same reason `process_timeouts` has two.
-    fn get_expired_schedule_timeouts(
+    async fn get_expired_schedule_timeouts(
         &self,
         time: i64,
         only: Option<&[String]>,
     ) -> StorageResult<Vec<(String, i64)>> {
         let rows = match only {
-            None => rt_block_on(
+            None => {
                 sqlx::query(
                     "SELECT id, next_run_at FROM schedules WHERE next_run_at <= $1 ORDER BY id",
                 )
                 .bind(time)
-                .fetch_all(self.tx()),
-            )?,
-            Some(ids) => rt_block_on(
+                .fetch_all(self.tx().await.pg())
+                .await?
+            }
+            Some(ids) => {
                 sqlx::query(
                     "SELECT id, next_run_at FROM schedules
                      WHERE id = ANY($2) AND (next_run_at + 0) <= $1 ORDER BY id",
                 )
                 .bind(time)
                 .bind(ids)
-                .fetch_all(self.tx()),
-            )?,
+                .fetch_all(self.tx().await.pg())
+                .await?
+            }
         };
         Ok(rows
             .iter()
@@ -4985,7 +5321,7 @@ impl PostgresDb<'_> {
             .collect())
     }
 
-    fn process_schedule_timeout(
+    async fn process_schedule_timeout(
         &self,
         schedule_id: &str,
         fired_at: i64,
@@ -4996,7 +5332,7 @@ impl PostgresDb<'_> {
         let trt = self.task_retry_timeout;
         let promise_tags_json = serde_json::to_string(promise_tags).unwrap();
         // $1=schedule_id, $2=fired_at, $3=next_run_at, $4=promise_tags, $5=time
-        let rows = rt_block_on(sqlx::query(&format!("
+        let rows = sqlx::query(&format!("
             WITH schedule AS (
               SELECT *,
                 REPLACE(REPLACE(promise_id, '{{{{.id}}}}', id), '{{{{.timestamp}}}}', CAST($2 AS TEXT)) AS computed_promise_id,
@@ -5044,7 +5380,7 @@ impl PostgresDb<'_> {
             FROM updated_schedule
         ", messages = emitted_json(&["emit_new"])))
             .bind(schedule_id).bind(fired_at).bind(next_run_at).bind(promise_tags_json).bind(time)
-            .fetch_all(self.tx()))?;
+            .fetch_all(self.tx().await.pg()).await?;
 
         if rows.is_empty() {
             return Ok(None);
@@ -5072,8 +5408,29 @@ impl PostgresDb<'_> {
         Ok(Some(schedule))
     }
 
-    fn debug_reset(&self) -> StorageResult<()> {
-        rt_block_on(sqlx::raw_sql("TRUNCATE promises, schedules CASCADE").execute(self.tx()))?;
+    async fn debug_reset(&self) -> StorageResult<()> {
+        sqlx::query("TRUNCATE promises, schedules CASCADE")
+            .execute(self.tx().await.pg())
+            .await?;
+        Ok(())
+    }
+
+    /// One of `process_timeouts`' statements: `$1` the time, `$2` the ids when
+    /// the precise form names some.
+    async fn fire_statement(
+        &self,
+        sql: &str,
+        time: i64,
+        ids: &Option<Vec<String>>,
+    ) -> StorageResult<()> {
+        let q = sqlx::query(sql).bind(time);
+        let q = match ids {
+            Some(ids) => q.bind(ids.clone()),
+            None => q,
+        };
+        if let Some(row) = q.fetch_optional(self.tx().await.pg()).await? {
+            self.absorb_and_arm_retries(&row, time + self.task_retry_timeout);
+        }
         Ok(())
     }
 
@@ -5093,7 +5450,7 @@ impl PostgresDb<'_> {
     /// A batch of named timeouts is one statement per queue, not one
     /// transaction per timeout, so a burst of deadlines coming due together
     /// costs three round trips rather than three per deadline.
-    fn process_timeouts(&self, time: i64, only: Option<&[Timeout]>) -> StorageResult<()> {
+    async fn process_timeouts(&self, time: i64, only: Option<&[Timeout]>) -> StorageResult<()> {
         let trt = self.task_retry_timeout;
         // `None`: the full form. `Some(ids)`: the precise form over `ids`,
         // skipped when nothing of that kind was named.
@@ -5110,17 +5467,6 @@ impl PostgresDb<'_> {
                 }
             }
         };
-        let run = |sql: &str, ids: &Option<Vec<String>>| -> StorageResult<()> {
-            let q = sqlx::query(sql).bind(time);
-            let q = match ids {
-                Some(ids) => q.bind(ids.clone()),
-                None => q,
-            };
-            if let Some(row) = rt_block_on(q.fetch_optional(self.tx()))? {
-                self.absorb_and_arm_retries(&row, time + trt);
-            }
-            Ok(())
-        };
 
         // Statement 1: expired promises.
         //
@@ -5135,7 +5481,8 @@ impl PostgresDb<'_> {
                     "id = ANY($2) AND state = 'pending' AND external AND (timeout_at + 0) <= $1"
                 }
             };
-            run(&expire_batch_sql(selection, "$1", trt), &ids)?;
+            self.fire_statement(&expire_batch_sql(selection, "$1", trt), time, &ids)
+                .await?;
         }
 
         // Statement 2: expired task retry deadlines — re-enqueue the execute
@@ -5168,7 +5515,7 @@ impl PostgresDb<'_> {
         ",
                 messages = emitted_json(&["emit_retry"])
             );
-            run(&sql, &ids)?;
+            self.fire_statement(&sql, time, &ids).await?;
         }
 
         // Statement 3: expired leases — the holder went away, hand the task back.
@@ -5202,26 +5549,25 @@ impl PostgresDb<'_> {
         ",
                 messages = emitted_json(&["emit_released"])
             );
-            run(&sql, &ids)?;
+            self.fire_statement(&sql, time, &ids).await?;
         }
 
         Ok(())
     }
 
     // D-04: debug.snap — every section is now a projection of the one table
-    fn snap(&self) -> StorageResult<Snapshot> {
-        let promise_rows = rt_block_on(
-            sqlx::query(&format!("SELECT {P_COLS} FROM promises ORDER BY id")).fetch_all(self.tx()),
-        )?;
+    async fn snap(&self) -> StorageResult<Snapshot> {
+        let promise_rows = sqlx::query(&format!("SELECT {P_COLS} FROM promises ORDER BY id"))
+            .fetch_all(self.tx().await.pg())
+            .await?;
         let promises: Vec<PromiseRecord> = promise_rows.iter().map(row_to_promise).collect();
 
-        let pt_rows = rt_block_on(
-            sqlx::query(
-                "SELECT id, timeout_at FROM promises
+        let pt_rows = sqlx::query(
+            "SELECT id, timeout_at FROM promises
                  WHERE state = 'pending' AND external ORDER BY id",
-            )
-            .fetch_all(self.tx()),
-        )?;
+        )
+        .fetch_all(self.tx().await.pg())
+        .await?;
         let promise_timeouts: Vec<SnapshotPromiseTimeout> = pt_rows
             .iter()
             .map(|r| SnapshotPromiseTimeout {
@@ -5231,14 +5577,13 @@ impl PostgresDb<'_> {
             .collect();
 
         // Non-ready callbacks only — the ready ones live in `resumes`.
-        let cb_rows = rt_block_on(
-            sqlx::query(
-                "SELECT aw AS awaiter_id, id AS awaited_id
+        let cb_rows = sqlx::query(
+            "SELECT aw AS awaiter_id, id AS awaited_id
                  FROM promises CROSS JOIN LATERAL unnest(callbacks) AS aw
                  ORDER BY aw, id",
-            )
-            .fetch_all(self.tx()),
-        )?;
+        )
+        .fetch_all(self.tx().await.pg())
+        .await?;
         let callbacks: Vec<SnapshotCallback> = cb_rows
             .iter()
             .map(|r| SnapshotCallback {
@@ -5247,14 +5592,13 @@ impl PostgresDb<'_> {
             })
             .collect();
 
-        let li_rows = rt_block_on(
-            sqlx::query(
-                "SELECT id AS promise_id, l AS address
+        let li_rows = sqlx::query(
+            "SELECT id AS promise_id, l AS address
                  FROM promises CROSS JOIN LATERAL unnest(listeners) AS l
                  ORDER BY id, l",
-            )
-            .fetch_all(self.tx()),
-        )?;
+        )
+        .fetch_all(self.tx().await.pg())
+        .await?;
         let listeners: Vec<SnapshotListener> = li_rows
             .iter()
             .map(|r| SnapshotListener {
@@ -5263,26 +5607,24 @@ impl PostgresDb<'_> {
             })
             .collect();
 
-        let task_rows = rt_block_on(
-            sqlx::query(
-                "SELECT id, task_state, task_version, ttl, pid, resumes
+        let task_rows = sqlx::query(
+            "SELECT id, task_state, task_version, ttl, pid, resumes
                  FROM promises WHERE task_state IS NOT NULL ORDER BY id",
-            )
-            .fetch_all(self.tx()),
-        )?;
+        )
+        .fetch_all(self.tx().await.pg())
+        .await?;
         let tasks: Vec<TaskRecord> = task_rows.iter().map(row_to_task).collect();
 
-        let tt_rows = rt_block_on(
-            sqlx::query(
-                "SELECT id, 0 AS timeout_type, retry_timeout_at AS timeout_at FROM promises
+        let tt_rows = sqlx::query(
+            "SELECT id, 0 AS timeout_type, retry_timeout_at AS timeout_at FROM promises
                    WHERE task_state = 'pending' AND retry_timeout_at IS NOT NULL
                  UNION ALL
                  SELECT id, 1 AS timeout_type, lease_timeout_at AS timeout_at FROM promises
                    WHERE task_state = 'acquired' AND lease_timeout_at IS NOT NULL
                  ORDER BY id",
-            )
-            .fetch_all(self.tx()),
-        )?;
+        )
+        .fetch_all(self.tx().await.pg())
+        .await?;
         let task_timeouts: Vec<SnapshotTaskTimeout> = tt_rows
             .iter()
             .map(|r| SnapshotTaskTimeout {
@@ -5310,23 +5652,23 @@ impl PostgresDb<'_> {
 
 /// One tick of the timer wheel: the three timeout sweeps, then expired
 /// schedules. Returns how many schedules fired, for the caller to record.
-fn process_all_timeouts(db: &PostgresDb, time: i64) -> StorageResult<usize> {
+async fn process_all_timeouts(db: &PostgresDb<'_>, time: i64) -> StorageResult<usize> {
     tracing::debug!(time = time, "Processing expired timeouts");
-    db.process_timeouts(time, None)?;
-    process_schedule_timeouts(db, time, None)
+    db.process_timeouts(time, None).await?;
+    process_schedule_timeouts(db, time, None).await
 }
 
 /// Process expired schedule timeouts.
-fn process_schedule_timeouts(
-    db: &PostgresDb,
+async fn process_schedule_timeouts(
+    db: &PostgresDb<'_>,
     time: i64,
     only: Option<&[String]>,
 ) -> StorageResult<usize> {
-    let expired = db.get_expired_schedule_timeouts(time, only)?;
+    let expired = db.get_expired_schedule_timeouts(time, only).await?;
     let mut fired = 0usize;
 
     for (schedule_id, fired_at) in &expired {
-        let schedule = match db.schedule_get(schedule_id)? {
+        let schedule = match db.schedule_get(schedule_id).await? {
             Some(s) => s,
             None => continue,
         };
@@ -5346,7 +5688,8 @@ fn process_schedule_timeouts(
         promise_tags.insert("resonate:prefix".to_string(), promise_id.clone());
 
         if db
-            .process_schedule_timeout(schedule_id, *fired_at, next_run_at, time, &promise_tags)?
+            .process_schedule_timeout(schedule_id, *fired_at, next_run_at, time, &promise_tags)
+            .await?
             .is_some()
         {
             tracing::info!(
@@ -5376,11 +5719,13 @@ impl Engine for PostgresEngine {
     }
 
     async fn tick(&self, now: i64) -> StorageResult<(usize, Vec<Outgoing>, Vec<Scheduled>)> {
-        self.transact(move |db| process_all_timeouts(db, now)).await
+        self.transact(move |db| Box::pin(async move { process_all_timeouts(db, now).await }))
+            .await
     }
 
     async fn upcoming(&self, limit: usize) -> StorageResult<Vec<Scheduled>> {
-        self.query(move |db| db.upcoming(limit)).await
+        self.query(move |db| Box::pin(async move { db.upcoming(limit).await }))
+            .await
     }
 
     fn returns_messages(&self) -> bool {
@@ -5402,18 +5747,21 @@ impl PostgresEngine {
         }
         let swept = self
             .transact(move |db| {
-                db.process_timeouts(now, Some(&timeouts))?;
-                let schedules: Vec<String> = timeouts
-                    .iter()
-                    .filter_map(|t| match t {
-                        Timeout::ScheduleDue { schedule_id } => Some(schedule_id.clone()),
-                        _ => None,
-                    })
-                    .collect();
-                if !schedules.is_empty() {
-                    process_schedule_timeouts(db, now, Some(&schedules))?;
-                }
-                Ok(())
+                let timeouts = timeouts.clone();
+                Box::pin(async move {
+                    db.process_timeouts(now, Some(&timeouts)).await?;
+                    let schedules: Vec<String> = timeouts
+                        .iter()
+                        .filter_map(|t| match t {
+                            Timeout::ScheduleDue { schedule_id } => Some(schedule_id.clone()),
+                            _ => None,
+                        })
+                        .collect();
+                    if !schedules.is_empty() {
+                        process_schedule_timeouts(db, now, Some(&schedules)).await?;
+                    }
+                    Ok(())
+                })
             })
             .await;
         match swept {

@@ -209,6 +209,50 @@ async fn it_refills_when_it_runs_low() {
     );
 }
 
+/// A wheel more than half full still re-reads the world every `idle`.
+///
+/// The wheel holds far-off deadlines, above the low watermark, so the top-up
+/// never runs. A deadline armed elsewhere — handed out only by later backfills
+/// — must still be found and fired within about one idle interval: this is
+/// what lets a server run without a sweep behind the timer.
+#[tokio::test]
+async fn a_full_wheel_still_rereads_every_idle() {
+    let (now, _) = clock();
+    let fired = Fired::default();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let n = calls.clone();
+    let backfill: OnBackfill<u64> = Arc::new(move |now, _room| {
+        let k = n.fetch_add(1, Ordering::SeqCst);
+        // The seed: a full wheel of far deadlines. After it, another
+        // instance's deadline that is already due.
+        let batch = if k == 0 {
+            (100..108).map(|v| Timeout::new(60_000, v)).collect()
+        } else {
+            vec![Timeout::new(now, 7)]
+        };
+        Box::pin(async move { batch })
+    });
+    let cfg = TimerConfig {
+        low_watermark: 4,
+        backfill_interval: Duration::from_millis(10),
+        idle: Duration::from_millis(40),
+        ..config()
+    };
+
+    let timer = Timer::new(cfg, IdComparator, now, fired.on_fire(), backfill);
+    timer.init().await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    timer.stop().await;
+
+    assert!(
+        fired.values().contains(&7),
+        "a deadline only a re-read could find never fired: {:?}",
+        fired.values()
+    );
+    let n = calls.load(Ordering::SeqCst);
+    assert!((2..=8).contains(&n), "read {n} times in 150ms at a 40ms idle");
+}
+
 #[tokio::test]
 async fn stop_ends_the_task() {
     let (now, _) = clock();

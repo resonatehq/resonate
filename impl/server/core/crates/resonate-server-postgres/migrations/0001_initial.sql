@@ -146,6 +146,11 @@ CREATE INDEX IF NOT EXISTS idx_task_lease_timeout_at
 -- The console's lineage read (`ui.execution.get`, `ui.executions.search`).
 CREATE INDEX IF NOT EXISTS idx_promises_origin_id
   ON promises (origin_id);
+-- The console's executions list: roots only, in its default order. A page is
+-- a walk of the front (or back) of this, and the total an index-only count;
+-- without it both were a parallel scan of every promise on every refresh.
+CREATE INDEX IF NOT EXISTS idx_promises_roots
+  ON promises (created_at, id) WHERE id = origin_id;
 -- Preload: a task's branch siblings.
 CREATE INDEX IF NOT EXISTS idx_promises_branch_id
   ON promises (branch_id) WHERE branch_id IS NOT NULL;
