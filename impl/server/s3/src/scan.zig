@@ -86,6 +86,17 @@ pub const Request = struct {
     op: store_mod.Operation = undefined,
     scanner: *Scanner = undefined,
     key_buf: std.ArrayList(u8) = undefined,
+    /// Set while `submit_op` is driving this request (see there).
+    pump: ?*Pump = null,
+};
+
+/// The state of one `submit_op` loop, on its caller's stack.
+const Pump = struct {
+    /// A completion that ran inline prepared the next operation.
+    queued: bool = false,
+    /// A completion that ran inline answered the request; it is no longer
+    /// ours to touch.
+    ended: bool = false,
 };
 
 pub const Scanner = struct {
@@ -135,7 +146,44 @@ pub const Scanner = struct {
             .arena = req.arena.allocator(),
         };
         req.op.listen(*Request, req, on_complete);
-        self.store.submit(&req.op);
+        self.submit_op(req);
+    }
+
+    /// Hand `req.op` to the store — without recursing.
+    ///
+    /// A scan is a chain: each completion submits the next operation. A store
+    /// that answers inline (the memory store does) completes inside `submit`,
+    /// so the chain became recursion one frame deep per object, and a snapshot
+    /// or a search over enough documents overflowed the stack. Here a
+    /// completion that runs inline and asks for the next operation only marks
+    /// it, and this loop submits it: the stack stays flat however long the
+    /// chain is. A store that answers later is unaffected — its completion
+    /// arrives with no loop running, and starts one.
+    fn submit_op(self: *Scanner, req: *Request) void {
+        if (req.pump) |pump| {
+            pump.queued = true;
+            return;
+        }
+        var pump: Pump = .{};
+        req.pump = &pump;
+        while (true) {
+            pump.queued = false;
+            self.store.submit(&req.op);
+            // Answered inline: the request may already be gone.
+            if (pump.ended) return;
+            if (!pump.queued) {
+                // In flight; its completion carries on from there.
+                req.pump = null;
+                return;
+            }
+        }
+    }
+
+    /// Answer the request. Every reply goes through here, so a running
+    /// `submit_op` knows to stop touching it.
+    fn finish(req: *Request) void {
+        if (req.pump) |pump| pump.ended = true;
+        req.callback(req);
     }
 
     fn on_complete(req: *Request, op: *store_mod.Operation) void {
@@ -167,7 +215,7 @@ pub const Scanner = struct {
             .arena = req.arena.allocator(),
         };
         req.op.listen(*Request, req, on_complete);
-        self.store.submit(&req.op);
+        self.submit_op(req);
     }
 
     fn on_read(self: *Scanner, req: *Request, result: store_mod.Result) void {
@@ -227,7 +275,7 @@ pub const Scanner = struct {
                 req.status = 200;
                 req.reply_data = "{}";
                 req.phase = .done;
-                req.callback(req);
+                finish(req);
                 return;
             },
         };
@@ -239,7 +287,7 @@ pub const Scanner = struct {
             .arena = req.arena.allocator(),
         };
         req.op.listen(*Request, req, on_reset_listed);
-        self.store.submit(&req.op);
+        self.submit_op(req);
     }
 
     fn on_reset_listed(req: *Request, op: *store_mod.Operation) void {
@@ -270,7 +318,7 @@ pub const Scanner = struct {
             .arena = req.arena.allocator(),
         };
         req.op.listen(*Request, req, on_complete);
-        self.store.submit(&req.op);
+        self.submit_op(req);
     }
 
     fn on_deleted(self: *Scanner, req: *Request, result: store_mod.Result) void {
@@ -299,7 +347,7 @@ pub const Scanner = struct {
         req.status = status;
         req.reply_data = out.items;
         req.phase = .done;
-        req.callback(req);
+        finish(req);
     }
 
     /// A projection that failed.
@@ -619,7 +667,7 @@ pub const Scanner = struct {
         req.status = status;
         req.reply_data = buf.items;
         req.phase = .done;
-        req.callback(req);
+        finish(req);
     }
 };
 
@@ -946,6 +994,41 @@ test "a task search filters by state and pages" {
     try testing.expect(std.mem.indexOf(u8, acquired.data, "\"pid\":\"w1\"") != null);
     const page = try f.call(&arena, "task.search", "{\"limit\":1}");
     try testing.expect(std.mem.indexOf(u8, page.data, "\"cursor\":\"o:a\"") != null);
+}
+
+test "a scan over a store that answers inline does not recurse per object" {
+    // The memory store completes inside `submit`. The scan used to chain each
+    // completion into the next submission, one stack frame per object, and a
+    // snapshot over enough documents overflowed the stack — found by
+    // resonate-fuzz, as a segfault after a few dozen programs.
+    const f = try Fixture.create(testing.allocator);
+    defer f.destroy();
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    var id_buf: [32]u8 = undefined;
+    var origin_buf: [32]u8 = undefined;
+    const n = 20_000;
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        const origin = try std.fmt.bufPrint(&origin_buf, "o{d}", .{i});
+        const id = try std.fmt.bufPrint(&id_buf, "o{d}:p", .{i});
+        try f.seed_doc(origin, &.{promise(id, .pending)}, &.{});
+    }
+    // On a thread with a small stack: the process's own may be unlimited,
+    // which hides the recursion instead of crashing on it. 20k objects at a few
+    // KiB of frames each would need far more than this.
+    const Scans = struct {
+        fn run(fx: *Fixture, ar: *std.heap.ArenaAllocator, ok: *bool) void {
+            const snap = fx.call(ar, "debug.snap", "{}") catch return;
+            const search = fx.call(ar, "promise.search", "{\"limit\":10}") catch return;
+            const reset = fx.call(ar, "debug.reset", "{}") catch return;
+            ok.* = snap.status == 200 and search.status == 200 and reset.status == 200;
+        }
+    };
+    var ok = false;
+    const thread = try std.Thread.spawn(.{ .stack_size = 1 << 20 }, Scans.run, .{ f, &arena, &ok });
+    thread.join();
+    try testing.expect(ok);
 }
 
 test "the snapshot projects everything two servers must agree on" {
