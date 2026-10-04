@@ -69,6 +69,11 @@ pub struct PostgresEngine {
 /// `well_formed_promise_pending_has_no_value` compares against `'{}'::jsonb`),
 /// so `NULLIF` restores the wire-level distinction the API draws between
 /// "no headers" and "headers present".
+/// The promise columns of a CTE that unions a written row with a locked one,
+/// for `P_COLS` to project from.
+const RESULT_COLS: &str = "id, state, param_headers, param_data, value_headers, value_data, \
+                           tags, timeout_at, created_at, settled_at";
+
 const P_COLS: &str =
     "id, state, NULLIF(param_headers, '{}'::jsonb)::text AS param_headers, param_data, \
                       NULLIF(value_headers, '{}'::jsonb)::text AS value_headers, value_data, \
@@ -3940,8 +3945,12 @@ impl PostgresDb<'_> {
         // concurrent task.suspend writing our `callbacks`, then reads the
         // row's latest version, those awaiters included — which is what a
         // lock statement and a second, fresh-snapshot statement were for.
-        // `guard`: with `Some(now)`, a promise pending past its deadline is
-        // left alone and reported, for the transaction to time out first.
+        // `guard`: with `Some(now)`, the statement writes nothing and reports
+        // `declined` if the promise is pending past its deadline — the
+        // transaction times it out first — or if the row changed after this
+        // statement's snapshot was taken, which means it waited for the lock
+        // and its other reads (the awaiters it would wake) may be stale. The
+        // transaction's statements run after the lock, so they cannot be.
         let sql = self.cached("promise_settle", || {
             let self_set = settle_self(
                 "(SELECT b.task_state IS NOT NULL AND b.task_state <> 'fulfilled' FROM before b)",
@@ -3957,13 +3966,15 @@ impl PostgresDb<'_> {
 
             format!("
             WITH locked AS (
-              SELECT id, state, task_state, callbacks, listeners,
-                     ($6::bigint IS NOT NULL AND state = 'pending' AND timeout_at <= $6) AS expired
+              SELECT *,
+                     ($6::bigint IS NOT NULL AND (
+                        (state = 'pending' AND timeout_at <= $6)
+                        OR ctid <> (SELECT s.ctid FROM promises s WHERE s.id = $1))) AS declined
               FROM promises WHERE id = $1
               FOR UPDATE
             ),
             before AS (
-              SELECT * FROM locked WHERE NOT expired
+              SELECT * FROM locked WHERE NOT declined
             ),
             updated_promise AS (
               UPDATE promises p
@@ -3975,13 +3986,13 @@ impl PostgresDb<'_> {
             {unblock},
             {fanout},
             result AS (
-              SELECT *, true AS was_settled FROM updated_promise
+              SELECT {RESULT_COLS}, true AS was_settled FROM updated_promise
               UNION ALL
-              SELECT *, false AS was_settled FROM promises
-              WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM updated_promise)
+              SELECT {RESULT_COLS}, false AS was_settled FROM locked
+              WHERE NOT EXISTS (SELECT 1 FROM updated_promise)
             )
             SELECT {P_COLS}, was_settled,
-              COALESCE((SELECT expired FROM locked), false) AS expired,
+              COALESCE((SELECT declined FROM locked), false) AS declined,
               {messages}
             FROM result
         ", messages = emitted_json(&["emit_unblock", "emit_resume"]))
@@ -4003,7 +4014,7 @@ impl PostgresDb<'_> {
         let Some(row) = rows.first() else {
             return Ok((none, false));
         };
-        if row.get::<bool, _>("expired") {
+        if row.get::<bool, _>("declined") {
             return Ok((none, true));
         }
         self.absorb_and_arm_retries(row, settled_at + self.task_retry_timeout);
@@ -4510,19 +4521,37 @@ impl PostgresDb<'_> {
         let sql = self.cached("task_fence_create_guarded", || {
             format!("
             WITH fence_check AS (
-              SELECT id, task_state, task_version, branch_id FROM promises
+              SELECT id, task_state, task_version, branch_id,
+                     ctid <> (SELECT s.ctid FROM promises s WHERE s.id = $1) AS stale
+              FROM promises
               WHERE id = $1 AND task_state IS NOT NULL
               FOR UPDATE
             ),
+            -- Why the fast path declines: a promise past its deadline, or a
+            -- task row that changed after this statement's snapshot.
             expired AS (
               SELECT $13::bigint IS NOT NULL AND EXISTS (
                 SELECT 1 FROM promises
                 WHERE id IN ($1, $3) AND state = 'pending' AND (timeout_at + 0) <= $13
-              ) AS hit
+              ) OR ($13::bigint IS NOT NULL AND COALESCE((SELECT stale FROM fence_check), false))
+              AS hit
             ),
             fence_ok AS (
               SELECT EXISTS (SELECT 1 FROM fence_check WHERE task_state = 'acquired' AND task_version = $2)
                      AND NOT (SELECT hit FROM expired) AS ok
+            ),
+            -- Every fence rewrites its task row, even to the same values.
+            -- A fence that only locked it would leave no trace: one that
+            -- committed after this statement's snapshot, while this statement
+            -- waited for the lock, would have written siblings this statement
+            -- cannot see. Rewritten, the row's version moves, `fence_check`
+            -- reports `stale`, and the fast path declines. (Not when the
+            -- fenced promise is the task's own: one statement must not
+            -- update a row twice.)
+            bumped AS (
+              UPDATE promises SET task_version = task_version
+              WHERE id = $1 AND $1 <> $3 AND (SELECT ok FROM fence_ok)
+              RETURNING id
             ),
             inserted_or_skipped_promise AS (
               INSERT INTO promises (id, state, param_headers, param_data, tags, timeout_at, created_at, settled_at,
@@ -4654,45 +4683,70 @@ impl PostgresDb<'_> {
 
             format!("
             WITH fence_check AS (
-              SELECT id, task_state, task_version, branch_id FROM promises
+              SELECT id, task_state, task_version, branch_id,
+                     ctid <> (SELECT s.ctid FROM promises s WHERE s.id = $1) AS stale
+              FROM promises
               WHERE id = $1 AND task_state IS NOT NULL
               FOR UPDATE
             ),
+            -- Why the fast path declines: a promise past its deadline, or a
+            -- task row that changed after this statement's snapshot.
             expired AS (
               SELECT $8::bigint IS NOT NULL AND EXISTS (
                 SELECT 1 FROM promises
                 WHERE id IN ($1, $3) AND state = 'pending' AND (timeout_at + 0) <= $8
-              ) AS hit
+              ) OR ($8::bigint IS NOT NULL AND COALESCE((SELECT stale FROM fence_check), false))
+              AS hit
             ),
             fence_ok AS (
               SELECT EXISTS (SELECT 1 FROM fence_check WHERE task_state = 'acquired' AND task_version = $2)
                      AND NOT (SELECT hit FROM expired) AS ok
             ),
+            -- `stale` here: the promise changed after the snapshot — an
+            -- awaiter suspended on it while this statement waited — and the
+            -- awaiters' rows this statement would wake are read as they were.
             locked_promise AS (
-              SELECT * FROM promises WHERE id = $3 AND (SELECT ok FROM fence_ok) FOR UPDATE
+              SELECT *, ($8::bigint IS NOT NULL
+                         AND ctid <> (SELECT s.ctid FROM promises s WHERE s.id = $3)) AS stale
+              FROM promises WHERE id = $3 AND (SELECT ok FROM fence_ok) FOR UPDATE
+            ),
+            -- Every fence rewrites its task row, even to the same values.
+            -- A fence that only locked it would leave no trace: one that
+            -- committed after this statement's snapshot, while this statement
+            -- waited for the lock, would have written siblings this statement
+            -- cannot see. Rewritten, the row's version moves, `fence_check`
+            -- reports `stale`, and the fast path declines. (Not when the
+            -- fenced promise is the task's own: one statement must not
+            -- update a row twice.)
+            bumped AS (
+              UPDATE promises SET task_version = task_version
+              WHERE id = $1 AND $1 <> $3 AND (SELECT ok FROM fence_ok)
+                AND NOT EXISTS (SELECT 1 FROM locked_promise WHERE stale)
+              RETURNING id
             ),
             before AS (
-              SELECT id, state, task_state, callbacks, listeners FROM locked_promise
+              SELECT id, state, task_state, callbacks, listeners FROM locked_promise WHERE NOT stale
             ),
             updated_promise AS (
               UPDATE promises p
               SET state = $4, value_headers = COALESCE($5::jsonb, '{{}}'), value_data = $6, settled_at = $7,
                   {self_set}
               WHERE p.id = $3 AND p.state = 'pending' AND (SELECT ok FROM fence_ok)
-                AND EXISTS (SELECT 1 FROM locked_promise)
+                AND EXISTS (SELECT 1 FROM before)
               RETURNING p.*
             ),
             {unblock},
             {fanout},
             result AS (
-              SELECT * FROM updated_promise
+              SELECT {RESULT_COLS} FROM updated_promise
               UNION ALL
-              SELECT * FROM locked_promise WHERE NOT EXISTS (SELECT 1 FROM updated_promise)
+              SELECT {RESULT_COLS} FROM locked_promise WHERE NOT EXISTS (SELECT 1 FROM updated_promise)
             )
             SELECT
               EXISTS (SELECT 1 FROM fence_check) AS task_exists,
               (SELECT ok FROM fence_ok) AS fence_ok,
-              (SELECT hit FROM expired) AS expired,
+              (SELECT hit FROM expired)
+                OR COALESCE((SELECT stale FROM locked_promise), false) AS expired,
               {cols}, {messages},
               CASE WHEN (SELECT ok FROM fence_ok) THEN {preload} END AS preload
             FROM (SELECT 1) AS dummy
@@ -4827,8 +4881,13 @@ impl PostgresDb<'_> {
             format!("
             WITH locked AS (
               SELECT id, state, external, task_state, task_version, branch_id,
-                     ($4::bigint IS NOT NULL AND state = 'pending' AND timeout_at <= $4) AS expired
-              FROM promises WHERE id = ANY($5)
+                     -- Decline (with `$4`): past its deadline, or changed after
+                     -- the snapshot — this statement waited for its lock, and
+                     -- the preload it would read may predate that writer.
+                     ($4::bigint IS NOT NULL AND (
+                        (state = 'pending' AND timeout_at <= $4)
+                        OR ctid <> (SELECT s.ctid FROM promises s WHERE s.id = p.id))) AS expired
+              FROM promises p WHERE id = ANY($5)
               ORDER BY (id = $1), id
               FOR UPDATE
             ),
@@ -4927,8 +4986,10 @@ impl PostgresDb<'_> {
     /// so after waiting out a concurrent writer it reads the row's latest
     /// version, callbacks registered a moment ago included — which is what the
     /// lock preamble's separate statement was for. `guard`: with `Some(now)`
-    /// nothing is written if the promise is pending past its deadline, and
-    /// the second value says so.
+    /// nothing is written, and the second value says so, if the promise is
+    /// pending past its deadline or the row changed after the statement's
+    /// snapshot — it waited for the lock, so what it read of other rows (the
+    /// awaiters it would wake) may predate the writer it waited for.
     async fn task_fulfill_guarded(
         &self,
         params: &TaskFulfillParams<'_>,
@@ -4951,9 +5012,9 @@ impl PostgresDb<'_> {
         // `fulfilled` here is the task transition, which also drives the
         // promise settlement — hence one shared guard.
         let guard_sql =
-            "(SELECT b.task_state = 'acquired' AND b.task_version = $2 AND NOT b.expired FROM before b)";
+            "(SELECT b.task_state = 'acquired' AND b.task_version = $2 AND NOT b.declined FROM before b)";
         let settle_guard =
-            "(SELECT b.task_state = 'acquired' AND b.task_version = $2 AND NOT b.expired \
+            "(SELECT b.task_state = 'acquired' AND b.task_version = $2 AND NOT b.declined \
              AND b.state = 'pending' FROM before b)";
         let sql = self.cached("task_fulfill_guarded", || {
             let self_set = settle_self(guard_sql);
@@ -4968,8 +5029,10 @@ impl PostgresDb<'_> {
 
             format!("
             WITH locked AS (
-              SELECT id, state, task_state, task_version, callbacks, listeners,
-                     ($8::bigint IS NOT NULL AND state = 'pending' AND timeout_at <= $8) AS expired
+              SELECT *,
+                     ($8::bigint IS NOT NULL AND (
+                        (state = 'pending' AND timeout_at <= $8)
+                        OR ctid <> (SELECT s.ctid FROM promises s WHERE s.id = $3))) AS declined
               FROM promises WHERE id = $3
               FOR UPDATE
             ),
@@ -4984,20 +5047,20 @@ impl PostgresDb<'_> {
                   settled_at    = CASE WHEN p.state = 'pending' THEN $7 ELSE p.settled_at END,
                   {self_set}
               WHERE p.id = $3 AND p.task_state = 'acquired' AND p.task_version = $2
-                AND EXISTS (SELECT 1 FROM locked WHERE NOT expired)
+                AND EXISTS (SELECT 1 FROM locked WHERE NOT declined)
               RETURNING p.*
             ),
             {unblock},
             {fanout},
             result AS (
-              SELECT * FROM updated_promise
+              SELECT {RESULT_COLS} FROM updated_promise
               UNION ALL
-              SELECT * FROM promises WHERE id = $3 AND NOT EXISTS (SELECT 1 FROM updated_promise)
+              SELECT {RESULT_COLS} FROM locked WHERE NOT EXISTS (SELECT 1 FROM updated_promise)
             )
             SELECT {cols},
               EXISTS (SELECT 1 FROM updated_promise) AS task_fulfilled,
               (SELECT b.task_state IS NOT NULL FROM before b) AS task_exists,
-              COALESCE((SELECT b.expired FROM before b), false) AS expired,
+              COALESCE((SELECT b.declined FROM before b), false) AS declined,
               {messages}
             FROM result r
         ", cols = p_cols("r"), messages = emitted_json(&["emit_unblock", "emit_resume"]))
@@ -5025,7 +5088,7 @@ impl PostgresDb<'_> {
             ));
         }
         let row = &rows[0];
-        if row.get::<bool, _>("expired") {
+        if row.get::<bool, _>("declined") {
             return Ok((
                 TaskFulfillResult {
                     task_exists: false,
