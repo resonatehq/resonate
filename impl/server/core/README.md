@@ -242,6 +242,44 @@ All backends are held to the same behaviour by the differential test suite — t
 
 On Neo4j every promise is a node, every await is an edge, and every call tree is a path — open the database in Neo4j Browser and the execution draws itself. See [`crates/resonate-server-neo4j`](crates/resonate-server-neo4j) for the queries.
 
+### PostgreSQL settings
+
+What the server sets itself, on every connection: `synchronous_commit = on` (a
+transition and the messages it emits commit together only if the commit is
+durable, whatever the cluster's default), generic plans, and no sequential
+scans. The `promises` table carries its own autovacuum settings in the schema.
+
+What it cannot set — they belong to the cluster, are shared with every database
+on it, and need a superuser or a restart — and logs a warning about at startup
+when they are left low:
+
+| Setting | Recommended | Why |
+|---|---|---|
+| `shared_buffers` | 2GB or more | the `promises` table and its indexes should stay in memory |
+| `wal_buffers` | 64MB | at the default, backends wait for WAL buffer space under load |
+| `max_wal_size` | 16GB | fewer checkpoints, so fewer pages written to WAL whole after one |
+| `checkpoint_timeout` | 30min | as above |
+| `checkpoint_completion_target` | 0.9 | spread checkpoint writes out |
+| `wal_compression` | `lz4` | full-page images dominate this engine's WAL |
+
+Measured with the load generator below, 32 workers on 4 cores shared with
+Postgres: against a cluster at its defaults (128MB buffers, 1GB `max_wal_size`)
+these settings took durable throughput from 4,485 to 5,183 req/s and WAL from
+10.3KB to about 1KB per request. With 1GB of buffers already, short runs show no
+throughput difference (5,356 against 5,359 req/s); the WAL volume and the
+checkpoints are what they save. `commit_delay` did not help: Postgres already
+groups commits under concurrent load.
+
+The pool size (`pool_size`, default 10) bounds concurrent statements; the
+figures above use 32. To measure a deployment:
+
+```shell
+PG_URL=postgres://user:pass@host/db cargo run --release --example pgload -- <workers> <seconds> <pool>
+```
+
+The database must be one the load generator may fill. `PGLOAD_CLIENT=1` adds
+external promises, listeners and callbacks to each execution.
+
 ---
 
 ## Workers
