@@ -88,6 +88,9 @@ struct Args {
     /// Send debug.reset before each program (needed for searches to agree).
     #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
     reset: bool,
+    /// Include promise.search, task.search and schedule.search (needs --reset).
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+    searches: bool,
     /// Compare debug.snap with the oracle after each program.
     #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
     snap: bool,
@@ -211,8 +214,26 @@ fn oracle_apply(o: &mut Oracle, env: &Value) -> Value {
     serde_json::to_value(o.apply(&req)).expect("a response serializes")
 }
 
+/// A snapshot reduced to one program's rows: without a reset between
+/// programs the server still holds the others', which the oracle never saw.
+fn own_rows(snap: &mut Value, names: &Names) {
+    let Some(sections) = snap.as_object_mut() else {
+        return;
+    };
+    for rows in sections.values_mut() {
+        if let Some(rows) = rows.as_array_mut() {
+            rows.retain(|row| {
+                ["id", "promiseId", "awaited", "awaiter", "taskId"]
+                    .iter()
+                    .filter_map(|k| row.get(*k).and_then(|v| v.as_str()))
+                    .any(|id| names.owns(id))
+            });
+        }
+    }
+}
+
 /// None if the two answers agree; otherwise what differs.
-fn disagreement(kind: &str, expected: &Value, actual: &Value) -> Option<String> {
+fn disagreement(kind: &str, expected: &Value, actual: &Value, names: &Names) -> Option<String> {
     let es = &expected["head"]["status"];
     let as_ = &actual["head"]["status"];
     let mut e = expected["data"].clone();
@@ -225,6 +246,8 @@ fn disagreement(kind: &str, expected: &Value, actual: &Value) -> Option<String> 
         if let Some(m) = a.as_object_mut() {
             m.remove("messages");
         }
+        own_rows(&mut e, names);
+        own_rows(&mut a, names);
     }
     if es != as_ || e != a {
         Some(format!(
@@ -359,7 +382,7 @@ async fn main() {
         let names = Names {
             ns: format!("{invocation}x{program}"),
             worker: worker.clone(),
-            searches: args.reset && args.alphabet != "spec",
+            searches: args.searches && args.reset && args.alphabet != "spec",
             spec_only: args.alphabet == "spec",
         };
         stats.programs += 1;
@@ -441,6 +464,12 @@ async fn main() {
                 Answer::Definite(b) => b,
                 Answer::Ambiguous(why) => {
                     stats.ambiguous += 1;
+                    if std::env::var_os("FUZZ_VERBOSE").is_some() {
+                        println!(
+                            "AMBIGUOUS program {program} step {step} ({}): {why}\n  request  {env}",
+                            req.kind
+                        );
+                    }
                     skull.check(
                         &skull::AMBIGUOUS,
                         true,
@@ -484,7 +513,7 @@ async fn main() {
             for m in o.take_emitted() {
                 *expected_msgs.entry(expected_key(&m)).or_insert(0) += 1;
             }
-            if let Some(diff) = disagreement(&req.kind, &expected, &actual) {
+            if let Some(diff) = disagreement(&req.kind, &expected, &actual, &names) {
                 stats.disagreements += 1;
                 println!(
                     "\nDISAGREE program {program} step {step} ({}):\n  request  {env}\n    {diff}",
@@ -512,7 +541,7 @@ async fn main() {
             let url = &args.url[rng.usize(0..args.url.len())];
             if let Answer::Definite(actual) = post(&client, url, &env).await {
                 let expected = oracle_apply(&mut o, &env);
-                if let Some(diff) = disagreement("debug.snap", &expected, &actual) {
+                if let Some(diff) = disagreement("debug.snap", &expected, &actual, &names) {
                     stats.state_disagreements += 1;
                     println!("\nSTATE DISAGREES after program {program}:\n    {diff}");
                     let d = json!({ "program": program, "snap": true,
@@ -567,6 +596,9 @@ async fn main() {
     if stats.disagreements + stats.state_disagreements > 0 {
         std::process::exit(1);
     }
+    if stats.ok_steps == 0 {
+        std::process::exit(2);
+    }
 }
 
 fn report(args: &Args, s: &Stats, corpus: &Corpus, elapsed: Duration) {
@@ -619,10 +651,13 @@ fn report(args: &Args, s: &Stats, corpus: &Corpus, elapsed: Duration) {
         "  verdict      {} answers and {} states disagreed with the oracle — {}",
         s.disagreements,
         s.state_disagreements,
-        if s.disagreements + s.state_disagreements == 0 {
-            "AGREED"
-        } else {
+        if s.disagreements + s.state_disagreements > 0 {
             "DISAGREED"
+        } else if s.ok_steps == 0 {
+            // Nothing answered: agreement with nothing is not a verdict.
+            "NO VERDICT (no request got a definite answer)"
+        } else {
+            "AGREED"
         }
     );
 }

@@ -183,11 +183,14 @@ def layer_fuzz(root, logdir):
             procs.start(f"fuzz-server-{seed}", [f"{root}/zig-out/bin/resonate", "serve", "--store", "memory",
                                                 "--debug", "--deliver", "--port", str(port)],
                         f"http://127.0.0.1:{port}/ready")
-            # Searches off (--reset false): promise.search reports a promise past
-            # its deadline as pending where the model has it timed out, a known
-            # divergence that would otherwise mask everything else.
+            # Searches off: promise.search reports a promise past its deadline as
+            # pending where the model has it timed out, a known divergence that
+            # would otherwise mask everything else. Resets stay on: without them
+            # the memory store's documents pile up and debug.snap overflows the
+            # stack (the scanner recurses once per document on a store that
+            # answers inline) — a second known issue.
             code, out = sh([FUZZ, "--url", f"http://127.0.0.1:{port}", "--programs", "40", "--seed", str(seed),
-                            "--reset", "false"],
+                            "--searches", "false"],
                            timeout=600)
             open(f"{logdir}/fuzz-{seed}.txt", "w").write(out)
             if code != 0:
