@@ -128,6 +128,14 @@ impl Names {
     fn promise(&self, n: usize) -> String {
         format!("{}:p{n}", self.ns)
     }
+    /// A promise id this program has not used, if one is left in the pool.
+    fn fresh_promise(&self, t: &mut Tape, existing: &[String]) -> String {
+        let start = t.upto(16);
+        (0..16)
+            .map(|i| self.promise((start + i) % 16))
+            .find(|id| !existing.contains(id))
+            .unwrap_or_else(|| self.promise(start))
+    }
     fn task(&self, n: usize) -> String {
         format!("{}:t{n}", self.ns)
     }
@@ -403,7 +411,14 @@ pub fn informed(
 
     let data = match op {
         "promise.create" => {
-            let id = pick(t, &all_p).unwrap_or_else(|| names.promise(t.upto(8)));
+            // A new promise two times in three, so what it is created as
+            // (internal, external, a timer) actually happens; otherwise an
+            // existing one, which must answer idempotently.
+            let id = if t.upto(3) == 0 {
+                pick(t, &all_p).unwrap_or_else(|| names.fresh_promise(t, &all_p))
+            } else {
+                names.fresh_promise(t, &all_p)
+            };
             // External or a timer some of the time, so deadlines are armed and
             // fire, and a timer's resolves.
             let tags = promise_tags(t);
@@ -494,7 +509,7 @@ pub fn informed(
                 let tags = promise_tags(t);
                 json!({ "id": id, "version": v, "action": {
                     "kind": "promise.create", "head": {},
-                    "data": { "id": names.promise(t.upto(8)),
+                    "data": { "id": names.fresh_promise(t, &all_p),
                               "timeoutAt": now + (t.upto(30) as i64 + 1) * 10_000,
                               "param": {}, "tags": tags } }})
             } else {
