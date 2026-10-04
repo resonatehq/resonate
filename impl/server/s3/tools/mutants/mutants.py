@@ -34,7 +34,7 @@ MUTANTS = [
         "why": "the heartbeat fast path extends a lease whose promise is past its deadline",
         "file": "src/handle.zig",
         "old": "break :blk promise.state != .pending or promise.timeout_at > ctx.now;",
-        "new": "break :blk true;",
+        "new": "_ = promise; break :blk true;",
     },
     {
         "name": "acquire-keeps-version",
