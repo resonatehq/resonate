@@ -85,6 +85,9 @@ class Procs:
         self.procs = []
 
 
+notes = []  # lincheck refutations, reported but not counted
+
+
 def check(trace_prefix, logdir, tag):
     """Both checkers over one trace. Returns a list of failures."""
     bad = []
@@ -94,9 +97,12 @@ def check(trace_prefix, logdir, tag):
         name = os.path.basename(tool)
         open(f"{logdir}/{tag}.{name}.txt", "w").write(out)
         if "NOT LINEARIZABLE" in out:
-            # lincheck refuting alone is about the recorded order; it is
-            # reported, conccheck refuting is the verdict on the server.
-            bad.append(f"{tag}: {name} refuted")
+            if tool == CONCCHECK:
+                bad.append(f"{tag}: conccheck refuted")
+            else:
+                # The recorded order failing is a statement about that one
+                # order, not the server (valid/README.md): noted, not counted.
+                notes.append(f"{tag}: lincheck refuted the recorded order")
         elif code != 0 and "LINEARIZABLE" not in out:
             bad.append(f"{tag}: {name} error")
     return bad
@@ -182,6 +188,7 @@ def run_one(mutant, out):
     if code or code2:
         open(f"{logdir}/build.txt", "w").write(build + wasm)
         return {"name": name, "build": "failed"}
+    notes.clear()
     result = {"name": name, "kind": mutant["kind"] if mutant else "-", "layers": {}}
     for lname, fn in LAYERS:
         t0 = time.time()
@@ -189,6 +196,7 @@ def run_one(mutant, out):
         result["layers"][lname] = {"caught": bool(failures), "why": failures[:3],
                                    "seconds": round(time.time() - t0)}
         print(f"  {name:30} {lname:10} {'CAUGHT' if failures else 'missed':7} {failures[:1]}", flush=True)
+    result["notes"] = list(notes)
     return result
 
 

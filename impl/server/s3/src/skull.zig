@@ -380,13 +380,13 @@ test "the catalog is the namespace's properties, known at compile time" {
 test "the wire: a catalog entry, then each condition value once, then randomness" {
     if (!enabled) return error.SkipZigTest;
 
-    // Stand in for the agent: listen where the program will look.
-    var dir = testing.tmpDir(.{});
-    defer dir.cleanup();
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const dir_path = try dir.dir.realpath(".", &path_buf);
-    var sock_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const sock_path = try std.fmt.bufPrint(&sock_buf, "{s}/libskull.sock", .{dir_path});
+    // Stand in for the agent: listen where the program will look. Under /tmp
+    // rather than the test's own tmpDir: a socket path is capped at 108
+    // bytes, and a tmpDir inside a deeply nested checkout passes that.
+    var sock_buf: [64]u8 = undefined;
+    const sock_path = try std.fmt.bufPrint(&sock_buf, "/tmp/resonate-skull-{d}.sock", .{std.os.linux.getpid()});
+    std.fs.deleteFileAbsolute(sock_path) catch {};
+    defer std.fs.deleteFileAbsolute(sock_path) catch {};
 
     const listener = try std.posix.socket(std.posix.AF.UNIX, std.posix.SOCK.SEQPACKET, 0);
     defer std.posix.close(listener);
