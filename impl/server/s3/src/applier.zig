@@ -24,9 +24,17 @@
 //!   decided in step 2 was decided against state that no longer exists, so the
 //!   whole batch is **re-decided** against a fresh read. Replaying the effects
 //!   would be wrong — the idempotence and version checks have to run again.
-//! * A conflict means the store could not order two conditional writes and will
-//!   not say whether this one landed. The same write is **retried**; if that is
-//!   refused, it falls into the re-decide path.
+//! * A lost answer — a timeout, or a conflict the store could not order — means
+//!   the write may or may not have landed. Deciding again would be wrong: the
+//!   fresh read may hold this very write, and a non-idempotent request decided
+//!   against its own effect answers as if someone else had made it. So the
+//!   **same write is sent again**. Written: it is committed now. Refused:
+//!   either it landed the first time or a rival committed, and the document
+//!   says which — every commit records a random token, and the last few are
+//!   kept. This write's token at the generation it wrote means it landed, and
+//!   the batch is answered with what it decided then; another token there means
+//!   it did not, and the batch is decided again. Too many commits since to
+//!   tell, and the caller is told "may or may not".
 //!
 //! ## The write law
 //!
@@ -304,6 +312,7 @@ const Phase = enum {
     committing,
     disarming,
     waiting,
+    verifying,
 };
 
 const Actor = struct {
@@ -335,6 +344,14 @@ const Actor = struct {
     /// Why the last attempt did not commit: what the caller is told if it was
     /// the last one.
     last_failure: Failure = .contended,
+    /// A commit went unanswered and may have landed. Until that is settled,
+    /// the batch is never decided again: the same write is sent again instead.
+    in_doubt: bool = false,
+    /// The generation the decision was taken against, and the token its commit
+    /// carries. The write landed exactly when the document records `token` at
+    /// `base_generation + 1`.
+    base_generation: u64 = 0,
+    token: u64 = 0,
 
     op: store_mod.Operation = undefined,
     /// Initialized rather than left undefined: `destroy` has to be able to ask
@@ -403,6 +420,7 @@ const Actor = struct {
         }
         self.batch = self.mailbox.take();
         self.attempt = 0;
+        self.in_doubt = false;
         self.load();
     }
 
@@ -457,6 +475,11 @@ const Actor = struct {
     fn on_commit_complete(self: *Actor, op: *store_mod.Operation) void {
         properties.completion_matches_phase.assert(self.phase == .committing, .{ .expected = "committing", .phase = @tagName(self.phase) });
         self.on_committed(op.result);
+    }
+
+    fn on_verify_complete(self: *Actor, op: *store_mod.Operation) void {
+        properties.completion_matches_phase.assert(self.phase == .verifying, .{ .expected = "verifying", .phase = @tagName(self.phase) });
+        self.on_verified(op.result);
     }
 
     fn on_disarm_complete(self: *Actor, _: *store_mod.Operation) void {
@@ -570,6 +593,9 @@ const Actor = struct {
 
         d.clock = @max(loaded_clock, latest);
         d.generation = loaded_generation + 1;
+        self.base_generation = loaded_generation;
+        self.token = self.applier.fresh_token(loaded_generation);
+        d.commits.push(self.token);
         var body = std.ArrayList(u8).init(a);
         d.encode(&body, self.origin) catch return self.fail_batch(503, "out of memory encoding");
         self.body = body.items;
@@ -666,11 +692,14 @@ const Actor = struct {
     fn on_committed(self: *Actor, result: store_mod.Result) void {
         switch (result) {
             .written => |etag| {
+                self.in_doubt = false;
                 self.applier.cache.put(self.origin, self.body, etag);
                 self.applier.commits += 1;
                 self.disarm();
             },
-            .precondition_failed => {
+            // Refused after an earlier attempt went unanswered: that attempt
+            // may be what refused it. Only the document can say.
+            .precondition_failed => if (self.in_doubt) self.verify() else {
                 // Someone else got there first. Everything above was decided
                 // against state that no longer exists, so drop it and decide
                 // again — never replay.
@@ -682,15 +711,16 @@ const Actor = struct {
             .timeout => {
                 // It may have landed. Nothing here guesses which: the cached copy
                 // is dropped, because whether the bucket moved past it is
-                // precisely what is not known, and the batch is decided again
-                // against whatever a fresh read finds. If the write landed, the
-                // re-decision sees it and answers what an idempotent retry
-                // would; if not, it writes again. Either way the caller gets an
-                // answer that is true, and is told "may or may not" only when
-                // every attempt ran out.
+                // precisely what is not known, and the same write is sent again.
+                // Deciding again instead would decide against a read that may
+                // hold this write, and a request that is not idempotent —
+                // task.create — would then answer 409 for a task it created
+                // itself. The caller is told "may or may not" only when every
+                // attempt ran out.
                 self.applier.cache.invalidate(self.origin);
                 self.applier.timeouts += 1;
                 properties.commit_timed_out.check(true, .{});
+                self.in_doubt = true;
                 self.retry(.timeout);
             },
             else => self.fail_batch(500, "the store answered a write with a read's result"),
@@ -722,11 +752,66 @@ const Actor = struct {
         // handing control back to the applier has to hold the applier, not the
         // actor.
         const applier = self.applier;
-        // A retry is always a re-decision: the only write failure that comes
-        // back here is a refused precondition, and what was decided against the
-        // old version is void.
-        self.load();
+        // A write that may have landed is sent again as it was. Anything else
+        // is decided again: what was decided against the old version is void.
+        if (self.in_doubt) self.commit() else self.load();
         applier.drain();
+    }
+
+    /// Read the document to learn whether the write in doubt landed.
+    fn verify(self: *Actor) void {
+        const key = self.applier.keys.doc_key(&self.key, self.origin) catch
+            return self.fail_batch(503, "out of memory");
+        self.phase = .verifying;
+        self.op = .{
+            .kind = .get,
+            .key = key,
+            .precondition = .none,
+            .arena = self.scratch.allocator(),
+        };
+        self.op.listen(*Actor, self, on_verify_complete);
+        self.applier.store.submit(&self.op);
+    }
+
+    fn on_verified(self: *Actor, result: store_mod.Result) void {
+        switch (result) {
+            .found => |f| {
+                var found = Doc.decode(self.applier.allocator, f.body, self.origin) catch |e| {
+                    if (e != error.OutOfMemory) properties.document_decodes.check(false, .{ .origin = self.origin, .@"error" = @errorName(e) });
+                    return self.fail_batch(500, "the document could not be read back");
+                };
+                defer found.deinit();
+                const recorded = found.commits.at(found.generation, self.base_generation + 1);
+                if (recorded == self.token) {
+                    // It landed. The answers decided then are the true ones —
+                    // its linearization point is that write — whatever has
+                    // been committed on top of it since.
+                    properties.commit_recognized.check(true, .{});
+                    self.in_doubt = false;
+                    self.applier.cache.put(self.origin, f.body, f.etag);
+                    self.applier.commits += 1;
+                    return self.disarm();
+                }
+                // Too many commits since to see that far back: whether it
+                // landed is not known, and the caller is told exactly that.
+                if (recorded == null and found.generation > self.base_generation) {
+                    properties.store_never_answered.reached(.{ .origin = self.origin });
+                    return self.fail_batch(503, store_mod.timeout_message);
+                }
+            },
+            // Gone: whatever is there now, it is not this write.
+            .not_found => {},
+            // Still nothing known: send the write again, and ask again if that
+            // is refused.
+            .timeout => return self.retry(.timeout),
+            else => return self.fail_batch(500, "the store answered a read with a write's result"),
+        }
+        // A rival committed instead, and this write can no longer land: the
+        // version it was conditional on is gone for good. Decide again.
+        self.in_doubt = false;
+        self.applier.contentions += 1;
+        properties.commit_contended.check(true, .{});
+        self.retry(.contended);
     }
 
     fn disarm(self: *Actor) void {
@@ -969,6 +1054,14 @@ pub const Applier = struct {
             // Zero is "no deadline armed", so it is not a token.
             if (token != 0) return token;
         }
+    }
+
+    /// The token a commit records in the document, by which its writer knows
+    /// it again after a lost answer. Random, so no rival writes the same one;
+    /// without a random source there are no rivals, and the next generation is
+    /// unique enough.
+    pub fn fresh_token(self: *Applier, loaded_generation: u64) u64 {
+        return self.fresh_arm(loaded_generation);
     }
 
     pub fn backoff_ms(self: *Applier, attempt: u32) i64 {
@@ -1516,14 +1609,17 @@ test "a write that landed under a lost acknowledgement is answered, once" {
     h.mem.random = &h.rng;
     h.mem.faults.lost_ack_percent = 100;
 
-    // The write lands and the store says nothing. The core decides again
-    // against a fresh read, finds its own write there, and answers what is
-    // true — without writing it a second time.
+    // The write lands and the store says nothing. The core sends the same
+    // write again, which is refused — the first one moved the document past
+    // the version it is conditional on — reads the document, finds its own
+    // token there, and answers what it decided. One write landed, not two.
     const first = try h.call("promise.create", "{\"id\":\"o:a\",\"timeoutAt\":9000000000000}");
     try testing.expectEqual(@as(i32, 200), first.status);
     try testing.expect(std.mem.indexOf(u8, first.data, "\"createdAt\":1000000000") != null);
     try testing.expectEqual(@as(u64, 1), h.applier.timeouts);
-    try testing.expectEqual(@as(u64, 1), h.mem.puts);
+    try testing.expectEqual(@as(u64, 1), h.applier.commits);
+    try testing.expectEqual(@as(u64, 0), h.applier.contentions);
+    try testing.expectEqual(@as(u64, 2), h.mem.puts);
 
     // And a caller's own retry says the same.
     h.mem.faults.lost_ack_percent = 0;

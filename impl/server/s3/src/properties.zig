@@ -18,8 +18,12 @@ pub const document_decodes = skull.Always("every document read from the store de
 /// A commit lost a race to another writer and was decided again.
 pub const commit_contended = skull.Sometimes("a commit lost a race and was decided again");
 
-/// The store did not answer a commit, and the core decided again.
-pub const commit_timed_out = skull.Sometimes("a commit the store did not answer was decided again");
+/// The store did not answer a commit, and the same write was sent again.
+pub const commit_timed_out = skull.Sometimes("a commit the store did not answer was sent again");
+
+/// A commit whose answer was lost was found in the document by its token, and
+/// its batch answered with what it decided.
+pub const commit_recognized = skull.Sometimes("a commit whose answer was lost was recognized by its token");
 
 /// The deadline queue was rebuilt from the bucket at startup.
 pub const deadlines_seeded = skull.Reachable("the deadline queue was seeded from the store");

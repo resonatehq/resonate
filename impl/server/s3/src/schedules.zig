@@ -86,6 +86,8 @@ pub const Request = struct {
         firing,
         /// Backing off before reading again, after the store did not answer.
         waiting,
+        /// Reading the schedule back to learn whether a write in doubt landed.
+        verifying,
         done,
     } = .start,
     service: *Service = undefined,
@@ -114,6 +116,14 @@ pub const Request = struct {
     /// How many times this request has been re-decided, after contention or a
     /// store that did not answer.
     attempt: u32 = 0,
+    /// A commit went unanswered and may have landed: until that is settled the
+    /// same write is sent again rather than decided again. As in the applier.
+    in_doubt: bool = false,
+    /// The generation this decision was taken against, and the token its commit
+    /// records: it landed exactly when the schedule holds `token` at
+    /// `base_generation + 1`.
+    base_generation: u64 = 0,
+    token: u64 = 0,
 };
 
 /// How many times a schedule is re-read — after contention, or after the store
@@ -205,6 +215,7 @@ pub const Service = struct {
             .loading => self.on_loaded(req, op.result),
             .arming => self.on_armed(req, op.result),
             .committing => self.on_committed(req, op.result),
+            .verifying => self.on_verified(req, op.result),
             .disarming => self.finish_ok(req),
 
             else => unreachable,
@@ -319,6 +330,10 @@ pub const Service = struct {
 
     fn build_and_commit(self: *Service, req: *Request) void {
         const fields = req.create_fields.?;
+        // A tombstone being reclaimed, or nothing. The new schedule continues its
+        // count: a counter that restarted would hand a generation — and with it a
+        // commit token's place — to two different writes.
+        const prior = req.sched;
         // The document's arena hangs off the request's, so it goes when the
         // request does and there is nothing to remember to free.
         var sched = ScheduleDoc.init(req.arena.allocator());
@@ -332,6 +347,10 @@ pub const Service = struct {
         sched.created_at = req.now;
         sched.next_run_at = cron.compute_next(fields.cron, req.now);
         sched.last_run_at = null;
+        if (prior) |old| {
+            sched.generation = old.generation;
+            sched.commits = old.commits;
+        }
         req.sched = sched;
 
         // The version read, if any: reclaiming a tombstone replaces an object that
@@ -349,7 +368,7 @@ pub const Service = struct {
         // that armed and then failed to commit cannot hand its name to the retry
         // that follows it. See `Applier.fresh_arm`, which this mirrors.
         req.old_timer_generation = sched.timer_generation;
-        sched.generation += 1;
+        self.stamp(req, sched);
         const moved = req.new_next_run_at != req.old_next_run_at or req.old_next_run_at == 0;
         if (moved) sched.timer_generation = self.applier.fresh_arm(sched.generation);
 
@@ -384,15 +403,25 @@ pub const Service = struct {
         }
     }
 
+    /// The next generation, and the token that will name this write in it.
+    fn stamp(self: *Service, req: *Request, sched: *doc_mod.ScheduleDoc) void {
+        req.base_generation = sched.generation;
+        req.token = self.applier.fresh_token(sched.generation);
+        sched.generation += 1;
+        sched.commits.push(req.token);
+    }
+
     /// The store did not answer. The core decides what that means for this
-    /// request — nothing, yet — and starts it over from a fresh read, after a
-    /// backoff, until the attempts run out. Only then is the caller told "may or
-    /// may not".
+    /// request — nothing, yet — and after a backoff either sends a write in
+    /// doubt again as it was, or starts over from a fresh read, until the
+    /// attempts run out. Only then is the caller told "may or may not".
     fn retry_after_timeout(self: *Service, req: *Request) void {
         req.attempt += 1;
         if (req.attempt > max_cas_retries) return fail(req, 503, store_mod.timeout_message);
-        req.sched = null;
-        req.etag = null;
+        if (!req.in_doubt) {
+            req.sched = null;
+            req.etag = null;
+        }
         req.phase = .waiting;
         const at = self.applier.clock.now_ms() + self.applier.backoff_ms(req.attempt);
         self.waiting.append(self.allocator, req) catch return fail(req, 503, "out of memory");
@@ -409,7 +438,7 @@ pub const Service = struct {
                 break;
             }
         }
-        self.load(req);
+        if (req.in_doubt) self.commit(req) else self.load(req);
     }
 
     fn commit(self: *Service, req: *Request) void {
@@ -430,54 +459,109 @@ pub const Service = struct {
     fn on_committed(self: *Service, req: *Request, result: store_mod.Result) void {
         switch (result) {
             .written => {
-                if (req.kind == .delete) {
-                    // The tombstone landed, so this caller is the one that deleted
-                    // it — and that is the whole of a delete. The object stays: it
-                    // carries the write counter that names this schedule's timer
-                    // objects, and a counter that restarted would let one
-                    // incarnation remove another's deadline. The timer object it
-                    // leaves behind is collected when it fires into a schedule that
-                    // is not there, which is the same repair the origin documents
-                    // rely on.
-                    return self.finish_empty(req);
-                }
-                if (self.deadline_hook) |hook| {
-                    hook(self.deadline_context, req.id, req.new_next_run_at, req.sched.?.timer_generation);
-                }
-                self.disarm(req);
+                req.in_doubt = false;
+                self.landed(req);
             },
-            .precondition_failed => {
-                req.attempt += 1;
-                if (req.attempt > max_cas_retries) {
-                    return fail(req, 503, "the schedule was contended for too long");
-                }
-                switch (req.kind) {
-                    // Someone else wrote first, so this decision was made against
-                    // state that no longer exists: read again and decide again.
-                    // Never turn it into a different operation — a create that
-                    // found the schedule deleted in between still has a schedule
-                    // to create, and answering "not found" to a create is an
-                    // answer no sequential execution could give.
-                    // A fire is no different. "Whoever moved it did this round's
-                    // work" is only true if they moved it *past* this instant, and
-                    // the only way to know is to read again — the promises are
-                    // already created, and creating them again is a no-op, so
-                    // redoing the round is free and leaving the schedule
-                    // un-advanced is not: a tick that answered would have fired a
-                    // run nothing recorded.
-                    .create, .delete, .fire => {
-                        req.sched = null;
-                        req.etag = null;
-                        self.load(req);
-                    },
-                    else => fail(req, 409, "the schedule changed while it was being written"),
-                }
+            // Refused after an earlier attempt went unanswered: that attempt may
+            // be what refused it. Only the schedule can say.
+            .precondition_failed => if (req.in_doubt) self.verify(req) else self.refused(req),
+            // It may have landed. Deciding again would decide against a read
+            // that may hold this very write — a delete would find its own
+            // tombstone and answer 404 — so the same write is sent again.
+            .timeout => {
+                req.in_doubt = true;
+                self.retry_after_timeout(req);
             },
-            // It may have landed. Read again and decide again, exactly as after
-            // a refused precondition: if it landed, the re-decision sees it.
-            .timeout => self.retry_after_timeout(req),
             else => fail(req, 500, "the store answered a write with something else"),
         }
+    }
+
+    /// This request's write is in the store.
+    fn landed(self: *Service, req: *Request) void {
+        if (req.kind == .delete) {
+            // The tombstone landed, so this caller is the one that deleted
+            // it — and that is the whole of a delete. The object stays: it
+            // carries the write counter that names this schedule's timer
+            // objects, and a counter that restarted would let one
+            // incarnation remove another's deadline. The timer object it
+            // leaves behind is collected when it fires into a schedule that
+            // is not there, which is the same repair the origin documents
+            // rely on.
+            return self.finish_empty(req);
+        }
+        if (self.deadline_hook) |hook| {
+            hook(self.deadline_context, req.id, req.new_next_run_at, req.sched.?.timer_generation);
+        }
+        self.disarm(req);
+    }
+
+    /// Someone else's write is in the store instead of this one.
+    fn refused(self: *Service, req: *Request) void {
+        req.attempt += 1;
+        if (req.attempt > max_cas_retries) {
+            return fail(req, 503, "the schedule was contended for too long");
+        }
+        switch (req.kind) {
+            // Someone else wrote first, so this decision was made against
+            // state that no longer exists: read again and decide again.
+            // Never turn it into a different operation — a create that
+            // found the schedule deleted in between still has a schedule
+            // to create, and answering "not found" to a create is an
+            // answer no sequential execution could give.
+            // A fire is no different. "Whoever moved it did this round's
+            // work" is only true if they moved it *past* this instant, and
+            // the only way to know is to read again — the promises are
+            // already created, and creating them again is a no-op, so
+            // redoing the round is free and leaving the schedule
+            // un-advanced is not: a tick that answered would have fired a
+            // run nothing recorded.
+            .create, .delete, .fire => {
+                req.sched = null;
+                req.etag = null;
+                self.load(req);
+            },
+            else => fail(req, 409, "the schedule changed while it was being written"),
+        }
+    }
+
+    /// Read the schedule back to learn whether the write in doubt landed.
+    fn verify(self: *Service, req: *Request) void {
+        const key = self.keys.sched_key(&req.key_buf, req.id) catch
+            return fail(req, 503, "out of memory");
+        req.phase = .verifying;
+        req.op = .{
+            .kind = .get,
+            .key = key,
+            .arena = req.arena.allocator(),
+        };
+        req.op.listen(*Request, req, on_complete);
+        self.store.submit(&req.op);
+    }
+
+    fn on_verified(self: *Service, req: *Request, result: store_mod.Result) void {
+        switch (result) {
+            .found => |f| {
+                const found = doc_mod.ScheduleDoc.decode(req.arena.allocator(), f.body, req.id) catch
+                    return fail(req, 500, "the schedule object is corrupt");
+                const recorded = found.commits.at(found.generation, req.base_generation + 1);
+                if (recorded == req.token) {
+                    properties.commit_recognized.check(true, .{});
+                    req.in_doubt = false;
+                    return self.landed(req);
+                }
+                // Too many writes since to see that far back.
+                if (recorded == null and found.generation > req.base_generation) {
+                    return fail(req, 503, store_mod.timeout_message);
+                }
+            },
+            .not_found => {},
+            // Still nothing known: send the write again.
+            .timeout => return self.retry_after_timeout(req),
+            else => return fail(req, 500, "the store answered a read with something else"),
+        }
+        // A rival's write is there, and this one can no longer land.
+        req.in_doubt = false;
+        self.refused(req);
     }
 
     fn disarm(self: *Service, req: *Request) void {
@@ -518,7 +602,7 @@ pub const Service = struct {
         req.old_next_run_at = sched.next_run_at;
         req.old_timer_generation = sched.timer_generation;
         req.new_next_run_at = sched.next_run_at;
-        sched.generation += 1;
+        self.stamp(req, sched);
 
         const a = req.arena.allocator();
         var body = std.ArrayList(u8).init(a);
@@ -813,6 +897,7 @@ const Fixture = struct {
     }
 
     fn destroy(self: *Fixture) void {
+        self.service.deinit();
         self.applier.deinit();
         self.sender.deinit();
         self.mem.deinit();
@@ -971,6 +1056,53 @@ test "a schedule is created once, read back, and deleted" {
     try testing.expectEqual(@as(i32, 404), (try f.call(&arena, "schedule.get", "{\"id\":\"s0\"}")).status);
     try testing.expectEqual(@as(i32, 404), (try f.call(&arena, "schedule.delete", "{\"id\":\"s0\"}")).status);
     // A search skips the tombstone; that is `scan`'s to prove.
+}
+
+test "a delete whose tombstone landed unacknowledged is the delete" {
+    // The tombstone lands and its acknowledgement is lost. Reading again and
+    // deciding again would find the tombstone and answer 404 — "there was
+    // nothing to delete" — to the request that deleted it. The write is sent
+    // again instead, refused, and recognized by its token.
+    const f = try Fixture.create(testing.allocator);
+    defer f.destroy();
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    const created = try f.call(&arena, "schedule.create",
+        \\{"id":"s0","cron":"* * * * *","promiseId":"p","promiseTimeout":60000,"promiseTags":{"resonate:target":"http://w"}}
+    );
+    try testing.expectEqual(@as(i32, 200), created.status);
+
+    var key_buf = std.ArrayList(u8).init(arena.allocator());
+    f.mem.lose_ack_once = try f.keys.sched_key(&key_buf, "s0");
+    const deleted = try f.call(&arena, "schedule.delete", "{\"id\":\"s0\"}");
+    try testing.expect(f.mem.lose_ack_once == null); // the fault was used
+    try testing.expectEqual(@as(i32, 200), deleted.status);
+    try testing.expectEqual(@as(i32, 404), (try f.call(&arena, "schedule.get", "{\"id\":\"s0\"}")).status);
+}
+
+test "a schedule created over a tombstone continues its generation" {
+    // A counter that restarted would give the new schedule's first write the
+    // generation of an old one, and a token recorded there would be read as
+    // belonging to the wrong write.
+    const f = try Fixture.create(testing.allocator);
+    defer f.destroy();
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const create =
+        \\{"id":"s0","cron":"* * * * *","promiseId":"p","promiseTimeout":60000,"promiseTags":{"resonate:target":"http://w"}}
+    ;
+    try testing.expectEqual(@as(i32, 200), (try f.call(&arena, "schedule.create", create)).status);
+    try testing.expectEqual(@as(i32, 200), (try f.call(&arena, "schedule.delete", "{\"id\":\"s0\"}")).status);
+    try testing.expectEqual(@as(i32, 200), (try f.call(&arena, "schedule.create", create)).status);
+
+    var key_buf = std.ArrayList(u8).init(a);
+    const key = try f.keys.sched_key(&key_buf, "s0");
+    const obj = f.mem.objects.get(key).?;
+    const sched = try doc_mod.ScheduleDoc.decode(a, obj.body, "s0");
+    try testing.expectEqual(@as(u64, 3), sched.generation);
+    try testing.expectEqual(@as(usize, 3), sched.commits.tokens.len);
 }
 
 test "a schedule is refused when it does not say what it would run" {

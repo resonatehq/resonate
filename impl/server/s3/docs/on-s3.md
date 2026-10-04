@@ -64,7 +64,7 @@ Three kinds of answer, and only three:
 |---|---|---|
 | data — `200`, `304`, `404`, `204` | it happened, and this is what is there | carry on |
 | `412` precondition failed | it did not land, and the state has moved | **re-decide**: read again, decide again, never replay |
-| anything else | nothing — it may or may not have landed | **decide again** from a fresh read, after a backoff; only when the attempts run out, tell the caller 503, *"may or may not have taken effect"* |
+| anything else | nothing — it may or may not have landed | **send the same write again**, after a backoff; if that is refused, read the object and look for this write's token; only when the attempts run out, or the token has scrolled out of the window, tell the caller 503, *"may or may not have taken effect"* |
 
 "Anything else" is a `timeout`, and it is deliberately one outcome with no
 reason attached: a deadline (every request has one), a reset, a body cut off
@@ -74,14 +74,27 @@ knowing exactly the same thing — nothing — so none is allowed to tell it mor
 Handling that one case correctly is handling every failure correctly, including
 the ones nobody has listed.
 
-The core handles it by deciding again, the same way it handles a lost race: drop
-the cached copy, read, decide, write. If the write that timed out had landed,
-the fresh read shows it, and the decision answers what an idempotent retry
-would — without writing it twice. If it had not, it is written now. The caller
-sees a definite answer either way, and "may or may not" only once
-`--cas-retries` attempts have all gone unanswered. A `409` used to be retried here as "the same write
-again"; that assumed it had not landed, which is the one thing a `409` does not
-say.
+The core does not decide again. It used to — drop the cached copy, read,
+decide, write — on the theory that if the write had landed, the fresh read
+would show it and the decision would answer what an idempotent retry would. Not
+every operation is idempotent. A `task.create` decided against its own landed
+write finds the task acquired and answers `409`, "somebody else holds it", for a
+task it created; a `schedule.delete` finds its own tombstone and answers `404`.
+Both are answers no sequential execution gives, and the skulld campaign found the
+first one across a RustFS partition.
+
+So the same write is sent again, conditional on the same version. Written: it is
+committed now. Refused: either the first attempt landed, or a rival committed
+first — and the object says which. Every commit records a random token in the
+object's header (`"cm"`, the last 16, oldest first, the last one belonging to the
+current generation), so the writer reads the object back and looks at the token
+recorded for the generation it wrote. Its own token: the write landed, and the
+caller gets the answer decided then — the linearization point was that write, so
+that answer is the true one whatever has been committed on top since. Another
+token: a rival won, this write can never land, and the batch is decided again
+like any lost race. More than 16 commits since: whether it landed is not known,
+and the caller is told exactly that. "May or may not" also comes once
+`--cas-retries` attempts have all gone unanswered.
 
 Re-deciding rather than replaying is the important one. A decision made against
 state that no longer exists is not a decision that can be re-applied: the promise

@@ -373,6 +373,10 @@ pub const Doc = struct {
     /// not have to be rewritten.
     timer_generation: u64 = 0,
 
+    /// Which commits wrote the last few generations. Excluded from the write
+    /// law, like `generation`.
+    commits: CommitLog = .{},
+
     pub fn init(child: std.mem.Allocator) Doc {
         return .{ .arena = std.heap.ArenaAllocator.init(child) };
     }
@@ -554,6 +558,7 @@ pub const Doc = struct {
             try out.appendSlice(",\"tgn\":");
             try out.writer().print("{d}", .{self.timer_generation});
         }
+        try self.commits.encode(out);
         try out.append('}');
 
         for (self.promises.items) |p| {
@@ -697,6 +702,7 @@ pub const Doc = struct {
                     const tg = v.get_i64("tgn") orelse break :blk 0;
                     break :blk if (tg < 0) 0 else @intCast(tg);
                 };
+                doc.commits = try CommitLog.decode(v);
                 seen_header = true;
                 continue;
             }
@@ -825,8 +831,66 @@ pub const Doc = struct {
         fresh.generation = self.generation;
         fresh.timer_at = self.timer_at;
         fresh.timer_generation = self.timer_generation;
+        fresh.commits = self.commits;
         self.deinit();
         self.* = fresh;
+    }
+};
+
+// ── Commit tokens ─────────────────────────────────────────────────────────────
+
+/// The tokens of the last few commits to an object, oldest first: the last one
+/// wrote the object's current generation, the one before it the generation
+/// before that, and so on.
+///
+/// How a writer whose acknowledgement was lost learns whether its write landed.
+/// A generation alone cannot say: a rival that decided against the same version
+/// writes the same generation. A random token can, as long as the commit is
+/// still in the window — and when it is not, the writer knows that it does not
+/// know.
+pub const CommitLog = struct {
+    pub const capacity = 16;
+
+    tokens: std.BoundedArray(u64, capacity) = .{},
+
+    /// Record a commit's token, forgetting the oldest one past the window.
+    pub fn push(self: *CommitLog, token: u64) void {
+        if (self.tokens.len == capacity) _ = self.tokens.orderedRemove(0);
+        self.tokens.appendAssumeCapacity(token);
+    }
+
+    /// The token of the commit that wrote generation `gen` of an object now at
+    /// `current`, or null when the window does not reach back to it — or never
+    /// did: an object written before tokens existed has none.
+    pub fn at(self: *const CommitLog, current: u64, gen: u64) ?u64 {
+        if (gen == 0 or gen > current) return null;
+        const back = current - gen;
+        if (back >= self.tokens.len) return null;
+        return self.tokens.get(self.tokens.len - 1 - @as(usize, @intCast(back)));
+    }
+
+    /// `,"cm":[...]`, or nothing at all when empty.
+    fn encode(self: *const CommitLog, out: *std.ArrayList(u8)) !void {
+        if (self.tokens.len == 0) return;
+        try out.appendSlice(",\"cm\":[");
+        for (self.tokens.constSlice(), 0..) |t, i| {
+            if (i > 0) try out.append(',');
+            try out.writer().print("{d}", .{t});
+        }
+        try out.append(']');
+    }
+
+    fn decode(v: json.Value) Error!CommitLog {
+        var log = CommitLog{};
+        const cm = v.get("cm") orelse return log;
+        const arr = cm.as_array() orelse return error.Corrupt;
+        if (arr.len > capacity) return error.Corrupt;
+        for (arr) |item| {
+            const t = item.as_i64() orelse return error.Corrupt;
+            if (t <= 0) return error.Corrupt;
+            log.tokens.appendAssumeCapacity(@intCast(t));
+        }
+        return log;
     }
 };
 
@@ -854,6 +918,8 @@ pub const ScheduleDoc = struct {
     /// deadline.
     generation: u64 = 0,
     timer_generation: u64 = 0,
+    /// Which commits wrote the last few generations; see `CommitLog`.
+    commits: CommitLog = .{},
 
     /// A schedule that has been deleted, but whose object has not gone yet.
     ///
@@ -902,6 +968,7 @@ pub const ScheduleDoc = struct {
             try out.writer().print("{d}", .{lr});
         }
         if (self.deleted) try out.appendSlice(",\"del\":true");
+        try self.commits.encode(out);
         if (!self.promise_param.is_empty()) {
             try out.appendSlice(",\"pa\":");
             try Doc.encode_value(out, self.promise_param);
@@ -937,6 +1004,7 @@ pub const ScheduleDoc = struct {
             break :blk if (g < 0) 0 else @intCast(g);
         };
         sched.last_run_at = v.get_i64("lr");
+        sched.commits = try CommitLog.decode(v);
         sched.deleted = blk: {
             const del = v.get("del") orelse break :blk false;
             break :blk del.as_bool() orelse false;
@@ -1161,4 +1229,45 @@ test "the timer generation is part of the document and part of the write law" {
     var back = try Doc.decode(testing.allocator, buf.items, "o");
     defer back.deinit();
     try testing.expectEqual(@as(u64, 4), back.timer_generation);
+}
+
+test "commit tokens round-trip and name the generation that wrote them" {
+    var d = Doc.init(testing.allocator);
+    defer d.deinit();
+    // No tokens: nothing is known about any generation.
+    d.generation = 5;
+    try testing.expectEqual(@as(?u64, null), d.commits.at(d.generation, 5));
+
+    const n = CommitLog.capacity;
+    var i: u64 = 1;
+    while (i <= n + 3) : (i += 1) {
+        d.generation = i;
+        d.commits.push(1000 + i);
+    }
+    const last = n + 3;
+    try testing.expectEqual(@as(?u64, 1000 + last), d.commits.at(last, last));
+    try testing.expectEqual(@as(?u64, 1000 + last - n + 1), d.commits.at(last, last - n + 1));
+    // Past the window, and past the present: unknown rather than wrong.
+    try testing.expectEqual(@as(?u64, null), d.commits.at(last, last - n));
+    try testing.expectEqual(@as(?u64, null), d.commits.at(last, last + 1));
+
+    var buf = std.ArrayList(u8).init(testing.allocator);
+    defer buf.deinit();
+    try d.encode(&buf, "x");
+    var back = try Doc.decode(testing.allocator, buf.items, "x");
+    defer back.deinit();
+    try testing.expectEqualSlices(u64, d.commits.tokens.constSlice(), back.commits.tokens.constSlice());
+    try testing.expectEqual(@as(?u64, 1000 + last), back.commits.at(back.generation, last));
+}
+
+test "a document without commit tokens still decodes, and stays unchanged on the wire" {
+    var d = Doc.init(testing.allocator);
+    defer d.deinit();
+    var buf = std.ArrayList(u8).init(testing.allocator);
+    defer buf.deinit();
+    try d.encode(&buf, "x");
+    try testing.expect(std.mem.indexOf(u8, buf.items, "\"cm\"") == null);
+    var back = try Doc.decode(testing.allocator, buf.items, "x");
+    defer back.deinit();
+    try testing.expectEqual(@as(usize, 0), back.commits.tokens.len);
 }
