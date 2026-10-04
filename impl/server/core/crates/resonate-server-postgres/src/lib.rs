@@ -129,8 +129,21 @@ impl PostgresEngine {
             .max_connections(pool_size)
             .after_connect(|conn, _meta| {
                 Box::pin(async move {
+                    // Generic plans, always. Every statement here is
+                    // prepared once per connection and selects through keys
+                    // whose plan does not depend on the values bound, so a
+                    // custom plan buys nothing — but Postgres re-plans the
+                    // first five executions of every statement and keeps
+                    // re-planning any whose generic estimate looks worse,
+                    // and planning one of these CTEs costs a millisecond
+                    // where executing it costs a tenth of that. Every plan
+                    // this forces was read with EXPLAIN against a table of
+                    // millions of rows; none of them scans it.
                     sqlx::query("SET search_path TO resonate, public")
-                        .execute(conn)
+                        .execute(&mut *conn)
+                        .await?;
+                    sqlx::query("SET plan_cache_mode TO force_generic_plan")
+                        .execute(&mut *conn)
                         .await?;
                     Ok(())
                 })
@@ -2783,29 +2796,39 @@ WITH expired AS (
 expired_snap AS (
   SELECT id, listeners FROM promises WHERE :SELECTION
 ),
-fulfilled AS (
-  SELECT id FROM expired WHERE task_state IS NOT NULL AND task_state <> 'fulfilled'
+-- Every set below is an array computed once, so each `= ANY(...)` and `&&`
+-- is an InitPlan parameter (the `::text[]` is what makes `ANY((SELECT ..))`
+-- the array form rather than the subquery form) the planner can push into an index: the fan-out
+-- reaches the rows it names through the primary key and the GIN index on
+-- `callbacks`, and never scans the table. When nothing expired, every array
+-- is empty and the statement touches no row at all.
+expired_ids AS (
+  SELECT COALESCE(array_agg(id), '{}') AS ids FROM expired
 ),
 fulfilled_ids AS (
-  SELECT COALESCE(array_agg(id), '{}') AS ids FROM fulfilled
+  SELECT COALESCE(array_agg(id), '{}') AS ids FROM expired
+  WHERE task_state IS NOT NULL AND task_state <> 'fulfilled'
 ),
 -- marked_ready, aggregated: one awaiter may be woken by several expiring promises
 ready_agg AS (
   SELECT aw AS awaiter, array_agg(DISTINCT e.id) AS awaited_ids
   FROM expired e CROSS JOIN LATERAL unnest(e.callbacks) aw
-  WHERE aw NOT IN (SELECT id FROM fulfilled)
+  WHERE NOT (aw = ANY((SELECT ids FROM fulfilled_ids)::text[]))
   GROUP BY aw
+),
+ready_ids AS (
+  SELECT COALESCE(array_agg(awaiter), '{}') AS ids FROM ready_agg
 ),
 suspended_awaiters AS (
   SELECT p.id, p.task_version, p.target FROM promises p
-  WHERE p.task_state = 'suspended' AND p.id IN (SELECT awaiter FROM ready_agg)
+  WHERE p.id = ANY((SELECT ids FROM ready_ids)::text[]) AND p.task_state = 'suspended'
 ),
 updated_expired AS (
   UPDATE promises p SET
     state = CASE WHEN p.is_timer THEN 'resolved' ELSE 'rejected_timedout' END,
     settled_at = p.timeout_at,
     :SELF_SET
-  WHERE p.id IN (SELECT id FROM expired)
+  WHERE p.id = ANY((SELECT ids FROM expired_ids)::text[])
   RETURNING p.*
 ),
 emit_unblock AS (
@@ -2817,22 +2840,24 @@ emit_unblock AS (
 ),
 fanout AS (
   UPDATE promises q SET
-    callbacks = (SELECT COALESCE(array_agg(b), '{}') FROM unnest(q.callbacks) b
-                WHERE b NOT IN (SELECT id FROM fulfilled)),
+    callbacks = CASE WHEN q.callbacks && (SELECT ids FROM fulfilled_ids)
+                  THEN (SELECT COALESCE(array_agg(b), '{}') FROM unnest(q.callbacks) b
+                        WHERE NOT (b = ANY((SELECT ids FROM fulfilled_ids)::text[])))
+                  ELSE q.callbacks END,
     resumes = q.resumes || COALESCE((SELECT r.awaited_ids FROM ready_agg r WHERE r.awaiter = q.id), '{}'),
-    task_state = CASE WHEN q.task_state = 'suspended' AND EXISTS (SELECT 1 FROM ready_agg r WHERE r.awaiter = q.id)
+    task_state = CASE WHEN q.task_state = 'suspended' AND q.id = ANY((SELECT ids FROM ready_ids)::text[])
                    THEN 'pending' ELSE q.task_state END,
-    retry_timeout_at = CASE WHEN q.task_state = 'suspended' AND EXISTS (SELECT 1 FROM ready_agg r WHERE r.awaiter = q.id)
+    retry_timeout_at = CASE WHEN q.task_state = 'suspended' AND q.id = ANY((SELECT ids FROM ready_ids)::text[])
                    THEN :TIME + :TRT ELSE q.retry_timeout_at END,
-    lease_timeout_at = CASE WHEN q.task_state = 'suspended' AND EXISTS (SELECT 1 FROM ready_agg r WHERE r.awaiter = q.id)
+    lease_timeout_at = CASE WHEN q.task_state = 'suspended' AND q.id = ANY((SELECT ids FROM ready_ids)::text[])
                    THEN NULL ELSE q.lease_timeout_at END,
-    ttl = CASE WHEN q.task_state = 'suspended' AND EXISTS (SELECT 1 FROM ready_agg r WHERE r.awaiter = q.id)
+    ttl = CASE WHEN q.task_state = 'suspended' AND q.id = ANY((SELECT ids FROM ready_ids)::text[])
                    THEN NULL ELSE q.ttl END,
-    pid = CASE WHEN q.task_state = 'suspended' AND EXISTS (SELECT 1 FROM ready_agg r WHERE r.awaiter = q.id)
+    pid = CASE WHEN q.task_state = 'suspended' AND q.id = ANY((SELECT ids FROM ready_ids)::text[])
                    THEN NULL ELSE q.pid END
-  WHERE q.id NOT IN (SELECT id FROM expired)
-    AND ( EXISTS (SELECT 1 FROM ready_agg r WHERE r.awaiter = q.id)
+  WHERE ( q.id = ANY((SELECT ids FROM ready_ids)::text[])
           OR q.callbacks && (SELECT ids FROM fulfilled_ids) )
+    AND NOT (q.id = ANY((SELECT ids FROM expired_ids)::text[]))
   RETURNING q.id
 ),
 emit_resume AS (
@@ -3231,20 +3256,22 @@ impl PostgresDb<'_> {
         limit: i64,
         now: i64,
     ) -> StorageResult<Vec<PromiseRecord>> {
-        let rows = rt_block_on(
-            sqlx::query(&format!(
-                "SELECT {P_COLS} FROM promises
-                 WHERE {}
-                   AND ($1::jsonb IS NULL OR tags @> $1::jsonb)
-                   AND ($2::text IS NULL OR id > $2)
-                 ORDER BY id ASC LIMIT $3",
-                resonate_sql::effective_state_sql(state, now)
-            ))
-            .bind(tags)
-            .bind(cursor)
-            .bind(limit)
-            .fetch_all(self.tx().as_mut()),
-        )?;
+        // `now` is bound, never formatted in: a statement whose text changed
+        // with the clock was a new prepared statement on every call, and each
+        // one pushed a hot statement out of the connection's cache. Only the
+        // states that depend on the deadline mention `$4`, so it is bound
+        // only when it appears.
+        let sql = format!(
+            "SELECT {P_COLS} FROM promises
+             WHERE {}
+               AND ($1::jsonb IS NULL OR tags @> $1::jsonb)
+               AND ($2::text IS NULL OR id > $2)
+             ORDER BY id ASC LIMIT $3",
+            resonate_sql::effective_state_sql_at(state, "$4::bigint")
+        );
+        let q = sqlx::query(&sql).bind(tags).bind(cursor).bind(limit);
+        let q = if sql.contains("$4") { q.bind(now) } else { q };
+        let rows = rt_block_on(q.fetch_all(self.tx().as_mut()))?;
         Ok(rows
             .iter()
             .map(|row| {
@@ -4201,17 +4228,27 @@ impl PostgresDb<'_> {
     fn upcoming(&self, limit: usize) -> StorageResult<Vec<Scheduled>> {
         let rows = rt_block_on(
             sqlx::query(
+                // Each branch is its own top-N over the index whose key is
+                // `(deadline, id)` and whose predicate is the branch's WHERE,
+                // so each reads at most `$1` index entries in order and the
+                // outer sort merges four short lists. Without the inner
+                // LIMITs Postgres may sort every armed row to keep `$1` of
+                // them — the full read the sweep used to be.
                 "SELECT deadline, kind, id, pid FROM (
-                     SELECT timeout_at AS deadline, 'promise' AS kind, id AS id, NULL::text AS pid
-                       FROM promises WHERE state = 'pending' AND external
+                     (SELECT timeout_at AS deadline, 'promise' AS kind, id, NULL::text AS pid
+                        FROM promises WHERE state = 'pending' AND external
+                        ORDER BY timeout_at, id LIMIT $1)
                      UNION ALL
-                     SELECT retry_timeout_at, 'retry', id, NULL
-                       FROM promises WHERE task_state = 'pending' AND retry_timeout_at IS NOT NULL
+                     (SELECT retry_timeout_at, 'retry', id, NULL
+                        FROM promises WHERE task_state = 'pending' AND retry_timeout_at IS NOT NULL
+                        ORDER BY retry_timeout_at, id LIMIT $1)
                      UNION ALL
-                     SELECT lease_timeout_at, 'lease', id, pid
-                       FROM promises WHERE task_state = 'acquired' AND lease_timeout_at IS NOT NULL
+                     (SELECT lease_timeout_at, 'lease', id, pid
+                        FROM promises WHERE task_state = 'acquired' AND lease_timeout_at IS NOT NULL
+                        ORDER BY lease_timeout_at, id LIMIT $1)
                      UNION ALL
-                     SELECT next_run_at, 'schedule', id, NULL FROM schedules
+                     (SELECT next_run_at, 'schedule', id, NULL FROM schedules
+                        ORDER BY next_run_at, id LIMIT $1)
                  ) d
                  ORDER BY deadline ASC, id ASC
                  LIMIT $1",
@@ -4231,21 +4268,32 @@ impl PostgresDb<'_> {
             .collect())
     }
 
+    /// Schedules due at `time`: every one (`None`, the schedule index walked up
+    /// to `time`), or the named ones through the primary key — two statements
+    /// for the same reason `process_timeouts` has two.
     fn get_expired_schedule_timeouts(
         &self,
         time: i64,
-        only: Option<&str>,
+        only: Option<&[String]>,
     ) -> StorageResult<Vec<(String, i64)>> {
-        let rows = rt_block_on(
-            sqlx::query(
-                "SELECT id, next_run_at FROM schedules
-                 WHERE next_run_at <= $1 AND ($2::text IS NULL OR id = $2)
-                 ORDER BY id",
-            )
-            .bind(time)
-            .bind(only)
-            .fetch_all(self.tx().as_mut()),
-        )?;
+        let rows = match only {
+            None => rt_block_on(
+                sqlx::query(
+                    "SELECT id, next_run_at FROM schedules WHERE next_run_at <= $1 ORDER BY id",
+                )
+                .bind(time)
+                .fetch_all(self.tx().as_mut()),
+            )?,
+            Some(ids) => rt_block_on(
+                sqlx::query(
+                    "SELECT id, next_run_at FROM schedules
+                     WHERE id = ANY($2) AND (next_run_at + 0) <= $1 ORDER BY id",
+                )
+                .bind(time)
+                .bind(ids)
+                .fetch_all(self.tx().as_mut()),
+            )?,
+        };
         Ok(rows
             .iter()
             .map(|r| (r.get::<String, _>("id"), r.get::<i64, _>("next_run_at")))
@@ -4346,68 +4394,84 @@ impl PostgresDb<'_> {
         Ok(())
     }
 
-    // Timeout processing — three sequential statements, as in the multi-table
-    // backend. Statement 1 is the same cascade as `try_timeout`, driven by the
-    // sweep predicate instead of an explicit id list.
-    /// Fire expired timeouts, either all of them or one named.
+    /// Fire expired timeouts, either every one that is due or the ones named.
     ///
-    /// `only` is what makes the precise form precise, and it costs one bound
-    /// parameter: every statement below already selects the rows of one queue
-    /// past their deadline, and `$2` narrows that to a single id. A named
-    /// timeout runs the statement for its own queue and skips the other two,
-    /// so the narrow form is the sweep restricted to one row rather than a
-    /// second implementation of it.
+    /// Two forms of each statement, never one statement with a switch in it.
+    /// `($2::text IS NULL OR id = $2)` reads like one statement, but once a
+    /// prepared statement goes generic Postgres must plan it for both values
+    /// at once, which means it cannot use the primary key: the precise form
+    /// became a range scan over every overdue row of the queue. So the named
+    /// form selects through `id = ANY($2)` — the primary key, one probe per
+    /// id — and the deadline is `timeout_at + 0`, an expression no index
+    /// carries, so the planner is never tempted into the deadline index
+    /// instead. The full form is the deadline index walked up to `$1`, and
+    /// only `debug.tick` asks for it: there is no background sweep.
     ///
-    /// `$2::text IS NULL` is the full sweep. The cast is load-bearing: without
-    /// it Postgres cannot infer the parameter's type in a comparison against
-    /// `NULL`.
-    fn process_timeouts(&self, time: i64, only: Option<&Timeout>) -> StorageResult<()> {
+    /// A batch of named timeouts is one statement per queue, not one
+    /// transaction per timeout, so a burst of deadlines coming due together
+    /// costs three round trips rather than three per deadline.
+    fn process_timeouts(&self, time: i64, only: Option<&[Timeout]>) -> StorageResult<()> {
         let trt = self.task_retry_timeout;
-        let selected = |kind: &str| match only {
-            None => Some(None::<String>),
-            Some(t) if t.kind() == kind => Some(Some(t.id().to_string())),
-            Some(_) => None,
+        // `None`: the full form. `Some(ids)`: the precise form over `ids`,
+        // skipped when nothing of that kind was named.
+        let selected = |kind: &str| -> Option<Option<Vec<String>>> {
+            match only {
+                None => Some(None),
+                Some(ts) => {
+                    let ids: Vec<String> = ts
+                        .iter()
+                        .filter(|t| t.kind() == kind)
+                        .map(|t| t.id().to_string())
+                        .collect();
+                    (!ids.is_empty()).then_some(Some(ids))
+                }
+            }
+        };
+        let run = |sql: &str, ids: &Option<Vec<String>>| -> StorageResult<()> {
+            let q = sqlx::query(sql).bind(time);
+            let q = match ids {
+                Some(ids) => q.bind(ids.clone()),
+                None => q,
+            };
+            if let Some(row) = rt_block_on(q.fetch_optional(self.tx().as_mut()))? {
+                self.absorb_and_arm_retries(&row, time + trt);
+            }
+            Ok(())
         };
 
         // Statement 1: expired promises.
         //
         // `state = 'pending' AND external` is the whole of what
         // `promise_timeouts` held: rows entered on create and left on settle.
-        // Every pending promise that is not internal is swept eagerly;
+        // Every pending promise that is not internal is fired eagerly;
         // internal ones time out lazily, on read.
-        if let Some(id) = selected("promise") {
-            let sql = expire_batch_sql(
-                "state = 'pending' AND external AND timeout_at <= $1
-                 AND ($2::text IS NULL OR id = $2)",
-                "$1",
-                trt,
-            );
-            let expired_row = rt_block_on(
-                sqlx::query(&sql)
-                    .bind(time)
-                    .bind(&id)
-                    .fetch_optional(self.tx().as_mut()),
-            )?;
-            if let Some(row) = expired_row {
-                self.absorb_and_arm_retries(&row, time + trt);
-            }
+        if let Some(ids) = selected("promise") {
+            let selection = match ids {
+                None => "state = 'pending' AND external AND timeout_at <= $1",
+                Some(_) => {
+                    "id = ANY($2) AND state = 'pending' AND external AND (timeout_at + 0) <= $1"
+                }
+            };
+            run(&expire_batch_sql(selection, "$1", trt), &ids)?;
         }
 
         // Statement 2: expired task retry deadlines — re-enqueue the execute
         // message and push the deadline out.
-        if let Some(id) = selected("retry") {
-            let retry_row = rt_block_on(
-                sqlx::query(&format!(
-                    "
+        if let Some(ids) = selected("retry") {
+            let selection = match ids {
+                None => "task_state = 'pending' AND retry_timeout_at <= $1",
+                Some(_) => "id = ANY($2) AND task_state = 'pending' AND (retry_timeout_at + 0) <= $1",
+            };
+            let sql = format!(
+                "
             WITH expired_retry AS (
               SELECT id, task_version, target FROM promises
-              WHERE task_state = 'pending' AND retry_timeout_at IS NOT NULL AND retry_timeout_at <= $1
-                AND ($2::text IS NULL OR id = $2)
+              WHERE {selection}
               FOR UPDATE
             ),
             updated_retry AS (
               UPDATE promises SET retry_timeout_at = $1 + {trt}, pid = NULL
-              WHERE id IN (SELECT id FROM expired_retry)
+              WHERE id = ANY((SELECT COALESCE(array_agg(id), '{{}}') FROM expired_retry)::text[])
               RETURNING id
             ),
             emit_retry AS (
@@ -4417,33 +4481,29 @@ impl PostgresDb<'_> {
             )
             SELECT {messages}
         ",
-                    messages = emitted_json(&["emit_retry"])
-                ))
-                .bind(time)
-                .bind(&id)
-                .fetch_optional(self.tx().as_mut()),
-            )?;
-            if let Some(row) = retry_row {
-                self.absorb_and_arm_retries(&row, time + trt);
-            }
+                messages = emitted_json(&["emit_retry"])
+            );
+            run(&sql, &ids)?;
         }
 
         // Statement 3: expired leases — the holder went away, hand the task back.
-        if let Some(id) = selected("lease") {
-            let lease_row = rt_block_on(
-                sqlx::query(&format!(
-                    "
+        if let Some(ids) = selected("lease") {
+            let selection = match ids {
+                None => "task_state = 'acquired' AND lease_timeout_at <= $1",
+                Some(_) => "id = ANY($2) AND task_state = 'acquired' AND (lease_timeout_at + 0) <= $1",
+            };
+            let sql = format!(
+                "
             WITH expired_lease AS (
               SELECT id, task_version, target FROM promises
-              WHERE task_state = 'acquired' AND lease_timeout_at IS NOT NULL AND lease_timeout_at <= $1
-                AND ($2::text IS NULL OR id = $2)
+              WHERE {selection}
               FOR UPDATE
             ),
             released AS (
               UPDATE promises SET
                 task_state = 'pending', retry_timeout_at = $1 + {trt},
                 lease_timeout_at = NULL, ttl = NULL, pid = NULL
-              WHERE id IN (SELECT id FROM expired_lease)
+              WHERE id = ANY((SELECT COALESCE(array_agg(id), '{{}}') FROM expired_lease)::text[])
               RETURNING id
             ),
             emit_released AS (
@@ -4453,15 +4513,9 @@ impl PostgresDb<'_> {
             )
             SELECT {messages}
         ",
-                    messages = emitted_json(&["emit_released"])
-                ))
-                .bind(time)
-                .bind(&id)
-                .fetch_optional(self.tx().as_mut()),
-            )?;
-            if let Some(row) = lease_row {
-                self.absorb_and_arm_retries(&row, time + trt);
-            }
+                messages = emitted_json(&["emit_released"])
+            );
+            run(&sql, &ids)?;
         }
 
         Ok(())
@@ -4580,7 +4634,7 @@ fn process_all_timeouts(db: &PostgresDb, time: i64) -> StorageResult<usize> {
 fn process_schedule_timeouts(
     db: &PostgresDb,
     time: i64,
-    only: Option<&str>,
+    only: Option<&[String]>,
 ) -> StorageResult<usize> {
     let expired = db.get_expired_schedule_timeouts(time, only)?;
     let mut fired = 0usize;
@@ -4627,8 +4681,12 @@ impl Engine for PostgresEngine {
     async fn process(&self, input: Input<'_>, now: i64) -> Output {
         match input {
             Input::External(req) => self.dispatch(req, now).await,
-            Input::Internal(timeout) => self.fire(timeout, now).await,
+            Input::Internal(timeout) => self.fire_all(vec![timeout], now).await,
         }
+    }
+
+    async fn fire(&self, timeouts: Vec<Timeout>, now: i64) -> Output {
+        self.fire_all(timeouts, now).await
     }
 
     async fn tick(&self, now: i64) -> StorageResult<(usize, Vec<Outgoing>, Vec<Scheduled>)> {
@@ -4645,20 +4703,33 @@ impl Engine for PostgresEngine {
 }
 
 impl PostgresEngine {
-    /// Fire one timeout the system asked of itself. See `persistence_sqlite.rs`.
-    async fn fire(&self, timeout: Timeout, now: i64) -> Output {
-        let swept = match timeout {
-            Timeout::ScheduleDue { schedule_id } => {
-                self.transact(move |db| {
-                    process_schedule_timeouts(db, now, Some(&schedule_id)).map(|_| ())
-                })
-                .await
-            }
-            other => {
-                self.transact(move |db| db.process_timeouts(now, Some(&other)))
-                    .await
-            }
-        };
+    /// Fire the timeouts the system asked of itself, all in one transaction:
+    /// one statement per queue, whatever the batch holds.
+    ///
+    /// Atomic and idempotent as a batch, which is what each was alone: every
+    /// statement re-checks the deadline against the row, so a timeout that
+    /// has moved or settled is skipped, and a failed batch committed nothing
+    /// and is found again by the timer's next refresh.
+    async fn fire_all(&self, timeouts: Vec<Timeout>, now: i64) -> Output {
+        if timeouts.is_empty() {
+            return Output::default();
+        }
+        let swept = self
+            .transact(move |db| {
+                db.process_timeouts(now, Some(&timeouts))?;
+                let schedules: Vec<String> = timeouts
+                    .iter()
+                    .filter_map(|t| match t {
+                        Timeout::ScheduleDue { schedule_id } => Some(schedule_id.clone()),
+                        _ => None,
+                    })
+                    .collect();
+                if !schedules.is_empty() {
+                    process_schedule_timeouts(db, now, Some(&schedules))?;
+                }
+                Ok(())
+            })
+            .await;
         match swept {
             Ok(((), messages, timeouts)) => Output {
                 response: None,
@@ -4666,7 +4737,7 @@ impl PostgresEngine {
                 timeouts,
             },
             Err(e) => {
-                tracing::error!(error = %e, "Timeout sweep failed");
+                tracing::error!(error = %e, "Firing timeouts failed; the timer's refresh finds them again");
                 Output::default()
             }
         }
@@ -4725,12 +4796,6 @@ pub struct Config {
     /// instance armed.
     #[serde(default = "default_wheel_refresh")]
     pub wheel_refresh: u64,
-
-    /// The backstop scan interval (ms). The last resort, not the mechanism: the
-    /// timer fires a deadline when it comes due and refreshes more often than
-    /// this runs.
-    #[serde(default = "default_sweep_interval")]
-    pub sweep_interval: u64,
 }
 
 fn default_preload_limit() -> u32 {
@@ -4744,9 +4809,6 @@ fn default_wheel_capacity() -> usize {
 }
 fn default_wheel_refresh() -> u64 {
     30_000
-}
-fn default_sweep_interval() -> u64 {
-    60_000
 }
 fn default_pool_size() -> u32 {
     10
@@ -4763,7 +4825,6 @@ impl Default for Config {
             server_url: String::new(),
             wheel_capacity: default_wheel_capacity(),
             wheel_refresh: default_wheel_refresh(),
-            sweep_interval: default_sweep_interval(),
         }
     }
 }
@@ -4783,7 +4844,11 @@ fn configure(
         server_url: config.server_url.clone(),
         wheel_capacity: config.wheel_capacity,
         wheel_refresh: config.wheel_refresh,
-        sweep_interval: config.sweep_interval,
+        // No sweep. Every deadline is a row in an index ordered by it, and the
+        // timer walks the front of those indexes every `wheel_refresh`: that
+        // walk is the recovery path, for a restart, for another instance's
+        // deadlines and for a wheel that overflowed.
+        sweep_interval: 0,
     };
     let open = config.clone();
     Ok(resonate_sql::server::Server::new(

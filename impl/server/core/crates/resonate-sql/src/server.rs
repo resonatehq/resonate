@@ -28,7 +28,8 @@ pub struct Server {
     /// The externally reachable URL, stamped into every message so a worker
     /// knows where to call back.
     server_url: String,
-    /// How often the sweep runs, in milliseconds.
+    /// How often the sweep runs, in milliseconds. Zero: never — the timer's
+    /// refresh is the whole recovery path.
     sweep_interval: u64,
     /// Durable state and every transition over it. The server validates,
     /// hands over, and shapes what comes back.
@@ -94,7 +95,13 @@ pub struct Options {
     pub wheel_capacity: usize,
     /// How often it re-reads the durable deadlines, and the longest it sleeps.
     pub wheel_refresh: u64,
-    /// The backstop scan interval.
+    /// The backstop scan interval, or zero for none.
+    ///
+    /// Zero is safe only for an engine whose [`Engine::upcoming`] is an index
+    /// walk: the timer then re-reads the nearest deadlines every
+    /// `wheel_refresh`, which finds whatever another instance armed, whatever
+    /// a restart forgot and whatever the wheel dropped — everything the sweep
+    /// was there for, without scanning anything.
     pub sweep_interval: u64,
 }
 
@@ -161,11 +168,12 @@ impl Server {
 
     /// Fire deadlines the timer says have come due.
     ///
-    /// One `Internal` per deadline, which is the narrow form: the engine acts
-    /// on the row that timeout names and nothing else. Firing is a hint, so
-    /// each of these may find the deadline has moved or the row has settled and
-    /// do nothing — that is `Internal` being idempotent, and it is what lets
-    /// this run alongside a sweep that will fire the same deadlines.
+    /// The whole batch goes to [`Engine::fire`], which is the narrow form: the
+    /// engine acts on the rows those timeouts name and nothing else, in as few
+    /// round trips as it can. Firing is a hint, so each may find the deadline
+    /// has moved or the row has settled and do nothing — that is `Internal`
+    /// being idempotent, and it is what lets two instances fire the same
+    /// deadline, or a sweep run alongside, without either knowing.
     ///
     /// What comes back is treated exactly like a request's output: messages go
     /// to the router, and a deadline a firing armed goes straight back into the
@@ -173,14 +181,12 @@ impl Server {
     /// without a round trip through the sweep.
     pub async fn fire(&self, timeouts: Vec<Timeout>) {
         let now = util::system_time_ms();
-        for timeout in timeouts {
-            let Ok(engine) = self.engine() else {
-                return;
-            };
-            let out = engine.process(Input::Internal(timeout), now).await;
-            self.deliver(out.messages).await;
-            self.arm(out.timeouts);
-        }
+        let Ok(engine) = self.engine() else {
+            return;
+        };
+        let out = engine.fire(timeouts, now).await;
+        self.deliver(out.messages).await;
+        self.arm(out.timeouts);
     }
 
     /// Deliver what a transition emitted.
@@ -285,6 +291,10 @@ impl ResonateServer for Server {
         }
 
         self.timer.init().await;
+        if self.sweep_interval == 0 {
+            tracing::info!("Timer started; no sweep");
+            return Ok(());
+        }
         let handle = tokio::spawn(crate::sweep::run(
             self.this.clone(),
             self.sweep_interval,

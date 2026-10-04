@@ -39,6 +39,14 @@ use resonate_core::ui::UiError;
 /// integer literal, and `state` is one of the protocol's five states or the
 /// predicate is `FALSE`.
 pub fn effective_state_sql(state: Option<&str>, now: i64) -> String {
+    effective_state_sql_at(state, &now.to_string())
+}
+
+/// [`effective_state_sql`] with `now` as any SQL expression — a bind
+/// parameter, typically, so the statement text does not change with the
+/// clock and a prepared statement can be reused rather than re-parsed on
+/// every call.
+pub fn effective_state_sql_at(state: Option<&str>, now: &str) -> String {
     match state {
         None => "TRUE".to_string(),
         Some("pending") => format!("(state = 'pending' AND timeout_at > {now})"),

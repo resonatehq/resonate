@@ -97,7 +97,9 @@ pub struct TimerConfig {
     ///
     /// This is the backstop, and the reason the timer can be wrong without
     /// being unsafe: a deadline another instance armed is invisible here until
-    /// the next backfill, and this bounds how long that can last.
+    /// the next backfill, and this bounds how long that can last — the driver
+    /// re-reads a full wheel's worth at least this often, however full the
+    /// wheel already is.
     pub idle: Duration,
 }
 
@@ -238,6 +240,7 @@ where
         &d.now,
         &d.on_backfill,
         &mut last_backfill,
+        false,
     )
     .await;
     let _ = d.seeded.send(());
@@ -250,15 +253,26 @@ where
         // Refill before deciding how long to sleep: a backfill can pull the
         // front of the wheel nearer, and sleeping on a stale `next` would miss
         // it until the idle interval expired.
-        if wheel.len() < d.config.low_watermark
-            && last_backfill.is_none_or(|t| t.elapsed() >= d.config.backfill_interval)
-        {
+        //
+        // Two reasons to read. Below the watermark, to top the wheel up. And
+        // once every `idle` whatever the wheel holds, asking for a full
+        // wheel's worth: a deadline another instance armed sooner than
+        // everything here is invisible otherwise, and a merge into a full
+        // wheel keeps the nearest entries, so the re-read can only pull the
+        // front nearer. That second read is what makes `idle` the bound it
+        // says it is — without it a wheel more than half full never looked.
+        let since = last_backfill.map(|t| t.elapsed());
+        let refresh = since.is_none_or(|e| e >= d.config.idle);
+        let top_up = wheel.len() < d.config.low_watermark
+            && since.is_none_or(|e| e >= d.config.backfill_interval);
+        if refresh || top_up {
             backfill(
                 &mut wheel,
                 &d.config,
                 &d.now,
                 &d.on_backfill,
                 &mut last_backfill,
+                refresh,
             )
             .await;
         }
@@ -297,11 +311,18 @@ async fn backfill<T, C>(
     now: &Clock,
     on_backfill: &OnBackfill<T>,
     last: &mut Option<Instant>,
+    full: bool,
 ) where
     C: Comparator<T>,
 {
     *last = Some(Instant::now());
-    let room = config.capacity.saturating_sub(wheel.len());
+    // A full read asks for the whole capacity: what it returns competes with
+    // what the wheel holds, and the merge keeps the nearest of both.
+    let room = if full {
+        config.capacity
+    } else {
+        config.capacity.saturating_sub(wheel.len())
+    };
     if room == 0 {
         return;
     }

@@ -128,26 +128,35 @@ CREATE TABLE IF NOT EXISTS promises (
   args          TEXT
 );
 
--- The promise timeout sweep queue is NOT a column: promise_timeouts membership
--- is exactly (state = 'pending' AND target IS NOT NULL), given
--- `consistent_task_iff_targeted_promise`. A targetless promise has no task and
--- is never swept eagerly; it times out lazily on first touch (try_timeout).
+-- The deadline queues. Each is a partial index whose predicate is exactly the
+-- queue's membership and whose key is `(deadline, id)` — the order the timer
+-- reads them in — so the timer's refresh (`upcoming`) is a top-N walk of the
+-- front of each index, and firing a named deadline is a primary-key probe.
+-- Nothing ever scans the table to find what is due.
+--
+-- The promise queue is `state = 'pending' AND external`: an internal promise
+-- arms nothing and times out lazily, on first touch (try_timeout), so it is
+-- not in the index at all.
 CREATE INDEX IF NOT EXISTS idx_promises_timeout_at
-  ON promises (timeout_at) WHERE state = 'pending';
+  ON promises (timeout_at, id) WHERE state = 'pending' AND external;
+CREATE INDEX IF NOT EXISTS idx_task_retry_timeout_at
+  ON promises (retry_timeout_at, id) WHERE task_state = 'pending';
+CREATE INDEX IF NOT EXISTS idx_task_lease_timeout_at
+  ON promises (lease_timeout_at, id) WHERE task_state = 'acquired';
 
+-- The console's lineage read (`ui.execution.get`, `ui.executions.search`).
 CREATE INDEX IF NOT EXISTS idx_promises_origin_id
   ON promises (origin_id);
+-- Preload: a task's branch siblings.
 CREATE INDEX IF NOT EXISTS idx_promises_branch_id
   ON promises (branch_id) WHERE branch_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_promises_target
-  ON promises (target) WHERE target IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS idx_task_retry_timeout_at
-  ON promises (retry_timeout_at) WHERE task_state = 'pending';
-CREATE INDEX IF NOT EXISTS idx_task_lease_timeout_at
-  ON promises (lease_timeout_at) WHERE task_state = 'acquired';
+-- task.search.
 CREATE INDEX IF NOT EXISTS idx_promises_task
   ON promises (task_state, id) WHERE task_state IS NOT NULL;
+
+-- No index on `target`: nothing selects by it, and a promise row is rewritten
+-- on every task transition, so every index it carries is paid for on every
+-- one of those writes.
 
 -- Fan-out in the other direction: "which rows list me as an awaiter", the
 -- One-row stand-in for `DELETE FROM callbacks WHERE awaiter_id = $1`.
@@ -229,9 +238,10 @@ ALTER TABLE promises DROP CONSTRAINT IF EXISTS promises_pkey;
 ALTER TABLE promises ADD CONSTRAINT promises_pkey
   PRIMARY KEY (id);
 
+-- No UNIQUE (task_key): `task_key` is either `id` or NULL, so the primary key
+-- already makes it unique, and the index that enforced it again was one more
+-- write on every insert and every task transition.
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS promises_task_key_unique;
-ALTER TABLE promises ADD CONSTRAINT promises_task_key_unique
-  UNIQUE (task_key);
 
 
 -- --- promises: domains — the two state enums, inline in CREATE TABLE -------

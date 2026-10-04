@@ -194,6 +194,23 @@ pub trait Engine: Send + Sync {
     /// several implementations through the same sequence at the same instants.
     async fn process(&self, input: Input<'_>, now: i64) -> Output;
 
+    /// Fire several timeouts the timer found due together.
+    ///
+    /// The default is `process(Internal(..))` once per timeout, which is what
+    /// every engine did before this existed. An engine may do it in one
+    /// transaction instead — each timeout is idempotent and re-checked against
+    /// its row, so a batch is the same set of no-ops and transitions, minus
+    /// the round trips.
+    async fn fire(&self, timeouts: Vec<Timeout>, now: i64) -> Output {
+        let mut out = Output::default();
+        for timeout in timeouts {
+            let o = self.process(Input::Internal(timeout), now).await;
+            out.messages.extend(o.messages);
+            out.timeouts.extend(o.timeouts);
+        }
+        out
+    }
+
     /// Fire every timeout now due, and return what they emitted.
     ///
     /// The bulk form, and the backstop: a timer holds only the near future of
