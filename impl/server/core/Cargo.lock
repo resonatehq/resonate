@@ -3156,6 +3156,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "resonate-fuzz"
+version = "0.10.1"
+dependencies = [
+ "axum",
+ "clap",
+ "fastrand",
+ "libc",
+ "reqwest 0.12.28",
+ "resonate-core",
+ "resonate-oracle",
+ "resonate-sql",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "resonate-gateway-http"
 version = "0.10.1"
 dependencies = [
