@@ -262,6 +262,13 @@ impl PostgresEngine {
                     sqlx::query("SET enable_seqscan TO off")
                         .execute(&mut *conn)
                         .await?;
+                    // No JIT. These statements are short key lookups that a
+                    // compiled plan never pays back — and with sequential scans
+                    // penalized, the one statement that has no other path
+                    // (a whole-table read: `debug.snap`, a console count) is
+                    // costed past the JIT thresholds and compiled on every
+                    // execution, 100 ms for a table of twenty rows.
+                    sqlx::query("SET jit TO off").execute(&mut *conn).await?;
                     // Durable commits, whatever the cluster's default. This is
                     // not tuning: a transition commits together with the
                     // messages it returns, and a message goes out as soon as
