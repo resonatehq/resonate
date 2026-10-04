@@ -327,7 +327,11 @@ impl PostgresEngine {
             Ok(rows) => rows,
             Err(_) => return,
         };
-        let get = |name: &str| rows.iter().find(|(n, _)| n == name).map(|(_, v)| v.as_str());
+        let get = |name: &str| {
+            rows.iter()
+                .find(|(n, _)| n == name)
+                .map(|(_, v)| v.as_str())
+        };
         let num = |name: &str| get(name).and_then(|v| v.parse::<i64>().ok());
         // pg_settings units: max_wal_size MB, checkpoint_timeout s,
         // shared_buffers 8 kB pages.
