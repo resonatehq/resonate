@@ -2209,6 +2209,131 @@ impl<'a> PostgresDb<'a> {
         sql
     }
 
+    /// `task_fence_settle_guarded`'s statement. `lean` drops the sections
+    /// that act on the settled promise's awaiters, listeners and own task,
+    /// and writes nothing when the promise has any of them (`need_full`).
+    fn fence_settle_sql(&self, lean: bool) -> String {
+        let (self_set, need_full, gate, sections, no_fanout, messages);
+        if lean {
+            // No task of its own: nothing to fulfill on the row itself.
+            self_set = settle_self("false");
+            need_full = "
+            -- A pending promise with awaiters, listeners or a task of its own
+            -- needs the sections this statement leaves out: write nothing.
+            need_full AS (
+              SELECT EXISTS (
+                SELECT 1 FROM locked_promise
+                WHERE NOT stale AND state = 'pending'
+                  AND (callbacks <> '{}' OR listeners <> '{}' OR task_state IS NOT NULL)
+              ) AS hit
+            ),"
+            .to_string();
+            gate = "AND NOT (SELECT hit FROM need_full)";
+            sections = String::new();
+            no_fanout = "AND NOT (SELECT hit FROM need_full)".to_string();
+            messages = "'[]'::json AS messages".to_string();
+        } else {
+            self_set = settle_self(
+                "(SELECT b.task_state IS NOT NULL AND b.task_state <> 'fulfilled' FROM before b)",
+            );
+            need_full = String::new();
+            gate = "";
+            let unblock = settle_unblock("updated_promise", "(SELECT b.listeners FROM before b)");
+            let fanout = settle_fanout(
+                "$3",
+                "(SELECT CASE WHEN b.state = 'pending' THEN b.callbacks END FROM before b)",
+                "(SELECT b.state = 'pending' AND b.task_state IS NOT NULL AND b.task_state <> 'fulfilled' FROM before b)",
+                "$7",
+                self.task_retry_timeout,
+            );
+            sections = format!("{unblock},\n{fanout},");
+            no_fanout = "
+                -- Nor when the fan-out rewrites it (the fenced task awaits
+                -- the promise it settles): one statement must not update a
+                -- row twice — Postgres keeps one write and silently drops the
+                -- other — and the fan-out's write moves the version anyway.
+                -- Reading `fanout` here also runs it first.
+                AND NOT EXISTS (SELECT 1 FROM fanout WHERE fanout.id = $1)"
+                .to_string();
+            messages = emitted_json(&["emit_unblock", "emit_resume"]);
+        }
+
+        format!("
+            WITH fence_check AS (
+              SELECT id, task_state, task_version, branch_id,
+                     ctid <> (SELECT s.ctid FROM promises s WHERE s.id = $1) AS stale
+              FROM promises
+              WHERE id = $1 AND COALESCE(task_state, '') <> ''
+              FOR UPDATE
+            ),
+            -- Why the fast path declines: a promise past its deadline, or a
+            -- task row that changed after this statement's snapshot.
+            expired AS (
+              SELECT $8::bigint IS NOT NULL AND EXISTS (
+                SELECT 1 FROM promises
+                WHERE id IN ($1, $3) AND state = 'pending' AND (timeout_at + 0) <= $8
+              ) OR ($8::bigint IS NOT NULL AND COALESCE((SELECT stale FROM fence_check), false))
+              AS hit
+            ),
+            fence_ok AS (
+              SELECT EXISTS (SELECT 1 FROM fence_check WHERE task_state = 'acquired' AND task_version = $2)
+                     AND NOT (SELECT hit FROM expired) AS ok
+            ),
+            -- `stale` here: the promise changed after the snapshot — an
+            -- awaiter suspended on it while this statement waited — and the
+            -- awaiters' rows this statement would wake are read as they were.
+            locked_promise AS (
+              SELECT *, ($8::bigint IS NOT NULL
+                         AND ctid <> (SELECT s.ctid FROM promises s WHERE s.id = $3)) AS stale
+              FROM promises WHERE id = $3 AND (SELECT ok FROM fence_ok) FOR UPDATE
+            ),{need_full}
+            before AS (
+              SELECT id, state, task_state, callbacks, listeners FROM locked_promise
+              WHERE NOT stale {gate}
+            ),
+            updated_promise AS (
+              UPDATE promises p
+              SET state = $4, value_headers = COALESCE($5::jsonb, '{{}}'), value_data = $6, settled_at = $7,
+                  {self_set}
+              WHERE p.id = $3 AND p.state = 'pending' AND (SELECT ok FROM fence_ok)
+                AND EXISTS (SELECT 1 FROM before)
+              RETURNING p.*
+            ),
+            {sections}
+            -- Every fence rewrites its task row, even to the same values.
+            -- A fence that only locked it would leave no trace: one that
+            -- committed after this statement's snapshot, while this statement
+            -- waited for the lock, would have written siblings this statement
+            -- cannot see. Rewritten, the row's version moves, `fence_check`
+            -- reports `stale`, and the fast path declines. (Not when the
+            -- fenced promise is the task's own: one statement must not
+            -- update a row twice.)
+            bumped AS (
+              UPDATE promises SET task_version = task_version
+              WHERE id = $1 AND $1 <> $3 AND (SELECT ok FROM fence_ok)
+                AND NOT EXISTS (SELECT 1 FROM locked_promise WHERE stale){no_fanout}
+              RETURNING id
+            ),
+            result AS (
+              SELECT {RESULT_COLS} FROM updated_promise
+              UNION ALL
+              SELECT {RESULT_COLS} FROM locked_promise WHERE NOT EXISTS (SELECT 1 FROM updated_promise)
+            )
+            SELECT
+              EXISTS (SELECT 1 FROM fence_check) AS task_exists,
+              (SELECT ok FROM fence_ok) AS fence_ok,
+              (SELECT hit FROM expired)
+                OR COALESCE((SELECT stale FROM locked_promise), false) AS expired,
+              {cols}, {messages}, {need_full_col} AS need_full,
+              CASE WHEN (SELECT ok FROM fence_ok) {gate} THEN {preload} END AS preload
+            FROM (SELECT 1) AS dummy
+            LEFT JOIN result r ON true
+        ", cols = p_cols("r"),
+           need_full_col = if lean { "(SELECT hit FROM need_full)" } else { "false" },
+           preload = preload_sql("(SELECT branch_id FROM fence_check)", "$1",
+                                 Some("updated_promise"), self.preload_limit))
+    }
+
     /// The connection, for one statement.
     async fn tx(&self) -> tokio::sync::MutexGuard<'_, Conn<'a>> {
         self.conn.lock().await
@@ -4811,145 +4936,70 @@ impl PostgresDb<'_> {
             settled_at,
         } = *params;
 
-        let sql = self.cached("task_fence_settle_guarded", || {
-            let self_set = settle_self(
-                "(SELECT b.task_state IS NOT NULL AND b.task_state <> 'fulfilled' FROM before b)",
-            );
-            let unblock = settle_unblock("updated_promise", "(SELECT b.listeners FROM before b)");
-            let fanout = settle_fanout(
-                "$3",
-                "(SELECT CASE WHEN b.state = 'pending' THEN b.callbacks END FROM before b)",
-                "(SELECT b.state = 'pending' AND b.task_state IS NOT NULL AND b.task_state <> 'fulfilled' FROM before b)",
-                "$7",
-                self.task_retry_timeout,
-            );
+        // Most fenced settles are of a local child: no awaiters, no
+        // listeners, no task of its own. For those the lean statement does
+        // the work without the fan-out, unblock and resume sections, which
+        // cost a quarter of the executor time even when they touch nothing.
+        // A promise that has any of them makes the lean statement write
+        // nothing and say so (`need_full`); the full statement then runs.
+        for lean in [true, false] {
+            let key = if lean {
+                "task_fence_settle_lean"
+            } else {
+                "task_fence_settle_guarded"
+            };
+            let sql = self.cached(key, || self.fence_settle_sql(lean));
+            let rows = sqlx::query(&sql)
+                .bind(task_id)
+                .bind(version as i32) // $1-$2
+                .bind(promise_id)
+                .bind(state)
+                .bind(value_headers)
+                .bind(value_data)
+                .bind(settled_at) // $3-$7
+                .bind(guard) // $8
+                .fetch_all(self.tx().await.pg())
+                .await?;
 
-            format!("
-            WITH fence_check AS (
-              SELECT id, task_state, task_version, branch_id,
-                     ctid <> (SELECT s.ctid FROM promises s WHERE s.id = $1) AS stale
-              FROM promises
-              WHERE id = $1 AND COALESCE(task_state, '') <> ''
-              FOR UPDATE
-            ),
-            -- Why the fast path declines: a promise past its deadline, or a
-            -- task row that changed after this statement's snapshot.
-            expired AS (
-              SELECT $8::bigint IS NOT NULL AND EXISTS (
-                SELECT 1 FROM promises
-                WHERE id IN ($1, $3) AND state = 'pending' AND (timeout_at + 0) <= $8
-              ) OR ($8::bigint IS NOT NULL AND COALESCE((SELECT stale FROM fence_check), false))
-              AS hit
-            ),
-            fence_ok AS (
-              SELECT EXISTS (SELECT 1 FROM fence_check WHERE task_state = 'acquired' AND task_version = $2)
-                     AND NOT (SELECT hit FROM expired) AS ok
-            ),
-            -- `stale` here: the promise changed after the snapshot — an
-            -- awaiter suspended on it while this statement waited — and the
-            -- awaiters' rows this statement would wake are read as they were.
-            locked_promise AS (
-              SELECT *, ($8::bigint IS NOT NULL
-                         AND ctid <> (SELECT s.ctid FROM promises s WHERE s.id = $3)) AS stale
-              FROM promises WHERE id = $3 AND (SELECT ok FROM fence_ok) FOR UPDATE
-            ),
-            before AS (
-              SELECT id, state, task_state, callbacks, listeners FROM locked_promise WHERE NOT stale
-            ),
-            updated_promise AS (
-              UPDATE promises p
-              SET state = $4, value_headers = COALESCE($5::jsonb, '{{}}'), value_data = $6, settled_at = $7,
-                  {self_set}
-              WHERE p.id = $3 AND p.state = 'pending' AND (SELECT ok FROM fence_ok)
-                AND EXISTS (SELECT 1 FROM before)
-              RETURNING p.*
-            ),
-            {unblock},
-            {fanout},
-            -- Every fence rewrites its task row, even to the same values.
-            -- A fence that only locked it would leave no trace: one that
-            -- committed after this statement's snapshot, while this statement
-            -- waited for the lock, would have written siblings this statement
-            -- cannot see. Rewritten, the row's version moves, `fence_check`
-            -- reports `stale`, and the fast path declines. (Not when the
-            -- fenced promise is the task's own: one statement must not
-            -- update a row twice.)
-            bumped AS (
-              UPDATE promises SET task_version = task_version
-              WHERE id = $1 AND $1 <> $3 AND (SELECT ok FROM fence_ok)
-                AND NOT EXISTS (SELECT 1 FROM locked_promise WHERE stale)
-                -- Nor when the fan-out rewrites it (the fenced task awaits
-                -- the promise it settles): one statement must not update a
-                -- row twice — Postgres keeps one write and silently drops the
-                -- other — and the fan-out's write moves the version anyway.
-                -- Reading `fanout` here also runs it first.
-                AND NOT EXISTS (SELECT 1 FROM fanout WHERE fanout.id = $1)
-              RETURNING id
-            ),
-            result AS (
-              SELECT {RESULT_COLS} FROM updated_promise
-              UNION ALL
-              SELECT {RESULT_COLS} FROM locked_promise WHERE NOT EXISTS (SELECT 1 FROM updated_promise)
-            )
-            SELECT
-              EXISTS (SELECT 1 FROM fence_check) AS task_exists,
-              (SELECT ok FROM fence_ok) AS fence_ok,
-              (SELECT hit FROM expired)
-                OR COALESCE((SELECT stale FROM locked_promise), false) AS expired,
-              {cols}, {messages},
-              CASE WHEN (SELECT ok FROM fence_ok) THEN {preload} END AS preload
-            FROM (SELECT 1) AS dummy
-            LEFT JOIN result r ON true
-        ", cols = p_cols("r"), messages = emitted_json(&["emit_unblock", "emit_resume"]),
-           preload = preload_sql("(SELECT branch_id FROM fence_check)", "$1",
-                                 Some("updated_promise"), self.preload_limit))
-        });
-        let rows = sqlx::query(&sql)
-            .bind(task_id)
-            .bind(version as i32) // $1-$2
-            .bind(promise_id)
-            .bind(state)
-            .bind(value_headers)
-            .bind(value_data)
-            .bind(settled_at) // $3-$7
-            .bind(guard) // $8
-            .fetch_all(self.tx().await.pg())
-            .await?;
-
-        if rows.is_empty() {
+            if rows.is_empty() {
+                return Ok((
+                    TaskFenceResult {
+                        task_exists: false,
+                        fence_ok: false,
+                        promise: None,
+                    },
+                    false,
+                    Vec::new(),
+                ));
+            }
+            let row = &rows[0];
+            if row.get::<bool, _>("expired") {
+                return Ok((
+                    TaskFenceResult {
+                        task_exists: false,
+                        fence_ok: false,
+                        promise: None,
+                    },
+                    true,
+                    Vec::new(),
+                ));
+            }
+            if lean && row.get::<bool, _>("need_full") {
+                continue;
+            }
+            self.absorb_and_arm_retries(row, settled_at + self.task_retry_timeout);
+            let promise_id_val: Option<String> = row.get("id");
             return Ok((
                 TaskFenceResult {
-                    task_exists: false,
-                    fence_ok: false,
-                    promise: None,
+                    task_exists: row.get("task_exists"),
+                    fence_ok: row.get("fence_ok"),
+                    promise: promise_id_val.map(|_| row_to_promise(row)),
                 },
                 false,
-                Vec::new(),
+                preload_from(row),
             ));
         }
-        let row = &rows[0];
-        if row.get::<bool, _>("expired") {
-            return Ok((
-                TaskFenceResult {
-                    task_exists: false,
-                    fence_ok: false,
-                    promise: None,
-                },
-                true,
-                Vec::new(),
-            ));
-        }
-        self.absorb_and_arm_retries(row, settled_at + self.task_retry_timeout);
-        let promise_id_val: Option<String> = row.get("id");
-        Ok((
-            TaskFenceResult {
-                task_exists: row.get("task_exists"),
-                fence_ok: row.get("fence_ok"),
-                promise: promise_id_val.map(|_| row_to_promise(row)),
-            },
-            false,
-            preload_from(row),
-        ))
+        unreachable!("the full statement never asks for itself")
     }
 
     // T-05: task.heartbeat — extend the lease of every task this pid still holds
