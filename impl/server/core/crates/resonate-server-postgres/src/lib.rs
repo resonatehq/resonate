@@ -629,179 +629,53 @@ impl PostgresEngine {
         let data = req.data.clone();
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
-        self.run(req, move |db| { let data = data.clone(); let kind_str = kind_str.clone(); let corr_id = corr_id.clone(); Box::pin(async move {
-                let r: PromiseCreateData = match serde_json::from_value(data.clone()) {
-                    Ok(d) => d,
-                    Err(e) => {
-                        return Ok(ResponseEnvelope::error(
-                            kind_str.clone(),
-                            corr_id.clone(),
-                            400,
-                            &format!("Invalid request: {}", e),
-                        ))
-                    }
-                };
-                if let Err(e) = r.validate() {
-                    return Ok(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        400,
-                        &format_validation_errors(&e),
-                    ));
-                }
-                let address = r.tags.get("resonate:target").map(|s| s.as_str());
-                if let Some(addr) = address {
-                    if !resonate_core::is_valid_address(addr) {
-                        tracing::warn!(
-                            promise_id = %r.id,
-                            address = addr,
-                            "Promise create rejected: invalid resonate:target address"
-                        );
-                        return Ok(ResponseEnvelope::error(
-                            kind_str.clone(),
-                            corr_id.clone(),
-                            400,
-                            "Invalid resonate:target address",
-                        ));
-                    }
-                }
-                db.try_timeout(&[&r.id], now).await?;
-                let tags_json = serde_json::to_string(&r.tags).unwrap();
-                let already_timedout = now >= r.timeout_at;
-                let (state, created_at, settled_at) = if already_timedout {
-                    let state = if r.tags.get("resonate:timer").map(|v| v.as_str()) == Some("true") {
-                        tracing::debug!(promise_id = %r.id, "Promise created already timedout (timer: resolved immediately)");
-                        PromiseState::Resolved
-                    } else {
-                        tracing::debug!(promise_id = %r.id, "Promise created already timedout");
-                        PromiseState::RejectedTimedout
-                    };
-                    (state, r.timeout_at, Some(r.timeout_at))
-                } else {
-                    (PromiseState::Pending, now, None)
-                };
-                let param_headers_json = r
-                    .param
-                    .headers
-                    .as_ref()
-                    .map(|h| serde_json::to_string(h).unwrap());
-                let result = db.promise_create(&PromiseCreateParams {
-                    id: &r.id,
-                    state: state.as_str(),
-                    param_headers: param_headers_json.as_deref(),
-                    param_data: r.param.data.as_deref(),
-                    tags: &tags_json,
-                    timeout_at: r.timeout_at,
-                    created_at,
-                    settled_at,
-                    already_timedout,
-                    address,
-                }).await?;
-                if result.was_created {
-                    tracing::info!(
-                        promise_id = %result.promise.id,
-                        state = %result.promise.state,
-                        timeout_at = result.promise.timeout_at,
-                        target = address.unwrap_or("none"),
-                        already_timedout = already_timedout,
-                        "Promise created"
-                    );
-                } else {
-                    tracing::debug!(
-                        promise_id = %result.promise.id,
-                        state = %result.promise.state,
-                        "Promise create: already exists (idempotent)"
-                    );
-                }
-                Ok(ResponseEnvelope::success(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    &PromiseResponseData { promise: result.promise },
-                ))
-            }) })
-            .await
+        let fast = {
+            let (data, kind_str, corr_id) = (data.clone(), kind_str.clone(), corr_id.clone());
+            db_fn(move |db| {
+                let data = data.clone();
+                let kind_str = kind_str.clone();
+                let corr_id = corr_id.clone();
+                Box::pin(async move {
+                    promise_create_body(db, &data, &kind_str, &corr_id, now, true).await
+                })
+            })
+        };
+        self.run_fast(req, fast, move |db| {
+            let data = data.clone();
+            let kind_str = kind_str.clone();
+            let corr_id = corr_id.clone();
+            Box::pin(async move {
+                promise_create_body(db, &data, &kind_str, &corr_id, now, false)
+                    .await
+                    .map(|r| r.expect("invariant: the slow path never declines"))
+            })
+        })
+        .await
     }
 
     async fn op_promise_settle(&self, req: &RequestEnvelope, now: i64) -> Output {
         let data = req.data.clone();
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
-        self.run(req, move |db| {
+        let fast = {
+            let (data, kind_str, corr_id) = (data.clone(), kind_str.clone(), corr_id.clone());
+            db_fn(move |db| {
+                let data = data.clone();
+                let kind_str = kind_str.clone();
+                let corr_id = corr_id.clone();
+                Box::pin(
+                    async move { settle_body(db, &data, &kind_str, &corr_id, now, true).await },
+                )
+            })
+        };
+        self.run_fast(req, fast, move |db| {
             let data = data.clone();
             let kind_str = kind_str.clone();
             let corr_id = corr_id.clone();
             Box::pin(async move {
-                let r: PromiseSettleData = match serde_json::from_value(data.clone()) {
-                    Ok(d) => d,
-                    Err(e) => {
-                        return Ok(ResponseEnvelope::error(
-                            kind_str.clone(),
-                            corr_id.clone(),
-                            400,
-                            &format!("Invalid request: {}", e),
-                        ))
-                    }
-                };
-                if let Err(e) = r.validate() {
-                    return Ok(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        400,
-                        &format_validation_errors(&e),
-                    ));
-                }
-                db.try_timeout(&[&r.id], now).await?;
-                let value_headers_json = r
-                    .value
-                    .headers
-                    .as_ref()
-                    .map(|h| serde_json::to_string(h).unwrap());
-                let result = db
-                    .promise_settle(&PromiseSettleParams {
-                        id: &r.id,
-                        state: r.state.as_str(),
-                        value_headers: value_headers_json.as_deref(),
-                        value_data: r.value.data.as_deref(),
-                        settled_at: now,
-                    })
-                    .await?;
-                match result.promise {
-                    Some(promise) => {
-                        assert_ne!(
-                            promise.state,
-                            PromiseState::Pending,
-                            "invariant: returning 200 but promise is still pending"
-                        );
-                        if result.was_settled {
-                            tracing::info!(
-                                promise_id = %promise.id,
-                                state = %promise.state,
-                                "Promise settled"
-                            );
-                        } else {
-                            tracing::debug!(
-                                promise_id = %promise.id,
-                                current_state = %promise.state,
-                                requested_state = %r.state,
-                                "Promise settle: already settled (idempotent)"
-                            );
-                        }
-                        Ok(ResponseEnvelope::success(
-                            kind_str.clone(),
-                            corr_id.clone(),
-                            &PromiseResponseData { promise },
-                        ))
-                    }
-                    None => {
-                        tracing::debug!(promise_id = %r.id, "Promise settle: promise not found");
-                        Ok(ResponseEnvelope::error(
-                            kind_str.clone(),
-                            corr_id.clone(),
-                            404,
-                            "Promise not found",
-                        ))
-                    }
-                }
+                settle_body(db, &data, &kind_str, &corr_id, now, false)
+                    .await
+                    .map(|r| r.expect("invariant: the slow path never declines"))
             })
         })
         .await
@@ -811,158 +685,56 @@ impl PostgresEngine {
         let data = req.data.clone();
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
-        self.run(req, move |db| { let data = data.clone(); let kind_str = kind_str.clone(); let corr_id = corr_id.clone(); Box::pin(async move {
-                let r: PromiseRegisterCallbackData = match serde_json::from_value(data.clone()) {
-                    Ok(d) => d,
-                    Err(e) => {
-                        return Ok(ResponseEnvelope::error(
-                            kind_str.clone(),
-                            corr_id.clone(),
-                            400,
-                            &format!("Invalid request: {}", e),
-                        ))
-                    }
-                };
-                if let Err(e) = r.validate() {
-                    return Ok(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        400,
-                        &format_validation_errors(&e),
-                    ));
-                }
-                db.try_timeout(&[&r.awaited, &r.awaiter], now).await?;
-                let result = db.promise_register_callback(&r.awaited, &r.awaiter, now).await?;
-                let p_awaited = match result.awaited {
-                    Some(p) => p,
-                    None => {
-                        tracing::debug!(promise_id = %r.awaited, "Callback registration: awaited promise not found");
-                        return Ok(ResponseEnvelope::error(
-                            kind_str.clone(),
-                            corr_id.clone(),
-                            404,
-                            "Awaited promise not found",
-                        ))
-                    }
-                };
-                let p_awaiter = match result.awaiter {
-                    Some(p) => p,
-                    None => {
-                        tracing::debug!(promise_id = %r.awaiter, "Callback registration: awaiter promise not found");
-                        return Ok(ResponseEnvelope::error(
-                            kind_str.clone(),
-                            corr_id.clone(),
-                            422,
-                            "Awaiter promise not found",
-                        ))
-                    }
-                };
-                if !p_awaiter.tags.contains_key("resonate:target") {
-                    tracing::debug!(awaiter = %r.awaiter, "Callback registration rejected: awaiter has no resonate:target");
-                    return Ok(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        422,
-                        "Awaiter promise has no resonate:target tag",
-                    ));
-                }
-                if !resonate_core::types::is_external(&p_awaited.tags) {
-                    tracing::debug!(awaited = %r.awaited, "Callback registration rejected: awaited is not awaitable");
-                    return Ok(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        422,
-                        "Awaited promise is not awaitable",
-                    ));
-                }
-                tracing::info!(
-                    awaited = %r.awaited,
-                    awaiter = %r.awaiter,
-                    awaited_state = %p_awaited.state,
-                    "Callback registered"
-                );
-                Ok(ResponseEnvelope::success(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    &PromiseResponseData { promise: p_awaited },
-                ))
-            }) })
-            .await
+        let fast = {
+            let (data, kind_str, corr_id) = (data.clone(), kind_str.clone(), corr_id.clone());
+            db_fn(move |db| {
+                let data = data.clone();
+                let kind_str = kind_str.clone();
+                let corr_id = corr_id.clone();
+                Box::pin(
+                    async move { callback_body(db, &data, &kind_str, &corr_id, now, true).await },
+                )
+            })
+        };
+        self.run_fast(req, fast, move |db| {
+            let data = data.clone();
+            let kind_str = kind_str.clone();
+            let corr_id = corr_id.clone();
+            Box::pin(async move {
+                callback_body(db, &data, &kind_str, &corr_id, now, false)
+                    .await
+                    .map(|r| r.expect("invariant: the slow path never declines"))
+            })
+        })
+        .await
     }
 
     async fn op_promise_register_listener(&self, req: &RequestEnvelope, now: i64) -> Output {
         let data = req.data.clone();
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
-        self.run(req, move |db| { let data = data.clone(); let kind_str = kind_str.clone(); let corr_id = corr_id.clone(); Box::pin(async move {
-                let r: PromiseRegisterListenerData = match serde_json::from_value(data.clone()) {
-                    Ok(d) => d,
-                    Err(e) => {
-                        return Ok(ResponseEnvelope::error(
-                            kind_str.clone(),
-                            corr_id.clone(),
-                            400,
-                            &format!("Invalid request: {}", e),
-                        ))
-                    }
-                };
-                if let Err(e) = r.validate() {
-                    return Ok(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        400,
-                        &format_validation_errors(&e),
-                    ));
-                }
-                if !resonate_core::is_valid_address(&r.address) {
-                    tracing::warn!(
-                        awaited = %r.awaited,
-                        address = %r.address,
-                        "Listener registration rejected: invalid address"
-                    );
-                    return Ok(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        400,
-                        "Invalid listener address",
-                    ));
-                }
-                db.try_timeout(&[&r.awaited], now).await?;
-                match db.promise_register_listener(&r.awaited, &r.address).await? {
-                    Some(promise) => {
-                        if !resonate_core::types::is_external(&promise.tags) {
-                            tracing::debug!(awaited = %r.awaited, "Listener registration rejected: awaited is not awaitable");
-                            return Ok(ResponseEnvelope::error(
-                                kind_str.clone(),
-                                corr_id.clone(),
-                                422,
-                                "Awaited promise is not awaitable",
-                            ));
-                        }
-                        tracing::info!(
-                            awaited = %r.awaited,
-                            address = %r.address,
-                            promise_state = %promise.state,
-                            "Listener registered"
-                        );
-                        Ok(ResponseEnvelope::success(
-                            kind_str.clone(),
-                            corr_id.clone(),
-                            &PromiseResponseData { promise },
-                        ))
-                    }
-                    None => {
-                        tracing::debug!(awaited = %r.awaited, "Listener registration: awaited promise not found");
-                        Ok(ResponseEnvelope::error(
-                            kind_str.clone(),
-                            corr_id.clone(),
-                            404,
-                            "Awaited promise not found",
-                        ))
-                    }
-                }
-            }) })
-            .await
+        let fast = {
+            let (data, kind_str, corr_id) = (data.clone(), kind_str.clone(), corr_id.clone());
+            db_fn(move |db| {
+                let data = data.clone();
+                let kind_str = kind_str.clone();
+                let corr_id = corr_id.clone();
+                Box::pin(
+                    async move { listener_body(db, &data, &kind_str, &corr_id, now, true).await },
+                )
+            })
+        };
+        self.run_fast(req, fast, move |db| {
+            let data = data.clone();
+            let kind_str = kind_str.clone();
+            let corr_id = corr_id.clone();
+            Box::pin(async move {
+                listener_body(db, &data, &kind_str, &corr_id, now, false)
+                    .await
+                    .map(|r| r.expect("invariant: the slow path never declines"))
+            })
+        })
+        .await
     }
 
     async fn op_promise_search(&self, req: &RequestEnvelope, now: i64) -> Output {
@@ -3159,6 +2931,389 @@ async fn suspend_body(
     )))
 }
 
+/// `promise.settle`, both ways — see `fence_body`.
+async fn settle_body(
+    db: &PostgresDb<'_>,
+    data: &Value,
+    kind_str: &str,
+    corr_id: &str,
+    now: i64,
+    fast: bool,
+) -> StorageResult<Option<ResponseEnvelope>> {
+    let r: PromiseSettleData = match serde_json::from_value(data.clone()) {
+        Ok(d) => d,
+        Err(e) => {
+            return Ok(Some(ResponseEnvelope::error(
+                kind_str.to_string(),
+                corr_id.to_string(),
+                400,
+                &format!("Invalid request: {}", e),
+            )))
+        }
+    };
+    if let Err(e) = r.validate() {
+        return Ok(Some(ResponseEnvelope::error(
+            kind_str.to_string(),
+            corr_id.to_string(),
+            400,
+            &format_validation_errors(&e),
+        )));
+    }
+    if !fast {
+        db.try_timeout(&[&r.id], now).await?;
+    }
+    let value_headers_json = r
+        .value
+        .headers
+        .as_ref()
+        .map(|h| serde_json::to_string(h).unwrap());
+    let (result, expired) = db
+        .promise_settle(
+            &PromiseSettleParams {
+                id: &r.id,
+                state: r.state.as_str(),
+                value_headers: value_headers_json.as_deref(),
+                value_data: r.value.data.as_deref(),
+                settled_at: now,
+            },
+            fast.then_some(now),
+        )
+        .await?;
+    if expired {
+        return Ok(None);
+    }
+    match result.promise {
+        Some(promise) => {
+            assert_ne!(
+                promise.state,
+                PromiseState::Pending,
+                "invariant: returning 200 but promise is still pending"
+            );
+            if result.was_settled {
+                tracing::info!(
+                    promise_id = %promise.id,
+                    state = %promise.state,
+                    "Promise settled"
+                );
+            } else {
+                tracing::debug!(
+                    promise_id = %promise.id,
+                    current_state = %promise.state,
+                    requested_state = %r.state,
+                    "Promise settle: already settled (idempotent)"
+                );
+            }
+            Ok(Some(ResponseEnvelope::success(
+                kind_str.to_string(),
+                corr_id.to_string(),
+                &PromiseResponseData { promise },
+            )))
+        }
+        None => {
+            tracing::debug!(promise_id = %r.id, "Promise settle: promise not found");
+            Ok(Some(ResponseEnvelope::error(
+                kind_str.to_string(),
+                corr_id.to_string(),
+                404,
+                "Promise not found",
+            )))
+        }
+    }
+}
+
+/// `promise.register_listener`, both ways — see `fence_body`.
+async fn listener_body(
+    db: &PostgresDb<'_>,
+    data: &Value,
+    kind_str: &str,
+    corr_id: &str,
+    now: i64,
+    fast: bool,
+) -> StorageResult<Option<ResponseEnvelope>> {
+    let r: PromiseRegisterListenerData = match serde_json::from_value(data.clone()) {
+        Ok(d) => d,
+        Err(e) => {
+            return Ok(Some(ResponseEnvelope::error(
+                kind_str.to_string(),
+                corr_id.to_string(),
+                400,
+                &format!("Invalid request: {}", e),
+            )))
+        }
+    };
+    if let Err(e) = r.validate() {
+        return Ok(Some(ResponseEnvelope::error(
+            kind_str.to_string(),
+            corr_id.to_string(),
+            400,
+            &format_validation_errors(&e),
+        )));
+    }
+    if !resonate_core::is_valid_address(&r.address) {
+        tracing::warn!(
+            awaited = %r.awaited,
+            address = %r.address,
+            "Listener registration rejected: invalid address"
+        );
+        return Ok(Some(ResponseEnvelope::error(
+            kind_str.to_string(),
+            corr_id.to_string(),
+            400,
+            "Invalid listener address",
+        )));
+    }
+    if !fast {
+        db.try_timeout(&[&r.awaited], now).await?;
+    }
+    let (found, expired) = db
+        .promise_register_listener(&r.awaited, &r.address, fast.then_some(now))
+        .await?;
+    if expired {
+        return Ok(None);
+    }
+    match found {
+        Some(promise) => {
+            if !resonate_core::types::is_external(&promise.tags) {
+                tracing::debug!(awaited = %r.awaited, "Listener registration rejected: awaited is not awaitable");
+                return Ok(Some(ResponseEnvelope::error(
+                    kind_str.to_string(),
+                    corr_id.to_string(),
+                    422,
+                    "Awaited promise is not awaitable",
+                )));
+            }
+            tracing::info!(
+                awaited = %r.awaited,
+                address = %r.address,
+                promise_state = %promise.state,
+                "Listener registered"
+            );
+            Ok(Some(ResponseEnvelope::success(
+                kind_str.to_string(),
+                corr_id.to_string(),
+                &PromiseResponseData { promise },
+            )))
+        }
+        None => {
+            tracing::debug!(awaited = %r.awaited, "Listener registration: awaited promise not found");
+            Ok(Some(ResponseEnvelope::error(
+                kind_str.to_string(),
+                corr_id.to_string(),
+                404,
+                "Awaited promise not found",
+            )))
+        }
+    }
+}
+
+/// `promise.register_callback`, both ways — see `fence_body`.
+async fn callback_body(
+    db: &PostgresDb<'_>,
+    data: &Value,
+    kind_str: &str,
+    corr_id: &str,
+    now: i64,
+    fast: bool,
+) -> StorageResult<Option<ResponseEnvelope>> {
+    let r: PromiseRegisterCallbackData = match serde_json::from_value(data.clone()) {
+        Ok(d) => d,
+        Err(e) => {
+            return Ok(Some(ResponseEnvelope::error(
+                kind_str.to_string(),
+                corr_id.to_string(),
+                400,
+                &format!("Invalid request: {}", e),
+            )))
+        }
+    };
+    if let Err(e) = r.validate() {
+        return Ok(Some(ResponseEnvelope::error(
+            kind_str.to_string(),
+            corr_id.to_string(),
+            400,
+            &format_validation_errors(&e),
+        )));
+    }
+    if !fast {
+        db.try_timeout(&[&r.awaited, &r.awaiter], now).await?;
+    }
+    let (result, expired) = db
+        .promise_register_callback(&r.awaited, &r.awaiter, now, fast.then_some(now))
+        .await?;
+    if expired {
+        return Ok(None);
+    }
+    let p_awaited = match result.awaited {
+        Some(p) => p,
+        None => {
+            tracing::debug!(promise_id = %r.awaited, "Callback registration: awaited promise not found");
+            return Ok(Some(ResponseEnvelope::error(
+                kind_str.to_string(),
+                corr_id.to_string(),
+                404,
+                "Awaited promise not found",
+            )));
+        }
+    };
+    let p_awaiter = match result.awaiter {
+        Some(p) => p,
+        None => {
+            tracing::debug!(promise_id = %r.awaiter, "Callback registration: awaiter promise not found");
+            return Ok(Some(ResponseEnvelope::error(
+                kind_str.to_string(),
+                corr_id.to_string(),
+                422,
+                "Awaiter promise not found",
+            )));
+        }
+    };
+    if !p_awaiter.tags.contains_key("resonate:target") {
+        tracing::debug!(awaiter = %r.awaiter, "Callback registration rejected: awaiter has no resonate:target");
+        return Ok(Some(ResponseEnvelope::error(
+            kind_str.to_string(),
+            corr_id.to_string(),
+            422,
+            "Awaiter promise has no resonate:target tag",
+        )));
+    }
+    if !resonate_core::types::is_external(&p_awaited.tags) {
+        tracing::debug!(awaited = %r.awaited, "Callback registration rejected: awaited is not awaitable");
+        return Ok(Some(ResponseEnvelope::error(
+            kind_str.to_string(),
+            corr_id.to_string(),
+            422,
+            "Awaited promise is not awaitable",
+        )));
+    }
+    tracing::info!(
+        awaited = %r.awaited,
+        awaiter = %r.awaiter,
+        awaited_state = %p_awaited.state,
+        "Callback registered"
+    );
+    Ok(Some(ResponseEnvelope::success(
+        kind_str.to_string(),
+        corr_id.to_string(),
+        &PromiseResponseData { promise: p_awaited },
+    )))
+}
+
+/// `promise.create`, both ways — see `fence_body`. The insert is the one
+/// statement either way; only an existing promise past its deadline declines.
+async fn promise_create_body(
+    db: &PostgresDb<'_>,
+    data: &Value,
+    kind_str: &str,
+    corr_id: &str,
+    now: i64,
+    fast: bool,
+) -> StorageResult<Option<ResponseEnvelope>> {
+    let r: PromiseCreateData = match serde_json::from_value(data.clone()) {
+        Ok(d) => d,
+        Err(e) => {
+            return Ok(Some(ResponseEnvelope::error(
+                kind_str.to_string(),
+                corr_id.to_string(),
+                400,
+                &format!("Invalid request: {}", e),
+            )))
+        }
+    };
+    if let Err(e) = r.validate() {
+        return Ok(Some(ResponseEnvelope::error(
+            kind_str.to_string(),
+            corr_id.to_string(),
+            400,
+            &format_validation_errors(&e),
+        )));
+    }
+    let address = r.tags.get("resonate:target").map(|s| s.as_str());
+    if let Some(addr) = address {
+        if !resonate_core::is_valid_address(addr) {
+            tracing::warn!(
+                promise_id = %r.id,
+                address = addr,
+                "Promise create rejected: invalid resonate:target address"
+            );
+            return Ok(Some(ResponseEnvelope::error(
+                kind_str.to_string(),
+                corr_id.to_string(),
+                400,
+                "Invalid resonate:target address",
+            )));
+        }
+    }
+    if !fast {
+        db.try_timeout(&[&r.id], now).await?;
+    }
+    let tags_json = serde_json::to_string(&r.tags).unwrap();
+    let already_timedout = now >= r.timeout_at;
+    let (state, created_at, settled_at) = if already_timedout {
+        let state = if r.tags.get("resonate:timer").map(|v| v.as_str()) == Some("true") {
+            tracing::debug!(promise_id = %r.id, "Promise created already timedout (timer: resolved immediately)");
+            PromiseState::Resolved
+        } else {
+            tracing::debug!(promise_id = %r.id, "Promise created already timedout");
+            PromiseState::RejectedTimedout
+        };
+        (state, r.timeout_at, Some(r.timeout_at))
+    } else {
+        (PromiseState::Pending, now, None)
+    };
+    let param_headers_json = r
+        .param
+        .headers
+        .as_ref()
+        .map(|h| serde_json::to_string(h).unwrap());
+    let result = db
+        .promise_create(&PromiseCreateParams {
+            id: &r.id,
+            state: state.as_str(),
+            param_headers: param_headers_json.as_deref(),
+            param_data: r.param.data.as_deref(),
+            tags: &tags_json,
+            timeout_at: r.timeout_at,
+            created_at,
+            settled_at,
+            already_timedout,
+            address,
+        })
+        .await?;
+    // The fast path's insert wrote nothing if the promise exists;
+    // one that exists pending past its deadline must be timed out
+    // before it is answered, which is the transaction's job.
+    if fast
+        && !result.was_created
+        && result.promise.state == PromiseState::Pending
+        && result.promise.timeout_at <= now
+    {
+        return Ok(None);
+    }
+    if result.was_created {
+        tracing::info!(
+            promise_id = %result.promise.id,
+            state = %result.promise.state,
+            timeout_at = result.promise.timeout_at,
+            target = address.unwrap_or("none"),
+            already_timedout = already_timedout,
+            "Promise created"
+        );
+    } else {
+        tracing::debug!(
+            promise_id = %result.promise.id,
+            state = %result.promise.state,
+            "Promise create: already exists (idempotent)"
+        );
+    }
+    Ok(Some(ResponseEnvelope::success(
+        kind_str.to_string(),
+        corr_id.to_string(),
+        &PromiseResponseData {
+            promise: result.promise,
+        },
+    )))
+}
+
 /// `task.fulfill`, both ways — see `fence_body`. The fast path is one
 /// autocommit statement that locks, checks the fence and settles; it declines
 /// if the promise is pending past its deadline.
@@ -3748,7 +3903,8 @@ impl PostgresDb<'_> {
     async fn promise_settle(
         &self,
         params: &PromiseSettleParams<'_>,
-    ) -> StorageResult<PromiseSettleResult> {
+        guard: Option<i64>,
+    ) -> StorageResult<(PromiseSettleResult, bool)> {
         let PromiseSettleParams {
             id,
             state,
@@ -3757,14 +3913,12 @@ impl PostgresDb<'_> {
             settled_at,
         } = *params;
 
-        // Statement 1: acquire the row lock — blocks until a concurrent
-        // task.suspend writing our `callbacks` finishes.
-        sqlx::query("SELECT id FROM promises WHERE id = $1 FOR UPDATE")
-            .bind(id)
-            .fetch_optional(self.tx().await.pg())
-            .await?;
-
-        // Statement 2: fresh snapshot, so `before` sees those awaiters.
+        // One statement. `locked` takes the row lock — it waits out a
+        // concurrent task.suspend writing our `callbacks`, then reads the
+        // row's latest version, those awaiters included — which is what a
+        // lock statement and a second, fresh-snapshot statement were for.
+        // `guard`: with `Some(now)`, a promise pending past its deadline is
+        // left alone and reported, for the transaction to time out first.
         let sql = self.cached("promise_settle", || {
             let self_set = settle_self(
                 "(SELECT b.task_state IS NOT NULL AND b.task_state <> 'fulfilled' FROM before b)",
@@ -3779,14 +3933,20 @@ impl PostgresDb<'_> {
             );
 
             format!("
-            WITH before AS (
-              SELECT id, state, task_state, callbacks, listeners FROM promises WHERE id = $1
+            WITH locked AS (
+              SELECT id, state, task_state, callbacks, listeners,
+                     ($6::bigint IS NOT NULL AND state = 'pending' AND timeout_at <= $6) AS expired
+              FROM promises WHERE id = $1
+              FOR UPDATE
+            ),
+            before AS (
+              SELECT * FROM locked WHERE NOT expired
             ),
             updated_promise AS (
               UPDATE promises p
               SET state = $2, value_headers = COALESCE($3::jsonb, '{{}}'), value_data = $4, settled_at = $5,
                   {self_set}
-              WHERE p.id = $1 AND p.state = 'pending'
+              WHERE p.id = $1 AND p.state = 'pending' AND EXISTS (SELECT 1 FROM before)
               RETURNING p.*
             ),
             {unblock},
@@ -3797,7 +3957,10 @@ impl PostgresDb<'_> {
               SELECT *, false AS was_settled FROM promises
               WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM updated_promise)
             )
-            SELECT {P_COLS}, was_settled, {messages} FROM result
+            SELECT {P_COLS}, was_settled,
+              COALESCE((SELECT expired FROM locked), false) AS expired,
+              {messages}
+            FROM result
         ", messages = emitted_json(&["emit_unblock", "emit_resume"]))
         });
         let rows = sqlx::query(&sql)
@@ -3806,21 +3969,28 @@ impl PostgresDb<'_> {
             .bind(value_headers)
             .bind(value_data)
             .bind(settled_at)
+            .bind(guard)
             .fetch_all(self.tx().await.pg())
             .await?;
 
-        if rows.is_empty() {
-            return Ok(PromiseSettleResult {
-                was_settled: false,
-                promise: None,
-            });
+        let none = PromiseSettleResult {
+            was_settled: false,
+            promise: None,
+        };
+        let Some(row) = rows.first() else {
+            return Ok((none, false));
+        };
+        if row.get::<bool, _>("expired") {
+            return Ok((none, true));
         }
-        let row = &rows[0];
         self.absorb_and_arm_retries(row, settled_at + self.task_retry_timeout);
-        Ok(PromiseSettleResult {
-            was_settled: row.get("was_settled"),
-            promise: Some(row_to_promise(row)),
-        })
+        Ok((
+            PromiseSettleResult {
+                was_settled: row.get("was_settled"),
+                promise: Some(row_to_promise(row)),
+            },
+            false,
+        ))
     }
 
     // P-04: promise.register_callback
@@ -3829,7 +3999,8 @@ impl PostgresDb<'_> {
         awaited_id: &str,
         awaiter_id: &str,
         time: i64,
-    ) -> StorageResult<RegisterCallbackResult> {
+        guard: Option<i64>,
+    ) -> StorageResult<(RegisterCallbackResult, bool)> {
         let trt = self.task_retry_timeout;
         let sql = self.cached("promise_register_callback", || {
             format!("
@@ -3843,8 +4014,18 @@ impl PostgresDb<'_> {
             -- a 422, so nothing below may write for it: not the link, and not
             -- the direct resume, which would wake the awaiter for a
             -- registration that never happened.
+            -- The fast path's guard: with `$4`, nothing below writes if
+            -- either promise is pending past its deadline.
+            expired AS (
+              SELECT $4::bigint IS NOT NULL AND EXISTS (
+                SELECT 1 FROM awaited WHERE state = 'pending' AND timeout_at <= $4
+                UNION ALL
+                SELECT 1 FROM awaiter WHERE state = 'pending' AND timeout_at <= $4
+              ) AS hit
+            ),
             awaitable AS (
-              SELECT EXISTS (SELECT 1 FROM awaited WHERE external) AS ok
+              SELECT EXISTS (SELECT 1 FROM awaited WHERE external)
+                     AND NOT (SELECT hit FROM expired) AS ok
             ),
             -- link: awaited still pending and awaitable, awaiter targeted and pending
             linked AS (
@@ -3898,9 +4079,11 @@ impl PostgresDb<'_> {
                 AND (SELECT ok FROM awaitable)
                 AND EXISTS (SELECT 1 FROM awaited WHERE state <> 'pending')
             )
-            SELECT 'awaited' AS type, {awaited_cols}, {messages} FROM awaited
+            SELECT 'awaited' AS type, {awaited_cols}, {messages},
+                   (SELECT hit FROM expired) AS expired FROM awaited
             UNION ALL
-            SELECT 'awaiter' AS type, {awaiter_cols}, {messages} FROM awaiter
+            SELECT 'awaiter' AS type, {awaiter_cols}, {messages},
+                   (SELECT hit FROM expired) AS expired FROM awaiter
         ",
             awaited_cols = p_cols("awaited"),
             awaiter_cols = p_cols("awaiter"),
@@ -3911,10 +4094,20 @@ impl PostgresDb<'_> {
             .bind(awaited_id)
             .bind(awaiter_id)
             .bind(time)
+            .bind(guard)
             .fetch_all(self.tx().await.pg())
             .await?;
 
         if let Some(row) = rows.first() {
+            if row.get::<bool, _>("expired") {
+                return Ok((
+                    RegisterCallbackResult {
+                        awaited: None,
+                        awaiter: None,
+                    },
+                    true,
+                ));
+            }
             self.absorb_and_arm_retries(row, time + trt);
         }
         let mut awaited = None;
@@ -3928,7 +4121,7 @@ impl PostgresDb<'_> {
                 _ => {}
             }
         }
-        Ok(RegisterCallbackResult { awaited, awaiter })
+        Ok((RegisterCallbackResult { awaited, awaiter }, false))
     }
 
     // P-05: promise.register_listener
@@ -3936,7 +4129,8 @@ impl PostgresDb<'_> {
         &self,
         awaited_id: &str,
         address: &str,
-    ) -> StorageResult<Option<PromiseRecord>> {
+        guard: Option<i64>,
+    ) -> StorageResult<(Option<PromiseRecord>, bool)> {
         let sql = self.cached("promise_register_listener", || {
             format!(
                 "
@@ -3950,23 +4144,28 @@ impl PostgresDb<'_> {
               UPDATE promises p SET listeners = p.listeners || $2
               WHERE p.id = $1
                 AND NOT (p.listeners @> ARRAY[$2])
-                AND EXISTS (SELECT 1 FROM locked_promise WHERE state = 'pending' AND external)
+                AND EXISTS (SELECT 1 FROM locked_promise WHERE state = 'pending' AND external
+                              AND NOT ($3::bigint IS NOT NULL AND timeout_at <= $3))
               RETURNING p.id
             )
-            SELECT {cols} FROM locked_promise",
+            SELECT {cols},
+              ($3::bigint IS NOT NULL AND state = 'pending' AND timeout_at <= $3) AS expired
+            FROM locked_promise",
                 cols = p_cols("locked_promise")
             )
         });
         let rows = sqlx::query(&sql)
             .bind(awaited_id)
             .bind(address)
+            .bind(guard)
             .fetch_all(self.tx().await.pg())
             .await?;
 
-        if rows.is_empty() {
-            return Ok(None);
+        match rows.first() {
+            None => Ok((None, false)),
+            Some(row) if row.get::<bool, _>("expired") => Ok((None, true)),
+            Some(row) => Ok((Some(row_to_promise(row)), false)),
         }
-        Ok(Some(row_to_promise(&rows[0])))
     }
 
     // P-06: promise.search

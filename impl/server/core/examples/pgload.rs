@@ -10,6 +10,9 @@
 //!   PG_URL=postgres://resonate:resonate@localhost:5432/resonate \
 //!     cargo run --release --example pgload -- <workers> <seconds> [pool]
 //!
+//! `PGLOAD_CLIENT=1` adds what a client does around each execution: an
+//! external promise, a listener and a callback on it, and its settlement.
+//!
 //! It reports requests per second and per-operation latency percentiles. The
 //! database is not reset: run it against a table that already holds a few
 //! million rows to see what a full scan would cost.
@@ -52,6 +55,7 @@ type Lat = Arc<Mutex<BTreeMap<&'static str, Vec<u32>>>>;
 
 struct Ctx {
     engine: Arc<PostgresEngine>,
+    client: bool,
     lat: Vec<(&'static str, u32)>,
     errors: u64,
 }
@@ -101,6 +105,32 @@ async fn execution(c: &mut Ctx, root: &str) {
             "id": id, "state": "resolved", "value": { "data": "d29ybGQ=" }
         }}}), &[200]).await;
     }
+    if c.client {
+        // What a client does around an execution: an external promise the
+        // execution can wait on, a listener for its result, and a settle.
+        let ext = format!("{root}:x");
+        c.call("promise.create", json!({ "id": ext, "timeoutAt": timeout, "param": {},
+            "tags": { "resonate:external": "true", "resonate:scope": "global", "resonate:branch": ext,
+                      "resonate:parent": root, "resonate:origin": root } }), &[200]).await;
+        c.call(
+            "promise.register_listener",
+            json!({ "awaited": ext, "address": TARGET }),
+            &[200],
+        )
+        .await;
+        c.call(
+            "promise.register_callback",
+            json!({ "awaited": ext, "awaiter": root }),
+            &[200],
+        )
+        .await;
+        c.call(
+            "promise.settle",
+            json!({ "id": ext, "state": "resolved", "value": {} }),
+            &[200],
+        )
+        .await;
+    }
     let child = format!("{root}:2");
     c.call("task.fence", json!({ "id": root, "version": v, "action": { "kind": "promise.create", "head": {}, "data": {
         "id": child, "timeoutAt": timeout, "param": { "data": "aGVsbG8=" },
@@ -110,13 +140,21 @@ async fn execution(c: &mut Ctx, root: &str) {
     c.call("task.suspend", json!({ "id": root, "version": v, "actions": [{
         "kind": "promise.register_callback", "head": {}, "data": { "awaited": child, "awaiter": root }
     }]}), &[200, 300]).await;
-    c.call("task.acquire", json!({ "id": child, "version": 0, "pid": PID, "ttl": TTL }), &[200])
-        .await;
+    c.call(
+        "task.acquire",
+        json!({ "id": child, "version": 0, "pid": PID, "ttl": TTL }),
+        &[200],
+    )
+    .await;
     c.call("task.fulfill", json!({ "id": child, "version": 1, "action": { "kind": "promise.settle", "head": {}, "data": {
         "id": child, "state": "resolved", "value": { "data": "d29ybGQ=" }
     }}}), &[200]).await;
-    c.call("task.acquire", json!({ "id": root, "version": v, "pid": PID, "ttl": TTL }), &[200])
-        .await;
+    c.call(
+        "task.acquire",
+        json!({ "id": root, "version": v, "pid": PID, "ttl": TTL }),
+        &[200],
+    )
+    .await;
     v += 1;
     c.call("task.fulfill", json!({ "id": root, "version": v, "action": { "kind": "promise.settle", "head": {}, "data": {
         "id": root, "state": "resolved", "value": { "data": "d29ybGQ=" }
@@ -166,6 +204,7 @@ async fn main() {
         handles.push(tokio::spawn(async move {
             let mut c = Ctx {
                 engine,
+                client: std::env::var("PGLOAD_CLIENT").is_ok(),
                 lat: Vec::with_capacity(100_000),
                 errors: 0,
             };

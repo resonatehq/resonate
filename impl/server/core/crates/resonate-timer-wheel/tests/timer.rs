@@ -250,7 +250,10 @@ async fn a_full_wheel_still_rereads_every_idle() {
         fired.values()
     );
     let n = calls.load(Ordering::SeqCst);
-    assert!((2..=8).contains(&n), "read {n} times in 150ms at a 40ms idle");
+    assert!(
+        (2..=8).contains(&n),
+        "read {n} times in 150ms at a 40ms idle"
+    );
 }
 
 #[tokio::test]
