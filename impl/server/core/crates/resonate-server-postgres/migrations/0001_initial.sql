@@ -57,9 +57,8 @@ $$ SELECT bool_and(resonate._addr_valid(e)) FROM unnest(a) e $$;
 CREATE TABLE IF NOT EXISTS promises (
   -- promise ------------------------------------------------------------------
   id            TEXT PRIMARY KEY,
-  state         TEXT   NOT NULL DEFAULT 'pending'
-                CHECK (state IN ('pending', 'resolved', 'rejected',
-                                 'rejected_canceled', 'rejected_timedout')),
+  -- Domain: promises_state_check, in the invariants trigger below.
+  state         TEXT   NOT NULL DEFAULT 'pending',
   param_headers JSONB  NOT NULL DEFAULT '{}',
   param_data    TEXT,
   value_headers JSONB  NOT NULL DEFAULT '{}',
@@ -92,8 +91,8 @@ CREATE TABLE IF NOT EXISTS promises (
                   CASE WHEN tags ? 'resonate:target' THEN id END) STORED,
 
   -- task — NULL task_state ⟺ the promise carries no resonate:target -----------
-  task_state    TEXT CHECK (task_state IN ('pending', 'acquired', 'suspended',
-                                           'halted', 'fulfilled')),
+  -- Domain: promises_task_state_check, in the invariants trigger below.
+  task_state    TEXT,
   task_version  INT NOT NULL DEFAULT 0,
 
   -- task deadlines. The multi-table task_timeouts.timeout_type discriminator
@@ -160,8 +159,17 @@ CREATE INDEX IF NOT EXISTS idx_promises_task
 
 -- Fan-out in the other direction: "which rows list me as an awaiter", the
 -- One-row stand-in for `DELETE FROM callbacks WHERE awaiter_id = $1`.
+--
+-- Partial, over the rows that have an awaiter at all — a pending promise
+-- something is suspended on, a sliver of the table. Unconditional, every
+-- insert and every task transition wrote an empty-array entry into it. And
+-- no fast update: with it, those entries queued in a pending list that every
+-- lookup reads end to end, and a settle that fans out paid for the whole
+-- list (measured: 167 pages, 43k tuples, on every task.fulfill). A query
+-- reaches this index only if it says `callbacks <> '{}'` itself.
 CREATE INDEX IF NOT EXISTS idx_promises_callbacks
-  ON promises USING GIN (callbacks);
+  ON promises USING GIN (callbacks) WITH (fastupdate = off)
+  WHERE callbacks <> '{}';
 
 -- --- schedules --------------------------------------------------------------
 
@@ -244,162 +252,215 @@ ALTER TABLE promises ADD CONSTRAINT promises_pkey
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS promises_task_key_unique;
 
 
--- --- promises: domains — the two state enums, inline in CREATE TABLE -------
+-- --- promises: the invariants, as one trigger --------------------------------
+--
+-- Every invariant on a promise row is checked by `promises_well_formed`, an
+-- AFTER ROW trigger, rather than by a CHECK constraint each. Same expressions,
+-- verbatim, over NEW; same names; same failure — SQLSTATE 23514, "new row for
+-- relation "promises" violates check constraint "<name>"", and the statement
+-- aborts with nothing written, exactly as a CHECK would.
+--
+-- Why not CHECK: Postgres re-reads and re-plans every CHECK expression of a
+-- table at the start of every statement that writes it, per writing node. With
+-- 31 of them that was 0.23 ms per UPDATE (measured: 0.35 ms against 0.12 ms on
+-- the same table without them), paid two or three times by a settle that fans
+-- out — the single largest cost of a transition. A PL/pgSQL function plans its
+-- expressions once per session; the same checks cost 0.05 ms or less.
+--
+-- What CHECK had that this does not: a trigger can be disabled
+-- (`ALTER TABLE ... DISABLE TRIGGER`, `session_replication_role = replica`).
+-- Nothing in this server does either.
+
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS promises_state_check;
-ALTER TABLE promises ADD CONSTRAINT promises_state_check
-  CHECK ((state = ANY (ARRAY['pending'::text, 'resolved'::text,
-  'rejected'::text, 'rejected_canceled'::text, 'rejected_timedout'::text])));
-
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS promises_task_state_check;
-ALTER TABLE promises ADD CONSTRAINT promises_task_state_check
-  CHECK ((task_state = ANY (ARRAY['pending'::text, 'acquired'::text,
-  'suspended'::text, 'halted'::text, 'fulfilled'::text])));
-
-
--- --- promises: promise ⊕ task — the entries a two-table layout cannot state ---
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS consistent_task_iff_targeted_promise;
-ALTER TABLE promises ADD CONSTRAINT consistent_task_iff_targeted_promise
-  CHECK (((task_state IS NOT NULL) = (target IS NOT NULL)));
-
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS consistent_settled_promise_has_fulfilled_task;
-ALTER TABLE promises ADD CONSTRAINT consistent_settled_promise_has_fulfilled_task
-  CHECK (((state = 'pending'::text) OR (task_state IS NULL) OR (task_state =
-  'fulfilled'::text)));
-
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS consistent_settled_task_promise_settled;
-ALTER TABLE promises ADD CONSTRAINT consistent_settled_task_promise_settled
-  CHECK (((task_state IS DISTINCT FROM 'fulfilled'::text) OR (state <>
-  'pending'::text)));
-
-
--- --- promises: promise well-formedness -------------------------------------
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_promise_created_at_lte_timeout_at;
-ALTER TABLE promises ADD CONSTRAINT well_formed_promise_created_at_lte_timeout_at
-  CHECK ((created_at <= timeout_at));
-
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_promise_pending_created_before_deadline;
-ALTER TABLE promises ADD CONSTRAINT well_formed_promise_pending_created_before_deadline
-  CHECK (((state <> 'pending'::text) OR (created_at < timeout_at)));
-
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_promise_settled_at_lte_timeout_at;
-ALTER TABLE promises ADD CONSTRAINT well_formed_promise_settled_at_lte_timeout_at
-  CHECK (((settled_at IS NULL) OR (settled_at <= timeout_at)));
-
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_promise_created_at_lte_settled_at;
-ALTER TABLE promises ADD CONSTRAINT well_formed_promise_created_at_lte_settled_at
-  CHECK (((settled_at IS NULL) OR (created_at <= settled_at)));
-
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_promise_settled_at_iff_not_pending;
-ALTER TABLE promises ADD CONSTRAINT well_formed_promise_settled_at_iff_not_pending
-  CHECK (((state <> 'pending'::text) = (settled_at IS NOT NULL)));
-
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_promise_pending_has_no_value;
-ALTER TABLE promises ADD CONSTRAINT well_formed_promise_pending_has_no_value
-  CHECK (((state <> 'pending'::text) OR ((value_data IS NULL) AND
-  (value_headers = '{}'::jsonb))));
-
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_promise_deadline_verdict_matches_timer_tag;
-ALTER TABLE promises ADD CONSTRAINT well_formed_promise_deadline_verdict_matches_timer_tag
-  CHECK (((settled_at IS DISTINCT FROM timeout_at) OR (state =
-  CASE
-      WHEN is_timer THEN 'resolved'::text
-      ELSE 'rejected_timedout'::text
-  END)));
-
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_promise_deadline_settlement_has_no_value;
-ALTER TABLE promises ADD CONSTRAINT well_formed_promise_deadline_settlement_has_no_value
-  CHECK (((settled_at IS DISTINCT FROM timeout_at) OR ((value_data IS NULL)
-  AND (value_headers = '{}'::jsonb))));
-
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_promise_timedout_is_server_owned;
-ALTER TABLE promises ADD CONSTRAINT well_formed_promise_timedout_is_server_owned
-  CHECK (((state <> 'rejected_timedout'::text) OR (settled_at =
-  timeout_at)));
-
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_promise_timer_not_targeted;
-ALTER TABLE promises ADD CONSTRAINT well_formed_promise_timer_not_targeted
-  CHECK ((NOT (is_timer AND (target IS NOT NULL))));
-
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_promise_obligations_require_external;
-ALTER TABLE promises ADD CONSTRAINT well_formed_promise_obligations_require_external
-  CHECK ((external OR ((callbacks = '{}'::text[]) AND (listeners =
-  '{}'::text[]))));
-
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_promise_awaiter_is_not_self;
-ALTER TABLE promises ADD CONSTRAINT well_formed_promise_awaiter_is_not_self
-  CHECK ((NOT (id = ANY (callbacks))));
-
-
--- --- promises: task well-formedness ----------------------------------------
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_task_acquired_iff_has_pid;
-ALTER TABLE promises ADD CONSTRAINT well_formed_task_acquired_iff_has_pid
-  CHECK (((task_state IS NULL) OR ((task_state = 'acquired'::text) = (pid IS
-  NOT NULL))));
-
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_task_acquired_iff_has_ttl;
-ALTER TABLE promises ADD CONSTRAINT well_formed_task_acquired_iff_has_ttl
-  CHECK (((task_state IS NULL) OR ((task_state = 'acquired'::text) = (ttl IS
-  NOT NULL))));
-
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_task_acquired_iff_has_lease_timeout_at;
-ALTER TABLE promises ADD CONSTRAINT well_formed_task_acquired_iff_has_lease_timeout_at
-  CHECK (((task_state IS NULL) OR ((task_state = 'acquired'::text) =
-  (lease_timeout_at IS NOT NULL))));
-
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_task_pending_iff_has_retry_timeout_at;
-ALTER TABLE promises ADD CONSTRAINT well_formed_task_pending_iff_has_retry_timeout_at
-  CHECK (((task_state IS NULL) OR ((task_state = 'pending'::text) =
-  (retry_timeout_at IS NOT NULL))));
-
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_task_fulfilled_is_cleared;
-ALTER TABLE promises ADD CONSTRAINT well_formed_task_fulfilled_is_cleared
-  CHECK (((task_state IS DISTINCT FROM 'fulfilled'::text) OR ((pid IS NULL)
-  AND (ttl IS NULL) AND (lease_timeout_at IS NULL) AND (retry_timeout_at IS NULL) AND
-  (resumes = '{}'::text[]))));
-
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_task_suspended_is_cleared;
-ALTER TABLE promises ADD CONSTRAINT well_formed_task_suspended_is_cleared
-  CHECK (((task_state IS DISTINCT FROM 'suspended'::text) OR ((pid IS NULL)
-  AND (ttl IS NULL) AND (lease_timeout_at IS NULL) AND (retry_timeout_at IS NULL))));
-
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_task_halted_is_cleared;
-ALTER TABLE promises ADD CONSTRAINT well_formed_task_halted_is_cleared
-  CHECK (((task_state IS DISTINCT FROM 'halted'::text) OR ((pid IS NULL) AND
-  (ttl IS NULL) AND (lease_timeout_at IS NULL) AND (retry_timeout_at IS NULL))));
-
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_task_suspended_has_no_resumes;
-ALTER TABLE promises ADD CONSTRAINT well_formed_task_suspended_has_no_resumes
-  CHECK (((task_state IS DISTINCT FROM 'suspended'::text) OR (resumes =
-  '{}'::text[])));
-
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_task_acquired_version_positive;
-ALTER TABLE promises ADD CONSTRAINT well_formed_task_acquired_version_positive
-  CHECK (((task_state IS DISTINCT FROM 'acquired'::text) OR (task_version >=
-  1)));
-
-
--- --- promises: obligations and uniqueness ----------------------------------
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_promise_callbacks_unique;
-ALTER TABLE promises ADD CONSTRAINT well_formed_promise_callbacks_unique
-  CHECK (((cardinality(callbacks) < 2) OR resonate._arr_uniq(callbacks)));
-
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_promise_listeners_unique;
-ALTER TABLE promises ADD CONSTRAINT well_formed_promise_listeners_unique
-  CHECK (((cardinality(listeners) < 2) OR resonate._arr_uniq(listeners)));
-
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_task_resumes_unique;
-ALTER TABLE promises ADD CONSTRAINT well_formed_task_resumes_unique
-  CHECK (((cardinality(resumes) < 2) OR resonate._arr_uniq(resumes)));
-
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS consistent_listener_addresses_deliverable;
-ALTER TABLE promises ADD CONSTRAINT consistent_listener_addresses_deliverable
-  CHECK (((listeners = '{}'::text[]) OR resonate._addrs_valid(listeners)));
-
-
--- --- promises: id format — this deployment's convention, not a catalogue entry ---
 ALTER TABLE promises DROP CONSTRAINT IF EXISTS well_formed_promise_id_at_most_one_separator;
-ALTER TABLE promises ADD CONSTRAINT well_formed_promise_id_at_most_one_separator
-  CHECK ((id ~ '^[^:]*(:[^:]*)?$'::text));
+
+CREATE OR REPLACE FUNCTION resonate._violated(name TEXT) RETURNS void
+  LANGUAGE plpgsql AS
+$$
+BEGIN
+  RAISE EXCEPTION USING
+    ERRCODE = 'check_violation',
+    MESSAGE = format('new row for relation "promises" violates check constraint "%s"', name),
+    CONSTRAINT = name, SCHEMA = 'resonate', TABLE = 'promises';
+END
+$$;
+
+CREATE OR REPLACE FUNCTION resonate._promises_well_formed() RETURNS trigger
+  LANGUAGE plpgsql AS
+$$
+BEGIN
+  -- --- promises: domains — the two state enums ------------------------------
+  IF NOT ((NEW.state = ANY (ARRAY['pending'::text, 'resolved'::text, 'rejected'::text, 'rejected_canceled'::text, 'rejected_timedout'::text]))) THEN
+    PERFORM resonate._violated('promises_state_check');
+  END IF;
+
+  IF NOT ((NEW.task_state = ANY (ARRAY['pending'::text, 'acquired'::text, 'suspended'::text, 'halted'::text, 'fulfilled'::text]))) THEN
+    PERFORM resonate._violated('promises_task_state_check');
+  END IF;
+
+
+  -- --- promises: promise ⊕ task — the entries a two-table layout cannot state ---
+  IF NOT (((NEW.task_state IS NOT NULL) = (NEW.target IS NOT NULL))) THEN
+    PERFORM resonate._violated('consistent_task_iff_targeted_promise');
+  END IF;
+
+  IF NOT (((NEW.state = 'pending'::text) OR (NEW.task_state IS NULL) OR (NEW.task_state = 'fulfilled'::text))) THEN
+    PERFORM resonate._violated('consistent_settled_promise_has_fulfilled_task');
+  END IF;
+
+  IF NOT (((NEW.task_state IS DISTINCT FROM 'fulfilled'::text) OR (NEW.state <> 'pending'::text))) THEN
+    PERFORM resonate._violated('consistent_settled_task_promise_settled');
+  END IF;
+
+
+  -- --- promises: promise well-formedness -------------------------------------
+  IF NOT ((NEW.created_at <= NEW.timeout_at)) THEN
+    PERFORM resonate._violated('well_formed_promise_created_at_lte_timeout_at');
+  END IF;
+
+  IF NOT (((NEW.state <> 'pending'::text) OR (NEW.created_at < NEW.timeout_at))) THEN
+    PERFORM resonate._violated('well_formed_promise_pending_created_before_deadline');
+  END IF;
+
+  IF NOT (((NEW.settled_at IS NULL) OR (NEW.settled_at <= NEW.timeout_at))) THEN
+    PERFORM resonate._violated('well_formed_promise_settled_at_lte_timeout_at');
+  END IF;
+
+  IF NOT (((NEW.settled_at IS NULL) OR (NEW.created_at <= NEW.settled_at))) THEN
+    PERFORM resonate._violated('well_formed_promise_created_at_lte_settled_at');
+  END IF;
+
+  IF NOT (((NEW.state <> 'pending'::text) = (NEW.settled_at IS NOT NULL))) THEN
+    PERFORM resonate._violated('well_formed_promise_settled_at_iff_not_pending');
+  END IF;
+
+  IF NOT (((NEW.state <> 'pending'::text) OR ((NEW.value_data IS NULL) AND (NEW.value_headers = '{}'::jsonb)))) THEN
+    PERFORM resonate._violated('well_formed_promise_pending_has_no_value');
+  END IF;
+
+  IF NOT (((NEW.settled_at IS DISTINCT FROM NEW.timeout_at) OR (NEW.state = CASE WHEN NEW.is_timer THEN 'resolved'::text ELSE 'rejected_timedout'::text END))) THEN
+    PERFORM resonate._violated('well_formed_promise_deadline_verdict_matches_timer_tag');
+  END IF;
+
+  IF NOT (((NEW.settled_at IS DISTINCT FROM NEW.timeout_at) OR ((NEW.value_data IS NULL) AND (NEW.value_headers = '{}'::jsonb)))) THEN
+    PERFORM resonate._violated('well_formed_promise_deadline_settlement_has_no_value');
+  END IF;
+
+  IF NOT (((NEW.state <> 'rejected_timedout'::text) OR (NEW.settled_at = NEW.timeout_at))) THEN
+    PERFORM resonate._violated('well_formed_promise_timedout_is_server_owned');
+  END IF;
+
+  IF NOT ((NOT (NEW.is_timer AND (NEW.target IS NOT NULL)))) THEN
+    PERFORM resonate._violated('well_formed_promise_timer_not_targeted');
+  END IF;
+
+  IF NOT ((NEW.external OR ((NEW.callbacks = '{}'::text[]) AND (NEW.listeners = '{}'::text[])))) THEN
+    PERFORM resonate._violated('well_formed_promise_obligations_require_external');
+  END IF;
+
+  IF NOT ((NOT (NEW.id = ANY (NEW.callbacks)))) THEN
+    PERFORM resonate._violated('well_formed_promise_awaiter_is_not_self');
+  END IF;
+
+
+  -- --- promises: task well-formedness ----------------------------------------
+  IF NOT (((NEW.task_state IS NULL) OR ((NEW.task_state = 'acquired'::text) = (NEW.pid IS NOT NULL)))) THEN
+    PERFORM resonate._violated('well_formed_task_acquired_iff_has_pid');
+  END IF;
+
+  IF NOT (((NEW.task_state IS NULL) OR ((NEW.task_state = 'acquired'::text) = (NEW.ttl IS NOT NULL)))) THEN
+    PERFORM resonate._violated('well_formed_task_acquired_iff_has_ttl');
+  END IF;
+
+  IF NOT (((NEW.task_state IS NULL) OR ((NEW.task_state = 'acquired'::text) = (NEW.lease_timeout_at IS NOT NULL)))) THEN
+    PERFORM resonate._violated('well_formed_task_acquired_iff_has_lease_timeout_at');
+  END IF;
+
+  IF NOT (((NEW.task_state IS NULL) OR ((NEW.task_state = 'pending'::text) = (NEW.retry_timeout_at IS NOT NULL)))) THEN
+    PERFORM resonate._violated('well_formed_task_pending_iff_has_retry_timeout_at');
+  END IF;
+
+  IF NOT (((NEW.task_state IS DISTINCT FROM 'fulfilled'::text) OR ((NEW.pid IS NULL) AND (NEW.ttl IS NULL) AND (NEW.lease_timeout_at IS NULL) AND (NEW.retry_timeout_at IS NULL) AND (NEW.resumes = '{}'::text[])))) THEN
+    PERFORM resonate._violated('well_formed_task_fulfilled_is_cleared');
+  END IF;
+
+  IF NOT (((NEW.task_state IS DISTINCT FROM 'suspended'::text) OR ((NEW.pid IS NULL) AND (NEW.ttl IS NULL) AND (NEW.lease_timeout_at IS NULL) AND (NEW.retry_timeout_at IS NULL)))) THEN
+    PERFORM resonate._violated('well_formed_task_suspended_is_cleared');
+  END IF;
+
+  IF NOT (((NEW.task_state IS DISTINCT FROM 'halted'::text) OR ((NEW.pid IS NULL) AND (NEW.ttl IS NULL) AND (NEW.lease_timeout_at IS NULL) AND (NEW.retry_timeout_at IS NULL)))) THEN
+    PERFORM resonate._violated('well_formed_task_halted_is_cleared');
+  END IF;
+
+  IF NOT (((NEW.task_state IS DISTINCT FROM 'suspended'::text) OR (NEW.resumes = '{}'::text[]))) THEN
+    PERFORM resonate._violated('well_formed_task_suspended_has_no_resumes');
+  END IF;
+
+  IF NOT (((NEW.task_state IS DISTINCT FROM 'acquired'::text) OR (NEW.task_version >= 1))) THEN
+    PERFORM resonate._violated('well_formed_task_acquired_version_positive');
+  END IF;
+
+
+  -- --- promises: obligations and uniqueness ----------------------------------
+  IF NOT (((cardinality(NEW.callbacks) < 2) OR resonate._arr_uniq(NEW.callbacks))) THEN
+    PERFORM resonate._violated('well_formed_promise_callbacks_unique');
+  END IF;
+
+  IF NOT (((cardinality(NEW.listeners) < 2) OR resonate._arr_uniq(NEW.listeners))) THEN
+    PERFORM resonate._violated('well_formed_promise_listeners_unique');
+  END IF;
+
+  IF NOT (((cardinality(NEW.resumes) < 2) OR resonate._arr_uniq(NEW.resumes))) THEN
+    PERFORM resonate._violated('well_formed_task_resumes_unique');
+  END IF;
+
+  IF NOT (((NEW.listeners = '{}'::text[]) OR resonate._addrs_valid(NEW.listeners))) THEN
+    PERFORM resonate._violated('consistent_listener_addresses_deliverable');
+  END IF;
+
+
+  -- --- promises: id format — this deployment's convention, not a catalogue entry ---
+  IF NOT ((NEW.id ~ '^[^:]*(:[^:]*)?$'::text)) THEN
+    PERFORM resonate._violated('well_formed_promise_id_at_most_one_separator');
+  END IF;
+
+  RETURN NULL;
+END
+$$;
+
+DROP TRIGGER IF EXISTS promises_well_formed ON promises;
+CREATE TRIGGER promises_well_formed
+  AFTER INSERT OR UPDATE ON promises
+  FOR EACH ROW EXECUTE FUNCTION resonate._promises_well_formed();
 
 
 -- --- schedules: schedules --------------------------------------------------
