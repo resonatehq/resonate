@@ -21,6 +21,7 @@ const usage = `Usage: host.mjs serve [options]
   --port <n>              port to listen on                   [default: 8001]
   --server-url <url>      the URL workers answer              [default: http://<bind>:<port>]
   --debug                 the clock belongs to the caller
+  --deliver               with --debug: send messages to workers instead of holding them
   --request-timeout <ms>  how long one store request may take [default: 10000]
   --wasm <file>           the module                          [default: zig-out/bin/resonate.wasm]
 `;
@@ -57,6 +58,7 @@ function parseArgs(argv) {
       case "--port": args.port = Number(value()); break;
       case "--server-url": args.serverUrl = value(); break;
       case "--debug": args.debug = true; break;
+      case "--deliver": args.deliver = true; break;
       case "--request-timeout": args.requestTimeout = Number(value()); break;
       case "--wasm": args.wasm = value(); break;
       default: fail(`unknown option: ${flag}`);
@@ -82,6 +84,7 @@ const resonate = await createResonate({
   prefix: args.prefix,
   serverUrl: args.serverUrl,
   debug: args.debug,
+  deliver: args.deliver,
   requestTimeout: args.requestTimeout,
 }).catch((e) => fail(e.message));
 

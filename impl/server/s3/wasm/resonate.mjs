@@ -37,6 +37,8 @@ const decoder = new TextDecoder();
  * @param {string} [options.prefix] A key prefix inside the bucket.
  * @param {string} [options.serverUrl] The URL workers answer. Default: http://localhost:8001.
  * @param {boolean} [options.debug] The clock belongs to the caller (`resonate:debug_time`).
+ * @param {boolean} [options.deliver] Under `debug`, send messages to workers instead of
+ *   holding them for `debug.snap`.
  * @param {number} [options.requestTimeout] How long one store request may take, in ms.
  *   Past it the module stops waiting and treats the request as "may or may not
  *   have happened". Default: 10000.
@@ -53,6 +55,7 @@ export async function createResonate(options) {
     prefix = "",
     serverUrl = "http://localhost:8001",
     debug = false,
+    deliver: deliverUnderDebug = false,
     requestTimeout = 10_000,
     fetch: fetchImpl = globalThis.fetch.bind(globalThis),
     log = (line) => console.error(line),
@@ -179,7 +182,7 @@ export async function createResonate(options) {
     withBuffer(bucket, (bP, bL) =>
       withBuffer(prefix, (pP, pL) =>
         withBuffer(serverUrl, (uP, uL) =>
-          exports.init(eP, eL, bP, bL, pP, pL, uP, uL, (debug ? 1 : 0) | (store === "memory" ? 2 : 0), requestTimeout),
+          exports.init(eP, eL, bP, bL, pP, pL, uP, uL, (debug ? 1 : 0) | (store === "memory" ? 2 : 0) | (deliverUnderDebug ? 4 : 0), requestTimeout),
         ),
       ),
     ),

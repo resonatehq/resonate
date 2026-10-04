@@ -118,7 +118,8 @@ fn leave(p: *Process) void {
 }
 
 /// Start the server. `flags`: bit 0 is debug mode, bit 1 keeps state in memory
-/// instead of the bucket. `request_timeout_ms` bounds every store request; 0
+/// instead of the bucket, bit 2 sends messages under debug mode instead of
+/// holding them (`--deliver`, as in `main.zig`). `request_timeout_ms` bounds every store request; 0
 /// takes the default. Returns 0, or 1 if it could not start.
 export fn init(
     endpoint_ptr: [*]const u8,
@@ -140,6 +141,7 @@ export fn init(
         server_url_ptr[0..server_url_len],
         flags & 1 != 0,
         flags & 2 != 0,
+        flags & 4 != 0,
         request_timeout_ms,
     ) catch |e| {
         log("could not start: {s}", .{@errorName(e)});
@@ -155,6 +157,7 @@ fn start(
     server_url_in: []const u8,
     debug: bool,
     in_memory: bool,
+    deliver: bool,
     request_timeout_ms: u32,
 ) !void {
     const p = try allocator.create(Process);
@@ -197,6 +200,7 @@ fn start(
             .timer_shards = store_mod.KeySpace.default_timer_shards,
             .server_url = server_url,
             .debug = debug,
+            .deliver = deliver,
             .applier = .{
                 .machine = .{ .preload_limit = protocol.preload_limit_default },
                 .max_cas_retries = 8,

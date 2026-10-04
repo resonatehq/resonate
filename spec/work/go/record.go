@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"sync"
@@ -49,6 +50,16 @@ type Recorder struct {
 	debug     bool
 	// wall: the instants follow wall-clock milliseconds. See UseWallClock.
 	wall bool
+	// sink, if set, sees every event as it is recorded (see skull.go).
+	sink func(Event)
+	// inFlight orders ticks against requests: a request holds it shared from
+	// the instant it is stamped until its answer arrives, a tick holds it
+	// exclusively. So no tick moves a server's clock past a request that is
+	// still on its way — which would let a deadline fire "before" the
+	// instant that request carries, and the trace show an effect earlier
+	// than its cause. With two servers ticked one after the other the
+	// window is wide enough to hit; see debugTicker.
+	inFlight sync.RWMutex
 }
 
 // Event is one request/response pair as it went over the wire.
@@ -60,6 +71,11 @@ type Event struct {
 	Client string          `json:"client"`
 	Call   int64           `json:"call"`
 	Return int64           `json:"return"`
+	// Ambiguous: no definite answer — a transport error, or a 5xx such as
+	// the server's "may or may not have taken effect". Recorded with status
+	// 500, which both checkers read as "applied or not, response unseen",
+	// and with no return: the effect may land after the client gave up.
+	Ambiguous bool `json:"ambiguous,omitempty"`
 }
 
 func NewRecorder(startAt, batchSize uint64, debug bool) *Recorder {
@@ -118,6 +134,9 @@ func (r *Recorder) add(e Event) {
 	r.mu.Lock()
 	r.events = append(r.events, e)
 	r.mu.Unlock()
+	if r.sink != nil {
+		r.sink(e)
+	}
 }
 
 // skip counts wire kinds the checkers cannot read, so a run reports what
@@ -179,13 +198,27 @@ func (n *recordingNet) Recv(cb func(raw string))        { n.inner.Recv(cb) }
 // debug instant into its head so the trace has a monotone clock, then tees
 // the pair.
 func (n *recordingNet) Send(ctx context.Context, body string) (string, error) {
+	n.rec.inFlight.RLock()
+	defer n.rec.inFlight.RUnlock()
 	now := n.rec.tick()
 	kind, stamped := stampDebugTime(body, now, n.rec.debug)
 
 	call := time.Now().UnixNano()
 	res, err := n.inner.Send(ctx, stamped)
 	ret := time.Now().UnixNano()
-	if err != nil {
+	// No definite answer. Dropping it would leave its effect, if it had one,
+	// unexplained in the trace — a refutation of a correct server. Recorded
+	// as pending instead: the checkers keep both branches.
+	ambiguous := err != nil || serverError(res)
+	if ambiguous {
+		if recordable(kind) {
+			if req, ok := dataOf(stamped); ok {
+				n.rec.add(Event{
+					Kind: kind, Now: now, Req: req, Res: pendingResponse(kind),
+					Client: n.client, Call: call, Return: math.MaxInt64, Ambiguous: true,
+				})
+			}
+		}
 		return res, err
 	}
 
@@ -211,6 +244,27 @@ func (n *recordingNet) Send(ctx context.Context, body string) (string, error) {
 		Client: n.client, Call: call, Return: ret,
 	})
 	return res, nil
+}
+
+// serverError: a 5xx answer, which promises nothing about the request.
+func serverError(res string) bool {
+	var env struct {
+		Head struct {
+			Status int `json:"status"`
+		} `json:"head"`
+	}
+	if json.Unmarshal([]byte(res), &env) != nil {
+		return false
+	}
+	return env.Head.Status >= 500
+}
+
+// pendingResponse is the envelope both checkers read as "may or may not
+// have applied" (`PendingOp` in valid/porc).
+func pendingResponse(kind string) json.RawMessage {
+	raw, _ := json.Marshal(map[string]any{
+		"kind": kind, "head": map[string]any{"status": 500}, "data": "ambiguous: no definite answer"})
+	return raw
 }
 
 // recordable is the set of kinds BOTH checkers can decode.

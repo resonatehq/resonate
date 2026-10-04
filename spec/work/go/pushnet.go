@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"net"
 	"net/http"
 	"strings"
@@ -27,7 +28,7 @@ import (
 // callbacks exactly as one SSE `data:` line would. Requests to the server
 // are a POST of the envelope, as in `httpnet`.
 type PushNetwork struct {
-	url       string // the server
+	urls      []string // the servers; each request goes to one at random
 	pid       string
 	group     string
 	advertise string // how the server reaches it, e.g. "http://client:41733/"
@@ -45,14 +46,14 @@ var _ resonate.Network = (*PushNetwork)(nil)
 // NewPushNetwork binds its listener now, so the address it advertises is
 // the one it holds — port 0 takes whatever is free, which is what lets two
 // drivers run side by side without agreeing on ports first.
-func NewPushNetwork(url, pid, host string, port int) (*PushNetwork, error) {
+func NewPushNetwork(urls []string, pid, host string, port int) (*PushNetwork, error) {
 	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		return nil, fmt.Errorf("push listener on :%d: %w", port, err)
 	}
 	bound := ln.Addr().(*net.TCPAddr).Port
 	return &PushNetwork{
-		url:       strings.TrimRight(url, "/"),
+		urls:      urls,
 		pid:       pid,
 		group:     "default",
 		advertise: fmt.Sprintf("http://%s:%d/", host, bound),
@@ -120,7 +121,10 @@ func (p *PushNetwork) Stop() error {
 }
 
 func (p *PushNetwork) Send(ctx context.Context, body string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.url+"/", strings.NewReader(body))
+	// Any server will do: they share one store, and a request answered by
+	// one must be visible through the other.
+	url := strings.TrimRight(p.urls[rand.Intn(len(p.urls))], "/")
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url+"/", strings.NewReader(body))
 	if err != nil {
 		return "", err
 	}

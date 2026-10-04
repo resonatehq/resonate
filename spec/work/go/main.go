@@ -119,7 +119,9 @@ func main() {
 	fs.Var(&cfg.Depth, "depth", "fan-out recursion depth, e.g. 1 or 1..2")
 
 	var (
-		url        = fs.String("url", "http://127.0.0.1:8001", "resonate address")
+		url        = fs.String("url", "http://127.0.0.1:8001", "resonate address; a comma-separated list sends each request to one at random (servers sharing a store)")
+		prefix     = fs.String("prefix", "", "prepended to every origin, so invocations against one server never share ids (default under skulld: the slot and the start time)")
+		reset      = fs.Bool("reset", true, "send debug.reset first (off when several invocations share a store)")
 		runs       = fs.Int("runs", 10, "total workflow invocations")
 		parallel   = fs.Int("parallel", 4, "fake clients running concurrently")
 		contention = fs.Float64("contention", 0, "chance [0,1] a run reuses another client's origin")
@@ -148,12 +150,30 @@ func main() {
 	if *clock == "wall" {
 		rec.UseWallClock()
 	}
+	urls := strings.Split(*url, ",")
+
+	// Under skulld: stream every event to the host as it is recorded, and
+	// keep this invocation's ids apart from the ones before it in the run.
+	slot, underSkull := os.LookupEnv("SKULL_SLOT")
+	if *prefix == "" && underSkull {
+		*prefix = fmt.Sprintf("s%s-%x-", slot, time.Now().UnixNano()&0xffffffff)
+	}
+	invocation := strings.TrimSuffix(*prefix, "-")
+	if invocation == "" {
+		invocation = name
+	}
+	if sink := dialSkull(); sink != nil {
+		rec.sink = func(e Event) { sink.trace(invocation, e) }
+		fmt.Printf("streaming the trace to skulld as invocation %s\n", invocation)
+	}
 
 	if *debug {
-		if err := debugStart(*url); err != nil {
-			fmt.Fprintln(os.Stderr, "scenarios: debug.start failed:", err)
-			fmt.Fprintln(os.Stderr, "  start the server with RESONATE_DEBUG=true, or pass -debug-time=false")
-			os.Exit(2)
+		for _, u := range urls {
+			if err := debugStart(u, *reset); err != nil {
+				fmt.Fprintln(os.Stderr, "scenarios: debug.start failed:", err)
+				fmt.Fprintln(os.Stderr, "  start the server with RESONATE_DEBUG=true, or pass -debug-time=false")
+				os.Exit(2)
+			}
 		}
 	}
 
@@ -163,7 +183,7 @@ func main() {
 	// the traffic includes clients fighting over one workflow id.
 	origins := make([]string, *parallel)
 	for i := range origins {
-		origins[i] = fmt.Sprintf("c%d", i)
+		origins[i] = fmt.Sprintf("%sc%d", *prefix, i)
 	}
 
 	fmt.Printf("%s: %d runs, %d clients, contention %.2f\n", name, *runs, *parallel, *contention)
@@ -184,7 +204,7 @@ func main() {
 	if *debug && *clock == "wall" {
 		tickCtx, stopTicking := stdctx.WithCancel(stdctx.Background())
 		defer stopTicking()
-		go debugTicker(tickCtx, *url, rec, *tickEvery)
+		go debugTicker(tickCtx, urls, rec, *tickEvery)
 	}
 
 	start := time.Now()
@@ -200,14 +220,14 @@ func main() {
 				if *pushPort > 0 {
 					port = *pushPort + cid
 				}
-				push, err := NewPushNetwork(*url, client, *pushHost, port)
+				push, err := NewPushNetwork(urls, client, *pushHost, port)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "client %s: %v\n", client, err)
 					return
 				}
 				network = rec.Wrap(push, client)
 			default:
-				network = rec.Network(*url, client)
+				network = rec.Network(urls[0], client)
 			}
 			r, err := resonate.New(resonate.Config{Network: network})
 			if err != nil {
@@ -264,6 +284,10 @@ func main() {
 	wg.Wait()
 	elapsed := time.Since(start).Round(time.Millisecond)
 
+	if *out == "" {
+		fmt.Printf("\n%d runs ok, %d failed, %v, %d events\n", okN, errN, elapsed, rec.Len())
+		return
+	}
 	if err := rec.WriteNDJSON(*out + ".ndjson"); err != nil {
 		fmt.Fprintln(os.Stderr, "scenarios: write ndjson:", err)
 		os.Exit(1)

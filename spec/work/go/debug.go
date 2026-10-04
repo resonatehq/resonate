@@ -19,8 +19,12 @@ import (
 // the one REFUTED capture in the original corpus, and the banner "Debug mode
 // enabled — background loops paused" prints unconditionally at startup
 // WITHOUT pausing anything: only this call does.
-func debugStart(url string) error {
-	for _, kind := range []string{"debug.start", "debug.reset"} {
+func debugStart(url string, reset bool) error {
+	kinds := []string{"debug.start"}
+	if reset {
+		kinds = append(kinds, "debug.reset")
+	}
+	for _, kind := range kinds {
 		body, _ := json.Marshal(map[string]any{
 			"kind": kind,
 			"head": map[string]any{"corrId": "scenarios", "version": "2026-04-01"},
@@ -54,7 +58,7 @@ func debugStart(url string) error {
 // without this their timers would never come due. A tick is an internal step
 // in the specification's sense — the checkers recover those themselves — so
 // it is not recorded.
-func debugTicker(ctx context.Context, url string, rec *Recorder, every time.Duration) {
+func debugTicker(ctx context.Context, urls []string, rec *Recorder, every time.Duration) {
 	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
@@ -63,16 +67,23 @@ func debugTicker(ctx context.Context, url string, rec *Recorder, every time.Dura
 			return
 		case <-t.C:
 		}
+		// Exclusive: no request is between its stamp and its answer while the
+		// servers' clocks move (see Recorder.inFlight).
+		rec.inFlight.Lock()
 		now := rec.Now()
 		body, _ := json.Marshal(map[string]any{
 			"kind": "debug.tick",
 			"head": map[string]any{"corrId": "tick", "version": "2026-04-01", "resonate:debug_time": now},
 			"data": map[string]any{"time": now},
 		})
-		resp, err := http.Post(url, "application/json", bytes.NewReader(body))
-		if err == nil {
-			_, _ = io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
+		// Every server: each keeps its own clock under the debug flag.
+		for _, url := range urls {
+			resp, err := http.Post(url, "application/json", bytes.NewReader(body))
+			if err == nil {
+				_, _ = io.Copy(io.Discard, resp.Body)
+				resp.Body.Close()
+			}
 		}
+		rec.inFlight.Unlock()
 	}
 }
