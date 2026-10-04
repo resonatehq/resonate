@@ -1104,230 +1104,15 @@ impl PostgresEngine {
         let data = req.data.clone();
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
-        self.run(req, move |db| {
-                let r: TaskCreateData = match serde_json::from_value(data.clone()) {
-                    Ok(d) => d,
-                    Err(e) => {
-                        return Ok(ResponseEnvelope::error(
-                            kind_str.clone(),
-                            corr_id.clone(),
-                            400,
-                            &format!("Invalid request: {}", e),
-                        ))
-                    }
-                };
-                if let Err(e) = r.validate() {
-                    return Ok(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        400,
-                        &format_validation_errors(&e),
-                    ));
-                }
-                let action_data = &r.action.data;
-                let action_id = &action_data.id;
-                if let Some(addr) = action_data.tags.get("resonate:target") {
-                    if !resonate_core::is_valid_address(addr) {
-                        tracing::warn!(
-                            task_id = %action_id,
-                            address = %addr,
-                            "Task create rejected: invalid resonate:target address"
-                        );
-                        return Ok(ResponseEnvelope::error(
-                            kind_str.clone(),
-                            corr_id.clone(),
-                            400,
-                            "Invalid resonate:target address",
-                        ));
-                    }
-                }
-                db.try_timeout(&[action_id], now)?;
-                // Lock preamble: ensures CTE and subsequent reads see
-                // current state under READ COMMITTED.
-                let _ = db.lock_for_update(action_id)?;
-                let tags_json = serde_json::to_string(&action_data.tags).unwrap();
-                let already_timedout = now >= action_data.timeout_at;
-                let (p_state, created_at, settled_at) = if already_timedout {
-                    let p_state =
-                        if action_data.tags.get("resonate:timer").map(|v| v.as_str()) == Some("true") {
-                            tracing::debug!(task_id = %action_id, "Task create: already timedout (timer: resolved immediately)");
-                            PromiseState::Resolved
-                        } else {
-                            tracing::debug!(task_id = %action_id, "Task create: already timedout");
-                            PromiseState::RejectedTimedout
-                        };
-                    (
-                        p_state,
-                        action_data.timeout_at,
-                        Some(action_data.timeout_at),
-                    )
-                } else {
-                    (PromiseState::Pending, now, None)
-                };
-                let param_headers_json = action_data
-                    .param
-                    .headers
-                    .as_ref()
-                    .map(|h| serde_json::to_string(h).unwrap());
-                let res = db.task_create(&TaskCreateParams {
-                    promise_id: action_id,
-                    state: p_state.as_str(),
-                    param_headers: param_headers_json.as_deref(),
-                    param_data: action_data.param.data.as_deref(),
-                    tags: &tags_json,
-                    timeout_at: action_data.timeout_at,
-                    created_at,
-                    settled_at,
-                    already_timedout,
-                    ttl: r.ttl,
-                    pid: &r.pid,
-                })?;
-
-                // If the promise is settled, process callbacks as a separate
-                // statement. This fires any callbacks registered by concurrent
-                // transactions (e.g. task.suspend) that committed after
-                // try_timeout's snapshot but before now.
-                if res.promise.state != PromiseState::Pending {
-                    db.process_callbacks(action_id, now)?;
-                }
-
-                // When the CTE created the task, use CTE result directly.
-                if res.task_created {
-                    let task_state_str = res.task_state.expect("invariant: task_state is Some when task_created");
-                    let task_state = task_state_str.parse::<TaskState>().expect("invariant: task_state is a valid TaskState");
-                    assert!(res.promise.state != PromiseState::Pending || task_state != TaskState::Fulfilled, "invariant: pending promise with fulfilled task");
-                    assert!(res.promise.state == PromiseState::Pending || task_state == TaskState::Fulfilled, "invariant: settled promise with non-fulfilled task");
-                    // Acquired tasks start at version 1 (first claim), fulfilled at 0
-                    let task_version = if task_state == TaskState::Acquired { 1 } else { 0 };
-                    let task = TaskRecord {
-                        id: action_id.to_string(),
-                        state: task_state,
-                        version: task_version,
-                        resumes: 0,
-                        ttl: if task_state == TaskState::Fulfilled { None } else { Some(r.ttl) },
-                        pid: if task_state == TaskState::Fulfilled { None } else { Some(r.pid.to_string()) },
-                    };
-                    // Every branch computes it: preload is branch-scoped, not
-                    // lifecycle-scoped, so a fulfilled task's siblings are as
-                    // real as an acquired one's.
-                    let preload = db.compute_preload(action_id)?;
-                    return Ok(ResponseEnvelope::success(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        &TaskCreateResponseData {
-                            task,
-                            promise: res.promise,
-                            preload,
-                        },
-                    ));
-                }
-
-                // CTE didn't create the task (promise already existed).
-                // Branch on the state/version surfaced by the CTE.
-                match (res.task_state.as_deref(), res.task_version) {
-                    (Some("fulfilled"), version) => {
-                        assert_ne!(res.promise.state, PromiseState::Pending, "invariant: pending promise with fulfilled task");
-                        Ok(ResponseEnvelope::success(
-                            kind_str.clone(),
-                            corr_id.clone(),
-                            &TaskCreateResponseData {
-                                task: TaskRecord {
-                                    id: action_id.to_string(),
-                                    state: TaskState::Fulfilled,
-                                    version: version.unwrap_or(0),
-                                    resumes: 0,
-                                    ttl: None,
-                                    pid: None,
-                                },
-                                promise: res.promise,
-                                preload: db.compute_preload(action_id)?,
-                            },
-                        ))
-                    }
-                    (Some("pending"), Some(version)) => {
-                        let acquire_result = db.task_acquire(&TaskAcquireParams {
-                            task_id: action_id,
-                            version,
-                            time: now,
-                            ttl: r.ttl,
-                            pid: &r.pid,
-                        })?;
-                        if acquire_result.was_acquired {
-                            let task = TaskRecord {
-                                id: action_id.to_string(),
-                                state: TaskState::Acquired,
-                                version: version + 1,
-                                resumes: 0,
-                                ttl: Some(r.ttl),
-                                pid: Some(r.pid.to_string()),
-                            };
-                            assert_eq!(res.promise.state, PromiseState::Pending, "invariant: settled promise with non-fulfilled task");
-                            assert_eq!(acquire_result.task_version, Some(version + 1), "invariant: acquired task version must be version + 1");
-                            let preload = db.compute_preload(action_id)?;
-                            Ok(ResponseEnvelope::success(
-                                kind_str.clone(),
-                                corr_id.clone(),
-                                &TaskCreateResponseData {
-                                    task,
-                                    promise: res.promise,
-                                    preload,
-                                },
-                            ))
-                        } else if acquire_result.task_state == Some(TaskState::Fulfilled) {
-                            let promise = acquire_result.promise.expect("fulfilled task must have a promise");
-                            assert_ne!(promise.state, PromiseState::Pending, "invariant: fulfilled task cannot have a pending promise");
-                            Ok(ResponseEnvelope::success(
-                                kind_str.clone(),
-                                corr_id.clone(),
-                                &TaskCreateResponseData {
-                                    task: TaskRecord {
-                                        id: action_id.to_string(),
-                                        state: TaskState::Fulfilled,
-                                        version: acquire_result.task_version.expect("invariant: fulfilled task must have a version"),
-                                        resumes: 0,
-                                        ttl: None,
-                                        pid: None,
-                                    },
-                                    promise,
-                                    preload: db.compute_preload(action_id)?,
-                                },
-                            ))
-                        } else {
-                            assert!(acquire_result.task_state.is_some(), "invariant: non-acquired result must have a task state");
-                            assert!(acquire_result.task_version.is_some(), "invariant: non-acquired result must have a task version");
-                            // Commented out, not deleted: this fired as a 500 under concurrent
-                            // load. It claims a lost acquire implies the row moved on, but another
-                            // request can return the task to `pending` at the same version between
-                            // the acquire and this read — so the state it calls impossible is
-                            // reachable, and a race that the next line already answers with a 409
-                            // became an internal error instead.
-                            // assert!(
-                            //     acquire_result.task_state.unwrap() != TaskState::Pending || acquire_result.task_version.unwrap() != version,
-                            //     "invariant: task state must not be pending or version must differ from request"
-                            // );
-                            Ok(ResponseEnvelope::error(
-                                kind_str.clone(),
-                                corr_id.clone(),
-                                409,
-                                "Already exists",
-                            ))
-                        }
-                    }
-                    (None, _) => Ok(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        422,
-                        "The promise does not have a resonate:target tag",
-                    )),
-                    _ => Ok(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        409,
-                        "Already exists",
-                    )),
-                }
-            })
-            .await
+        let fast = {
+            let (data, kind_str, corr_id) = (data.clone(), kind_str.clone(), corr_id.clone());
+            move |db: &PostgresDb| create_body(db, &data, &kind_str, &corr_id, now, true)
+        };
+        self.run_fast(req, fast, move |db| {
+            create_body(db, &data, &kind_str, &corr_id, now, false)
+                .map(|r| r.expect("invariant: the slow path never declines"))
+        })
+        .await
     }
 
     async fn op_task_acquire(&self, req: &RequestEnvelope, now: i64) -> Output {
@@ -1580,204 +1365,28 @@ impl PostgresEngine {
         let data = req.data.clone();
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
-        self.run(req, move |db| {
-                let r: TaskFulfillData = match serde_json::from_value(data.clone()) {
-                    Ok(d) => d,
-                    Err(e) => {
-                        return Ok(ResponseEnvelope::error(
-                            kind_str.clone(),
-                            corr_id.clone(),
-                            400,
-                            &format!("Invalid request: {}", e),
-                        ))
-                    }
-                };
-                if let Err(e) = r.validate() {
-                    return Ok(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        400,
-                        &format_validation_errors(&e),
-                    ));
-                }
-                let action_data = &r.action.data;
-                db.try_timeout(&[&action_data.id], now)?;
-                // Lock preamble: lock promise + task to prevent stale snapshot
-                // in fulfillment CTE.
-                let (_, task_exists) = db.lock_for_update(&r.id)?;
-                if !task_exists {
-                    tracing::debug!(task_id = %r.id, "Task fulfill: task not found");
-                    return Ok(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        404,
-                        "Task not found",
-                    ));
-                }
-                let value_headers_json = action_data
-                    .value
-                    .headers
-                    .as_ref()
-                    .map(|h| serde_json::to_string(h).unwrap());
-                let result = db.task_fulfill(&TaskFulfillParams {
-                    task_id: &r.id,
-                    version: r.version,
-                    promise_id: &r.id,
-                    state: action_data.state.as_str(),
-                    value_headers: value_headers_json.as_deref(),
-                    value_data: action_data.value.data.as_deref(),
-                    settled_at: now,
-                })?;
-                if !result.task_exists {
-                    tracing::debug!(task_id = %r.id, "Task fulfill: task not found");
-                    return Ok(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        404,
-                        "Task not found",
-                    ));
-                }
-                if !result.task_fulfilled {
-                    tracing::debug!(task_id = %r.id, version = r.version, "Task fulfill rejected: version mismatch or invalid state");
-                    return Ok(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        409,
-                        "Task version mismatch or invalid state",
-                    ));
-                }
-                let promise = result.promise.expect("invariant: task exists implies promise exists");
-                assert!(result.task_fulfilled, "invariant: returning 200 but task is not fulfilled");
-                assert_ne!(promise.state, PromiseState::Pending, "invariant: returning 200 but promise is still pending");
-                tracing::info!(
-                    task_id = %r.id,
-                    version = r.version,
-                    promise_state = %promise.state,
-                    "Task fulfilled and promise settled"
-                );
-                Ok(ResponseEnvelope::success(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    &TaskFulfillResponseData { promise },
-                ))
-            })
-            .await
+        let fast = {
+            let (data, kind_str, corr_id) = (data.clone(), kind_str.clone(), corr_id.clone());
+            move |db: &PostgresDb| fulfill_body(db, &data, &kind_str, &corr_id, now, true)
+        };
+        self.run_fast(req, fast, move |db| {
+            fulfill_body(db, &data, &kind_str, &corr_id, now, false)
+                .map(|r| r.expect("invariant: the slow path never declines"))
+        })
+        .await
     }
 
     async fn op_task_suspend(&self, req: &RequestEnvelope, now: i64) -> Output {
         let data = req.data.clone();
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
-        self.run(req, move |db| {
-            let r: TaskSuspendData = match serde_json::from_value(data.clone()) {
-                Ok(d) => d,
-                Err(e) => {
-                    return Ok(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        400,
-                        &format!("Invalid request: {}", e),
-                    ))
-                }
-            };
-            if let Err(e) = r.validate() {
-                return Ok(ResponseEnvelope::error(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    400,
-                    &format_validation_errors(&e),
-                ));
-            }
-            let awaited_ids: Vec<String> =
-                r.actions.iter().map(|a| a.data.awaited.clone()).collect();
-            let mut timeout_ids: Vec<&str> = vec![&r.id];
-            for aid in &awaited_ids {
-                timeout_ids.push(aid.as_str());
-            }
-            // Lock the task row BEFORE try_timeout to prevent
-            // try_timeout from fulfilling it via promise timeout.
-            let (_, task_exists) = db.lock_for_update(&r.id)?;
-            db.try_timeout(&timeout_ids, now)?;
-            // Duplicates are refused by validation, so the list is already
-            // unique — no deduplication on the way to storage.
-            let awaited: Vec<&str> = awaited_ids.iter().map(|s| s.as_str()).collect();
-            let result = db.task_suspend(&r.id, r.version, &awaited)?;
-            if !result.task_matched {
-                // Use lock_for_update result — no separate task_get that
-                // could see a concurrent task creation.
-                if !task_exists {
-                    return Ok(ResponseEnvelope::error(
-                        kind_str.clone(),
-                        corr_id.clone(),
-                        404,
-                        "Task not found",
-                    ));
-                }
-                tracing::debug!(
-                    task_id = %r.id,
-                    version = r.version,
-                    "Task suspend rejected: not acquired or version mismatch"
-                );
-                return Ok(ResponseEnvelope::error(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    409,
-                    "Task is not acquired or version mismatch",
-                ));
-            }
-            if result.missing_count > 0 {
-                tracing::debug!(
-                    task_id = %r.id,
-                    missing_count = result.missing_count,
-                    "Task suspend rejected: awaited promise(s) not found"
-                );
-                return Ok(ResponseEnvelope::error(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    422,
-                    "Awaited promise not found",
-                ));
-            }
-            if result.non_awaitable_count > 0 {
-                tracing::debug!(
-                    task_id = %r.id,
-                    non_awaitable_count = result.non_awaitable_count,
-                    "Task suspend rejected: awaited promise(s) not awaitable"
-                );
-                return Ok(ResponseEnvelope::error(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    422,
-                    "Awaited promise is not awaitable",
-                ));
-            }
-            if result.was_suspended {
-                tracing::info!(
-                    task_id = %r.id,
-                    version = r.version,
-                    awaited_count = awaited.len(),
-                    "Task suspended, waiting on promises"
-                );
-                return Ok(ResponseEnvelope::new(
-                    kind_str.clone(),
-                    corr_id.clone(),
-                    200,
-                    serde_json::json!({}),
-                ));
-            }
-            // Immediate resume (settled awaited promises)
-            tracing::info!(
-                task_id = %r.id,
-                version = r.version,
-                "Task suspend: immediate resume, awaited promises already settled"
-            );
-            let preload = db.compute_preload(&r.id)?;
-            Ok(ResponseEnvelope::new(
-                kind_str.clone(),
-                corr_id.clone(),
-                300,
-                serde_json::to_value(&TaskSuspendPreloadData { preload }).unwrap(),
-            ))
+        let fast = {
+            let (data, kind_str, corr_id) = (data.clone(), kind_str.clone(), corr_id.clone());
+            move |db: &PostgresDb| suspend_body(db, &data, &kind_str, &corr_id, now, true)
+        };
+        self.run_fast(req, fast, move |db| {
+            suspend_body(db, &data, &kind_str, &corr_id, now, false)
+                .map(|r| r.expect("invariant: the slow path never declines"))
         })
         .await
     }
@@ -2907,6 +2516,538 @@ SELECT :MESSAGES",
     )
 }
 
+/// `task.create`, both ways — see `fence_body`. The fast path is the one
+/// statement that inserts the promise with its task acquired; anything else
+/// (the promise exists, or is created already timed out) declines to the
+/// transaction.
+fn create_body(
+    db: &PostgresDb,
+    data: &Value,
+    kind_str: &str,
+    corr_id: &str,
+    now: i64,
+    fast: bool,
+) -> StorageResult<Option<ResponseEnvelope>> {
+    let r: TaskCreateData = match serde_json::from_value(data.clone()) {
+        Ok(d) => d,
+        Err(e) => {
+            return Ok(Some(ResponseEnvelope::error(
+                kind_str.to_string(),
+                corr_id.to_string(),
+                400,
+                &format!("Invalid request: {}", e),
+            )))
+        }
+    };
+    if let Err(e) = r.validate() {
+        return Ok(Some(ResponseEnvelope::error(
+            kind_str.to_string(),
+            corr_id.to_string(),
+            400,
+            &format_validation_errors(&e),
+        )));
+    }
+    let action_data = &r.action.data;
+    let action_id = &action_data.id;
+    if let Some(addr) = action_data.tags.get("resonate:target") {
+        if !resonate_core::is_valid_address(addr) {
+            tracing::warn!(
+                task_id = %action_id,
+                address = %addr,
+                "Task create rejected: invalid resonate:target address"
+            );
+            return Ok(Some(ResponseEnvelope::error(
+                kind_str.to_string(),
+                corr_id.to_string(),
+                400,
+                "Invalid resonate:target address",
+            )));
+        }
+    }
+    if !fast {
+        db.try_timeout(&[action_id], now)?;
+        // Lock preamble: ensures CTE and subsequent reads see
+        // current state under READ COMMITTED.
+        let _ = db.lock_for_update(action_id)?;
+    }
+    let tags_json = serde_json::to_string(&action_data.tags).unwrap();
+    let already_timedout = now >= action_data.timeout_at;
+    // The fast path creates, or declines: a promise created already
+    // settled owes its callbacks a separate statement, and one that
+    // exists already may need timing out first.
+    if fast && already_timedout {
+        return Ok(None);
+    }
+    let (p_state, created_at, settled_at) = if already_timedout {
+        let p_state = if action_data.tags.get("resonate:timer").map(|v| v.as_str()) == Some("true")
+        {
+            tracing::debug!(task_id = %action_id, "Task create: already timedout (timer: resolved immediately)");
+            PromiseState::Resolved
+        } else {
+            tracing::debug!(task_id = %action_id, "Task create: already timedout");
+            PromiseState::RejectedTimedout
+        };
+        (
+            p_state,
+            action_data.timeout_at,
+            Some(action_data.timeout_at),
+        )
+    } else {
+        (PromiseState::Pending, now, None)
+    };
+    let param_headers_json = action_data
+        .param
+        .headers
+        .as_ref()
+        .map(|h| serde_json::to_string(h).unwrap());
+    let (res, created_preload) = db.task_create(&TaskCreateParams {
+        promise_id: action_id,
+        state: p_state.as_str(),
+        param_headers: param_headers_json.as_deref(),
+        param_data: action_data.param.data.as_deref(),
+        tags: &tags_json,
+        timeout_at: action_data.timeout_at,
+        created_at,
+        settled_at,
+        already_timedout,
+        ttl: r.ttl,
+        pid: &r.pid,
+    })?;
+    if fast && !res.task_created {
+        return Ok(None);
+    }
+
+    // If the promise is settled, process callbacks as a separate
+    // statement. This fires any callbacks registered by concurrent
+    // transactions (e.g. task.suspend) that committed after
+    // try_timeout's snapshot but before now.
+    if res.promise.state != PromiseState::Pending {
+        db.process_callbacks(action_id, now)?;
+    }
+
+    // When the CTE created the task, use CTE result directly.
+    if res.task_created {
+        let task_state_str = res
+            .task_state
+            .expect("invariant: task_state is Some when task_created");
+        let task_state = task_state_str
+            .parse::<TaskState>()
+            .expect("invariant: task_state is a valid TaskState");
+        assert!(
+            res.promise.state != PromiseState::Pending || task_state != TaskState::Fulfilled,
+            "invariant: pending promise with fulfilled task"
+        );
+        assert!(
+            res.promise.state == PromiseState::Pending || task_state == TaskState::Fulfilled,
+            "invariant: settled promise with non-fulfilled task"
+        );
+        // Acquired tasks start at version 1 (first claim), fulfilled at 0
+        let task_version = if task_state == TaskState::Acquired {
+            1
+        } else {
+            0
+        };
+        let task = TaskRecord {
+            id: action_id.to_string(),
+            state: task_state,
+            version: task_version,
+            resumes: 0,
+            ttl: if task_state == TaskState::Fulfilled {
+                None
+            } else {
+                Some(r.ttl)
+            },
+            pid: if task_state == TaskState::Fulfilled {
+                None
+            } else {
+                Some(r.pid.to_string())
+            },
+        };
+        // Every branch computes it: preload is branch-scoped, not
+        // lifecycle-scoped, so a fulfilled task's siblings are as
+        // real as an acquired one's.
+        let preload = created_preload;
+        return Ok(Some(ResponseEnvelope::success(
+            kind_str.to_string(),
+            corr_id.to_string(),
+            &TaskCreateResponseData {
+                task,
+                promise: res.promise,
+                preload,
+            },
+        )));
+    }
+
+    // CTE didn't create the task (promise already existed).
+    // Branch on the state/version surfaced by the CTE.
+    match (res.task_state.as_deref(), res.task_version) {
+        (Some("fulfilled"), version) => {
+            assert_ne!(
+                res.promise.state,
+                PromiseState::Pending,
+                "invariant: pending promise with fulfilled task"
+            );
+            Ok(Some(ResponseEnvelope::success(
+                kind_str.to_string(),
+                corr_id.to_string(),
+                &TaskCreateResponseData {
+                    task: TaskRecord {
+                        id: action_id.to_string(),
+                        state: TaskState::Fulfilled,
+                        version: version.unwrap_or(0),
+                        resumes: 0,
+                        ttl: None,
+                        pid: None,
+                    },
+                    promise: res.promise,
+                    preload: db.compute_preload(action_id)?,
+                },
+            )))
+        }
+        (Some("pending"), Some(version)) => {
+            let acquire_result = db.task_acquire(&TaskAcquireParams {
+                task_id: action_id,
+                version,
+                time: now,
+                ttl: r.ttl,
+                pid: &r.pid,
+            })?;
+            if acquire_result.was_acquired {
+                let task = TaskRecord {
+                    id: action_id.to_string(),
+                    state: TaskState::Acquired,
+                    version: version + 1,
+                    resumes: 0,
+                    ttl: Some(r.ttl),
+                    pid: Some(r.pid.to_string()),
+                };
+                assert_eq!(
+                    res.promise.state,
+                    PromiseState::Pending,
+                    "invariant: settled promise with non-fulfilled task"
+                );
+                assert_eq!(
+                    acquire_result.task_version,
+                    Some(version + 1),
+                    "invariant: acquired task version must be version + 1"
+                );
+                let preload = db.compute_preload(action_id)?;
+                Ok(Some(ResponseEnvelope::success(
+                    kind_str.to_string(),
+                    corr_id.to_string(),
+                    &TaskCreateResponseData {
+                        task,
+                        promise: res.promise,
+                        preload,
+                    },
+                )))
+            } else if acquire_result.task_state == Some(TaskState::Fulfilled) {
+                let promise = acquire_result
+                    .promise
+                    .expect("fulfilled task must have a promise");
+                assert_ne!(
+                    promise.state,
+                    PromiseState::Pending,
+                    "invariant: fulfilled task cannot have a pending promise"
+                );
+                Ok(Some(ResponseEnvelope::success(
+                    kind_str.to_string(),
+                    corr_id.to_string(),
+                    &TaskCreateResponseData {
+                        task: TaskRecord {
+                            id: action_id.to_string(),
+                            state: TaskState::Fulfilled,
+                            version: acquire_result
+                                .task_version
+                                .expect("invariant: fulfilled task must have a version"),
+                            resumes: 0,
+                            ttl: None,
+                            pid: None,
+                        },
+                        promise,
+                        preload: db.compute_preload(action_id)?,
+                    },
+                )))
+            } else {
+                assert!(
+                    acquire_result.task_state.is_some(),
+                    "invariant: non-acquired result must have a task state"
+                );
+                assert!(
+                    acquire_result.task_version.is_some(),
+                    "invariant: non-acquired result must have a task version"
+                );
+                // Commented out, not deleted: this fired as a 500 under concurrent
+                // load. It claims a lost acquire implies the row moved on, but another
+                // request can return the task to `pending` at the same version between
+                // the acquire and this read — so the state it calls impossible is
+                // reachable, and a race that the next line already answers with a 409
+                // became an internal error instead.
+                // assert!(
+                //     acquire_result.task_state.unwrap() != TaskState::Pending || acquire_result.task_version.unwrap() != version,
+                //     "invariant: task state must not be pending or version must differ from request"
+                // );
+                Ok(Some(ResponseEnvelope::error(
+                    kind_str.to_string(),
+                    corr_id.to_string(),
+                    409,
+                    "Already exists",
+                )))
+            }
+        }
+        (None, _) => Ok(Some(ResponseEnvelope::error(
+            kind_str.to_string(),
+            corr_id.to_string(),
+            422,
+            "The promise does not have a resonate:target tag",
+        ))),
+        _ => Ok(Some(ResponseEnvelope::error(
+            kind_str.to_string(),
+            corr_id.to_string(),
+            409,
+            "Already exists",
+        ))),
+    }
+}
+
+/// `task.suspend`, both ways — see `fence_body`.
+fn suspend_body(
+    db: &PostgresDb,
+    data: &Value,
+    kind_str: &str,
+    corr_id: &str,
+    now: i64,
+    fast: bool,
+) -> StorageResult<Option<ResponseEnvelope>> {
+    let r: TaskSuspendData = match serde_json::from_value(data.clone()) {
+        Ok(d) => d,
+        Err(e) => {
+            return Ok(Some(ResponseEnvelope::error(
+                kind_str.to_string(),
+                corr_id.to_string(),
+                400,
+                &format!("Invalid request: {}", e),
+            )))
+        }
+    };
+    if let Err(e) = r.validate() {
+        return Ok(Some(ResponseEnvelope::error(
+            kind_str.to_string(),
+            corr_id.to_string(),
+            400,
+            &format_validation_errors(&e),
+        )));
+    }
+    let awaited_ids: Vec<String> = r.actions.iter().map(|a| a.data.awaited.clone()).collect();
+    let mut timeout_ids: Vec<&str> = vec![&r.id];
+    for aid in &awaited_ids {
+        timeout_ids.push(aid.as_str());
+    }
+    // The slow path: lock the task row BEFORE try_timeout to prevent
+    // try_timeout from fulfilling it via promise timeout. The fast
+    // path runs no try_timeout; its statement declines instead.
+    let mut task_exists = false;
+    if !fast {
+        task_exists = db.lock_for_update(&r.id)?.1;
+        db.try_timeout(&timeout_ids, now)?;
+    }
+    // Duplicates are refused by validation, so the list is already
+    // unique — no deduplication on the way to storage.
+    let awaited: Vec<&str> = awaited_ids.iter().map(|s| s.as_str()).collect();
+    let (result, exists, expired, preload) =
+        db.task_suspend_guarded(&r.id, r.version, &awaited, fast.then_some(now))?;
+    if expired {
+        return Ok(None);
+    }
+    if fast {
+        task_exists = exists;
+    }
+    if !result.task_matched {
+        // Use lock_for_update result — no separate task_get that
+        // could see a concurrent task creation.
+        if !task_exists {
+            return Ok(Some(ResponseEnvelope::error(
+                kind_str.to_string(),
+                corr_id.to_string(),
+                404,
+                "Task not found",
+            )));
+        }
+        tracing::debug!(
+            task_id = %r.id,
+            version = r.version,
+            "Task suspend rejected: not acquired or version mismatch"
+        );
+        return Ok(Some(ResponseEnvelope::error(
+            kind_str.to_string(),
+            corr_id.to_string(),
+            409,
+            "Task is not acquired or version mismatch",
+        )));
+    }
+    if result.missing_count > 0 {
+        tracing::debug!(
+            task_id = %r.id,
+            missing_count = result.missing_count,
+            "Task suspend rejected: awaited promise(s) not found"
+        );
+        return Ok(Some(ResponseEnvelope::error(
+            kind_str.to_string(),
+            corr_id.to_string(),
+            422,
+            "Awaited promise not found",
+        )));
+    }
+    if result.non_awaitable_count > 0 {
+        tracing::debug!(
+            task_id = %r.id,
+            non_awaitable_count = result.non_awaitable_count,
+            "Task suspend rejected: awaited promise(s) not awaitable"
+        );
+        return Ok(Some(ResponseEnvelope::error(
+            kind_str.to_string(),
+            corr_id.to_string(),
+            422,
+            "Awaited promise is not awaitable",
+        )));
+    }
+    if result.was_suspended {
+        tracing::info!(
+            task_id = %r.id,
+            version = r.version,
+            awaited_count = awaited.len(),
+            "Task suspended, waiting on promises"
+        );
+        return Ok(Some(ResponseEnvelope::new(
+            kind_str.to_string(),
+            corr_id.to_string(),
+            200,
+            serde_json::json!({}),
+        )));
+    }
+    // Immediate resume (settled awaited promises)
+    tracing::info!(
+        task_id = %r.id,
+        version = r.version,
+        "Task suspend: immediate resume, awaited promises already settled"
+    );
+    Ok(Some(ResponseEnvelope::new(
+        kind_str.to_string(),
+        corr_id.to_string(),
+        300,
+        serde_json::to_value(&TaskSuspendPreloadData { preload }).unwrap(),
+    )))
+}
+
+/// `task.fulfill`, both ways — see `fence_body`. The fast path is one
+/// autocommit statement that locks, checks the fence and settles; it declines
+/// if the promise is pending past its deadline.
+fn fulfill_body(
+    db: &PostgresDb,
+    data: &Value,
+    kind_str: &str,
+    corr_id: &str,
+    now: i64,
+    fast: bool,
+) -> StorageResult<Option<ResponseEnvelope>> {
+    let r: TaskFulfillData = match serde_json::from_value(data.clone()) {
+        Ok(d) => d,
+        Err(e) => {
+            return Ok(Some(ResponseEnvelope::error(
+                kind_str.to_string(),
+                corr_id.to_string(),
+                400,
+                &format!("Invalid request: {}", e),
+            )))
+        }
+    };
+    if let Err(e) = r.validate() {
+        return Ok(Some(ResponseEnvelope::error(
+            kind_str.to_string(),
+            corr_id.to_string(),
+            400,
+            &format_validation_errors(&e),
+        )));
+    }
+    let action_data = &r.action.data;
+    if !fast {
+        db.try_timeout(&[&action_data.id], now)?;
+        // Lock preamble: lock promise + task to prevent stale snapshot
+        // in fulfillment CTE.
+        let (_, task_exists) = db.lock_for_update(&r.id)?;
+        if !task_exists {
+            tracing::debug!(task_id = %r.id, "Task fulfill: task not found");
+            return Ok(Some(ResponseEnvelope::error(
+                kind_str.to_string(),
+                corr_id.to_string(),
+                404,
+                "Task not found",
+            )));
+        }
+    }
+    let value_headers_json = action_data
+        .value
+        .headers
+        .as_ref()
+        .map(|h| serde_json::to_string(h).unwrap());
+    let (result, expired) = db.task_fulfill_guarded(
+        &TaskFulfillParams {
+            task_id: &r.id,
+            version: r.version,
+            promise_id: &r.id,
+            state: action_data.state.as_str(),
+            value_headers: value_headers_json.as_deref(),
+            value_data: action_data.value.data.as_deref(),
+            settled_at: now,
+        },
+        fast.then_some(now),
+    )?;
+    if expired {
+        return Ok(None);
+    }
+    if !result.task_exists {
+        tracing::debug!(task_id = %r.id, "Task fulfill: task not found");
+        return Ok(Some(ResponseEnvelope::error(
+            kind_str.to_string(),
+            corr_id.to_string(),
+            404,
+            "Task not found",
+        )));
+    }
+    if !result.task_fulfilled {
+        tracing::debug!(task_id = %r.id, version = r.version, "Task fulfill rejected: version mismatch or invalid state");
+        return Ok(Some(ResponseEnvelope::error(
+            kind_str.to_string(),
+            corr_id.to_string(),
+            409,
+            "Task version mismatch or invalid state",
+        )));
+    }
+    let promise = result
+        .promise
+        .expect("invariant: task exists implies promise exists");
+    assert!(
+        result.task_fulfilled,
+        "invariant: returning 200 but task is not fulfilled"
+    );
+    assert_ne!(
+        promise.state,
+        PromiseState::Pending,
+        "invariant: returning 200 but promise is still pending"
+    );
+    tracing::info!(
+        task_id = %r.id,
+        version = r.version,
+        promise_state = %promise.state,
+        "Task fulfilled and promise settled"
+    );
+    Ok(Some(ResponseEnvelope::success(
+        kind_str.to_string(),
+        corr_id.to_string(),
+        &TaskFulfillResponseData { promise },
+    )))
+}
+
 /// A 400 the slow path gives only after it has run the expiry cascade: the
 /// fast path, which has not, declines rather than answer without it.
 fn unless_fast(fast: bool, response: ResponseEnvelope) -> Option<ResponseEnvelope> {
@@ -3620,7 +3761,12 @@ impl PostgresDb<'_> {
     }
 
     // T-02: task.create
-    fn task_create(&self, params: &TaskCreateParams) -> StorageResult<TaskCreateResult> {
+    /// `task.create`'s statement, and — when it created the task — the
+    /// preload, computed in the same statement over the new row's branch.
+    fn task_create(
+        &self,
+        params: &TaskCreateParams,
+    ) -> StorageResult<(TaskCreateResult, Vec<PromiseRecord>)> {
         let TaskCreateParams {
             promise_id,
             state,
@@ -3659,9 +3805,11 @@ impl PostgresDb<'_> {
             )
             SELECT {cols},
               EXISTS (SELECT 1 FROM inserted_promise) AS task_created,
-              p.task_state, p.task_version
+              p.task_state, p.task_version,
+              CASE WHEN EXISTS (SELECT 1 FROM inserted_promise) THEN {preload} END AS preload
             FROM promise p
-        ", cols = p_cols("p")))
+        ", cols = p_cols("p"),
+           preload = preload_sql("(SELECT branch_id FROM inserted_promise)", "$1", None, self.preload_limit)))
             .bind(promise_id).bind(state).bind(param_headers).bind(param_data).bind(tags) // $1-$5
             .bind(timeout_at).bind(created_at).bind(settled_at)                            // $6-$8
             .bind(already_timedout).bind(ttl).bind(pid).bind(task_initial_state)           // $9-$12
@@ -3681,27 +3829,33 @@ impl PostgresDb<'_> {
                 }
                 self.arm_lease(promise_id, pid, created_at + ttl);
             }
-            return Ok(TaskCreateResult {
-                promise,
-                task_created: true,
-                task_state: Some(task_initial_state.to_string()),
-                task_version: Some(if already_timedout { 0 } else { 1 }),
-            });
+            return Ok((
+                TaskCreateResult {
+                    promise,
+                    task_created: true,
+                    task_state: Some(task_initial_state.to_string()),
+                    task_version: Some(if already_timedout { 0 } else { 1 }),
+                },
+                preload_from(row),
+            ));
         }
 
-        Ok(TaskCreateResult {
-            promise,
-            task_created: false,
-            task_state: row
-                .try_get::<Option<String>, _>("task_state")
-                .ok()
-                .flatten(),
-            task_version: row
-                .try_get::<Option<i32>, _>("task_version")
-                .ok()
-                .flatten()
-                .map(|v| v as i64),
-        })
+        Ok((
+            TaskCreateResult {
+                promise,
+                task_created: false,
+                task_state: row
+                    .try_get::<Option<String>, _>("task_state")
+                    .ok()
+                    .flatten(),
+                task_version: row
+                    .try_get::<Option<i32>, _>("task_version")
+                    .ok()
+                    .flatten()
+                    .map(|v| v as i64),
+            },
+            Vec::new(),
+        ))
     }
 
     // T-03: task.acquire
@@ -4118,50 +4272,64 @@ impl PostgresDb<'_> {
     }
 
     // T-06: task.suspend
-    fn task_suspend(
+    /// `task.suspend` as one statement: locks, checks, links and suspends, and
+    /// computes the preload an immediate resume answers with.
+    ///
+    /// Every row it touches is locked by `locked`, awaited promises first and
+    /// the task last. That is the order a settle takes them in — its own row,
+    /// then the awaiters it wakes — so a child settling while its parent
+    /// suspends on it waits rather than deadlocks. Every decision is made in
+    /// `facts`, an aggregate over the locked rows: an aggregate reads its input
+    /// to the end before it yields, so the locked versions are read in full
+    /// before either UPDATE below writes one of them.
+    ///
+    /// `guard`: with `Some(now)`, nothing is written if any of these promises
+    /// is pending past its deadline. Returns the result, whether the task
+    /// exists, whether the guard tripped, and the preload.
+    fn task_suspend_guarded(
         &self,
         task_id: &str,
         version: i64,
         awaited_ids: &[&str],
-    ) -> StorageResult<TaskSuspendResult> {
+        guard: Option<i64>,
+    ) -> StorageResult<(TaskSuspendResult, bool, bool, Vec<PromiseRecord>)> {
         let awaited: Vec<String> = awaited_ids.iter().map(|s| s.to_string()).collect();
-
-        // Statement 1: lock every row this touches, lowest id first, so a
-        // concurrent settle taking the same rows cannot deadlock with us.
         let mut lock_ids: Vec<String> = awaited.clone();
         lock_ids.push(task_id.to_string());
-        rt_block_on(
-            sqlx::query("SELECT id FROM promises WHERE id = ANY($1) ORDER BY id FOR UPDATE")
-                .bind(&lock_ids)
-                .fetch_all(self.tx()),
-        )?;
 
-        // Statement 2: fresh snapshot — sees everything committed before the locks.
-        let rows = rt_block_on(sqlx::query("
-            WITH me AS (
-              SELECT id, task_state, task_version FROM promises WHERE id = $1 AND task_state IS NOT NULL
+        let row = rt_block_on(sqlx::query(&format!("
+            WITH locked AS (
+              SELECT id, state, external, task_state, task_version, branch_id,
+                     ($4::bigint IS NOT NULL AND state = 'pending' AND timeout_at <= $4) AS expired
+              FROM promises WHERE id = ANY($5)
+              ORDER BY (id = $1), id
+              FOR UPDATE
             ),
-            matched AS (
-              SELECT EXISTS (SELECT 1 FROM me WHERE task_version = $2 AND task_state = 'acquired') AS ok
+            facts AS (
+              SELECT
+                COALESCE(bool_or(id = $1 AND task_state IS NOT NULL), false) AS task_exists,
+                COALESCE(bool_or(id = $1 AND task_state = 'acquired' AND task_version = $2), false) AS ok,
+                COALESCE(bool_or(expired), false) AS expired,
+                (SELECT branch_id FROM locked WHERE id = $1) AS branch_id,
+                COUNT(*) FILTER (WHERE id = ANY($3))::INT AS found,
+                COUNT(*) FILTER (WHERE id = ANY($3) AND NOT external)::INT AS non_awaitable,
+                COALESCE(bool_or(id = ANY($3) AND state <> 'pending'), false) AS any_settled
+              FROM locked
             ),
-            awaited AS (
-              SELECT id, state, external
-              FROM promises WHERE id = ANY($3) AND (SELECT ok FROM matched)
-            ),
-            missing AS (
-              SELECT (COALESCE(array_length($3::text[], 1), 0) - COUNT(*)::INT) AS cnt FROM awaited
-            ),
-            -- `external` is the generated column of the same three tags as
-            -- `resonate_core::types::is_external`. A promise nothing outside
-            -- its own execution can settle may not be awaited.
-            non_awaitable AS (
-              SELECT COUNT(*)::INT AS cnt FROM awaited WHERE NOT external
+            -- What the multi-statement form called `matched`, `missing`,
+            -- `non_awaitable` and `can_suspend`. The awaited rows count only
+            -- when the task matched, as they did there.
+            verdict AS (
+              SELECT task_exists, expired, branch_id,
+                ok AND NOT expired AS ok,
+                COALESCE(array_length($3::text[], 1), 0) - CASE WHEN ok THEN found ELSE 0 END AS missing,
+                CASE WHEN ok THEN non_awaitable ELSE 0 END AS non_awaitable,
+                any_settled
+              FROM facts
             ),
             can_suspend AS (
-              SELECT 1 WHERE (SELECT ok FROM matched)
-                AND (SELECT cnt FROM missing) = 0
-                AND (SELECT cnt FROM non_awaitable) = 0
-                AND NOT EXISTS (SELECT 1 FROM awaited WHERE state <> 'pending')
+              SELECT 1 FROM verdict
+              WHERE ok AND missing = 0 AND non_awaitable = 0 AND NOT any_settled
             ),
             -- link the awaited rows (other than the task's own, handled below)
             linked AS (
@@ -4180,38 +4348,58 @@ impl PostgresDb<'_> {
                 pid        = CASE WHEN EXISTS (SELECT 1 FROM can_suspend) THEN NULL ELSE p.pid END,
                 -- deleted_ready_callbacks: fires on a version match even when
                 -- the suspend itself is refused because an awaited promise settled
-                resumes    = CASE WHEN (SELECT ok FROM matched) AND (SELECT cnt FROM missing) = 0
-                                    AND (SELECT cnt FROM non_awaitable) = 0
-                               THEN '{}' ELSE p.resumes END,
+                resumes    = '{{}}',
                 callbacks   = CASE WHEN $1 = ANY($3) AND EXISTS (SELECT 1 FROM can_suspend)
                                     AND NOT (p.callbacks @> ARRAY[$1])
                                THEN p.callbacks || $1 ELSE p.callbacks END
               WHERE p.id = $1
-                AND ((SELECT ok FROM matched) AND (SELECT cnt FROM missing) = 0
-                     AND (SELECT cnt FROM non_awaitable) = 0)
+                AND (SELECT ok AND missing = 0 AND non_awaitable = 0 FROM verdict)
               RETURNING p.id
             )
             SELECT
-              (SELECT ok FROM matched) AS task_matched,
+              v.ok AS task_matched,
               EXISTS (SELECT 1 FROM can_suspend) AS was_suspended,
-              (SELECT cnt FROM missing) AS missing_count,
-              (SELECT cnt FROM non_awaitable) AS non_awaitable_count
-        ")
-            .bind(task_id).bind(version as i32).bind(&awaited)
+              v.missing AS missing_count,
+              v.non_awaitable AS non_awaitable_count,
+              v.task_exists,
+              v.expired,
+              CASE WHEN v.ok AND v.missing = 0 AND v.non_awaitable = 0
+                        AND NOT EXISTS (SELECT 1 FROM can_suspend)
+                   THEN {preload} END AS preload
+            FROM verdict v
+        ", preload = preload_sql("v.branch_id", "$1", None, self.preload_limit)))
+            .bind(task_id).bind(version as i32).bind(&awaited).bind(guard).bind(&lock_ids)
             .fetch_one(self.tx()))?;
 
-        Ok(TaskSuspendResult {
-            task_matched: rows.get("task_matched"),
-            was_suspended: rows.get("was_suspended"),
-            missing_count: rows.get("missing_count"),
-            non_awaitable_count: rows.get("non_awaitable_count"),
-        })
+        Ok((
+            TaskSuspendResult {
+                task_matched: row.get("task_matched"),
+                was_suspended: row.get("was_suspended"),
+                missing_count: row.get("missing_count"),
+                non_awaitable_count: row.get("non_awaitable_count"),
+            },
+            row.get("task_exists"),
+            row.get("expired"),
+            preload_from(&row),
+        ))
     }
 
     // T-07: task.fulfill — the task and the promise are the same row, so the
     // multi-table backend's `fulfilled_acquired_task` and `updated_promise`
     // must become one UPDATE.
-    fn task_fulfill(&self, params: &TaskFulfillParams) -> StorageResult<TaskFulfillResult> {
+    /// `task.fulfill` as one statement.
+    ///
+    /// The row is locked by the statement itself — `locked` is `FOR UPDATE`,
+    /// so after waiting out a concurrent writer it reads the row's latest
+    /// version, callbacks registered a moment ago included — which is what the
+    /// lock preamble's separate statement was for. `guard`: with `Some(now)`
+    /// nothing is written if the promise is pending past its deadline, and
+    /// the second value says so.
+    fn task_fulfill_guarded(
+        &self,
+        params: &TaskFulfillParams,
+        guard: Option<i64>,
+    ) -> StorageResult<(TaskFulfillResult, bool)> {
         let TaskFulfillParams {
             task_id,
             version,
@@ -4226,31 +4414,32 @@ impl PostgresDb<'_> {
             "task.fulfill assumes the task and its promise are one row"
         );
 
-        // Statement 1: lock preamble.
-        rt_block_on(
-            sqlx::query("SELECT id FROM promises WHERE id = $1 FOR UPDATE")
-                .bind(promise_id)
-                .fetch_optional(self.tx()),
-        )?;
-
         // `fulfilled` here is the task transition, which also drives the
         // promise settlement — hence one shared guard.
-        let guard = "(SELECT b.task_state = 'acquired' AND b.task_version = $2 FROM before b)";
+        let guard_sql =
+            "(SELECT b.task_state = 'acquired' AND b.task_version = $2 AND NOT b.expired FROM before b)";
         let settle_guard =
-            "(SELECT b.task_state = 'acquired' AND b.task_version = $2 AND b.state = 'pending' FROM before b)";
-        let self_set = settle_self(guard);
+            "(SELECT b.task_state = 'acquired' AND b.task_version = $2 AND NOT b.expired \
+             AND b.state = 'pending' FROM before b)";
+        let self_set = settle_self(guard_sql);
         let unblock = settle_unblock("updated_promise", "(SELECT b.listeners FROM before b)");
         let fanout = settle_fanout(
             "$3",
             &format!("(SELECT CASE WHEN {settle_guard} THEN b.callbacks END FROM before b)"),
-            guard,
+            guard_sql,
             "$7",
             self.task_retry_timeout,
         );
 
         let rows = rt_block_on(sqlx::query(&format!("
-            WITH before AS (
-              SELECT id, state, task_state, task_version, callbacks, listeners FROM promises WHERE id = $3
+            WITH locked AS (
+              SELECT id, state, task_state, task_version, callbacks, listeners,
+                     ($8::bigint IS NOT NULL AND state = 'pending' AND timeout_at <= $8) AS expired
+              FROM promises WHERE id = $3
+              FOR UPDATE
+            ),
+            before AS (
+              SELECT * FROM locked
             ),
             updated_promise AS (
               UPDATE promises p
@@ -4260,6 +4449,7 @@ impl PostgresDb<'_> {
                   settled_at    = CASE WHEN p.state = 'pending' THEN $7 ELSE p.settled_at END,
                   {self_set}
               WHERE p.id = $3 AND p.task_state = 'acquired' AND p.task_version = $2
+                AND EXISTS (SELECT 1 FROM locked WHERE NOT expired)
               RETURNING p.*
             ),
             {unblock},
@@ -4272,31 +4462,49 @@ impl PostgresDb<'_> {
             SELECT {cols},
               EXISTS (SELECT 1 FROM updated_promise) AS task_fulfilled,
               (SELECT b.task_state IS NOT NULL FROM before b) AS task_exists,
+              COALESCE((SELECT b.expired FROM before b), false) AS expired,
               {messages}
             FROM result r
         ", cols = p_cols("r"), messages = emitted_json(&["emit_unblock", "emit_resume"])))
             .bind(task_id).bind(version as i32)                                                 // $1-$2
             .bind(promise_id).bind(state).bind(value_headers).bind(value_data).bind(settled_at) // $3-$7
+            .bind(guard)                                                                        // $8
             .fetch_all(self.tx()))?;
 
         if rows.is_empty() {
-            return Ok(TaskFulfillResult {
-                task_exists: false,
-                task_fulfilled: false,
-                promise: None,
-            });
+            return Ok((
+                TaskFulfillResult {
+                    task_exists: false,
+                    task_fulfilled: false,
+                    promise: None,
+                },
+                false,
+            ));
         }
         let row = &rows[0];
+        if row.get::<bool, _>("expired") {
+            return Ok((
+                TaskFulfillResult {
+                    task_exists: false,
+                    task_fulfilled: false,
+                    promise: None,
+                },
+                true,
+            ));
+        }
         self.absorb_and_arm_retries(row, settled_at + self.task_retry_timeout);
-        Ok(TaskFulfillResult {
-            task_exists: row
-                .try_get::<Option<bool>, _>("task_exists")
-                .ok()
-                .flatten()
-                .unwrap_or(false),
-            task_fulfilled: row.get("task_fulfilled"),
-            promise: Some(row_to_promise(row)),
-        })
+        Ok((
+            TaskFulfillResult {
+                task_exists: row
+                    .try_get::<Option<bool>, _>("task_exists")
+                    .ok()
+                    .flatten()
+                    .unwrap_or(false),
+                task_fulfilled: row.get("task_fulfilled"),
+                promise: Some(row_to_promise(row)),
+            },
+            false,
+        ))
     }
 
     // T-08: task.release
