@@ -515,6 +515,9 @@ pub const MemoryStore = struct {
     next_version: u64 = 1,
 
     faults: Faults = .{},
+    /// For tests: the next write whose key contains this lands, and is then
+    /// answered `timeout` — one lost acknowledgement, aimed. Cleared once used.
+    lose_ack_once: ?[]const u8 = null,
     random: ?*stdx.Random = null,
 
     /// Operations held back to complete later, in submission order. Draining
@@ -694,6 +697,13 @@ pub const MemoryStore = struct {
             };
         }
 
+        if (self.lose_ack_once) |needle| {
+            if (std.mem.indexOf(u8, op.key, needle) != null) {
+                self.lose_ack_once = null;
+                op.complete(.timeout);
+                return;
+            }
+        }
         if (self.random) |rng| {
             if (rng.chance(self.faults.lost_ack_percent)) {
                 // It landed. The caller will never know, and has to retry

@@ -585,6 +585,41 @@ const Harness = struct {
     }
 };
 
+test "a create whose commit landed unacknowledged is not answered as somebody else's" {
+    // The document write lands and its acknowledgement is lost. The applier
+    // decides again against what it then reads — which includes this very
+    // request's effect. task.create is not idempotent: deciding it again finds
+    // the task acquired and answers 409, "somebody else holds it", for a task
+    // this request created. Either the original answer or "may or may not" is
+    // true; a definite 409 is not.
+    //
+    // KNOWN BUG, disabled until the fix is decided: found by the skulld
+    // campaign (a task.create crossing a RustFS partition, refuted by
+    // conccheck on the host). Delete the next line to reproduce.
+    if (true) return error.SkipZigTest;
+    const h = try Harness.create(testing.allocator, false);
+    defer h.destroy();
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    h.mem.lose_ack_once = "wf/";
+    const body = try Harness.envelope(&arena, "task.create",
+        \\{"pid":"w1","ttl":60000,"action":{"kind":"promise.create","head":{},"data":{"id":"o:a","timeoutAt":9000000000000,"tags":{"resonate:target":"http://w:1"}}}}
+    , null);
+    // `post` never moves the clock, and the re-decision waits out a backoff:
+    // drive it by hand, a millisecond at a time.
+    var answer = Harness.Answer{};
+    var req = Request{ .body = body, .arena = &arena, .callback = Harness.Answer.callback, .context = &answer };
+    h.runtime.server.process(&req);
+    var guard: usize = 0;
+    while (!answer.done) : (guard += 1) {
+        if (guard > 10_000) return error.NeverAnswered;
+        h.runtime.drain();
+        _ = h.sim.advance_to(h.sim.now + 1);
+    }
+    try testing.expect(h.mem.lose_ack_once == null); // the fault was used
+    try testing.expect(answer.status != 409);
+}
+
 test "a request goes in as an envelope and comes back as one" {
     const h = try Harness.create(testing.allocator, false);
     defer h.destroy();
