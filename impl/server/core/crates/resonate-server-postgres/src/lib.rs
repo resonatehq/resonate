@@ -69,6 +69,15 @@ pub struct PostgresEngine {
 /// `well_formed_promise_pending_has_no_value` compares against `'{}'::jsonb`),
 /// so `NULLIF` restores the wire-level distinction the API draws between
 /// "no headers" and "headers present".
+/// A statement that finds rows by id never states a partial index's predicate
+/// in plain words beside the id: `task_state = 'acquired'`, `task_state =
+/// 'pending'`, `task_state IS NOT NULL`, `state = 'pending' AND external`. Each
+/// is the predicate of an index whose key starts with something else (a
+/// deadline, the task state), and a generic plan that matches it may walk that
+/// whole index with `id` as a filter instead of probing the primary key —
+/// `task.fulfill` did, at 2 ms a call. `COALESCE(task_state, '')` and
+/// `state || ''` say the same and match no index.
+///
 /// The promise columns of a CTE that unions a written row with a locked one,
 /// for `P_COLS` to project from.
 const RESULT_COLS: &str = "id, state, param_headers, param_data, value_headers, value_data, \
@@ -206,6 +215,12 @@ impl PostgresEngine {
         preload_limit: u32,
         debug: bool,
     ) -> Result<Self, sqlx::Error> {
+        // Room for every statement text this engine prepares. The console's
+        // reads vary with their filters and sort (some two hundred texts), and
+        // with sqlx's default of 100 a busy console evicted the hot statements,
+        // each of which costs milliseconds to plan again.
+        let options: sqlx::postgres::PgConnectOptions = url.parse()?;
+        let options = options.statement_cache_capacity(1024);
         let pool = sqlx::postgres::PgPoolOptions::new()
             .max_connections(pool_size)
             // No ping before every checkout. sqlx's default spends a round
@@ -232,10 +247,19 @@ impl PostgresEngine {
                     sqlx::query("SET plan_cache_mode TO force_generic_plan")
                         .execute(&mut *conn)
                         .await?;
+                    // Durable commits, whatever the cluster's default. This is
+                    // not tuning: a transition commits together with the
+                    // messages it returns, and a message goes out as soon as
+                    // the commit returns. With `off` a commit can return
+                    // before it is on disk, so a crash can lose a task whose
+                    // execute message a worker has already received.
+                    sqlx::query("SET synchronous_commit TO on")
+                        .execute(&mut *conn)
+                        .await?;
                     Ok(())
                 })
             })
-            .connect(url)
+            .connect_with(options)
             .await?;
         Ok(Self {
             pool,
@@ -268,7 +292,7 @@ impl PostgresEngine {
             .unwrap_or(0);
         resonate_sql::migrate::may_apply(applied as usize, migrator.iter().count(), migrate)
             .map_err(|e| sqlx::Error::Configuration(Box::new(e)))?;
-        migrator.run(&self.pool).await.map_err(|e| match e {
+        let migrated = migrator.run(&self.pool).await.map_err(|e| match e {
             // The initial schema was edited after this database was created.
             sqlx::migrate::MigrateError::VersionMismatch(v) => {
                 sqlx::Error::Configuration(Box::new(resonate_sql::migrate::MigrateError(
@@ -278,7 +302,61 @@ impl PostgresEngine {
                 )))
             }
             other => sqlx::Error::Migrate(Box::new(other)),
-        })
+        });
+        if migrated.is_ok() {
+            self.check_settings().await;
+        }
+        migrated
+    }
+
+    /// Warn about cluster settings this engine runs badly under.
+    ///
+    /// Nothing here is changed — they are the cluster's, shared with every
+    /// database on it, and settable only by a superuser or a restart — but a
+    /// deployment that leaves them at their defaults pays for it on every
+    /// request, so it should hear about it once, at startup. What each costs
+    /// is measured in the README's "PostgreSQL settings".
+    async fn check_settings(&self) {
+        let rows: Vec<(String, String)> = match sqlx::query_as(
+            "SELECT name, setting FROM pg_settings WHERE name IN \
+             ('max_wal_size', 'wal_compression', 'checkpoint_timeout', 'shared_buffers')",
+        )
+        .fetch_all(&self.pool)
+        .await
+        {
+            Ok(rows) => rows,
+            Err(_) => return,
+        };
+        let get = |name: &str| rows.iter().find(|(n, _)| n == name).map(|(_, v)| v.as_str());
+        let num = |name: &str| get(name).and_then(|v| v.parse::<i64>().ok());
+        // pg_settings units: max_wal_size MB, checkpoint_timeout s,
+        // shared_buffers 8 kB pages.
+        if num("max_wal_size").is_some_and(|mb| mb < 4096) {
+            tracing::warn!(
+                max_wal_size_mb = num("max_wal_size"),
+                "max_wal_size is under 4GB: checkpoints come often, and every page a \
+                 transition touches first after one is written to WAL whole"
+            );
+        }
+        if num("checkpoint_timeout").is_some_and(|s| s < 900) {
+            tracing::warn!(
+                checkpoint_timeout_s = num("checkpoint_timeout"),
+                "checkpoint_timeout is under 15min: see max_wal_size"
+            );
+        }
+        if get("wal_compression") == Some("off") {
+            tracing::warn!(
+                "wal_compression is off: full-page images dominate this engine's WAL; \
+                 lz4 cut it from ~10KB to ~1KB per request"
+            );
+        }
+        if num("shared_buffers").is_some_and(|pages| pages < 131_072) {
+            tracing::warn!(
+                shared_buffers_mb = num("shared_buffers").map(|p| p / 128),
+                "shared_buffers is under 1GB: the promises table and its indexes \
+                 should stay in memory"
+            );
+        }
     }
 
     /// Run one transition, and hand back what it emitted along with its result.
@@ -2341,17 +2419,27 @@ const SETTLE_SELF: &str = "
 /// row's own task was fulfilled and so must be unlinked from everything it was
 /// itself blocked on.
 ///
-/// `suspended_awaiters` is read from the pre-update snapshot rather than from
-/// the `UPDATE`'s `RETURNING`, because `RETURNING` yields post-update values and
-/// the outbox needs to know *which* awaiters were suspended. The multi-table
-/// backend gets this from `resumed_tasks RETURNING`, which is re-checked under
-/// EPQ; this snapshot read is not. The exposure is a concurrent write to an
-/// awaiter row between this statement's snapshot and its row locks — see the
-/// module docs on lock scope.
+/// `suspended_awaiters` is read before the `UPDATE` rather than from its
+/// `RETURNING`, because `RETURNING` yields post-update values and the emission
+/// needs to know *which* awaiters were suspended. It reads them locked, so at
+/// their latest version: a concurrent suspend that committed while this
+/// statement waited is seen, as the multi-table backend saw it through
+/// `resumed_tasks RETURNING` under EPQ.
 const SETTLE_FANOUT: &str = "
+-- The awaiters, locked, so each is read at its latest version: one that
+-- suspended while this statement waited for its own lock is seen as
+-- suspended, and woken with a message. Read from the snapshot instead it
+-- would be woken in `fanout` (which sees the latest version) but sent
+-- nothing, and wait out its retry deadline. No state filter here: a filter
+-- is applied to the snapshot version before the lock, and would drop exactly
+-- that row; `emit_resume` filters the locked versions instead.
+awaiter_rows AS (
+  SELECT id, task_version, target, task_state FROM promises
+  WHERE id = ANY(:AWAITERS)
+  FOR UPDATE
+),
 suspended_awaiters AS (
-  SELECT id, task_version, target FROM promises
-  WHERE id = ANY(:AWAITERS) AND task_state = 'suspended'
+  SELECT id, task_version, target FROM awaiter_rows WHERE task_state = 'suspended'
 ),
 fanout AS (
   UPDATE promises q SET
@@ -2371,6 +2459,9 @@ fanout AS (
   WHERE q.id <> :AWAITED
     AND ( q.id = ANY(:AWAITERS)
           OR (:FULFILLED AND q.callbacks <> '{}' AND q.callbacks @> ARRAY[:AWAITED]) )
+    -- Read the awaiters (and take their locks) before writing them: a locked
+    -- read after this UPDATE would find its own rewrite and yield nothing.
+    AND (SELECT count(*) FROM awaiter_rows) >= 0
   RETURNING q.id
 ),
 emit_resume AS (
@@ -2450,32 +2541,45 @@ WITH expired AS (
 expired_snap AS (
   SELECT id, listeners FROM promises WHERE :SELECTION
 ),
--- Every set below is an array computed once, so each `= ANY(...)` and `&&`
--- is an InitPlan parameter (the `::text[]` is what makes `ANY((SELECT ..))`
--- the array form rather than the subquery form) the planner can push into an index: the fan-out
--- reaches the rows it names through the primary key and the GIN index on
--- `callbacks`, and never scans the table. When nothing expired, every array
--- is empty and the statement touches no row at all.
+-- The sets a row is looked up *by* are arrays computed once, so each
+-- `= ANY(...)` and `&&` is an InitPlan parameter (the `::text[]` is what makes
+-- `ANY((SELECT ..))` the array form rather than the subquery form) that the
+-- planner pushes into an index: the fan-out reaches the rows it names through
+-- the primary key and the GIN index on `callbacks`, and never scans the
+-- table. The sets a row is tested *against* — `NOT IN` below — stay subqueries,
+-- which Postgres hashes: `x <> ALL(array)` compares against every element, and
+-- across a large batch that was quadratic (4.2 s for 20k rows against a 40k
+-- array, against 30 ms hashed). When nothing expired, every set is empty and
+-- the statement touches no row at all.
 expired_ids AS (
   SELECT COALESCE(array_agg(id), '{}') AS ids FROM expired
 ),
+fulfilled AS (
+  SELECT id FROM expired WHERE task_state IS NOT NULL AND task_state <> 'fulfilled'
+),
 fulfilled_ids AS (
-  SELECT COALESCE(array_agg(id), '{}') AS ids FROM expired
-  WHERE task_state IS NOT NULL AND task_state <> 'fulfilled'
+  SELECT COALESCE(array_agg(id), '{}') AS ids FROM fulfilled
 ),
 -- marked_ready, aggregated: one awaiter may be woken by several expiring promises
 ready_agg AS (
   SELECT aw AS awaiter, array_agg(DISTINCT e.id) AS awaited_ids
   FROM expired e CROSS JOIN LATERAL unnest(e.callbacks) aw
-  WHERE NOT (aw = ANY((SELECT ids FROM fulfilled_ids)::text[]))
+  WHERE aw NOT IN (SELECT id FROM fulfilled)
   GROUP BY aw
 ),
 ready_ids AS (
   SELECT COALESCE(array_agg(awaiter), '{}') AS ids FROM ready_agg
 ),
+-- The awaiters to wake, locked so they are read at their latest version — see
+-- `SETTLE_FANOUT`. An awaiter that is itself expiring is settled, not woken.
+awaiter_rows AS (
+  SELECT p.id, p.task_version, p.target, p.task_state FROM promises p
+  WHERE p.id = ANY((SELECT ids FROM ready_ids)::text[])
+    AND p.id NOT IN (SELECT id FROM expired)
+  FOR UPDATE
+),
 suspended_awaiters AS (
-  SELECT p.id, p.task_version, p.target FROM promises p
-  WHERE p.id = ANY((SELECT ids FROM ready_ids)::text[]) AND p.task_state = 'suspended'
+  SELECT id, task_version, target FROM awaiter_rows WHERE task_state = 'suspended'
 ),
 updated_expired AS (
   UPDATE promises p SET
@@ -2492,26 +2596,39 @@ emit_unblock AS (
   JOIN expired_snap e ON e.id = u.id
   CROSS JOIN LATERAL unnest(e.listeners) AS l
 ),
+-- The rows the fan-out writes, each with what it is owed, joined once. A
+-- correlated lookup per row (`SELECT .. FROM ready_agg WHERE awaiter = q.id`
+-- in the SET list) is a scan of the whole aggregate for every row written:
+-- 30 s for a batch of 20k.
+fanout_targets AS (
+  SELECT q.id, r.awaited_ids
+  FROM promises q
+  LEFT JOIN ready_agg r ON r.awaiter = q.id
+  WHERE ( q.id = ANY((SELECT ids FROM ready_ids)::text[])
+          OR (q.callbacks <> '{}' AND q.callbacks && (SELECT ids FROM fulfilled_ids)) )
+    AND q.id NOT IN (SELECT id FROM expired)
+),
 fanout AS (
   UPDATE promises q SET
     callbacks = CASE WHEN q.callbacks && (SELECT ids FROM fulfilled_ids)
                   THEN (SELECT COALESCE(array_agg(b), '{}') FROM unnest(q.callbacks) b
-                        WHERE NOT (b = ANY((SELECT ids FROM fulfilled_ids)::text[])))
+                        WHERE b NOT IN (SELECT id FROM fulfilled))
                   ELSE q.callbacks END,
-    resumes = q.resumes || COALESCE((SELECT r.awaited_ids FROM ready_agg r WHERE r.awaiter = q.id), '{}'),
-    task_state = CASE WHEN q.task_state = 'suspended' AND q.id = ANY((SELECT ids FROM ready_ids)::text[])
+    resumes = q.resumes || COALESCE(t.awaited_ids, '{}'),
+    task_state = CASE WHEN q.task_state = 'suspended' AND t.awaited_ids IS NOT NULL
                    THEN 'pending' ELSE q.task_state END,
-    retry_timeout_at = CASE WHEN q.task_state = 'suspended' AND q.id = ANY((SELECT ids FROM ready_ids)::text[])
+    retry_timeout_at = CASE WHEN q.task_state = 'suspended' AND t.awaited_ids IS NOT NULL
                    THEN :TIME + :TRT ELSE q.retry_timeout_at END,
-    lease_timeout_at = CASE WHEN q.task_state = 'suspended' AND q.id = ANY((SELECT ids FROM ready_ids)::text[])
+    lease_timeout_at = CASE WHEN q.task_state = 'suspended' AND t.awaited_ids IS NOT NULL
                    THEN NULL ELSE q.lease_timeout_at END,
-    ttl = CASE WHEN q.task_state = 'suspended' AND q.id = ANY((SELECT ids FROM ready_ids)::text[])
+    ttl = CASE WHEN q.task_state = 'suspended' AND t.awaited_ids IS NOT NULL
                    THEN NULL ELSE q.ttl END,
-    pid = CASE WHEN q.task_state = 'suspended' AND q.id = ANY((SELECT ids FROM ready_ids)::text[])
+    pid = CASE WHEN q.task_state = 'suspended' AND t.awaited_ids IS NOT NULL
                    THEN NULL ELSE q.pid END
-  WHERE ( q.id = ANY((SELECT ids FROM ready_ids)::text[])
-          OR (q.callbacks <> '{}' AND q.callbacks && (SELECT ids FROM fulfilled_ids)) )
-    AND NOT (q.id = ANY((SELECT ids FROM expired_ids)::text[]))
+  FROM fanout_targets t
+  WHERE t.id = q.id
+    -- Read the awaiters (and take their locks) before writing them.
+    AND (SELECT count(*) FROM awaiter_rows) >= 0
   RETURNING q.id
 ),
 emit_resume AS (
@@ -4224,7 +4341,7 @@ impl PostgresDb<'_> {
             "SELECT {P_COLS} FROM promises
              WHERE {}
                AND ($1::jsonb IS NULL OR tags @> $1::jsonb)
-               AND ($2::text IS NULL OR id > $2)
+               AND id > COALESCE($2::text, '')
              ORDER BY id ASC LIMIT $3",
             resonate_sql::effective_state_sql_at(state, "$4::bigint")
         );
@@ -4245,7 +4362,7 @@ impl PostgresDb<'_> {
     async fn task_get(&self, id: &str) -> StorageResult<Option<TaskRecord>> {
         let row = sqlx::query(
             "SELECT id, task_state, task_version, ttl, pid, resumes
-                 FROM promises WHERE id = $1 AND task_state IS NOT NULL",
+                 FROM promises WHERE id = $1 AND COALESCE(task_state, '') <> ''",
         )
         .bind(id)
         .fetch_optional(self.tx().await.pg())
@@ -4397,14 +4514,14 @@ impl PostgresDb<'_> {
             WITH before AS (
               SELECT id, task_state, task_version, branch_id,
                      (state = 'pending' AND timeout_at <= $3) AS expired
-              FROM promises WHERE id = $1 AND task_state IS NOT NULL
+              FROM promises WHERE id = $1 AND COALESCE(task_state, '') <> ''
             ),
             acquired_task AS (
               UPDATE promises p SET
                 task_state = 'acquired', task_version = p.task_version + 1,
                 lease_timeout_at = $3 + $4, ttl = $4, pid = $5, retry_timeout_at = NULL,
                 resumes = '{{}}'                    -- deleted_ready_callbacks
-              WHERE p.id = $1 AND p.task_version = $2 AND p.task_state = 'pending'
+              WHERE p.id = $1 AND p.task_version = $2 AND COALESCE(p.task_state, '') = 'pending'
                 AND NOT ($6 AND p.state = 'pending' AND p.timeout_at <= $3)
               RETURNING p.id, p.task_state, p.task_version
             )
@@ -4524,7 +4641,7 @@ impl PostgresDb<'_> {
               SELECT id, task_state, task_version, branch_id,
                      ctid <> (SELECT s.ctid FROM promises s WHERE s.id = $1) AS stale
               FROM promises
-              WHERE id = $1 AND task_state IS NOT NULL
+              WHERE id = $1 AND COALESCE(task_state, '') <> ''
               FOR UPDATE
             ),
             -- Why the fast path declines: a promise past its deadline, or a
@@ -4686,7 +4803,7 @@ impl PostgresDb<'_> {
               SELECT id, task_state, task_version, branch_id,
                      ctid <> (SELECT s.ctid FROM promises s WHERE s.id = $1) AS stale
               FROM promises
-              WHERE id = $1 AND task_state IS NOT NULL
+              WHERE id = $1 AND COALESCE(task_state, '') <> ''
               FOR UPDATE
             ),
             -- Why the fast path declines: a promise past its deadline, or a
@@ -4710,20 +4827,6 @@ impl PostgresDb<'_> {
                          AND ctid <> (SELECT s.ctid FROM promises s WHERE s.id = $3)) AS stale
               FROM promises WHERE id = $3 AND (SELECT ok FROM fence_ok) FOR UPDATE
             ),
-            -- Every fence rewrites its task row, even to the same values.
-            -- A fence that only locked it would leave no trace: one that
-            -- committed after this statement's snapshot, while this statement
-            -- waited for the lock, would have written siblings this statement
-            -- cannot see. Rewritten, the row's version moves, `fence_check`
-            -- reports `stale`, and the fast path declines. (Not when the
-            -- fenced promise is the task's own: one statement must not
-            -- update a row twice.)
-            bumped AS (
-              UPDATE promises SET task_version = task_version
-              WHERE id = $1 AND $1 <> $3 AND (SELECT ok FROM fence_ok)
-                AND NOT EXISTS (SELECT 1 FROM locked_promise WHERE stale)
-              RETURNING id
-            ),
             before AS (
               SELECT id, state, task_state, callbacks, listeners FROM locked_promise WHERE NOT stale
             ),
@@ -4737,6 +4840,26 @@ impl PostgresDb<'_> {
             ),
             {unblock},
             {fanout},
+            -- Every fence rewrites its task row, even to the same values.
+            -- A fence that only locked it would leave no trace: one that
+            -- committed after this statement's snapshot, while this statement
+            -- waited for the lock, would have written siblings this statement
+            -- cannot see. Rewritten, the row's version moves, `fence_check`
+            -- reports `stale`, and the fast path declines. (Not when the
+            -- fenced promise is the task's own: one statement must not
+            -- update a row twice.)
+            bumped AS (
+              UPDATE promises SET task_version = task_version
+              WHERE id = $1 AND $1 <> $3 AND (SELECT ok FROM fence_ok)
+                AND NOT EXISTS (SELECT 1 FROM locked_promise WHERE stale)
+                -- Nor when the fan-out rewrites it (the fenced task awaits
+                -- the promise it settles): one statement must not update a
+                -- row twice — Postgres keeps one write and silently drops the
+                -- other — and the fan-out's write moves the version anyway.
+                -- Reading `fanout` here also runs it first.
+                AND NOT EXISTS (SELECT 1 FROM fanout WHERE fanout.id = $1)
+              RETURNING id
+            ),
             result AS (
               SELECT {RESULT_COLS} FROM updated_promise
               UNION ALL
@@ -4828,7 +4951,7 @@ impl PostgresDb<'_> {
             UPDATE promises p SET lease_timeout_at = $3 + p.ttl
             FROM task_data td
             WHERE p.id = td.id AND p.task_version = td.version
-              AND p.task_state = 'acquired' AND p.pid = $4
+              AND COALESCE(p.task_state, '') = 'acquired' AND p.pid = $4
             -- The promise-liveness guard: a heartbeat on a task whose promise
             -- is pending-but-expired is a no-op. This is the one operation
             -- that does not sweep first, so without it the lease would be
@@ -5046,8 +5169,13 @@ impl PostgresDb<'_> {
                   value_data    = CASE WHEN p.state = 'pending' THEN $6 ELSE p.value_data END,
                   settled_at    = CASE WHEN p.state = 'pending' THEN $7 ELSE p.settled_at END,
                   {self_set}
-              WHERE p.id = $3 AND p.task_state = 'acquired' AND p.task_version = $2
-                AND EXISTS (SELECT 1 FROM locked WHERE NOT declined)
+              -- The fence is checked on `locked`, which holds the row's lock
+              -- and so its latest version: said here instead, `task_state =
+              -- 'acquired'` matched the lease index's predicate and the update
+              -- was planned as a walk of that whole index (2 ms, 380 buffers).
+              WHERE p.id = $3
+                AND EXISTS (SELECT 1 FROM locked
+                            WHERE NOT declined AND task_state = 'acquired' AND task_version = $2)
               RETURNING p.*
             ),
             {unblock},
@@ -5128,7 +5256,7 @@ impl PostgresDb<'_> {
               UPDATE promises p SET
                 task_state = 'pending', retry_timeout_at = $3 + $4,
                 lease_timeout_at = NULL, ttl = NULL, pid = NULL
-              WHERE p.id = $1 AND p.task_version = $2 AND p.task_state = 'acquired'
+              WHERE p.id = $1 AND p.task_version = $2 AND COALESCE(p.task_state, '') = 'acquired'
               RETURNING p.id, p.task_version, p.target
             ),
             emit_released AS (
@@ -5138,7 +5266,7 @@ impl PostgresDb<'_> {
             )
             SELECT
               EXISTS (SELECT 1 FROM released_task) AS task_released,
-              EXISTS (SELECT 1 FROM promises WHERE id = $1 AND task_state IS NOT NULL) AS task_exists,
+              EXISTS (SELECT 1 FROM promises WHERE id = $1 AND COALESCE(task_state, '') <> '') AS task_exists,
               :MESSAGES
         "
             .replace(":MESSAGES", &emitted_json(&["emit_released"]))
@@ -5164,12 +5292,12 @@ impl PostgresDb<'_> {
             sqlx::query(
                 "
             WITH locked_task AS (
-              SELECT id, task_state FROM promises WHERE id = $1 AND task_state IS NOT NULL FOR UPDATE
+              SELECT id, task_state FROM promises WHERE id = $1 AND COALESCE(task_state, '') <> '' FOR UPDATE
             ),
             halted_task AS (
               UPDATE promises p SET
                 task_state = 'halted', retry_timeout_at = NULL, lease_timeout_at = NULL, ttl = NULL, pid = NULL
-              WHERE p.id = $1 AND p.task_state IS NOT NULL
+              WHERE p.id = $1 AND COALESCE(p.task_state, '') <> ''
                 AND p.task_state NOT IN ('fulfilled', 'halted')
               RETURNING p.id
             )
@@ -5195,7 +5323,7 @@ impl PostgresDb<'_> {
             "
             WITH locked_task AS (
               SELECT id, task_state, task_version, target FROM promises
-              WHERE id = $1 AND task_state IS NOT NULL FOR UPDATE
+              WHERE id = $1 AND COALESCE(task_state, '') <> '' FOR UPDATE
             ),
             continued_task AS (
               UPDATE promises p SET task_state = 'pending', retry_timeout_at = $2 + {trt}
@@ -5235,18 +5363,36 @@ impl PostgresDb<'_> {
         cursor: Option<&str>,
         limit: i64,
     ) -> StorageResult<Vec<TaskRecord>> {
-        let rows = sqlx::query(
-            "SELECT id, task_state, task_version, ttl, pid, resumes FROM promises
-                 WHERE task_state IS NOT NULL
-                   AND ($1::text IS NULL OR task_state = $1)
-                   AND ($2::text IS NULL OR id > $2)
-                 ORDER BY id ASC LIMIT $3",
-        )
-        .bind(state)
-        .bind(cursor)
-        .bind(limit)
-        .fetch_all(self.tx().await.pg())
-        .await?;
+        // One text per shape, and the cursor as `id > COALESCE(..)` rather
+        // than `$n IS NULL OR id > $n`: a generic plan cannot use an index for
+        // a condition that might not apply, so the old form walked the primary
+        // key filtering every row, and restarted from the first row on every
+        // page (165 ms a page at 1.7M rows). `''` sorts before every id.
+        let rows = match state {
+            Some(state) => {
+                sqlx::query(
+                    "SELECT id, task_state, task_version, ttl, pid, resumes FROM promises
+                     WHERE task_state = $1 AND id > COALESCE($2::text, '')
+                     ORDER BY id ASC LIMIT $3",
+                )
+                .bind(state)
+                .bind(cursor)
+                .bind(limit)
+                .fetch_all(self.tx().await.pg())
+                .await?
+            }
+            None => {
+                sqlx::query(
+                    "SELECT id, task_state, task_version, ttl, pid, resumes FROM promises
+                     WHERE task_state IS NOT NULL AND id > COALESCE($1::text, '')
+                     ORDER BY id ASC LIMIT $2",
+                )
+                .bind(cursor)
+                .bind(limit)
+                .fetch_all(self.tx().await.pg())
+                .await?
+            }
+        };
         Ok(rows.iter().map(row_to_task).collect())
     }
 
@@ -5347,7 +5493,7 @@ impl PostgresDb<'_> {
             "SELECT id, cron, promise_id, promise_timeout, NULLIF(promise_param_headers, '{}'::jsonb)::text AS promise_param_headers,
                     promise_param_data, promise_tags::text, created_at, next_run_at, last_run_at
              FROM schedules
-             WHERE ($1::jsonb IS NULL OR promise_tags @> $1::jsonb) AND ($2::text IS NULL OR id > $2)
+             WHERE ($1::jsonb IS NULL OR promise_tags @> $1::jsonb) AND id > COALESCE($2::text, '')
              ORDER BY id ASC LIMIT $3")
             .bind(tags).bind(cursor).bind(limit).fetch_all(self.tx().await.pg()).await?;
         Ok(rows.iter().map(row_to_schedule).collect())
@@ -5708,18 +5854,36 @@ impl PostgresDb<'_> {
         time: i64,
         ids: &Option<Vec<String>>,
     ) -> StorageResult<()> {
-        let q = sqlx::query(sql).bind(time);
-        let q = match ids {
-            Some(ids) => q.bind(ids.clone()),
-            None => q,
+        // A named batch goes in chunks. A burst — a wheel's worth of leases
+        // expiring after an outage — would otherwise be one statement holding
+        // thousands of row locks, with per-row tests against arrays as long
+        // as the batch.
+        const CHUNK: usize = 256;
+        let chunks: Vec<Option<&[String]>> = match ids {
+            Some(ids) => ids.chunks(CHUNK).map(Some).collect(),
+            None => vec![None],
         };
-        if let Some(row) = q.fetch_optional(self.tx().await.pg()).await? {
-            self.absorb_and_arm_retries(&row, time + self.task_retry_timeout);
+        for chunk in chunks {
+            let q = sqlx::query(sql).bind(time);
+            let q = match chunk {
+                Some(ids) => q.bind(ids),
+                None => q,
+            };
+            if let Some(row) = q.fetch_optional(self.tx().await.pg()).await? {
+                self.absorb_and_arm_retries(&row, time + self.task_retry_timeout);
+            }
         }
         Ok(())
     }
 
     /// Fire expired timeouts, either every one that is due or the ones named.
+    ///
+    /// The precise form's predicates never say `task_state = '...'` or
+    /// `state = 'pending' AND external` plainly: those are the predicates of
+    /// the deadline indexes, keyed `(deadline, id)`, and a statement that
+    /// matches one may be planned through it — `id` its second column, so a
+    /// walk of the whole index — instead of through the primary key. The
+    /// `COALESCE` / `|| ''` spellings mean the same and match no index.
     ///
     /// Two forms of each statement, never one statement with a switch in it.
     /// `($2::text IS NULL OR id = $2)` reads like one statement, but once a
@@ -5763,11 +5927,16 @@ impl PostgresDb<'_> {
             let selection = match ids {
                 None => "state = 'pending' AND external AND timeout_at <= $1",
                 Some(_) => {
-                    "id = ANY($2) AND state = 'pending' AND external AND (timeout_at + 0) <= $1"
+                    "id = ANY($2) AND (state || '') = 'pending' AND external AND (timeout_at + 0) <= $1"
                 }
             };
-            self.fire_statement(&expire_batch_sql(selection, "$1", trt), time, &ids)
-                .await?;
+            let key = if ids.is_some() {
+                "expire_precise"
+            } else {
+                "expire_full"
+            };
+            let sql = self.cached(key, || expire_batch_sql(selection, "$1", trt));
+            self.fire_statement(&sql, time, &ids).await?;
         }
 
         // Statement 2: expired task retry deadlines — re-enqueue the execute
@@ -5776,11 +5945,17 @@ impl PostgresDb<'_> {
             let selection = match ids {
                 None => "task_state = 'pending' AND retry_timeout_at <= $1",
                 Some(_) => {
-                    "id = ANY($2) AND task_state = 'pending' AND (retry_timeout_at + 0) <= $1"
+                    "id = ANY($2) AND COALESCE(task_state, '') = 'pending' AND (retry_timeout_at + 0) <= $1"
                 }
             };
-            let sql = format!(
-                "
+            let key = if ids.is_some() {
+                "retry_precise"
+            } else {
+                "retry_full"
+            };
+            let sql = self.cached(key, || {
+                format!(
+                    "
             WITH expired_retry AS (
               SELECT id, task_version, target FROM promises
               WHERE {selection}
@@ -5798,8 +5973,9 @@ impl PostgresDb<'_> {
             )
             SELECT {messages}
         ",
-                messages = emitted_json(&["emit_retry"])
-            );
+                    messages = emitted_json(&["emit_retry"])
+                )
+            });
             self.fire_statement(&sql, time, &ids).await?;
         }
 
@@ -5808,11 +5984,17 @@ impl PostgresDb<'_> {
             let selection = match ids {
                 None => "task_state = 'acquired' AND lease_timeout_at <= $1",
                 Some(_) => {
-                    "id = ANY($2) AND task_state = 'acquired' AND (lease_timeout_at + 0) <= $1"
+                    "id = ANY($2) AND COALESCE(task_state, '') = 'acquired' AND (lease_timeout_at + 0) <= $1"
                 }
             };
-            let sql = format!(
-                "
+            let key = if ids.is_some() {
+                "lease_precise"
+            } else {
+                "lease_full"
+            };
+            let sql = self.cached(key, || {
+                format!(
+                    "
             WITH expired_lease AS (
               SELECT id, task_version, target FROM promises
               WHERE {selection}
@@ -5832,8 +6014,9 @@ impl PostgresDb<'_> {
             )
             SELECT {messages}
         ",
-                messages = emitted_json(&["emit_released"])
-            );
+                    messages = emitted_json(&["emit_released"])
+                )
+            });
             self.fire_statement(&sql, time, &ids).await?;
         }
 

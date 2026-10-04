@@ -35,23 +35,6 @@
 CREATE SCHEMA IF NOT EXISTS resonate;
 SET search_path TO resonate, public;
 
--- --- helpers the constraint catalogue depends on -----------------------------
-
--- Array elements are pairwise distinct.
-CREATE OR REPLACE FUNCTION resonate._arr_uniq(a TEXT[]) RETURNS BOOLEAN
-  LANGUAGE sql IMMUTABLE PARALLEL SAFE AS
-$$ SELECT cardinality(a) = (SELECT count(DISTINCT e) FROM unnest(a) e) $$;
-
--- Deliverable address. Mirrors core::is_valid_address, which accepts any URI
--- with a scheme (`url::Url::parse` succeeds).
-CREATE OR REPLACE FUNCTION resonate._addr_valid(a TEXT) RETURNS BOOLEAN
-  LANGUAGE sql IMMUTABLE PARALLEL SAFE AS
-$$ SELECT a IS NOT NULL AND a ~ '^[A-Za-z][A-Za-z0-9+.-]*:' $$;
-
-CREATE OR REPLACE FUNCTION resonate._addrs_valid(a TEXT[]) RETURNS BOOLEAN
-  LANGUAGE sql IMMUTABLE PARALLEL SAFE AS
-$$ SELECT bool_and(resonate._addr_valid(e)) FROM unnest(a) e $$;
-
 -- --- promises ---------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS promises (
@@ -125,6 +108,19 @@ CREATE TABLE IF NOT EXISTS promises (
   tmessage      TEXT,
   func          TEXT,
   args          TEXT
+);
+
+-- Vacuum this table early. Its rows are rewritten on every task transition,
+-- and the deadline indexes below churn fastest of all: an entry goes stale the
+-- moment its row is settled, acquired or redispatched. At the default (vacuum
+-- once a fifth of the table is dead) a table of a few million promises carries
+-- hundreds of thousands of dead entries between vacuums, and the timer's
+-- refresh, which walks the front of those indexes, slowed from 1.6 ms to
+-- 130 ms reading them. These are the owner's to set, so they live here.
+ALTER TABLE promises SET (
+  autovacuum_vacuum_scale_factor = 0.01,
+  autovacuum_analyze_scale_factor = 0.02,
+  autovacuum_vacuum_cost_delay = 0
 );
 
 -- The deadline queues. Each is a partial index whose predicate is exactly the
@@ -323,6 +319,12 @@ CREATE OR REPLACE FUNCTION resonate._promises_well_formed() RETURNS trigger
   LANGUAGE plpgsql AS
 $$
 BEGIN
+  -- The array checks are written out rather than calling helper functions: a
+  -- SQL function called from here was planned again on every call, where an
+  -- expression in this body is planned once per session. Uniqueness of an
+  -- array is its cardinality against its distinct count; a deliverable address
+  -- is any URI with a scheme, as `core::is_valid_address` accepts.
+  --
   -- --- promises: domains — the two state enums ------------------------------
   IF NOT ((NEW.state = ANY (ARRAY['pending'::text, 'resolved'::text, 'rejected'::text, 'rejected_canceled'::text, 'rejected_timedout'::text]))) THEN
     PERFORM resonate._violated('promises_state_check');
@@ -436,19 +438,19 @@ BEGIN
 
 
   -- --- promises: obligations and uniqueness ----------------------------------
-  IF NOT (((cardinality(NEW.callbacks) < 2) OR resonate._arr_uniq(NEW.callbacks))) THEN
+  IF NOT (((cardinality(NEW.callbacks) < 2) OR cardinality(NEW.callbacks) = (SELECT count(DISTINCT e) FROM unnest(NEW.callbacks) e))) THEN
     PERFORM resonate._violated('well_formed_promise_callbacks_unique');
   END IF;
 
-  IF NOT (((cardinality(NEW.listeners) < 2) OR resonate._arr_uniq(NEW.listeners))) THEN
+  IF NOT (((cardinality(NEW.listeners) < 2) OR cardinality(NEW.listeners) = (SELECT count(DISTINCT e) FROM unnest(NEW.listeners) e))) THEN
     PERFORM resonate._violated('well_formed_promise_listeners_unique');
   END IF;
 
-  IF NOT (((cardinality(NEW.resumes) < 2) OR resonate._arr_uniq(NEW.resumes))) THEN
+  IF NOT (((cardinality(NEW.resumes) < 2) OR cardinality(NEW.resumes) = (SELECT count(DISTINCT e) FROM unnest(NEW.resumes) e))) THEN
     PERFORM resonate._violated('well_formed_task_resumes_unique');
   END IF;
 
-  IF NOT (((NEW.listeners = '{}'::text[]) OR resonate._addrs_valid(NEW.listeners))) THEN
+  IF NOT (((NEW.listeners = '{}'::text[]) OR (SELECT bool_and(e IS NOT NULL AND e ~ '^[A-Za-z][A-Za-z0-9+.-]*:') FROM unnest(NEW.listeners) e))) THEN
     PERFORM resonate._violated('consistent_listener_addresses_deliverable');
   END IF;
 
