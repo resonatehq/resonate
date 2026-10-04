@@ -233,6 +233,9 @@ def run_one(mutant, out):
                                    "seconds": round(time.time() - t0)}
         print(f"  {name:30} {lname:10} {'CAUGHT' if failures else 'missed':7} {failures[:1]}", flush=True)
     result["notes"] = list(notes)
+    # The copy and its build cache are a few hundred MB each; the logs are
+    # what a result is read from.
+    shutil.rmtree(root, ignore_errors=True)
     return result
 
 
