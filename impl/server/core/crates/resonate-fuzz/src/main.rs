@@ -437,6 +437,11 @@ async fn main() {
             } else {
                 generate::blind(&mut t, &names, now)
             };
+            if req.kind == generate::CLOCK_ADVANCE {
+                // Nothing is sent: the next request just carries a later instant.
+                now = now.max(req.next_now);
+                continue;
+            }
             corr += 1;
             let env = envelope(&req.kind, &req.data, now, &format!("f{corr}"));
 
@@ -556,12 +561,22 @@ async fn main() {
 
         // Messages still on their way, then the comparison.
         if comparable {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            for m in mailbox.lock().unwrap().drain(..) {
-                if let Some((id, key)) = received_key(&m) {
-                    if names.owns(&id) {
-                        *received_msgs.entry(key).or_insert(0) += 1;
+            // Until 100ms pass with nothing new, or a second in all: delivery is
+            // asynchronous, and a big program's last messages trail.
+            let settle = Instant::now() + Duration::from_secs(1);
+            loop {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                let batch: Vec<Value> = mailbox.lock().unwrap().drain(..).collect();
+                let quiet = batch.is_empty();
+                for m in batch {
+                    if let Some((id, key)) = received_key(&m) {
+                        if names.owns(&id) {
+                            *received_msgs.entry(key).or_insert(0) += 1;
+                        }
                     }
+                }
+                if quiet || Instant::now() > settle {
+                    break;
                 }
             }
             for (k, n) in &expected_msgs {

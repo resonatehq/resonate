@@ -188,6 +188,44 @@ fn tick(t: &mut Tape, now: i64) -> (Value, i64) {
     (json!({ "time": next }), next)
 }
 
+/// Time moving with no tick: the next requests carry a later instant, but no
+/// deadline fires until something reads it. That is where a deadline that has
+/// passed but not been processed lives — a heartbeat for a task whose promise
+/// is already past due, a read that has to settle it on the way.
+pub const CLOCK_ADVANCE: &str = "clock.advance";
+
+/// The clock's move: a tick two times in three, a silent advance otherwise.
+fn clock(t: &mut Tape, now: i64) -> (&'static str, Value, i64) {
+    if t.upto(3) == 0 {
+        let next = now + (t.upto(10) as i64 + 1) * 5_000;
+        (CLOCK_ADVANCE, Value::Null, next)
+    } else {
+        let (d, n) = tick(t, now);
+        ("debug.tick", d, n)
+    }
+}
+
+/// The version a task holds, or one beside it a fifth of the time: a stale
+/// fence, an early or late heartbeat — what the server must refuse.
+fn skew(t: &mut Tape, v: i64) -> i64 {
+    match t.upto(10) {
+        0 => v - 1,
+        1 => v + 1,
+        _ => v,
+    }
+}
+
+/// A promise's tags: internal, external, or a timer (which is external and
+/// resolves rather than times out). Never a timer with a target: the
+/// specification refuses one, and the oracle does not.
+fn promise_tags(t: &mut Tape) -> Value {
+    match t.upto(8) {
+        0 | 1 => json!({ "resonate:external": "true" }),
+        2 => json!({ "resonate:timer": "true" }),
+        _ => json!({}),
+    }
+}
+
 // ─── the blind generator ─────────────────────────────────────────────────────
 
 pub fn blind(t: &mut Tape, names: &Names, now: i64) -> Request {
@@ -266,7 +304,8 @@ pub fn blind(t: &mut Tape, names: &Names, now: i64) -> Request {
         "schedule.get" | "schedule.delete" => json!({ "id": names.schedule(t.upto(4)) }),
         "promise.search" | "task.search" | "schedule.search" => search(op, t),
         _ => {
-            let (d, n) = tick(t, now);
+            let (k, d, n) = clock(t, now);
+            op = k;
             next_now = n;
             d
         }
@@ -333,11 +372,9 @@ pub fn informed(
         elig.push("task.fulfill");
         elig.push("task.fence");
         elig.push("task.heartbeat");
-        // Something to await other than a task's own promise.
-        if pending_p
-            .iter()
-            .any(|p| !acquired.iter().any(|(a, _)| a == p))
-        {
+        // Something to await other than a task's own promise — pending, or
+        // already settled, which the server must answer with a redirect.
+        if all_p.iter().any(|p| !acquired.iter().any(|(a, _)| a == p)) {
             elig.push("task.suspend");
         }
     }
@@ -355,7 +392,7 @@ pub fn informed(
     if names.spec_only {
         elig.retain(|op| in_spec_alphabet(op));
     }
-    let op = elig[t.upto(elig.len())];
+    let mut op = elig[t.upto(elig.len())];
     let settle = ["resolved", "rejected", "rejected_canceled"][t.upto(3)];
     let mut next_now = now;
     let mut from_inbox = false;
@@ -367,12 +404,9 @@ pub fn informed(
     let data = match op {
         "promise.create" => {
             let id = pick(t, &all_p).unwrap_or_else(|| names.promise(t.upto(8)));
-            // External a quarter of the time, so deadlines are armed and fire.
-            let tags = if t.upto(4) == 0 {
-                json!({ "resonate:external": "true" })
-            } else {
-                json!({})
-            };
+            // External or a timer some of the time, so deadlines are armed and
+            // fire, and a timer's resolves.
+            let tags = promise_tags(t);
             json!({ "id": id, "timeoutAt": now + (t.upto(30) as i64 + 1) * 10_000,
                     "param": {}, "tags": tags })
         }
@@ -432,17 +466,22 @@ pub fn informed(
         }
         "task.release" => {
             let (id, v) = task_of(t, &acquired);
-            json!({ "id": id, "version": v })
+            json!({ "id": id, "version": skew(t, v) })
         }
         "task.fulfill" => {
             let (id, v) = task_of(t, &acquired);
+            let v = skew(t, v);
             json!({ "id": id, "version": v, "action": {
                 "kind": "promise.settle", "head": {},
                 "data": { "id": id, "state": settle, "value": {} } }})
         }
         "task.suspend" => {
             let (id, v) = task_of(t, &acquired);
-            let others: Vec<String> = pending_p.iter().filter(|p| **p != id).cloned().collect();
+            let v = skew(t, v);
+            // Mostly a pending promise; a quarter of the time any, settled
+            // ones included, which must not suspend the task.
+            let pool = if t.upto(4) == 0 { &all_p } else { &pending_p };
+            let others: Vec<String> = pool.iter().filter(|p| **p != id).cloned().collect();
             let awaited = pick(t, &others).unwrap_or_else(|| names.promise(0));
             json!({ "id": id, "version": v, "actions": [{
                 "kind": "promise.register_callback", "head": {},
@@ -450,12 +489,14 @@ pub fn informed(
         }
         "task.fence" => {
             let (id, v) = task_of(t, &acquired);
+            let v = skew(t, v);
             if pending_p.is_empty() || t.byte().is_multiple_of(4) {
+                let tags = promise_tags(t);
                 json!({ "id": id, "version": v, "action": {
                     "kind": "promise.create", "head": {},
                     "data": { "id": names.promise(t.upto(8)),
                               "timeoutAt": now + (t.upto(30) as i64 + 1) * 10_000,
-                              "param": {}, "tags": {} } }})
+                              "param": {}, "tags": tags } }})
             } else {
                 let p = pick(t, &pending_p).unwrap_or_else(|| names.promise(0));
                 json!({ "id": id, "version": v, "action": {
@@ -470,7 +511,7 @@ pub fn informed(
                 acquired
                     .iter()
                     .take(3)
-                    .map(|(id, v)| json!({ "id": id, "version": v }))
+                    .map(|(id, v)| json!({ "id": id, "version": skew(t, *v) }))
                     .collect()
             };
             let pid = if t.byte().is_multiple_of(7) {
@@ -493,7 +534,8 @@ pub fn informed(
         }
         "promise.search" | "task.search" | "schedule.search" => search(op, t),
         _ => {
-            let (d, n) = tick(t, now);
+            let (k, d, n) = clock(t, now);
+            op = k;
             next_now = n;
             d
         }
