@@ -413,6 +413,21 @@ impl PostgresEngine {
         }
     }
 
+    /// An operation that is one statement on every path, run in autocommit.
+    async fn run_auto<F>(&self, req: &RequestEnvelope, f: F) -> Output
+    where
+        F: for<'d> FnMut(&'d PostgresDb<'static>) -> DbFut<'d, ResponseEnvelope> + Send,
+    {
+        match self.execute(true, f).await {
+            Ok((response, messages, timeouts)) => Output {
+                response: Some(response),
+                messages,
+                timeouts,
+            },
+            Err(e) => self.fail(req, e),
+        }
+    }
+
     /// One operation with a fast path: `fast` first, as one autocommit
     /// statement, and `slow` — the full transaction — only if `fast` declines.
     ///
@@ -472,7 +487,9 @@ impl PostgresEngine {
         F: for<'d> FnMut(&'d PostgresDb<'static>) -> DbFut<'d, T> + Send,
         T: Send + 'static,
     {
-        self.transact(f).await.map(|(v, _, _)| v)
+        // Autocommit: under READ COMMITTED a transaction gives a run of reads
+        // no common snapshot, so it would buy nothing but two round trips.
+        self.execute(true, f).await.map(|(v, _, _)| v)
     }
 
     pub async fn dispatch(&self, req: &RequestEnvelope, now: i64) -> Output {
@@ -741,7 +758,8 @@ impl PostgresEngine {
         let data = req.data.clone();
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
-        self.run(req, move |db| {
+        // One read: no transaction around it.
+        self.run_auto(req, move |db| {
             let data = data.clone();
             let kind_str = kind_str.clone();
             let corr_id = corr_id.clone();
@@ -1277,7 +1295,9 @@ impl PostgresEngine {
         let data = req.data.clone();
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
-        self.run(req, move |db| {
+        // One statement, whatever the request holds: it is its own
+        // transaction, so no BEGIN and no COMMIT around it.
+        self.run_auto(req, move |db| {
             let data = data.clone();
             let kind_str = kind_str.clone();
             let corr_id = corr_id.clone();
@@ -1444,7 +1464,8 @@ impl PostgresEngine {
         let data = req.data.clone();
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
-        self.run(req, move |db| {
+        // One read: no transaction around it.
+        self.run_auto(req, move |db| {
             let data = data.clone();
             let kind_str = kind_str.clone();
             let corr_id = corr_id.clone();
@@ -1517,7 +1538,8 @@ impl PostgresEngine {
         let data = req.data.clone();
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
-        self.run(req, move |db| {
+        // One read: no transaction around it.
+        self.run_auto(req, move |db| {
             let data = data.clone();
             let kind_str = kind_str.clone();
             let corr_id = corr_id.clone();
@@ -1718,7 +1740,8 @@ impl PostgresEngine {
         let data = req.data.clone();
         let kind_str = req.kind.clone();
         let corr_id = req.head.corr_id.clone();
-        self.run(req, move |db| {
+        // One read: no transaction around it.
+        self.run_auto(req, move |db| {
             let data = data.clone();
             let kind_str = kind_str.clone();
             let corr_id = corr_id.clone();
