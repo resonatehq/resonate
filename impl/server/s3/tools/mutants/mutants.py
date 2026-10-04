@@ -78,7 +78,7 @@ MUTANTS = [
         "why": "a timer's deadline rejects it instead of resolving it",
         "file": "src/protocol.zig",
         "old": "return if (is_timer(tags)) .resolved else .rejected_timedout;",
-        "new": "return .rejected_timedout;",
+        "new": "_ = tags; return .rejected_timedout;",
     },
     {
         "name": "fence-ignores-version",
@@ -86,7 +86,7 @@ MUTANTS = [
         "why": "task.fence commits for any version of an acquired task",
         "file": "src/handle.zig",
         "old": 'if (t.state != .acquired or t.version != version) return ctx.fail(409, "Version mismatch");',
-        "new": 'if (t.state != .acquired) return ctx.fail(409, "Version mismatch");',
+        "new": '_ = version; if (t.state != .acquired) return ctx.fail(409, "Version mismatch");',
     },
     {
         "name": "get-skips-deadline",
