@@ -4,6 +4,7 @@
 #   ./run.sh start N             start resonate on nodes 1..N, wiping local copies; TOPIC picks
 #                                the topic prefix, PARTITIONS the partition count (new topics only),
 #                                PIPELINE the rounds in flight per partition,
+#                                RESONATE_BIN the bucket's build of resonate to run,
 #                                the topic prefix, LIBRDKAFKA adds client properties (toml lines)
 #   ./run.sh stop                stop resonate on every node
 #   ./run.sh load NAME K ARGS..  run the load generator on loadgens 1..K at once,
@@ -38,7 +39,8 @@ start)
 set -e
 systemctl stop resonate
 # The binaries as last built, so a node never runs a stale one.
-gcloud storage cp -q $BUCKET/bin/server $BUCKET/bin/resonate /opt/resonate/ && chmod +x /opt/resonate/server /opt/resonate/resonate
+# RESONATE_BIN picks another build of the resonate binary (bin/NAME), for A/B runs.
+gcloud storage cp -q $BUCKET/bin/server /opt/resonate/ && gcloud storage cp -q $BUCKET/bin/${RESONATE_BIN:-resonate} /opt/resonate/resonate && chmod +x /opt/resonate/server /opt/resonate/resonate
 sed -i '/TOPIC_PREFIX/d; /__PARTITIONS=/d; /__PIPELINE_DEPTH=/d' /etc/resonate.env
 printf 'RESONATE_SERVERS__SERVER_KAFKA__TOPIC_PREFIX=%s\nRESONATE_SERVERS__SERVER_KAFKA__PARTITIONS=%s\nRESONATE_SERVERS__SERVER_KAFKA__PIPELINE_DEPTH=%s\n' \
   '${TOPIC:-resonate}' '$PARTITIONS' '${PIPELINE:-1}' >> /etc/resonate.env
