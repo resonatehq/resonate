@@ -17,6 +17,7 @@ layers that catch it, not just the first:
   L5 fuzz       resonate-fuzz (impl/server/core): guided and informed, every
                 answer and state compared with the in-memory reference model,
                 and the server's messages with the ones the model emitted
+  L6 fuzz2      the same against the native and the wasm server on one bucket
 
 A layer "catches" a mutant if it fails where it passes on the unmutated
 server (the baseline, run first). Tools come from the environment:
@@ -206,8 +207,35 @@ def layer_fuzz(root, logdir):
     return bad
 
 
+def layer_fuzz2(root, logdir):
+    """The fuzzer against two servers on one bucket: the native one and the
+    wasm one over fakes3, each request to either. What one server caches the
+    other may have changed."""
+    bad = []
+    procs = Procs(logdir)
+    s3, zport, wport = free_port(), free_port(), free_port()
+    try:
+        procs.start("fuzz2-fakes3", [f"{root}/zig-out/bin/fakes3", "--port", str(s3)])
+        common = ["--store", "s3", "--endpoint", f"http://127.0.0.1:{s3}", "--bucket", "b", "--debug", "--deliver"]
+        procs.start("fuzz2-native", [f"{root}/zig-out/bin/resonate", "serve", *common, "--port", str(zport)],
+                    f"http://127.0.0.1:{zport}/ready")
+        procs.start("fuzz2-wasm", [NODE, f"{root}/wasm/host.mjs", "serve", "--wasm", f"{root}/zig-out/bin/resonate.wasm",
+                                   *common, "--port", str(wport)], f"http://127.0.0.1:{wport}/ready")
+        for seed in (1, 2):
+            code, out = sh([FUZZ, "--url", f"http://127.0.0.1:{zport},http://127.0.0.1:{wport}",
+                            "--programs", "30", "--seed", str(seed), "--searches", "false"], timeout=900)
+            open(f"{logdir}/fuzz2-{seed}.txt", "w").write(out)
+            if code != 0:
+                first = next((l.strip() for l in out.splitlines() if l.startswith(("DISAGREE", "STATE"))), f"exit {code}")
+                bad.append(f"fuzz2 seed {seed}: {first}")
+    finally:
+        procs.stop()
+    return bad
+
+
 LAYERS = [("tests", layer_tests), ("simulator", layer_simulator),
-          ("loadgen", layer_loadgen), ("scenarios", layer_scenarios), ("fuzz", layer_fuzz)]
+          ("loadgen", layer_loadgen), ("scenarios", layer_scenarios), ("fuzz", layer_fuzz),
+          ("fuzz2", layer_fuzz2)]
 
 
 def run_one(mutant, out):
