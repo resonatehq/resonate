@@ -5,6 +5,7 @@
 #                                the topic prefix, PARTITIONS the partition count (new topics only),
 #                                PIPELINE the rounds in flight per partition,
 #                                RESONATE_BIN the bucket's build of resonate to run,
+#                                PG_BATCH_LANES its group commit lanes (Postgres),
 #                                the topic prefix, LIBRDKAFKA adds client properties (toml lines)
 #   ./run.sh stop                stop resonate on every node
 #   ./run.sh load NAME K ARGS..  run the load generator on loadgens 1..K at once,
@@ -50,6 +51,8 @@ if [ '${BACKEND:-kafka}' = postgres ]; then
   : > /opt/resonate/resonate.toml
   printf 'RESONATE_SERVERS__ACTIVE=server_postgres\nRESONATE_SERVERS__SERVER_POSTGRES__URL=%s\nRESONATE_SERVERS__SERVER_POSTGRES__POOL_SIZE=%s\nRESONATE_GATEWAYS__GATEWAY_HTTP__BIND=0.0.0.0:8001\nRESONATE_GATEWAYS__GATEWAY_METRICS__BIND=0.0.0.0:9090\nRESONATE_LEVEL=warn\n' \
     '${PG_URL:-}' '${PG_POOL:-32}' > /etc/resonate-pg.env
+  # Only builds that know the key: the server refuses RESONATE_* keys it does not.
+  [ -n '${PG_BATCH_LANES:-}' ] && echo 'RESONATE_SERVERS__SERVER_POSTGRES__BATCH_LANES=${PG_BATCH_LANES:-}' >> /etc/resonate-pg.env
   printf '[Service]\nEnvironmentFile=\nEnvironmentFile=/etc/resonate-pg.env\nExecStart=\nExecStart=/opt/resonate/resonate serve\n' \
     > /etc/systemd/system/resonate.service.d/backend.conf
 else
