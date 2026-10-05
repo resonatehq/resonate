@@ -24,15 +24,18 @@ for spec in "$@"; do
   $G compute scp ${SSH_FLAGS:-} $tgz $PREFIX-builder:/tmp/$b.tgz --zone $z >/dev/null
   ssh_to $PREFIX-builder $z "set -e; source \$HOME/.cargo/env
     rm -rf ~/$b && mkdir -p ~/$b && tar -xzf /tmp/$b.tgz -C ~/$b && cd ~/$b/impl/server/core
-    CARGO_TARGET_DIR=~/target-b cargo build --release -p resonate --bin resonate 2>&1 | tail -1
-    gcloud storage cp -q ~/target-b/release/resonate $BUCKET/bin/resonate-$b"
+    # Its own target directory: the sources carry their commit's mtime, so in
+    # a shared one cargo can find another tree's newer build fresh and reuse it.
+    CARGO_TARGET_DIR=~/target-$b cargo build --release -p resonate --bin resonate 2>&1 | tail -1
+    echo \"sha256 \$(sha256sum ~/target-$b/release/resonate | cut -c1-16)\"
+    gcloud storage cp -q ~/target-$b/release/resonate $BUCKET/bin/resonate-$b"
   $G storage ls $BUCKET/bin/resonate-$b >/dev/null || { echo "build $b is missing"; exit 1; }
 done
 
 if [ -n "${TEST_TGZ:-}" ]; then
   echo "## correctness suites on the builder, lanes ${TEST_LANES:-0 1 4} $(date -u +%T)"
   $G compute scp ${SSH_FLAGS:-} pgtest.sh $PREFIX-builder:~/pgtest.sh --zone $z >/dev/null
-  ssh_to $PREFIX-builder $z "src=~/$(basename $TEST_TGZ .tgz); nohup bash ~/pgtest.sh \$src ${TEST_LANES:-0 1 4} > ~/pgtest.out 2>&1 < /dev/null &"
+  ssh_to $PREFIX-builder $z "src=~/$(basename $TEST_TGZ .tgz); DIFF=${TEST_DIFF:-1} nohup bash ~/pgtest.sh \$src ${TEST_LANES:-0 1 4} > ~/pgtest.out 2>&1 < /dev/null &"
 fi
 
 echo "## node and loadgens $(date -u +%T)"

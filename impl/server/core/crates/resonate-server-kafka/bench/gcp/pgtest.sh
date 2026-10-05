@@ -4,7 +4,7 @@
 # porcupine linearizability check — once per LANES value (group commit lanes;
 # 0 is off). Prints one PASS/FAIL line per run; logs land in ~/pgtest/.
 #
-#   ./pgtest.sh SRC_DIR [LANES..]
+#   ./pgtest.sh SRC_DIR [LANES..]      DIFF=0 skips the differential and port suites
 src=$1; shift; lanes=("${@:-0 1 4}")
 log=~/pgtest; mkdir -p $log
 if ! command -v pg_ctlcluster >/dev/null; then
@@ -22,9 +22,10 @@ export XTASK_POSTGRES_ADMIN_URL=postgres://postgres:resonate@localhost:5432/post
 cd $src/impl/server/core
 for n in ${lanes[*]}; do
   if [ "$n" = 0 ]; then extra=(); else extra=(TEST_POSTGRES_BATCH_LANES=$n RESONATE_SERVERS__SERVER_POSTGRES__BATCH_LANES=$n); fi
-  if env "${extra[@]}" CARGO_TARGET_DIR=~/target-test timeout 3000 cargo xtask differential --backend postgres > $log/differential-l$n.log 2>&1
+  [ "${DIFF:-1}" = 1 ] && if env "${extra[@]}" CARGO_TARGET_DIR=~/target-test timeout 3000 cargo xtask differential --backend postgres > $log/differential-l$n.log 2>&1
   then echo "PASS differential+port, lanes $n"; else echo "FAIL differential+port, lanes $n (rc $?): $(grep -E 'panicked|FAILED|failed|error' $log/differential-l$n.log | head -3 | tr '\n' ' ' | cut -c1-300)"; fi
-  if env "${extra[@]}" CARGO_TARGET_DIR=~/target-test timeout 1800 cargo xtask porcupine --backend postgres > $log/porcupine-l$n.log 2>&1
+  # The source tree's own target directory: porcupine starts target/release/resonate.
+  if env "${extra[@]}" timeout 1800 cargo xtask porcupine --backend postgres > $log/porcupine-l$n.log 2>&1
   then echo "PASS porcupine, lanes $n: $(grep -iE 'linearizable|ok|operations' $log/porcupine-l$n.log | tail -2 | tr '\n' ' ' | cut -c1-200)"
   else echo "FAIL porcupine, lanes $n (rc $?): $(tail -5 $log/porcupine-l$n.log | tr '\n' ' ' | cut -c1-300)"; fi
 done
