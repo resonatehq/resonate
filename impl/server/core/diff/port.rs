@@ -375,10 +375,16 @@ async fn postgres_backend(url: String) -> Backend {
     let server = resonate_sql::server::Server::new(
         Box::new(move |debug| {
             Box::pin(async move {
-                let engine =
-                    PostgresEngine::connect(&url, 5, TASK_RETRY_TIMEOUT_MS, PRELOAD_LIMIT, debug)
-                        .await
-                        .map_err(|e| Unavailable::new(format!("cannot connect: {e}")))?;
+                let engine = PostgresEngine::connect(
+                    &url,
+                    5,
+                    TASK_RETRY_TIMEOUT_MS,
+                    PRELOAD_LIMIT,
+                    debug,
+                    pg_batch_lanes(),
+                )
+                .await
+                .map_err(|e| Unavailable::new(format!("cannot connect: {e}")))?;
                 engine
                     .init(true)
                     .await
@@ -1674,4 +1680,13 @@ fn promise_id_different_from(rng: &mut fastrand::Rng, other: &str) -> String {
     } else {
         candidate
     }
+}
+
+/// `TEST_POSTGRES_BATCH_LANES` runs the Postgres engine with that many group
+/// commit lanes (default 0: every write commits on its own).
+fn pg_batch_lanes() -> u32 {
+    std::env::var("TEST_POSTGRES_BATCH_LANES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0)
 }

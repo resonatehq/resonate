@@ -528,7 +528,7 @@ async fn every_backend_gives_the_same_answer() {
     // differential. `debug.reset` first: these are shared databases.
     let pg;
     if let Ok(url) = std::env::var("TEST_POSTGRES_URL") {
-        pg = resonate_server_postgres::PostgresEngine::connect(&url, 4, 30_000, 10, true)
+        pg = resonate_server_postgres::PostgresEngine::connect(&url, 4, 30_000, 10, true, 0)
             .await
             .expect("postgres");
         pg.init(true).await.expect("postgres schema");

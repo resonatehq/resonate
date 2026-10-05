@@ -62,7 +62,86 @@ pub struct PostgresEngine {
     preload_limit: u32,
     /// Whether `debug.*` operations are permitted at all.
     debug: bool,
+    /// Group commit for one-statement writes; empty when it is off. See
+    /// [`Lane`].
+    lanes: Vec<Lane>,
 }
+
+/// One connection that commits many one-statement writes at once.
+///
+/// Every request was its own transaction, so every request paid a WAL flush
+/// and, on a cluster with a synchronous standby, a round trip to it — and
+/// under load the connections queued on that flush (`LWLock:WALWrite`) while
+/// the statements themselves took a millisecond. A lane runs the statements
+/// of whoever arrives in one transaction and commits them together: one flush
+/// for the lot.
+///
+/// No timer decides when a batch closes. The first request in opens the
+/// transaction and runs its statement; then it queues for the lane again to
+/// commit. The lane's lock is fair, so everyone who queued meanwhile runs
+/// first and joins the batch; whoever comes after the commit opens the next
+/// one. Alone, a request pays `BEGIN` and `COMMIT` round trips it did not pay
+/// in autocommit; under load the batch grows with the queue.
+///
+/// Nobody hears back before the commit: responses, messages and armed
+/// deadlines are released only once it returned. If any statement of a batch
+/// failed, or the commit did, the batch rolled back and nothing of it was
+/// released — each member then runs on its own as it would have without a
+/// lane, so an error is still that request's own. Statements run under READ
+/// COMMITTED as before, each with a fresh snapshot, so one that waited for
+/// another lane's commit still sees the row changed and declines.
+struct Lane {
+    state: Arc<tokio::sync::Mutex<LaneState>>,
+}
+
+struct LaneState {
+    /// The lane's connection; `None` until first used, or after it failed.
+    conn: Option<sqlx::pool::PoolConnection<sqlx::Postgres>>,
+    /// The batch whose transaction is open on `conn`.
+    open: Option<Arc<Batch>>,
+}
+
+struct Batch {
+    /// A member's statement failed: the transaction is aborted.
+    poisoned: std::sync::atomic::AtomicBool,
+    outcome: tokio::sync::watch::Sender<Option<Outcome>>,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Outcome {
+    Committed,
+    /// Nothing committed: every member runs again on its own.
+    RolledBack,
+    /// The commit's answer was lost with the connection. It may or may not
+    /// have committed, so nobody runs again; each member reports the error.
+    Unknown,
+}
+
+/// A lane's transaction control, in the simple protocol (several statements,
+/// one round trip). Boxed with its lifetime spelled out: the future sqlx
+/// returns is not provably `Send` for every lifetime the trait's async methods
+/// need.
+fn simple<'c>(
+    conn: &'c mut sqlx::pool::PoolConnection<sqlx::Postgres>,
+    sql: &'static str,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), sqlx::Error>> + Send + 'c>> {
+    // A bare `&str` has no arguments, so sqlx sends it as a simple query.
+    Box::pin(async move { sqlx::Executor::execute(&mut **conn, sql).await.map(|_| ()) })
+}
+
+/// The writes a lane takes: one statement on the common path, which is what
+/// lets a batch be undone and replayed one by one.
+const BATCHED: &[&str] = &[
+    "promise.create",
+    "promise.settle",
+    "promise.register_callback",
+    "promise.register_listener",
+    "task.create",
+    "task.fulfill",
+    "task.suspend",
+    "task.fence",
+    "task.heartbeat",
+];
 
 /// The promise columns every read projects. `param_headers`/`value_headers` are
 /// `NOT NULL DEFAULT '{}'` here (the catalogue's
@@ -214,6 +293,7 @@ impl PostgresEngine {
         task_retry_timeout: i64,
         preload_limit: u32,
         debug: bool,
+        batch_lanes: u32,
     ) -> Result<Self, sqlx::Error> {
         // Room for every statement text this engine prepares. The console's
         // reads vary with their filters and sort (some two hundred texts), and
@@ -289,6 +369,14 @@ impl PostgresEngine {
             task_retry_timeout,
             preload_limit,
             debug,
+            lanes: (0..batch_lanes)
+                .map(|_| Lane {
+                    state: Arc::new(tokio::sync::Mutex::new(LaneState {
+                        conn: None,
+                        open: None,
+                    })),
+                })
+                .collect(),
         })
     }
 
@@ -504,6 +592,128 @@ impl PostgresEngine {
         unreachable!("transact loop completed without returning")
     }
 
+    /// The lane `req` commits through, or `None` to run it in autocommit: a
+    /// write a lane takes, when there are lanes. One promise, one lane, so
+    /// writes to the same row queue behind each other in one transaction
+    /// rather than wait across lanes for each other's commits.
+    fn lane_for(&self, req: &RequestEnvelope) -> Option<&Lane> {
+        if self.lanes.is_empty() || !BATCHED.contains(&req.kind.as_str()) {
+            return None;
+        }
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        match req.data.get("id").and_then(Value::as_str) {
+            Some(id) => id.hash(&mut h),
+            None => req.head.corr_id.hash(&mut h),
+        }
+        Some(&self.lanes[(h.finish() % self.lanes.len() as u64) as usize])
+    }
+
+    /// [`Self::execute`] in autocommit, or through `req`'s lane: the same
+    /// closure, its statement run in the lane's open transaction and its
+    /// results released once that commits. See [`Lane`].
+    async fn execute_write<F, T>(
+        &self,
+        req: &RequestEnvelope,
+        mut f: F,
+    ) -> StorageResult<(T, Vec<Outgoing>, Vec<Scheduled>)>
+    where
+        F: for<'d> FnMut(&'d PostgresDb<'static>) -> DbFut<'d, T> + Send,
+        T: Send + 'static,
+    {
+        let Some(lane) = self.lane_for(req) else {
+            return self.execute(true, f).await;
+        };
+
+        let mut guard = lane.state.clone().lock_owned().await;
+        let leader = guard.open.is_none();
+        if leader {
+            if guard.conn.is_none() {
+                match self.pool.acquire().await {
+                    Ok(conn) => guard.conn = Some(conn),
+                    Err(_) => {
+                        drop(guard);
+                        return self.execute(true, f).await;
+                    }
+                }
+            }
+            let conn = guard.conn.as_mut().expect("lane connection");
+            if simple(conn, "BEGIN").await.is_err() {
+                guard.conn = None;
+                drop(guard);
+                return self.execute(true, f).await;
+            }
+            let (outcome, _) = tokio::sync::watch::channel(None);
+            guard.open = Some(Arc::new(Batch {
+                poisoned: std::sync::atomic::AtomicBool::new(false),
+                outcome,
+            }));
+        }
+        let batch = guard.open.clone().expect("open batch");
+        let mut outcome = batch.outcome.subscribe();
+
+        let db = PostgresDb {
+            conn: tokio::sync::Mutex::new(Conn::Auto(guard.conn.take().expect("lane connection"))),
+            sql: self.sql.clone(),
+            task_retry_timeout: self.task_retry_timeout,
+            preload_limit: self.preload_limit,
+            emitted: std::sync::Mutex::new(Vec::new()),
+            armed: std::sync::Mutex::new(Vec::new()),
+        };
+        let result = f(&db).await;
+        let emitted = db.emitted.into_inner().expect("emitted");
+        let armed = db.armed.into_inner().expect("armed");
+        match db.conn.into_inner() {
+            Conn::Auto(conn) => guard.conn = Some(conn),
+            Conn::Tx(_) => unreachable!("a lane runs on a bare connection"),
+        }
+        if result.is_err() {
+            batch
+                .poisoned
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        drop(guard);
+
+        if leader {
+            // Behind everyone who queued while the batch ran: they join it.
+            let mut guard = lane.state.clone().lock_owned().await;
+            let conn = guard.conn.as_mut().expect("lane connection");
+            let decided = if batch.poisoned.load(std::sync::atomic::Ordering::Relaxed) {
+                Outcome::RolledBack
+            } else {
+                // `SELECT 1` first: in a transaction a failed statement
+                // aborted, it fails too and the COMMIT never runs — a bare
+                // COMMIT there would answer ROLLBACK without an error.
+                match simple(conn, "SELECT 1; COMMIT").await {
+                    Ok(_) => Outcome::Committed,
+                    Err(sqlx::Error::Database(_)) => Outcome::RolledBack,
+                    Err(_) => Outcome::Unknown,
+                }
+            };
+            if decided != Outcome::Committed && simple(conn, "ROLLBACK").await.is_err() {
+                guard.conn = None;
+            }
+            guard.open = None;
+            batch.outcome.send_replace(Some(decided));
+        }
+
+        let decided = *outcome
+            .wait_for(Option::is_some)
+            .await
+            .expect("the leader decides before it lets go")
+            .as_ref()
+            .expect("decided");
+        match (decided, result) {
+            (Outcome::Committed, Ok(v)) => Ok((v, emitted, armed)),
+            (Outcome::Unknown, _) => Err(StorageError::Backend(
+                "the batch's commit was lost with its connection".into(),
+            )),
+            // Rolled back, ours or another member's statement failed: run
+            // alone, as without a lane, so the answer is our own.
+            _ => self.execute(true, f).await,
+        }
+    }
+
     /// One operation: run it, and turn a storage failure into a response.
     ///
     /// Same tail for all 21, so it lives here once. `Serialization` maps to
@@ -527,7 +737,7 @@ impl PostgresEngine {
     where
         F: for<'d> FnMut(&'d PostgresDb<'static>) -> DbFut<'d, ResponseEnvelope> + Send,
     {
-        match self.execute(true, f).await {
+        match self.execute_write(req, f).await {
             Ok((response, messages, timeouts)) => Output {
                 response: Some(response),
                 messages,
@@ -553,7 +763,7 @@ impl PostgresEngine {
         FF: for<'d> FnMut(&'d PostgresDb<'static>) -> DbFut<'d, Option<ResponseEnvelope>> + Send,
         F: for<'d> FnMut(&'d PostgresDb<'static>) -> DbFut<'d, ResponseEnvelope> + Send,
     {
-        match self.execute(true, fast).await {
+        match self.execute_write(req, fast).await {
             Ok((Some(response), messages, timeouts)) => Output {
                 response: Some(response),
                 messages,
@@ -6374,6 +6584,12 @@ pub struct Config {
     /// instance armed.
     #[serde(default = "default_wheel_refresh")]
     pub wheel_refresh: u64,
+
+    /// Connections that commit one-statement writes in batches (group
+    /// commit); 0 commits each on its own. Each lane holds one connection of
+    /// the pool. See `Lane`.
+    #[serde(default)]
+    pub batch_lanes: u32,
 }
 
 fn default_preload_limit() -> u32 {
@@ -6403,6 +6619,7 @@ impl Default for Config {
             server_url: String::new(),
             wheel_capacity: default_wheel_capacity(),
             wheel_refresh: default_wheel_refresh(),
+            batch_lanes: 0,
         }
     }
 }
@@ -6438,6 +6655,7 @@ fn configure(
                     open.retry_timeout,
                     open.preload_limit,
                     debug,
+                    open.batch_lanes,
                 )
                 .await
                 .map_err(|e| resonate_plugin::Unavailable::new(format!("cannot connect: {e}")))?;

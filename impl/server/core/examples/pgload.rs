@@ -179,7 +179,7 @@ async fn main() {
     let url = std::env::var("PG_URL")
         .unwrap_or_else(|_| "postgres://resonate:resonate@localhost:5432/resonate".into());
 
-    let engine = PostgresEngine::connect(&url, pool, 30_000, 10, false)
+    let engine = PostgresEngine::connect(&url, pool, 30_000, 10, false, 0)
         .await
         .expect("connect");
     engine.init(true).await.expect("init");

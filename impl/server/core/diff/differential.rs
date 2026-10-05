@@ -260,9 +260,16 @@ async fn differential_random() {
 
     let pg_backend: Option<Backend> = match pg_url {
         Some(url) => {
-            let pg = PostgresEngine::connect(&url, 5, TASK_RETRY_TIMEOUT_MS, PRELOAD_LIMIT, true)
-                .await
-                .expect("postgres connect");
+            let pg = PostgresEngine::connect(
+                &url,
+                5,
+                TASK_RETRY_TIMEOUT_MS,
+                PRELOAD_LIMIT,
+                true,
+                pg_batch_lanes(),
+            )
+            .await
+            .expect("postgres connect");
             pg.init(true).await.expect("postgres schema init");
             Some(Arc::new(pg) as Backend)
         }
@@ -1412,4 +1419,13 @@ fn promise_id_different_from(rng: &mut fastrand::Rng, other: &str) -> String {
     } else {
         candidate
     }
+}
+
+/// `TEST_POSTGRES_BATCH_LANES` runs the Postgres engine with that many group
+/// commit lanes (default 0: every write commits on its own).
+fn pg_batch_lanes() -> u32 {
+    std::env::var("TEST_POSTGRES_BATCH_LANES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0)
 }
