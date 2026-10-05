@@ -26,6 +26,6 @@ for n in ${lanes[*]}; do
   then echo "PASS differential+port, lanes $n"; else echo "FAIL differential+port, lanes $n (rc $?): $(grep -E 'panicked|FAILED|failed|error' $log/differential-l$n.log | head -3 | tr '\n' ' ' | cut -c1-300)"; fi
   # The source tree's own target directory: porcupine starts target/release/resonate.
   if env "${extra[@]}" timeout 1800 cargo xtask porcupine --backend postgres > $log/porcupine-l$n.log 2>&1
-  then echo "PASS porcupine, lanes $n: $(grep -iE 'linearizable|ok|operations' $log/porcupine-l$n.log | tail -2 | tr '\n' ' ' | cut -c1-200)"
+  then echo "PASS porcupine, lanes $n"; grep -vE '^\s*(Compiling|Finished|Running|Blocking|Downloaded|Downloading)' $log/porcupine-l$n.log | tail -12 | sed 's/^/    /' 
   else echo "FAIL porcupine, lanes $n (rc $?): $(tail -5 $log/porcupine-l$n.log | tr '\n' ' ' | cut -c1-300)"; fi
 done

@@ -57,7 +57,7 @@ done
 
 if [ -n "${TEST_TGZ:-}" ]; then
   echo "## waiting for the correctness suites $(date -u +%T)"
-  for _ in $(seq 1 120); do ssh_to $PREFIX-builder $z "pgrep -f pgtest.sh >/dev/null" 2>/dev/null || break; sleep 30; done
+  for _ in $(seq 1 120); do ssh_to $PREFIX-builder $z "pgrep -f \"[p]gtest.sh\" >/dev/null" 2>/dev/null || break; sleep 30; done
   echo "## correctness"; ssh_to $PREFIX-builder $z "cat ~/pgtest.out; tar -czf /tmp/pgtest.tgz -C ~ pgtest" 2>/dev/null
   mkdir -p results/pgtest && $G compute scp ${SSH_FLAGS:-} $PREFIX-builder:/tmp/pgtest.tgz results/pgtest/ --zone $z >/dev/null 2>&1
 fi
