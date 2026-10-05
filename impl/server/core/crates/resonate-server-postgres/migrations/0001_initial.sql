@@ -93,6 +93,23 @@ CREATE TABLE IF NOT EXISTS promises (
   -- listeners -----------------------------------------------------------------
   listeners     TEXT[] NOT NULL DEFAULT '{}',
 
+  -- The promise deadline queue's key: `timeout_at` while the promise is
+  -- pending and external (`external`, spelled out — a generated column cannot
+  -- read another), NULL otherwise. The queue's index is keyed on this rather
+  -- than filtered by `state = 'pending' AND external`, because a column an
+  -- index's predicate reads blocks HOT updates just as a key column does: with
+  -- `state` in that predicate, every settle wrote a new row version and a new
+  -- entry in every index, though most promises were never in the queue at
+  -- all. Here an internal promise's settle leaves this NULL, touches no
+  -- indexed column, and updates in place.
+  queue_timeout_at BIGINT GENERATED ALWAYS AS (
+                  CASE WHEN state = 'pending' AND (
+                         COALESCE(tags->>'resonate:scope', '')       = 'global'
+                         OR COALESCE(tags->>'resonate:external', '') = 'true'
+                         OR tags->>'resonate:target' IS NOT NULL
+                         OR COALESCE(tags->>'resonate:timer', '')    = 'true')
+                       THEN timeout_at END) STORED,
+
   -- ── unconsumed ─────────────────────────────────────────────────────────
   -- Nothing reads these yet.
   --
@@ -117,7 +134,14 @@ CREATE TABLE IF NOT EXISTS promises (
 -- hundreds of thousands of dead entries between vacuums, and the timer's
 -- refresh, which walks the front of those indexes, slowed from 1.6 ms to
 -- 130 ms reading them. These are the owner's to set, so they live here.
+--
+-- And leave room in every page. A settle that updates in place (HOT, see
+-- `queue_timeout_at`) needs space for the new version on the row's own page,
+-- and a promise is usually settled moments after it was inserted, into a page
+-- that inserts have meanwhile filled. At 85% a page keeps room for the
+-- settled versions of the rows it holds.
 ALTER TABLE promises SET (
+  fillfactor = 85,
   autovacuum_vacuum_scale_factor = 0.01,
   autovacuum_analyze_scale_factor = 0.02,
   autovacuum_vacuum_cost_delay = 0
@@ -129,11 +153,11 @@ ALTER TABLE promises SET (
 -- front of each index, and firing a named deadline is a primary-key probe.
 -- Nothing ever scans the table to find what is due.
 --
--- The promise queue is `state = 'pending' AND external`: an internal promise
--- arms nothing and times out lazily, on first touch (try_timeout), so it is
--- not in the index at all.
+-- The promise queue is `state = 'pending' AND external`, carried as
+-- `queue_timeout_at`: an internal promise arms nothing and times out lazily,
+-- on first touch (try_timeout), so it is not in the index at all.
 CREATE INDEX IF NOT EXISTS idx_promises_timeout_at
-  ON promises (timeout_at, id) WHERE state = 'pending' AND external;
+  ON promises (queue_timeout_at, id) WHERE queue_timeout_at IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_task_retry_timeout_at
   ON promises (retry_timeout_at, id) WHERE task_state = 'pending';
 CREATE INDEX IF NOT EXISTS idx_task_lease_timeout_at

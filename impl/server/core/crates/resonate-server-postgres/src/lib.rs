@@ -4451,10 +4451,81 @@ impl PostgresDb<'_> {
         // statement's snapshot was taken, which means it waited for the lock
         // and its other reads (the awaiters it would wake) may be stale. The
         // transaction's statements run after the lock, so they cannot be.
-        let sql = self.cached("promise_settle", || {
-            let self_set = settle_self(
+        // Most settles are of a promise nothing waits on: no awaiters, no
+        // listeners, no task of its own. For those the lean statement settles
+        // without the unblock, fan-out and resume sections, which cost the
+        // executor even when they touch nothing. A promise that has any of
+        // them makes the lean statement write nothing and say so
+        // (`need_full`); the full statement then runs.
+        for lean in [true, false] {
+            let key = if lean {
+                "promise_settle_lean"
+            } else {
+                "promise_settle"
+            };
+            let sql = self.cached(key, || self.promise_settle_sql(lean));
+            let rows = sqlx::query(&sql)
+                .bind(id)
+                .bind(state)
+                .bind(value_headers)
+                .bind(value_data)
+                .bind(settled_at)
+                .bind(guard)
+                .fetch_all(self.tx().await.pg())
+                .await?;
+
+            let none = PromiseSettleResult {
+                was_settled: false,
+                promise: None,
+            };
+            let Some(row) = rows.first() else {
+                return Ok((none, false));
+            };
+            if row.get::<bool, _>("declined") {
+                return Ok((none, true));
+            }
+            if lean && row.get::<bool, _>("need_full") {
+                continue;
+            }
+            self.absorb_and_arm_retries(row, settled_at + self.task_retry_timeout);
+            return Ok((
+                PromiseSettleResult {
+                    was_settled: row.get("was_settled"),
+                    promise: Some(row_to_promise(row)),
+                },
+                false,
+            ));
+        }
+        unreachable!("the full statement never asks for itself")
+    }
+
+    /// `promise_settle`'s statement. `lean` drops the sections that act on
+    /// the promise's awaiters, listeners and own task, and writes nothing when
+    /// the promise has any of them (`need_full`).
+    fn promise_settle_sql(&self, lean: bool) -> String {
+        let (self_set, need_full, gate, sections, messages);
+        if lean {
+            // No task of its own: nothing to fulfill on the row itself.
+            self_set = settle_self("false");
+            need_full = "
+            -- A pending promise with awaiters, listeners or a task of its own
+            -- needs the sections this statement leaves out: write nothing.
+            need_full AS (
+              SELECT EXISTS (
+                SELECT 1 FROM locked
+                WHERE NOT declined AND state = 'pending'
+                  AND (callbacks <> '{}' OR listeners <> '{}' OR task_state IS NOT NULL)
+              ) AS hit
+            ),";
+            gate = "AND NOT (SELECT hit FROM need_full)";
+            sections = String::new();
+            messages = "'[]'::json AS messages".to_string();
+        } else {
+            self_set = settle_self(
                 "(SELECT b.task_state IS NOT NULL AND b.task_state <> 'fulfilled' FROM before b)",
             );
+            need_full = "";
+            gate = "";
             let unblock = settle_unblock("updated_promise", "(SELECT b.listeners FROM before b)");
             let fanout = settle_fanout(
                 "$1",
@@ -4463,8 +4534,21 @@ impl PostgresDb<'_> {
                 "$5",
                 self.task_retry_timeout,
             );
+            sections = format!("{unblock},\n{fanout},");
+            messages = emitted_json(&["emit_unblock", "emit_resume"]);
+        }
 
-            format!("
+        // One statement. `locked` takes the row lock — it waits out a
+        // concurrent task.suspend writing our `callbacks`, then reads the
+        // row's latest version, those awaiters included — which is what a
+        // lock statement and a second, fresh-snapshot statement were for.
+        // `$6` (the guard): with `Some(now)`, the statement writes nothing and
+        // reports `declined` if the promise is pending past its deadline — the
+        // transaction times it out first — or if the row changed after this
+        // statement's snapshot was taken, which means it waited for the lock
+        // and its other reads (the awaiters it would wake) may be stale. The
+        // transaction's statements run after the lock, so they cannot be.
+        format!("
             WITH locked AS (
               SELECT *,
                      ($6::bigint IS NOT NULL AND (
@@ -4472,9 +4556,9 @@ impl PostgresDb<'_> {
                         OR ctid <> (SELECT s.ctid FROM promises s WHERE s.id = $1))) AS declined
               FROM promises WHERE id = $1
               FOR UPDATE
-            ),
+            ),{need_full}
             before AS (
-              SELECT * FROM locked WHERE NOT declined
+              SELECT * FROM locked WHERE NOT declined {gate}
             ),
             updated_promise AS (
               UPDATE promises p
@@ -4483,8 +4567,7 @@ impl PostgresDb<'_> {
               WHERE p.id = $1 AND p.state = 'pending' AND EXISTS (SELECT 1 FROM before)
               RETURNING p.*
             ),
-            {unblock},
-            {fanout},
+            {sections}
             result AS (
               SELECT {RESULT_COLS}, true AS was_settled FROM updated_promise
               UNION ALL
@@ -4493,38 +4576,10 @@ impl PostgresDb<'_> {
             )
             SELECT {P_COLS}, was_settled,
               COALESCE((SELECT declined FROM locked), false) AS declined,
+              {need_full_col} AS need_full,
               {messages}
             FROM result
-        ", messages = emitted_json(&["emit_unblock", "emit_resume"]))
-        });
-        let rows = sqlx::query(&sql)
-            .bind(id)
-            .bind(state)
-            .bind(value_headers)
-            .bind(value_data)
-            .bind(settled_at)
-            .bind(guard)
-            .fetch_all(self.tx().await.pg())
-            .await?;
-
-        let none = PromiseSettleResult {
-            was_settled: false,
-            promise: None,
-        };
-        let Some(row) = rows.first() else {
-            return Ok((none, false));
-        };
-        if row.get::<bool, _>("declined") {
-            return Ok((none, true));
-        }
-        self.absorb_and_arm_retries(row, settled_at + self.task_retry_timeout);
-        Ok((
-            PromiseSettleResult {
-                was_settled: row.get("was_settled"),
-                promise: Some(row_to_promise(row)),
-            },
-            false,
-        ))
+        ", need_full_col = if lean { "(SELECT hit FROM need_full)" } else { "false" })
     }
 
     // P-04: promise.register_callback
@@ -5993,9 +6048,9 @@ impl PostgresDb<'_> {
             // LIMITs Postgres may sort every armed row to keep `$1` of
             // them — the full read the sweep used to be.
             "SELECT deadline, kind, id, pid FROM (
-                     (SELECT timeout_at AS deadline, 'promise' AS kind, id, NULL::text AS pid
-                        FROM promises WHERE state = 'pending' AND external
-                        ORDER BY timeout_at, id LIMIT $1)
+                     (SELECT queue_timeout_at AS deadline, 'promise' AS kind, id, NULL::text AS pid
+                        FROM promises WHERE queue_timeout_at IS NOT NULL
+                        ORDER BY queue_timeout_at, id LIMIT $1)
                      UNION ALL
                      (SELECT retry_timeout_at, 'retry', id, NULL
                         FROM promises WHERE task_state = 'pending' AND retry_timeout_at IS NOT NULL
@@ -6233,7 +6288,10 @@ impl PostgresDb<'_> {
         // internal ones time out lazily, on read.
         if let Some(ids) = selected("promise") {
             let selection = match ids {
-                None => "state = 'pending' AND external AND timeout_at <= $1",
+                // `queue_timeout_at` is set exactly while the promise is
+                // pending and external; the comparison implies the index's
+                // `IS NOT NULL`, so this is a walk of its front.
+                None => "queue_timeout_at <= $1",
                 Some(_) => {
                     "id = ANY($2) AND (state || '') = 'pending' AND external AND (timeout_at + 0) <= $1"
                 }
