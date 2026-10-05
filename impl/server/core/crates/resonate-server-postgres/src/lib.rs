@@ -593,17 +593,39 @@ impl PostgresEngine {
     }
 
     /// The lane `req` commits through, or `None` to run it in autocommit: a
-    /// write a lane takes, when there are lanes. One promise, one lane, so
-    /// writes to the same row queue behind each other in one transaction
-    /// rather than wait across lanes for each other's commits.
+    /// write a lane takes, when there are lanes.
+    ///
+    /// One origin, one lane. The writes of one execution touch each other's
+    /// rows — a child's settle resumes its root while the root's own task
+    /// suspends or fences — and routed by their own ids they landed in
+    /// different lanes, where each waited for a row the other lane's open
+    /// batch held: a lane stalled behind another's commit, and two lanes
+    /// waiting on each other stalled until Postgres broke the deadlock a
+    /// second later and both batches ran again. In one lane they queue in one
+    /// transaction instead. The origin is everything before the first ':',
+    /// as `resonate_core::types::origin` reads it.
     fn lane_for(&self, req: &RequestEnvelope) -> Option<&Lane> {
         if self.lanes.is_empty() || !BATCHED.contains(&req.kind.as_str()) {
             return None;
         }
+        // Where each kind names its promise: `id` (promise.create, settle,
+        // task.fence, suspend, fulfill), `awaited` (register_callback,
+        // register_listener), the created promise's id (task.create), the
+        // process (task.heartbeat, which spans executions).
+        let d = &req.data;
+        let key = d
+            .get("id")
+            .or_else(|| d.get("awaited"))
+            .or_else(|| d.pointer("/action/data/id"))
+            .or_else(|| d.get("pid"))
+            .and_then(Value::as_str);
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        match req.data.get("id").and_then(Value::as_str) {
-            Some(id) => id.hash(&mut h),
+        match key {
+            Some(id) => id
+                .split_once(':')
+                .map_or(id, |(origin, _)| origin)
+                .hash(&mut h),
             None => req.head.corr_id.hash(&mut h),
         }
         Some(&self.lanes[(h.finish() % self.lanes.len() as u64) as usize])
