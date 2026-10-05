@@ -56,6 +56,8 @@ use std::sync::Arc;
 
 pub struct PostgresEngine {
     pool: PgPool,
+    /// The lanes' connections, one each; `None` without lanes.
+    lane_pool: Option<PgPool>,
     /// The hot statements' text, built once. See [`PostgresDb::cached`].
     sql: SqlCache,
     task_retry_timeout: i64,
@@ -286,6 +288,71 @@ fn preload_from(row: &PgRow) -> Vec<PromiseRecord> {
         .unwrap_or_default()
 }
 
+/// The pool every connection of this engine comes from: `size` of them, each
+/// set up the same way.
+fn pool_options(size: u32) -> sqlx::postgres::PgPoolOptions {
+    sqlx::postgres::PgPoolOptions::new()
+        .max_connections(size)
+        // No ping before every checkout. sqlx's default spends a round
+        // trip per request proving a pooled connection is alive, which on
+        // this engine was a fifth of the round trips a read made. A
+        // connection that died is reported by the statement that finds
+        // it, as a 500 for that one request, and the pool replaces it.
+        .test_before_acquire(false)
+        .after_connect(|conn, _meta| {
+            Box::pin(async move {
+                // Generic plans, always. Every statement here is
+                // prepared once per connection and selects through keys
+                // whose plan does not depend on the values bound, so a
+                // custom plan buys nothing — but Postgres re-plans the
+                // first five executions of every statement and keeps
+                // re-planning any whose generic estimate looks worse,
+                // and planning one of these CTEs costs a millisecond
+                // where executing it costs a tenth of that. Every plan
+                // this forces was read with EXPLAIN against a table of
+                // millions of rows; none of them scans it.
+                sqlx::query("SET search_path TO resonate, public")
+                    .execute(&mut *conn)
+                    .await?;
+                sqlx::query("SET plan_cache_mode TO force_generic_plan")
+                    .execute(&mut *conn)
+                    .await?;
+                // And no sequential scans. A generic plan is built once and
+                // kept, and one built while the table is small — a fresh
+                // deployment, its first minutes — finds a sequential scan
+                // of a few pages cheaper than the primary key, and keeps
+                // scanning as the table grows, until an ANALYZE happens
+                // to invalidate it (measured: 643 buffers a fence instead
+                // of 50, throughput anywhere from 1.9k to 5.3k req/s on a
+                // table that started empty). Every statement here is meant
+                // to reach its rows through an index, so a sequential scan
+                // is never the plan wanted; this is a cost penalty, not a
+                // prohibition, and a statement with no index path still
+                // runs.
+                sqlx::query("SET enable_seqscan TO off")
+                    .execute(&mut *conn)
+                    .await?;
+                // No JIT. These statements are short key lookups that a
+                // compiled plan never pays back — and with sequential scans
+                // penalized, the one statement that has no other path
+                // (a whole-table read: `debug.snap`, a console count) is
+                // costed past the JIT thresholds and compiled on every
+                // execution, 100 ms for a table of twenty rows.
+                sqlx::query("SET jit TO off").execute(&mut *conn).await?;
+                // Durable commits, whatever the cluster's default. This is
+                // not tuning: a transition commits together with the
+                // messages it returns, and a message goes out as soon as
+                // the commit returns. With `off` a commit can return
+                // before it is on disk, so a crash can lose a task whose
+                // execute message a worker has already received.
+                sqlx::query("SET synchronous_commit TO on")
+                    .execute(&mut *conn)
+                    .await?;
+                Ok(())
+            })
+        })
+}
+
 impl PostgresEngine {
     pub async fn connect(
         url: &str,
@@ -301,70 +368,19 @@ impl PostgresEngine {
         // each of which costs milliseconds to plan again.
         let options: sqlx::postgres::PgConnectOptions = url.parse()?;
         let options = options.statement_cache_capacity(1024);
-        let pool = sqlx::postgres::PgPoolOptions::new()
-            .max_connections(pool_size)
-            // No ping before every checkout. sqlx's default spends a round
-            // trip per request proving a pooled connection is alive, which on
-            // this engine was a fifth of the round trips a read made. A
-            // connection that died is reported by the statement that finds
-            // it, as a 500 for that one request, and the pool replaces it.
-            .test_before_acquire(false)
-            .after_connect(|conn, _meta| {
-                Box::pin(async move {
-                    // Generic plans, always. Every statement here is
-                    // prepared once per connection and selects through keys
-                    // whose plan does not depend on the values bound, so a
-                    // custom plan buys nothing — but Postgres re-plans the
-                    // first five executions of every statement and keeps
-                    // re-planning any whose generic estimate looks worse,
-                    // and planning one of these CTEs costs a millisecond
-                    // where executing it costs a tenth of that. Every plan
-                    // this forces was read with EXPLAIN against a table of
-                    // millions of rows; none of them scans it.
-                    sqlx::query("SET search_path TO resonate, public")
-                        .execute(&mut *conn)
-                        .await?;
-                    sqlx::query("SET plan_cache_mode TO force_generic_plan")
-                        .execute(&mut *conn)
-                        .await?;
-                    // And no sequential scans. A generic plan is built once and
-                    // kept, and one built while the table is small — a fresh
-                    // deployment, its first minutes — finds a sequential scan
-                    // of a few pages cheaper than the primary key, and keeps
-                    // scanning as the table grows, until an ANALYZE happens
-                    // to invalidate it (measured: 643 buffers a fence instead
-                    // of 50, throughput anywhere from 1.9k to 5.3k req/s on a
-                    // table that started empty). Every statement here is meant
-                    // to reach its rows through an index, so a sequential scan
-                    // is never the plan wanted; this is a cost penalty, not a
-                    // prohibition, and a statement with no index path still
-                    // runs.
-                    sqlx::query("SET enable_seqscan TO off")
-                        .execute(&mut *conn)
-                        .await?;
-                    // No JIT. These statements are short key lookups that a
-                    // compiled plan never pays back — and with sequential scans
-                    // penalized, the one statement that has no other path
-                    // (a whole-table read: `debug.snap`, a console count) is
-                    // costed past the JIT thresholds and compiled on every
-                    // execution, 100 ms for a table of twenty rows.
-                    sqlx::query("SET jit TO off").execute(&mut *conn).await?;
-                    // Durable commits, whatever the cluster's default. This is
-                    // not tuning: a transition commits together with the
-                    // messages it returns, and a message goes out as soon as
-                    // the commit returns. With `off` a commit can return
-                    // before it is on disk, so a crash can lose a task whose
-                    // execute message a worker has already received.
-                    sqlx::query("SET synchronous_commit TO on")
-                        .execute(&mut *conn)
-                        .await?;
-                    Ok(())
-                })
-            })
-            .connect_with(options)
+        let pool = pool_options(pool_size)
+            .connect_with(options.clone())
             .await?;
+        // The lanes' connections are their own, beside the pool: a lane holds
+        // its connection for as long as the engine runs, and taken from the
+        // pool, lanes as many as the pool has connections left nothing for
+        // reads and the slow paths, which then waited out the acquire timeout.
+        let lane_pool =
+            (batch_lanes > 0).then(|| pool_options(batch_lanes).connect_lazy_with(options));
+
         Ok(Self {
             pool,
+            lane_pool,
             sql: SqlCache::default(),
             task_retry_timeout,
             preload_limit,
@@ -651,7 +667,13 @@ impl PostgresEngine {
         let leader = guard.open.is_none();
         if leader {
             if guard.conn.is_none() {
-                match self.pool.acquire().await {
+                match self
+                    .lane_pool
+                    .as_ref()
+                    .expect("lanes have a pool")
+                    .acquire()
+                    .await
+                {
                     Ok(conn) => guard.conn = Some(conn),
                     Err(_) => {
                         drop(guard);
@@ -6666,8 +6688,8 @@ pub struct Config {
     pub wheel_refresh: u64,
 
     /// Connections that commit one-statement writes in batches (group
-    /// commit); 0 commits each on its own. Each lane holds one connection of
-    /// the pool. See `Lane`.
+    /// commit); 0 commits each on its own. Each lane holds a connection of
+    /// its own, beside the pool's `pool_size`. See `Lane`.
     #[serde(default)]
     pub batch_lanes: u32,
 }
