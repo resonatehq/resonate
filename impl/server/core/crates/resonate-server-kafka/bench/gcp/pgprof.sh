@@ -46,14 +46,23 @@ profile() {  # profile N (closed loop: N clients per loadgen) | rN (open loop: N
   ROUTE=any NODES=1 ./run.sh load ${LABEL:-prof}-warm-$c 2 --mode $mode $drive --seconds 5 --warmup 1 --deadline-spread-ms 100000000000 --random-ids true >/dev/null 2>&1
   q $db "drop table if exists pss0; create table pss0 as select queryid, calls, total_exec_time, rows, shared_blks_hit, wal_bytes from pg_stat_statements where dbid=(select oid from pg_database where datname=current_database())" >/dev/null
   read -r x0 r0 <<< "$(q $db "select xact_commit, xact_rollback from pg_stat_database where datname=current_database()" | tr -d '|')"
+  read -r u0 h0 <<< "$(q $db "select n_tup_upd, n_tup_hot_upd from pg_stat_user_tables where relname = 'promises'" | tr -d '|')"
+  read -r w0 f0 <<< "$(q postgres "select wal_bytes, wal_fpi from pg_stat_wal" | tr -d '|')"
   sampler $db > /tmp/samples-$c.txt 2>&1 & local s=$!
   ( ssh_to $PREFIX-n1 $(zone_of 1) "sleep 8; top -bn2 -d5 | grep '^%Cpu' | tail -1; ps -o nlwp= -p \$(pgrep -f '/opt/resonate/resonate serve' | head -1)" > /tmp/node-$c.txt 2>&1 ) &
   echo "## ${LABEL:-prof}: $mode, $desc (2 loadgens), pool 64, db $db $(date -u +%T)"
   echo "   $(ROUTE=any NODES=1 ./run.sh load ${LABEL:-prof}-$mode-$c 2 --mode $mode $drive --seconds 25 --warmup 0 --deadline-spread-ms 100000000000 --random-ids true 2>&1 | sed -n 2p | cut -c1-120)"
   kill $s; wait
   read -r x1 r1 <<< "$(q $db "select xact_commit, xact_rollback from pg_stat_database where datname=current_database()" | tr -d '|')"
+  read -r u1 h1 <<< "$(q $db "select n_tup_upd, n_tup_hot_upd from pg_stat_user_tables where relname = 'promises'" | tr -d '|')"
+  read -r w1 f1 <<< "$(q postgres "select wal_bytes, wal_fpi from pg_stat_wal" | tr -d '|')"
   local x=$((x1-x0))
   echo "   transactions: $x committed, $((r1-r0)) rolled back"
+  # WAL is the cluster's (the only busy database is this one); the counters
+  # lag a few seconds, which the 25 s window absorbs.
+  awk -v x=$x -v u=$((u1-u0)) -v h=$((h1-h0)) -v w0=$w0 -v w1=$w1 -v f=$((f1-f0)) 'BEGIN {
+    printf "   promises updates: %d, HOT %.0f%%; WAL %.0f bytes and %.2f full-page images per transaction\n",
+      u, (u ? 100*h/u : 0), (x ? (w1-w0)/x : 0), (x ? f/x : 0) }'
   echo "   node 1: cpu $(head -1 /tmp/node-$c.txt | awk '{print 100-$8}')%, threads $(tail -1 /tmp/node-$c.txt | tr -d ' ')"
   echo "   connection states, mean over $(grep -c '^S' /tmp/samples-$c.txt) samples (of 64 pooled):"
   awk -F' [|] ' '/^S/ {n++; cpu+=$3; w+=$4; it+=$5; id+=$6; for (i=1;i<=split($7,e,",");i++) if (e[i]!="-") ev[e[i]]++}
