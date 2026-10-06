@@ -93,7 +93,7 @@ loadgens)
   ;;
 postgres)
   # Cloud SQL Postgres 16, regional HA (a synchronous standby in a second
-  # zone), reached over private IP like the brokers. Writes .pg: host and
+  # zone; PG_AVAILABILITY=ZONAL for none), reached over private IP like the brokers. Writes .pg: host and
   # password. Private services access is set up once per project.
   gcloud services enable sqladmin.googleapis.com servicenetworking.googleapis.com --project $PROJECT
   $G compute addresses describe google-managed-services-default --global >/dev/null 2>&1 ||
@@ -102,13 +102,13 @@ postgres)
     --ranges=google-managed-services-default --network=default --project $PROJECT 2>/dev/null || true
   $G sql instances describe $PREFIX-pg >/dev/null 2>&1 || $G sql instances create $PREFIX-pg \
     --database-version=POSTGRES_16 --edition=ENTERPRISE --tier=$PG_TIER \
-    --zone=$(zone_of 1) --availability-type=REGIONAL --storage-type=SSD --storage-size=$PG_STORAGE_GB \
+    --zone=$(zone_of 1) --availability-type=${PG_AVAILABILITY:-REGIONAL} --storage-type=SSD --storage-size=$PG_STORAGE_GB \
     --network=default --no-assign-ip --database-flags=max_connections=400
   pw=$(python3 -c 'import secrets;print(secrets.token_hex(16))')
   $G sql users set-password postgres --instance=$PREFIX-pg --password=$pw
   host=$($G sql instances describe $PREFIX-pg --format='value(ipAddresses[0].ipAddress)')
   echo "$host $pw" > .pg
-  echo "postgres: $host ($PG_TIER, HA, ${PG_STORAGE_GB} GB SSD)"
+  echo "postgres: $host ($PG_TIER, ${PG_AVAILABILITY:-REGIONAL}, ${PG_STORAGE_GB} GB SSD)"
   ;;
 controller)
   # Runs experiments inside GCP (controller.sh), so nothing depends on the
