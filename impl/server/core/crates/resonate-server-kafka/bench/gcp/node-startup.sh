@@ -9,6 +9,9 @@ if ! mountpoint -q /mnt/ssd; then
 fi
 # Tight clocks: timesyncd leaves nodes tens of ms apart, and the Postgres
 # backend stamps rows with the serving node's clock.
+# The image's package index goes stale (the mirror drops superseded .debs),
+# so refresh it first, or the install fails and the node never gets a server.
+apt-get update -qq >/dev/null
 apt-get install -y -qq chrony >/dev/null
 echo "server metadata.google.internal prefer iburst" > /etc/chrony/sources.d/gce.sources
 systemctl restart chrony
