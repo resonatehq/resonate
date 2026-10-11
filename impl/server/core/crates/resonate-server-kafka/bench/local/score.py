@@ -36,6 +36,21 @@ STAGES = [
     ("partition actor", re.compile(r"resonate_server_kafka::partition")),
     ("gateway", re.compile(r"resonate_gateway_http|axum::|hyper::server|hyper::proto")),
 ]
+# Why a kernel sample was in the kernel, from the user frame that called in
+# (and the two above it, to tell a wakeup write from a socket write).
+KERNEL = [
+    ("epoll", re.compile(r"^(epoll_wait|epoll_pwait)")),
+    ("wakeup write", re.compile(r"^(__GI___libc_write|write|__write)[^\n]*(\n[^\n]*)*?(Waker::wake|rd_kafka_toppar_enq_msg|"
+                                r"rd_kafka_q_io_event|rd_kafka_q_yield|wakeup)")),
+    ("socket send", re.compile(r"^(__GI___writev|writev|__libc_sendmsg|sendmsg|__libc_send|send|sendto|"
+                               r"__GI___libc_write|write)\b")),
+    ("socket recv", re.compile(r"^(readv|__libc_recvmsg|recvmsg|__libc_recv|recv|recvfrom|read|__GI___libc_read)\b")),
+    ("librdkafka poll", re.compile(r"^(__poll|poll|ppoll)\b")),
+    ("thread park/wake", re.compile(r"^(syscall|.*futex|pthread_cond|__GI___lll|__lll_lock|pthread_mutex|"
+                                    r"sched_yield|nanosleep|clock_nanosleep)")),
+    ("memory", re.compile(r"^(__mprotect|mprotect|mmap|munmap|madvise|brk|_int_malloc|malloc|sysmalloc|"
+                          r"__memmove|__memset|memcpy|cfree|_int_free)")),
+]
 LEAF = [
     ("alloc", re.compile(r"^(malloc|free|realloc|calloc|cfree|_int_malloc|_int_free|_int_realloc|"
                          r"malloc_consolidate|__libc_malloc|__libc_free|__rust_alloc|__rust_dealloc|"
@@ -108,8 +123,16 @@ def classify(frames, dsos):
             if rx.search(frames[0]):
                 leaf = name
                 break
-    # Kernel time is user code asking for it: name the syscall's caller.
-    return comp or "unattributed", stage or "-", leaf or "user code"
+    why = None
+    if leaf == "kernel":
+        user = [re.sub(r"::h[0-9a-f]{16}$", "", f) for f, d in zip(frames, dsos) if "kernel" not in d]
+        key = "\n".join(user[:3])
+        for name, rx in KERNEL:
+            if rx.search(key):
+                why = name
+                break
+        why = why or ("in kernel, no user frame" if not user else "other: " + user[0][:40])
+    return comp or "unattributed", stage or "-", leaf or "user code", why
 
 
 def table(title, counter, total, per_req_us, top=None):
@@ -176,12 +199,14 @@ def main():
             f"forwarded {srv.get('forwarded', 0):.0f} of {srv.get('served', 0):.0f}"
         )
 
-    comps, stages, leaves, thr, sym = (collections.Counter() for _ in range(5))
+    comps, stages, leaves, thr, sym, why = (collections.Counter() for _ in range(6))
     n = 0
     for comm, frames, dsos in parse_perf(f"{d}/perf.script"):
         n += 1
         thr[threads(comm)] += 1
-        c, s, l = classify(frames, dsos)
+        c, s, l, w = classify(frames, dsos)
+        if w:
+            why[w] += 1
         comps[c] += 1
         stages[s] += 1
         leaves[l] += 1
@@ -195,6 +220,7 @@ def main():
         lines += table("by component (innermost)", comps, n, per)
         lines += table("by request stage (outermost)", stages, n, per)
         lines += table("by leaf", leaves, n, per)
+        lines += table("kernel, by why (share of all samples)", why, n, per, top=10)
         lines += table("top leaf symbols", sym, n, per, top=15)
     print("\n".join(lines))
 
