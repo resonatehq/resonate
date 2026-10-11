@@ -50,6 +50,9 @@ fn configure(
     if config.brokers.is_some() && config.node_id.trim().is_empty() {
         return Err(settings.reject("node_id", "every node in a cluster needs a unique id"));
     }
+    if config.producers == 0 {
+        return Err(settings.reject("producers", "must be at least 1 (got 0)"));
+    }
     if config.pipeline_depth == 0 {
         return Err(settings.reject("pipeline_depth", "must be at least 1 (got 0)"));
     }
@@ -162,6 +165,12 @@ pub struct Config {
     #[serde(default = "default_pipeline_depth")]
     pub pipeline_depth: usize,
 
+    /// Kafka producers this node's partitions share; partition p writes
+    /// through producer p mod this. Each is a librdkafka client with a thread
+    /// and a connection per broker.
+    #[serde(default = "default_producers")]
+    pub producers: usize,
+
     /// Whether the search operations are answered. Each reads every record.
     #[serde(default)]
     pub search_enabled: bool,
@@ -231,6 +240,9 @@ fn default_cache_promises() -> usize {
 }
 fn default_max_batch() -> usize {
     512
+}
+fn default_producers() -> usize {
+    1
 }
 fn default_pipeline_depth() -> usize {
     1
@@ -360,6 +372,7 @@ impl ResonateServer for KafkaServer {
                     properties: c.librdkafka.clone(),
                     node_id: c.node_id.clone(),
                     min_compaction_lag: Duration::from_millis(c.min_compaction_lag_ms),
+                    producers: c.producers,
                     ..Default::default()
                 };
                 tracing::info!(brokers = %brokers, partitions = c.partitions, node = %c.node_id, "Using Kafka backend");

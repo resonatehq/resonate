@@ -143,6 +143,55 @@ async fn a_claim_fences_the_first_writer() {
     }
 }
 
+/// A node's writers share its producer: commits on many partitions at once,
+/// interleaved in one client, each land exactly where their writer left its
+/// own log, and read back in order.
+#[tokio::test(flavor = "multi_thread")]
+async fn writers_sharing_a_producer_keep_their_own_offsets() {
+    let Some(brokers) = brokers() else { return };
+    const PARTITIONS: u32 = 6;
+    const ROUNDS: usize = 40;
+    let log = KafkaLog::connect(cfg(&brokers, &prefix("shared"), PARTITIONS, "n"))
+        .await
+        .expect("connects and creates topics");
+    let mut tasks = Vec::new();
+    for p in 0..PARTITIONS {
+        let writer = log.fence(p).await.expect("claimed");
+        tasks.push(tokio::spawn(async move {
+            // Past the claim on each log.
+            let mut at = Checkpoint::at(1, 1);
+            for round in 0..ROUNDS {
+                let records = (0..3)
+                    .map(|i| Record {
+                        topic: Topic::Promises,
+                        key: format!("p{p}-r{round:03}-{i}"),
+                        value: Some(b"v".to_vec()),
+                    })
+                    .collect();
+                at = writer
+                    .commit(records, at)
+                    .await
+                    .expect("lands where it left off");
+            }
+            writer.check(at).await.expect("nobody else wrote");
+            at
+        }));
+    }
+    for (p, task) in tasks.into_iter().enumerate() {
+        let at = task.await.unwrap();
+        assert_eq!(at.promises, 1 + 3 * ROUNDS as i64, "partition {p}");
+        let mut reader = log.reader(p as u32, Checkpoint::default()).await.unwrap();
+        let mut keys = Vec::new();
+        while let Some((batch, _)) = reader.next().await.unwrap() {
+            keys.extend(batch.into_iter().map(|c| c.key));
+        }
+        let want: Vec<String> = (0..ROUNDS)
+            .flat_map(|round| (0..3).map(move |i| format!("p{p}-r{round:03}-{i}")))
+            .collect();
+        assert_eq!(keys, want, "partition {p} reads back in order");
+    }
+}
+
 struct Started {
     node: Arc<Node>,
     stop_peer: tokio::sync::watch::Sender<bool>,

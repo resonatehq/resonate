@@ -15,6 +15,8 @@
 #   BROKERS     [127.0.0.1:9092]             BIN       dir with server, load
 #   PIPELINE    pipeline_depth [1]           LIBRDKAFKA  'key = "value"' lines
 #   PERF        perf binary                  FREQ      perf sample rate [999]
+#   PRODUCERS   shared producers per node (unset: the build's default; builds
+#               before shared producers refuse the key)
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -24,6 +26,9 @@ WINDOW=${WINDOW:-15} BROKERS=${BROKERS:-127.0.0.1:9092} PIPELINE=${PIPELINE:-1}
 BIN=${BIN:?BIN must name the directory holding the server and load binaries}
 PERF=${PERF:-$(ls /usr/lib/linux-tools/*/perf 2>/dev/null | head -1)}
 FREQ=${FREQ:-999}
+host=${BROKERS%%,*}
+(echo > "/dev/tcp/${host%:*}/${host##*:}") 2> /dev/null ||
+  { echo "no Kafka broker at $host (./kafka.sh starts one)" >&2; exit 1; }
 dir=$OUT/$NAME
 rm -rf "$dir" && mkdir -p "$dir"
 topic="p$(date +%s)"   # fresh topics and group per run: no replay, no history
@@ -47,6 +52,7 @@ for i in $(seq 1 "$NODES"); do
       RESONATE_SERVERS__SERVER_KAFKA__DATA_DIR="$nd/rocks" \
       RESONATE_SERVERS__SERVER_KAFKA__BLOCK_CACHE_MB=256 \
       RESONATE_SERVERS__SERVER_KAFKA__PIPELINE_DEPTH="$PIPELINE" \
+      ${PRODUCERS:+RESONATE_SERVERS__SERVER_KAFKA__PRODUCERS="$PRODUCERS"} \
       RESONATE_GATEWAYS__GATEWAY_HTTP__BIND="127.0.0.$i:8001" \
       RESONATE_GATEWAYS__GATEWAY_METRICS__BIND="127.0.0.$i:9090" \
       RESONATE_LEVEL=warn \

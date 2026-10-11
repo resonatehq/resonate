@@ -14,6 +14,24 @@
 //! produced to an explicit partition ([`crate::keys::partition_of`] over the
 //! origin, or the schedule id), never to the producer's own choice.
 //!
+//! # Producers
+//!
+//! A node's writers share its producers ([`KafkaCfg::producers`], one by
+//! default): partition *p* writes through producer *p* mod *n*. A producer
+//! is a librdkafka client — a main thread, a thread and a connection per
+//! broker, a delivery-report thread — so one per partition cost a node
+//! threads, connections and wakeups in proportion to the partitions it owns,
+//! busy or not. Shared, records of many partitions bound for one broker go
+//! out in one request.
+//!
+//! Sharing changes nothing the fencing rests on. Order and idempotence are
+//! per partition, so writers do not reorder each other. A dropped writer's
+//! queued records still go out — librdkafka purges a whole client, not one
+//! partition — and land as a fenced writer's late records do, which the
+//! epoch filter reads past. A producer that turns fatal fails every writer
+//! on it; each partition is then taken over again, and its claim
+//! ([`KafkaLog::fence`]) gets a new producer in its place.
+//!
 //! # Fencing
 //!
 //! By claim, as [`super::epoch`] describes: `fence` reads each log's high
@@ -37,7 +55,7 @@
 //! [`crate::directory::kafka`].
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -47,7 +65,7 @@ use rdkafka::config::ClientConfig;
 use rdkafka::consumer::{BaseConsumer, Consumer};
 use rdkafka::error::{KafkaError, RDKafkaErrorCode};
 use rdkafka::message::{Header, Headers, OwnedHeaders};
-use rdkafka::producer::{FutureProducer, FutureRecord};
+use rdkafka::producer::{FutureProducer, FutureRecord, Producer};
 use rdkafka::{Message, Offset, TopicPartitionList};
 
 use super::{epoch, Checkpoint, Consumed, Log, LogError, Reader, Record, Topic, Writer};
@@ -78,6 +96,8 @@ pub struct KafkaCfg {
     /// `min.compaction.lag.ms` for topics this log creates. An existing topic
     /// must have at least [`KafkaCfg::compaction_lag_floor`].
     pub min_compaction_lag: Duration,
+    /// Producers the node's writers share; partition *p* uses *p* mod this.
+    pub producers: usize,
 }
 
 impl Default for KafkaCfg {
@@ -93,6 +113,7 @@ impl Default for KafkaCfg {
             node_id: "node-0".into(),
             delivery_timeout: Duration::from_secs(10),
             min_compaction_lag: Duration::from_secs(3_600),
+            producers: 1,
         }
     }
 }
@@ -170,6 +191,39 @@ fn unavailable(e: impl std::fmt::Display) -> LogError {
 pub struct KafkaLog {
     cfg: KafkaCfg,
     probe: Arc<BaseConsumer>,
+    producers: Producers,
+}
+
+/// The node's shared producers, each made on first use and made again once
+/// it has turned fatal.
+struct Producers {
+    slots: Vec<Mutex<Option<Arc<FutureProducer>>>>,
+}
+
+impl Producers {
+    fn new(n: usize) -> Self {
+        Self {
+            slots: (0..n.max(1)).map(|_| Mutex::new(None)).collect(),
+        }
+    }
+
+    /// The producer `partition` writes through.
+    fn get(&self, cfg: &KafkaCfg, partition: u32) -> Result<Arc<FutureProducer>, LogError> {
+        let mut slot = self.slots[partition as usize % self.slots.len()]
+            .lock()
+            .expect("producer slot");
+        if let Some(p) = slot.as_ref() {
+            match p.client().fatal_error() {
+                None => return Ok(Arc::clone(p)),
+                Some((code, reason)) => {
+                    tracing::warn!(?code, %reason, "A shared producer turned fatal; making a new one");
+                }
+            }
+        }
+        let p: Arc<FutureProducer> = Arc::new(cfg.producer_config().create().map_err(unavailable)?);
+        *slot = Some(Arc::clone(&p));
+        Ok(p)
+    }
 }
 
 impl KafkaLog {
@@ -181,6 +235,7 @@ impl KafkaLog {
         let probe: BaseConsumer = cfg.reader_config().create().map_err(unavailable)?;
         let log = Arc::new(Self {
             probe: Arc::new(probe),
+            producers: Producers::new(cfg.producers),
             cfg,
         });
         log.check_partition_counts().await?;
@@ -389,7 +444,7 @@ impl KafkaLog {
     /// Become the writer of `partition`: claim each log where it ends, and
     /// check the claim landed there ([`super::epoch`]).
     async fn claim(&self, partition: u32) -> Result<KafkaWriter, LogError> {
-        let producer: FutureProducer = self.cfg.producer_config().create().map_err(unavailable)?;
+        let producer = self.producers.get(&self.cfg, partition)?;
         let mut epochs = [-1i64; 2];
         for topic in [Topic::Promises, Topic::Schedules] {
             let name = self.cfg.topic(topic);
@@ -466,7 +521,7 @@ async fn high_watermarks(
 
 /// The writer of a partition: its records carry its epochs, and every one must land exactly where the last one left the log.
 struct KafkaWriter {
-    producer: FutureProducer,
+    producer: Arc<FutureProducer>,
     cfg: KafkaCfg,
     probe: Arc<BaseConsumer>,
     partition: u32,
