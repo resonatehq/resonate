@@ -65,6 +65,22 @@ served() {
 }
 for _ in $(seq 1 120); do [ "$(served)" -ge "$PARTITIONS" ] && break; sleep 1; done
 [ "$(served)" -ge "$PARTITIONS" ] || { echo "partitions never all served" >&2; exit 1; }
+# Every node's directory refreshes every 2 s: wait one out, so no node
+# forwards to an owner it does not know yet.
+sleep 3
+
+ticks() { awk '{print $14 + $15}' "/proc/$1/stat"; }
+broker=$(pgrep -f 'kafka\.Kafka' | head -1)
+# Idle: what the nodes and the broker burn with nothing to do, so a cost per
+# partition is not mistaken for a cost per request.
+IDLE=${IDLE:-5}
+i0=0; for p in "${pids[@]}"; do i0=$((i0 + $(ticks "$p"))); done; ib0=$(ticks "$broker")
+sleep "$IDLE"
+i1=0; for p in "${pids[@]}"; do i1=$((i1 + $(ticks "$p"))); done; ib1=$(ticks "$broker")
+echo "idle_s $IDLE" > "$dir/idle.txt"
+echo "idle nodes $((i1 - i0))" >> "$dir/idle.txt"
+echo "idle broker $((ib1 - ib0))" >> "$dir/idle.txt"
+echo "threads $(ls /proc/${pids[0]}/task | wc -l)" >> "$dir/idle.txt"
 
 urls=$(for i in $(seq 1 "$NODES"); do printf 'http://127.0.0.%s:8001,' "$i"; done); urls=${urls%,}
 metrics=$(for i in $(seq 1 "$NODES"); do printf 'http://127.0.0.%s:9090/metrics,' "$i"; done); metrics=${metrics%,}
@@ -79,8 +95,6 @@ lpid=$!
 # The window: after warm-up and settling, well before the end.
 sleep $((5 + 8))
 node_pids="${pids[*]}"
-broker=$(pgrep -f 'kafka\.Kafka' | head -1)
-ticks() { awk '{print $14 + $15}' "/proc/$1/stat"; }
 count() {  # gateway requests answered, all nodes
   for i in $(seq 1 "$NODES"); do curl -sf "127.0.0.$i:9090/metrics"; done |
     awk '/^resonate_request_duration_seconds_count/{s+=$2} END{print s+0}'

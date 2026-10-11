@@ -175,6 +175,13 @@ def main():
         pass
 
     node_us = us(sum(nodes))
+    idle = {}
+    try:
+        for line in open(f"{d}/idle.txt"):
+            k = line.split()
+            idle[" ".join(k[:-1])] = float(k[-1])
+    except FileNotFoundError:
+        pass
     lines = [
         f"== {d.rstrip('/').split('/')[-1]}: {result.get('mode')} at {result.get('rate'):.0f} ops/s, "
         f"{result.get('requests_per_s', 0):.0f} req/s; {reqs:.0f} requests in a {window:.1f} s window",
@@ -184,6 +191,14 @@ def main():
         f"broker {us(cpu['broker']):.0f}   loadgen {us(cpu['load']):.0f}",
         f"node cores   {sum(nodes) / hz / window:.2f} busy of the window",
     ]
+    if idle:
+        # Idle cores, scaled to the window: what the nodes burn with no load.
+        idle_ticks = idle["idle nodes"] / idle["idle_s"] * window
+        lines.append(
+            f"idle         {idle['idle nodes'] / hz / idle['idle_s'] / len(nodes):.3f} cores/node, "
+            f"broker {idle['idle broker'] / hz / idle['idle_s']:.3f} cores, {idle['threads']:.0f} threads/node;  "
+            f"marginal node CPU {us(sum(nodes) - idle_ticks):.0f} µs/req"
+        )
     if stat:
         per = lambda k: stat.get(k, 0) / max(reqs, 1)
         lines.append(
