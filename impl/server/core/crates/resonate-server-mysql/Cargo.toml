@@ -9,7 +9,7 @@ description = "Resonate server: durable state in MySQL."
 concurrency-stress = []
 
 [dependencies]
-resonate-sql = { path = "../resonate-sql" }
+resonate-sql = { path = "../resonate-sql", features = ["mysql"] }
 resonate-core = { path = "../resonate-core" }
 resonate-plugin = { path = "../resonate-plugin" }
 async-trait = { workspace = true }
