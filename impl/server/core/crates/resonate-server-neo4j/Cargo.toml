@@ -11,9 +11,9 @@ description = "Resonate server: durable state in Neo4j — one node per promise,
 # can be diffed and any divergence between them read off rather than argued.
 
 [dependencies]
-resonate-core = { path = "../resonate-core" }
-resonate-plugin = { path = "../resonate-plugin" }
-resonate-timer-wheel = { path = "../resonate-timer-wheel" }
+resonate-core = { version = "0.10.1", path = "../resonate-core" }
+resonate-plugin = { version = "0.10.1", path = "../resonate-plugin" }
+resonate-timer-wheel = { version = "0.10.1", path = "../resonate-timer-wheel" }
 neo4rs = "0.8"
 async-trait = { workspace = true }
 serde = { workspace = true }

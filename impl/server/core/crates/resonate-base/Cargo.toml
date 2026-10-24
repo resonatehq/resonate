@@ -10,8 +10,8 @@ name = "resonate_base"
 path = "src/lib.rs"
 
 [dependencies]
-resonate-core = { path = "../resonate-core" }
-resonate-plugin = { path = "../resonate-plugin" }
+resonate-core = { version = "0.10.1", path = "../resonate-core" }
+resonate-plugin = { version = "0.10.1", path = "../resonate-plugin" }
 async-trait = { workspace = true }
 lazy_static = "1"
 serde = { workspace = true }
