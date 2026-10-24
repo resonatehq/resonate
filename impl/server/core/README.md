@@ -343,6 +343,8 @@ When Resonate calls protected endpoints, it can attach an auth header under `[wo
 
 Tokens come from [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials); on Cloud Run this resolves to the service account identity automatically. Acquisition and refresh are handled by the `google-cloud-auth` crate.
 
+The GCP mode is the `gcp-idtoken` feature of `resonate-transport-http-push`, on by default. A build that names the crate with `default-features = false` leaves out `google-cloud-auth` and refuses `mode = "gcp"` at startup.
+
 ---
 
 ## Learn more

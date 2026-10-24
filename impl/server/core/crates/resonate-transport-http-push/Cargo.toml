@@ -13,7 +13,15 @@ serde_json = { workspace = true }
 tokio = { version = "1", features = ["rt", "sync", "macros"] }
 tracing = "0.1"
 reqwest = { version = "0.12", features = ["json"] }
-google-cloud-auth = { version = "1.9.0", features = ["idtoken"] }
+google-cloud-auth = { version = "1.9.0", features = ["idtoken"], optional = true }
+
+[features]
+default = ["gcp-idtoken"]
+# `auth.mode = "gcp"`: mint a GCP OIDC ID token per delivery through
+# `google-cloud-auth`. Without it the mode is refused at startup, and the build
+# drops google-cloud-auth and what only it brings (google-cloud-gax, -rpc,
+# -wkt, jsonwebtoken, and reqwest 0.13 with its default TLS).
+gcp-idtoken = ["dep:google-cloud-auth"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
