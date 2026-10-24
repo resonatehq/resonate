@@ -2963,6 +2963,9 @@ impl PostgresDb<'_> {
             address,
         } = *params;
         let trt = self.task_retry_timeout;
+        // A `resonate:delay` still ahead holds the first dispatch back: the
+        // retry deadline is the delay ($11), and nothing is emitted now.
+        let delay = resonate_sql::dispatch_delay(tags, created_at);
 
         let rows = rt_block_on(sqlx::query(&format!("
             WITH inserted_or_skipped_promise AS (
@@ -2972,14 +2975,14 @@ impl PostgresDb<'_> {
                       CASE WHEN $10::text IS NOT NULL
                            THEN (CASE WHEN $9 THEN 'fulfilled' ELSE 'pending' END) END,
                       0,
-                      CASE WHEN $10::text IS NOT NULL AND NOT $9 THEN $7 + {trt} END)
+                      CASE WHEN $10::text IS NOT NULL AND NOT $9 THEN COALESCE($11::bigint, $7 + {trt}) END)
               ON CONFLICT (id) DO NOTHING
               RETURNING *
             ),
             emit_new AS (
               SELECT 'execute'::text AS kind, $10::text AS address, p.id AS task_id,
                      0::int AS version, NULL::jsonb AS promise
-              FROM inserted_or_skipped_promise p WHERE p.task_state = 'pending'
+              FROM inserted_or_skipped_promise p WHERE p.task_state = 'pending' AND $11::bigint IS NULL
             ),
             result AS (
               SELECT *, TRUE AS was_created FROM inserted_or_skipped_promise
@@ -2992,6 +2995,7 @@ impl PostgresDb<'_> {
             .bind(id).bind(state).bind(param_headers).bind(param_data).bind(tags)  // $1-$5
             .bind(timeout_at).bind(created_at).bind(settled_at)                     // $6-$8
             .bind(already_timedout).bind(address)                                   // $9-$10
+            .bind(delay)                                                            // $11
             .fetch_all(self.tx().as_mut()))?;
 
         if rows.is_empty() {
@@ -3002,6 +3006,11 @@ impl PostgresDb<'_> {
         }
         self.absorb_and_arm_retries(&rows[0], created_at + trt);
         let was_created: bool = rows[0].get("was_created");
+        if let Some(at) = delay {
+            if was_created && address.is_some() && !already_timedout {
+                self.arm_retry(id, at);
+            }
+        }
         if was_created && !already_timedout && resonate_sql::external_tags(tags) {
             self.arm_promise_timeout(id, timeout_at);
         }
@@ -3424,6 +3433,9 @@ impl PostgresDb<'_> {
             address,
         } = *params;
         let trt = self.task_retry_timeout;
+        // As in `promise_create`: a delay still ahead is the retry deadline
+        // ($13), and nothing is emitted now.
+        let delay = resonate_sql::dispatch_delay(tags, created_at);
 
         let rows = rt_block_on(sqlx::query(&format!("
             WITH fence_check AS (
@@ -3439,7 +3451,7 @@ impl PostgresDb<'_> {
                      CASE WHEN $12::text IS NOT NULL
                           THEN (CASE WHEN $11::bool THEN 'fulfilled' ELSE 'pending' END) END,
                      0,
-                     CASE WHEN $12::text IS NOT NULL AND NOT $11::bool THEN $9 + {trt} END
+                     CASE WHEN $12::text IS NOT NULL AND NOT $11::bool THEN COALESCE($13::bigint, $9 + {trt}) END
               WHERE (SELECT ok FROM fence_ok)
               ON CONFLICT (id) DO NOTHING
               RETURNING *
@@ -3447,7 +3459,7 @@ impl PostgresDb<'_> {
             emit_new AS (
               SELECT 'execute'::text AS kind, $12::text AS address, p.id AS task_id,
                      0::int AS version, NULL::jsonb AS promise
-              FROM inserted_or_skipped_promise p WHERE p.task_state = 'pending'
+              FROM inserted_or_skipped_promise p WHERE p.task_state = 'pending' AND $13::bigint IS NULL
             ),
             result AS (
               SELECT * FROM inserted_or_skipped_promise
@@ -3468,6 +3480,7 @@ impl PostgresDb<'_> {
             .bind(promise_id).bind(state).bind(param_headers).bind(param_data).bind(tags)  // $3-$7
             .bind(timeout_at).bind(created_at).bind(settled_at)                             // $8-$10
             .bind(already_timedout).bind(address)                                           // $11-$12
+            .bind(delay)                                                                    // $13
             .fetch_all(self.tx().as_mut()))?;
 
         if rows.is_empty() {
@@ -3479,6 +3492,11 @@ impl PostgresDb<'_> {
         // The INSERT put the row on the queue if it is pending and external;
         // that is the deadline to announce, task or no task.
         let was_created: bool = row.get("was_created");
+        if let Some(at) = delay {
+            if was_created && address.is_some() && !already_timedout {
+                self.arm_retry(promise_id, at);
+            }
+        }
         if was_created && !already_timedout && resonate_sql::external_tags(tags) {
             self.arm_promise_timeout(promise_id, timeout_at);
         }

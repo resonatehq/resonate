@@ -2710,19 +2710,25 @@ impl<'a> SqliteDb<'a> {
                     )?;
                 }
             } else if let Some(addr) = address {
-                // TaskInfraCreated
+                // TaskInfraCreated. A `resonate:delay` still ahead holds the
+                // first dispatch back: the retry deadline is the delay, and
+                // the retry path dispatches when it comes due.
+                let delay = resonate_sql::dispatch_delay(tags, created_at);
+                let retry_at = delay.unwrap_or(created_at + self.task_retry_timeout);
                 let created = self.conn.execute(
                     "UPDATE promises SET task_state = 'pending', task_version = 0, retry_timeout_at = ?2
                      WHERE id = ?1 AND task_state IS NULL",
-                    params![id, created_at + self.task_retry_timeout],
+                    params![id, retry_at],
                 )? > 0;
                 if created {
-                    self.arm_retry(id, created_at + self.task_retry_timeout);
-                    self.emit(Outgoing::Execute {
-                        address: addr.to_string(),
-                        task_id: id.to_string(),
-                        version: 0,
-                    });
+                    self.arm_retry(id, retry_at);
+                    if delay.is_none() {
+                        self.emit(Outgoing::Execute {
+                            address: addr.to_string(),
+                            task_id: id.to_string(),
+                            version: 0,
+                        });
+                    }
                 }
             }
         }

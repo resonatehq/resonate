@@ -68,6 +68,26 @@ pub fn external_tags(tags_json: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// When a new task's first dispatch is held back to, if at all: the instant in
+/// `resonate:delay` when it is still ahead of `now`.
+///
+/// The specification's `createPromise` (spec/spec/02-abstract/state.lean)
+/// creates a targeted promise's task `pending` with its retry deadline at
+/// `max(delay, now)`. A delay in the future therefore means no dispatch at
+/// create and a retry deadline at the delay, where the ordinary retry path
+/// dispatches it; a delay already past means what no delay means. Validation
+/// (`validate_promise_create_data`) has already refused a delay that is not a
+/// non-negative integer, so an unparseable one cannot reach here; it is read
+/// as no delay rather than trusted.
+pub fn dispatch_delay(tags_json: &str, now: i64) -> Option<i64> {
+    serde_json::from_str::<std::collections::HashMap<String, String>>(tags_json)
+        .ok()?
+        .get("resonate:delay")?
+        .parse::<i64>()
+        .ok()
+        .filter(|&at| at > now)
+}
+
 /// Parse and resolve a `ui.*` request's `data`, rendering either failure as
 /// the response it is.
 ///
@@ -319,4 +339,30 @@ pub struct ScheduleCreateParams<'a> {
     pub promise_tags: &'a str,
     pub created_at: i64,
     pub next_run_at: i64,
+}
+
+#[cfg(test)]
+mod dispatch_delay_tests {
+    use super::dispatch_delay;
+
+    #[test]
+    fn a_delay_ahead_of_now_holds_the_dispatch_back_to_it() {
+        assert_eq!(
+            dispatch_delay(r#"{"resonate:delay":"5000"}"#, 1000),
+            Some(5000)
+        );
+    }
+
+    #[test]
+    fn a_delay_at_or_before_now_is_no_delay() {
+        assert_eq!(dispatch_delay(r#"{"resonate:delay":"1000"}"#, 1000), None);
+        assert_eq!(dispatch_delay(r#"{"resonate:delay":"10"}"#, 1000), None);
+    }
+
+    #[test]
+    fn no_tag_or_an_unreadable_one_is_no_delay() {
+        assert_eq!(dispatch_delay(r#"{}"#, 1000), None);
+        assert_eq!(dispatch_delay(r#"{"resonate:delay":"soon"}"#, 1000), None);
+        assert_eq!(dispatch_delay("not json", 1000), None);
+    }
 }
