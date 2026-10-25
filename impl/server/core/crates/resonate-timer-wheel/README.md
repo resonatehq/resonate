@@ -18,8 +18,15 @@ src/proof.rs        THE PROOFS, in three layers -- sequence plumbing, then the
 src/wheel.rs        THE IMPLEMENTATION, over a flat Vec. Every method's
                     `ensures` names `spec_merge` and friends directly, so the
                     SPEC -- not the loops -- is the definition of the behaviour.
+src/indexed.rs      The same specification over a BTreeMap and a hash index,
+                    O(log n) per arrival. What the timer runs. Not verified:
+                    tested step for step against src/wheel.rs.
+src/timer.rs        The async front (a task, a clock, a queue). Not verified.
 tests/wheel.rs      Worked examples, plus a differential test against an
                     independently written model.
+tests/indexed.rs    IndexedWheel against TimerWheel: every history of up to
+                    three operations over a small alphabet, long random
+                    histories, and the cost regression.
 ```
 
 ## The data structure
@@ -191,7 +198,10 @@ toolchain. Keep the two in step when bumping either.
 ## Where things stand
 
 `./verify.sh` -> **97 verified, 0 errors**, with no `assume`, no `admit`, and
-no `external_body` anywhere in `src/`. `cargo test` -> 18 passed, plus the doctest.
+no `external_body` anywhere in the verified modules. `src/indexed.rs` and
+`src/timer.rs` are outside them (gated on `verus_keep_ghost`), so `verify.sh`
+checks exactly what it checked before. `cargo test` runs the wheel tests, the
+`IndexedWheel` differential tests and the timer tests.
 
 The proofs were mutation-tested rather than taken on trust. Each line of the
 four-word definition was broken in turn, and each break was caught:
@@ -216,13 +226,45 @@ puts a duplicate in the wheel. That is why the spec says *the batch's updates*.
 
 ## Cost
 
-`merge` is `O(m^2 + m(n + m))` for a wheel of `n` taking a batch of `m`: an
-insertion sort of the batch, then one identity scan and one slot scan per
-arrival. The wheel is sized for
-the near horizon — thousands of entries, not millions — and a flat `Vec` beats
-a heap or a hash index at that size on the operation that actually runs hot,
-which is walking the front in deadline order. If a profile ever says otherwise, the
-specification is the thing to keep — it says nothing about how the result is
-computed, so a heap, a hash index or a merge sort can go in underneath without
-the statement of correctness changing at all. That is exactly the freedom the
-three-step definition is for.
+`TimerWheel::merge` is `O(m^2 + n^2)` for a wheel of `n` taking a batch of
+`m`. It moves the untouched entries out one `Vec::remove(0)` at a time and
+insertion-sorts the whole union back in, and each insertion scans for its slot
+from the front. Those are the shapes the proofs are written against.
+
+At a few hundred entries that does not matter. At the 8192 the SQL servers
+configure it does: one single-entry merge costs tens of milliseconds, and a
+server arms one or two deadlines on every request. Under task load the timer
+task fell behind its merge queue for good, and because it merged ahead of
+firing, deadlines fired tens of seconds late or not at all: after ten
+seconds of task load from 16 clients on SQLite, none of 500 deadlines two
+seconds out had fired 30 seconds later.
+
+So the timer runs `IndexedWheel` (`src/indexed.rs`), which is the freedom the
+specification was written to leave. It keys a `BTreeMap` by
+`(deadline, arrival sequence)` and keeps a `HashMap` from identity to that key:
+
+| step | `TimerWheel` | `IndexedWheel` |
+| --- | --- | --- |
+| drop what the batch names | scan the wheel, `O(n m)`, and `remove(0)` each entry, `O(n^2)` | `O(m log n)` |
+| add the last updates | `O(m^2)` | `O(m)` hashing |
+| sort | insertion sort of the union, `O((n + m)^2)` | the tree is the order, `O(m log n)` |
+| cut | `truncate` | `pop_last` per cut entry, `O(k log n)` |
+
+The arrival sequence is what makes the order the same, ties included: the
+proved wheel puts a newcomer behind everything due no later than it, and a
+sequence number that grows with every insertion puts it in the same place.
+Identity needs a key for that, so `IndexedWheel` takes a `KeyedComparator`,
+a `Comparator` that can also name an identity as a hashable key. The obligation
+is the comparator's, restated: `key(a) == key(b)` exactly when `eq(a, b)`.
+`IdComparator` implements it.
+
+`IndexedWheel` is **not** proved. `tests/indexed.rs` drives it and the proved
+wheel through the same operations and compares them after every step: every
+history of up to three operations over capacities 0 to 3, three ids, two
+deadlines and batches of up to two (424,316 histories), then 16,000 random
+operations on wheels of up to 512. A proof of `IndexedWheel` against
+`spec_merge` would need Verus models of `BTreeMap` and `HashMap`, which is the
+natural next step and is not done here.
+
+`cargo run --release -p resonate-timer-wheel --example merge_cost` prints the
+cost of a single-entry merge into a full wheel for both.

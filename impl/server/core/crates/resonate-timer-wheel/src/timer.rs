@@ -1,7 +1,7 @@
-//! The asynchronous front for [`TimerWheel`].
+//! The asynchronous front for the wheel.
 //!
-//! [`TimerWheel`] is pure: a sorted, deduplicated, bounded set of deadlines and
-//! four total functions over it. It knows nothing about clocks, tasks or
+//! [`TimerWheel`](crate::TimerWheel) is pure: a sorted, deduplicated, bounded
+//! set of deadlines and four total functions over it. It knows nothing about clocks, tasks or
 //! storage, which is what let it be proved. Everything a running system needs
 //! around that — a clock, a task that sleeps, somewhere to report a deadline
 //! that came due, somewhere to get more deadlines from — lives here.
@@ -26,6 +26,13 @@
 //! from a request path is a send that cannot block on the timer, and the send
 //! is itself the wake-up — there is no separate notification to keep in step
 //! with the queue.
+//!
+//! The wheel is an [`IndexedWheel`], so a merge costs `O(log n)` per arrival
+//! and the task keeps up with a request path that arms on every transition.
+//! Each pass takes what is already queued (up to [`DRAIN`] batches), then
+//! fires whatever is due before it sleeps again. A queue that never empties
+//! therefore delays a due deadline by at most one bounded drain, never
+//! indefinitely.
 //!
 //! # Why it can be fed everything
 //!
@@ -54,9 +61,8 @@ use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 
-use crate::comparator::Comparator;
+use crate::indexed::{IndexedWheel, KeyedComparator};
 use crate::timeout::Timeout;
-use crate::wheel::TimerWheel;
 
 /// A future returned by one of the timer's callbacks.
 pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
@@ -131,7 +137,7 @@ struct Driver<T, C> {
     seeded: oneshot::Sender<()>,
 }
 
-/// An asynchronous timer over a [`TimerWheel`].
+/// An asynchronous timer over an [`IndexedWheel`].
 ///
 /// Construct it with [`Timer::new`], start it with [`Timer::init`], feed it
 /// with [`Timer::merge`], and stop it with [`Timer::stop`].
@@ -148,7 +154,8 @@ pub struct Timer<T, C> {
 impl<T, C> Timer<T, C>
 where
     T: Send + 'static,
-    C: Comparator<T> + Send + 'static,
+    C: KeyedComparator<T> + Send + 'static,
+    C::Key: Send,
 {
     /// Build a timer. Nothing runs until [`Timer::init`].
     pub fn new(
@@ -222,13 +229,18 @@ where
     }
 }
 
+/// The most queued batches one pass of the driver merges before it fires what
+/// is due. Bounds how long a steady stream of merges can hold a deadline back.
+pub const DRAIN: usize = 1024;
+
 /// The driver. Owns the wheel for its whole life, so nothing else can lock it.
 async fn run<T, C>(mut d: Driver<T, C>)
 where
     T: Send + 'static,
-    C: Comparator<T> + Send + 'static,
+    C: KeyedComparator<T> + Send + 'static,
+    C::Key: Send,
 {
-    let mut wheel = TimerWheel::new(d.config.capacity, d.cmp);
+    let mut wheel = IndexedWheel::new(d.config.capacity, d.cmp);
     let mut last_backfill: Option<Instant> = None;
 
     // Seed first, then tell `init` it may return.
@@ -263,6 +275,33 @@ where
             .await;
         }
 
+        // Take what is already queued, so what fires is the newest view: a
+        // batch that arrived as a deadline expired lands before the fire.
+        // Bounded, so that a queue which never empties cannot starve firing.
+        //
+        // One merge per batch, not one merge of their concatenation. The two
+        // differ once the wheel is full: with capacity 1, `A@1` held, then
+        // `[B@0]` and `[B@5]` in sequence leave `B@5`, while `[B@0, B@5]`
+        // keeps `A@1`. Merging in sequence is what each caller was promised,
+        // and at O(log n) per arrival it costs no more.
+        for _ in 0..DRAIN {
+            match d.merges.try_recv() {
+                Ok(batch) => wheel.merge(batch),
+                Err(mpsc::error::TryRecvError::Empty) => break,
+                // Every sender is gone, so nothing can feed this wheel again.
+                Err(mpsc::error::TryRecvError::Disconnected) => return,
+            }
+        }
+
+        // Fire what is due before sleeping, whether the pass began with a
+        // timeout or with a batch. Under load the queue is rarely empty, and
+        // a deadline must not wait for it to be.
+        let due = wheel.pop_expired((d.now)());
+        if !due.is_empty() {
+            (d.on_fire)(due).await;
+            continue;
+        }
+
         let now = (d.now)();
         let wait = match wheel.next() {
             Some(deadline) => {
@@ -272,8 +311,6 @@ where
         };
 
         tokio::select! {
-            // Bias the queue: a batch that arrives as a deadline expires should
-            // land before the fire, so what fires is the newest view.
             biased;
             _ = d.shutdown.changed() => return,
             batch = d.merges.recv() => match batch {
@@ -281,24 +318,21 @@ where
                 // Every sender is gone, so nothing can feed this wheel again.
                 None => return,
             },
-            _ = tokio::time::sleep(wait) => {
-                let due = wheel.pop_expired((d.now)());
-                if !due.is_empty() {
-                    (d.on_fire)(due).await;
-                }
-            }
+            // Woken by the deadline (or the idle backstop): the next pass
+            // fires it.
+            _ = tokio::time::sleep(wait) => {}
         }
     }
 }
 
 async fn backfill<T, C>(
-    wheel: &mut TimerWheel<T, C>,
+    wheel: &mut IndexedWheel<T, C>,
     config: &TimerConfig,
     now: &Clock,
     on_backfill: &OnBackfill<T>,
     last: &mut Option<Instant>,
 ) where
-    C: Comparator<T>,
+    C: KeyedComparator<T>,
 {
     *last = Some(Instant::now());
     let room = config.capacity.saturating_sub(wheel.len());

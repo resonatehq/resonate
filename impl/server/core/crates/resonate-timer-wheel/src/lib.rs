@@ -37,6 +37,10 @@
 //!
 //! ```text
 //! timeout.rs      Timeout<T>: a deadline and a payload.
+//! indexed.rs      IndexedWheel<T, C>: the same specification over a tree and
+//!                 a hash index, O(log n) per arrival. The wheel the timer
+//!                 runs. NOT verified; tested step for step against
+//!                 TimerWheel, and gated so Verus never sees it.
 //! timer.rs        Timer<T, C>: the async front. A task that sleeps until the
 //!                 nearest deadline, wakes on anything that moves it, fires
 //!                 what is due and refills when it runs low. NOT verified,
@@ -105,6 +109,11 @@
 #![allow(unused_imports)]
 
 pub mod comparator;
+/// The wheel the timer runs: the same specification over a tree and a hash
+/// index, so arming is `O(log n)`. Tested against [`TimerWheel`], not proved,
+/// and gated so Verus never sees it.
+#[cfg(not(verus_keep_ghost))]
+pub mod indexed;
 pub mod proof;
 pub mod spec;
 pub mod timeout;
@@ -126,5 +135,7 @@ pub use comparator::{Comparator, HasId, IdComparator};
 pub use timeout::Timeout;
 pub use wheel::TimerWheel;
 
+#[cfg(not(verus_keep_ghost))]
+pub use indexed::{IndexedWheel, KeyedComparator};
 #[cfg(not(verus_keep_ghost))]
 pub use timer::{Timer, TimerConfig};
