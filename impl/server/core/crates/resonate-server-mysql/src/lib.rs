@@ -2925,6 +2925,11 @@ impl MysqlDb<'_> {
             // `task_state IS NULL` is the guard `INSERT IGNORE INTO tasks`
             // used to be — a promise carries at most one task.
             if let Some(addr) = address {
+                // A `resonate:delay` still ahead holds the first dispatch
+                // back: the retry deadline is the delay, and the retry path
+                // dispatches when it comes due.
+                let delay = resonate_sql::dispatch_delay(tags, created_at);
+                let retry_at = delay.unwrap_or(created_at + trt);
                 let task_state = if already_timedout {
                     "fulfilled"
                 } else {
@@ -2938,18 +2943,20 @@ impl MysqlDb<'_> {
                     )
                     .bind(task_state)
                     .bind(already_timedout)
-                    .bind(created_at + trt)
+                    .bind(retry_at)
                     .bind(id)
                     .execute(self.tx().as_mut()),
                 )?;
 
                 if task_res.rows_affected() > 0 && !already_timedout {
-                    self.arm_retry(id, created_at + trt);
-                    self.emit(Outgoing::Execute {
-                        address: addr.to_string(),
-                        task_id: id.to_string(),
-                        version: 0,
-                    });
+                    self.arm_retry(id, retry_at);
+                    if delay.is_none() {
+                        self.emit(Outgoing::Execute {
+                            address: addr.to_string(),
+                            task_id: id.to_string(),
+                            version: 0,
+                        });
+                    }
                 }
             }
         }
@@ -3437,6 +3444,10 @@ impl MysqlDb<'_> {
                     self.arm_promise_timeout(promise_id, timeout_at);
                 }
                 if let Some(addr) = address {
+                    // As in `promise_create`: a delay still ahead is the
+                    // retry deadline, and nothing is dispatched now.
+                    let delay = resonate_sql::dispatch_delay(tags, created_at);
+                    let retry_at = delay.unwrap_or(created_at + trt);
                     let task_state = if already_timedout {
                         "fulfilled"
                     } else {
@@ -3450,17 +3461,19 @@ impl MysqlDb<'_> {
                         )
                         .bind(task_state)
                         .bind(already_timedout)
-                        .bind(created_at + trt)
+                        .bind(retry_at)
                         .bind(promise_id)
                         .execute(self.tx().as_mut()),
                     )?;
                     if task_res.rows_affected() > 0 && !already_timedout {
-                        self.arm_retry(promise_id, created_at + trt);
-                        self.emit(Outgoing::Execute {
-                            address: addr.to_string(),
-                            task_id: promise_id.to_string(),
-                            version: 0,
-                        });
+                        self.arm_retry(promise_id, retry_at);
+                        if delay.is_none() {
+                            self.emit(Outgoing::Execute {
+                                address: addr.to_string(),
+                                task_id: promise_id.to_string(),
+                                version: 0,
+                            });
+                        }
                     }
                 }
             }
