@@ -339,3 +339,71 @@ async fn deadlines_fire_on_time_while_the_wheel_is_full_and_busy() {
     let p99 = pct(&late, 99.0);
     assert!(p99 < 500, "p99 lateness {p99} ms");
 }
+
+/// A server under load arms deadlines on nearly every request, so merges
+/// arrive without a gap. Firing must still happen: a due deadline waits for
+/// at most one bounded drain of the queue, not for the stream to stop.
+///
+/// The producer never sleeps, so the queue is never empty when the driver
+/// looks. A driver that always takes the next merge before it fires (the
+/// biased `select!` this replaced) never gets round to firing, however cheap
+/// each merge is.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stream_of_merges_does_not_starve_firing() {
+    let (now, _) = clock();
+    let fired = Fired::default();
+    let cfg = TimerConfig {
+        capacity: 4_096,
+        low_watermark: 0,
+        backfill_interval: Duration::from_secs(60),
+        idle: Duration::from_secs(60),
+    };
+    let far: Vec<Timeout<u64>> = (0..4_000)
+        .map(|i| Timeout::new(now() + 600_000 + i, 1_000_000 + i))
+        .collect();
+    let (backfill, _) = backfill_once(far);
+    let timer = Arc::new(Timer::new(
+        cfg,
+        IdComparator,
+        now.clone(),
+        fired.on_fire(),
+        backfill,
+    ));
+    timer.init().await;
+
+    let flooding = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let flood = {
+        let (timer, now, flooding) = (timer.clone(), now.clone(), flooding.clone());
+        tokio::spawn(async move {
+            let mut i = 0u64;
+            while flooding.load(Ordering::SeqCst) {
+                // Far deadlines that replace one another, so the wheel stays
+                // the same size.
+                timer.merge(vec![Timeout::new(now() + 600_000, 2_000_000 + i % 64)]);
+                i += 1;
+                if i.is_multiple_of(16) {
+                    tokio::task::yield_now().await;
+                }
+            }
+        })
+    };
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let armed = Instant::now();
+    timer.merge(vec![Timeout::new(now() + 20, 1u64)]);
+    let mut starved = false;
+    while !fired.values().contains(&1) {
+        if armed.elapsed() > Duration::from_secs(2) {
+            starved = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    flooding.store(false, Ordering::SeqCst);
+    flood.await.unwrap();
+    timer.stop().await;
+    assert!(
+        !starved,
+        "a due deadline did not fire within 2 s while merges kept arriving"
+    );
+}

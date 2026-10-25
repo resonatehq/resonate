@@ -27,9 +27,12 @@
 //! is itself the wake-up — there is no separate notification to keep in step
 //! with the queue.
 //!
-//! The wheel is an [`IndexedWheel`]: the proved [`TimerWheel`](crate::TimerWheel)'s
-//! specification at `O(log n)` per arrival, so the task keeps up with a
-//! request path that arms on every transition.
+//! The wheel is an [`IndexedWheel`], so a merge costs `O(log n)` per arrival
+//! and the task keeps up with a request path that arms on every transition.
+//! Each pass takes what is already queued (up to [`DRAIN`] batches), then
+//! fires whatever is due before it sleeps again. A queue that never empties
+//! therefore delays a due deadline by at most one bounded drain, never
+//! indefinitely.
 //!
 //! # Why it can be fed everything
 //!
@@ -226,6 +229,10 @@ where
     }
 }
 
+/// The most queued batches one pass of the driver merges before it fires what
+/// is due. Bounds how long a steady stream of merges can hold a deadline back.
+pub const DRAIN: usize = 1024;
+
 /// The driver. Owns the wheel for its whole life, so nothing else can lock it.
 async fn run<T, C>(mut d: Driver<T, C>)
 where
@@ -268,6 +275,33 @@ where
             .await;
         }
 
+        // Take what is already queued, so what fires is the newest view: a
+        // batch that arrived as a deadline expired lands before the fire.
+        // Bounded, so that a queue which never empties cannot starve firing.
+        //
+        // One merge per batch, not one merge of their concatenation. The two
+        // differ once the wheel is full: with capacity 1, `A@1` held, then
+        // `[B@0]` and `[B@5]` in sequence leave `B@5`, while `[B@0, B@5]`
+        // keeps `A@1`. Merging in sequence is what each caller was promised,
+        // and at O(log n) per arrival it costs no more.
+        for _ in 0..DRAIN {
+            match d.merges.try_recv() {
+                Ok(batch) => wheel.merge(batch),
+                Err(mpsc::error::TryRecvError::Empty) => break,
+                // Every sender is gone, so nothing can feed this wheel again.
+                Err(mpsc::error::TryRecvError::Disconnected) => return,
+            }
+        }
+
+        // Fire what is due before sleeping, whether the pass began with a
+        // timeout or with a batch. Under load the queue is rarely empty, and
+        // a deadline must not wait for it to be.
+        let due = wheel.pop_expired((d.now)());
+        if !due.is_empty() {
+            (d.on_fire)(due).await;
+            continue;
+        }
+
         let now = (d.now)();
         let wait = match wheel.next() {
             Some(deadline) => {
@@ -277,8 +311,6 @@ where
         };
 
         tokio::select! {
-            // Bias the queue: a batch that arrives as a deadline expires should
-            // land before the fire, so what fires is the newest view.
             biased;
             _ = d.shutdown.changed() => return,
             batch = d.merges.recv() => match batch {
@@ -286,12 +318,9 @@ where
                 // Every sender is gone, so nothing can feed this wheel again.
                 None => return,
             },
-            _ = tokio::time::sleep(wait) => {
-                let due = wheel.pop_expired((d.now)());
-                if !due.is_empty() {
-                    (d.on_fire)(due).await;
-                }
-            }
+            // Woken by the deadline (or the idle backstop): the next pass
+            // fires it.
+            _ = tokio::time::sleep(wait) => {}
         }
     }
 }
