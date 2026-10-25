@@ -570,10 +570,18 @@ theorem QObj_project {a : ServerState} (hq : Hereditary g a) {o : Object}
   have h1 : g.promise o.id o.promise = true := QObj_promise h
   simp only [QObj, Bool.and_eq_true]
   refine ⟨hq.project _ _ n hst h1, ?_⟩
-  show (o.task.map (·.view (o.promise.project n))).all g.task = true
+  show (o.task.map fun t => (t.view (o.promise.project n)).lapse n).all g.task = true
   cases hto : o.task with
   | none   => rfl
-  | some t => exact hq.tView t _ (QObj_task h hto)
+  | some t =>
+      have hv : g.task (t.view (o.promise.project n)) = true := hq.tView t _ (QObj_task h hto)
+      show g.task ((t.view (o.promise.project n)).lapse n) = true
+      unfold TaskObject.lapse
+      split
+      · split
+        · exact hq.tRepend _ _ hv
+        · exact hv
+      · exact hv
 
 theorem writesGood_setSettled {e : Env} (hq : Hereditary g e.state)
     (o : Object) (ho : QObj g o = true) (p : PromiseObject) (h : g.promise o.id p = true) :

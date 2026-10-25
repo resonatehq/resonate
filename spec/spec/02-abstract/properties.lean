@@ -481,6 +481,13 @@ def monotone_promise_set_grows (_now : Nat) (a b : ServerState) : Bool :=
 def monotone_task_set_grows (_now : Nat) (a b : ServerState) : Bool :=
   a.objects.all fun o => !o.task.isSome || b.hasTask o.id
 
+/-- An acquired task whose lease has ended by `now`. A read shows it
+    pending (`TaskObject.lapse`), so one request may take it over: the
+    stored row goes from acquired to acquired, one version up, in one step.
+    The transition properties below name that case where it matters. -/
+def _root_.AbstractModel.TaskObject.lapsed (t : TaskObject) (now : Nat) : Bool :=
+  t.state == .acquired && (match t.leaseTimeoutAt with | some d => d ≤ now | none => false)
+
 /-- The fencing property: a task's version rises by exactly one on
     `pending → acquired`, and does not move on any other transition.
 
@@ -497,13 +504,15 @@ def monotone_task_set_grows (_now : Nat) (a b : ServerState) : Bool :=
     are. There, a step may register or drain a whole ledger at once, so
     the count is an implementation choice and only the direction is
     protocol. Here the count IS the protocol: one grant, one version. -/
-def monotone_task_version_increases_only_on_acquisition (_now : Nat) (a b : ServerState) : Bool :=
+def monotone_task_version_increases_only_on_acquisition (now : Nat) (a b : ServerState) : Bool :=
   a.objects.all fun o => o.task.all fun t =>
     match b.task? o.id with
     | none => true
     | some u =>
         if t.state == .pending && u.state == .acquired then
           u.version == t.version + 1
+        else if t.lapsed now && u.state == .acquired then
+          u.version == t.version || u.version == t.version + 1
         else
           u.version == t.version
 
@@ -889,7 +898,7 @@ def preserved_task_lease_holder_stable (_now : Nat) (a b : ServerState) : Bool :
         !(t.state == .acquired && u.state == .acquired && u.version == t.version)
         || (u.pid == t.pid && u.ttl == t.ttl)
 
-def consistent_task_lease_fields_move_together (_now : Nat) (a b : ServerState) : Bool :=
+def consistent_task_lease_fields_move_together (now : Nat) (a b : ServerState) : Bool :=
   a.objects.all fun o => o.task.all fun t =>
     match b.task? o.id with
     | none => true
@@ -901,6 +910,8 @@ def consistent_task_lease_fields_move_together (_now : Nat) (a b : ServerState) 
               && u.pid.isNone && u.ttl.isNone && u.leaseTimeoutAt.isNone)
         || (t.state == .acquired && u.state == .acquired
               && u.pid == t.pid && u.ttl == t.ttl)
+        || (t.lapsed now && u.state == .acquired && u.version == t.version + 1
+              && u.pid.isSome && u.ttl.isSome && u.leaseTimeoutAt.isSome)
 
 def monotone_task_resumes_grow_or_clear (_now : Nat) (a b : ServerState) : Bool :=
   a.objects.all fun o => o.task.all fun t =>
@@ -921,11 +932,14 @@ def consistent_task_acquisition_is_atomic (now : Nat) (a b : ServerState) : Bool
     match b.task? o.id with
     | none => true
     | some u =>
-        !(t.state != .acquired && u.state == .acquired)
-        || (t.state == .pending && t.version < u.version
-              && u.pid.isSome && u.ttl.isSome
+        let granted := u.pid.isSome && u.ttl.isSome
               && u.leaseTimeoutAt == some (now + u.ttl.getD 0)
-              && u.retryTimeoutAt.isNone && u.resumes.isEmpty)
+              && u.retryTimeoutAt.isNone && u.resumes.isEmpty
+        (!(t.state != .acquired && u.state == .acquired)
+          || (t.state == .pending && t.version < u.version && granted))
+        -- a lapsed lease taken over in one step: the same grant, from the lapsed row
+        && (!(t.lapsed now && u.state == .acquired && u.version != t.version)
+          || (u.version == t.version + 1 && granted))
 
 def consistent_task_lease_deadline_is_now_plus_ttl (now : Nat) (a b : ServerState) : Bool :=
   b.objects.all fun o => o.task.all fun u =>
@@ -937,12 +951,25 @@ def consistent_task_lease_deadline_is_now_plus_ttl (now : Nat) (a b : ServerStat
             | some t => t.leaseTimeoutAt == some d && t.ttl == u.ttl && t.state == u.state
             | none   => false)
 
+/-- A task that comes to be pending is due for an offer at once: at `now`
+    for a release or a continue; at the lease's end, already passed, for a
+    lease that lapsed; at the awaited promise's settlement, already passed,
+    for a resume. The due instant is the anchor of the task's retry grid,
+    so it is a fact of the state, never later than `now`. -/
 def consistent_task_pending_entry_arms_retry (now : Nat) (a b : ServerState) : Bool :=
   a.objects.all fun o => o.task.all fun t =>
     match b.task? o.id with
     | none => true
     | some u =>
-        !(t.state != .pending && u.state == .pending) || u.retryTimeoutAt == some now
+        !(t.state != .pending && u.state == .pending)
+          || (match u.retryTimeoutAt with
+              | some r =>
+                  r == now
+                    -- a lapsed lease: due at its end, or already offered by
+                    -- the same step and armed ahead
+                    || (t.lapsed now && (t.leaseTimeoutAt == some r || now < r))
+                    || (t.state == .suspended && r ≤ now)
+              | none => false)
 
 def consistent_task_retry_rearm_only_when_due (now : Nat) (a b : ServerState) : Bool :=
   a.objects.all fun o => o.task.all fun t =>
@@ -958,7 +985,8 @@ def consistent_task_wake_records_resume (now : Nat) (a b : ServerState) : Bool :
     | none => true
     | some u =>
         !(t.state == .suspended && u.state == .pending)
-        || (!u.resumes.isEmpty && u.retryTimeoutAt == some now && u.version == t.version)
+        || (!u.resumes.isEmpty && u.version == t.version
+              && (match u.retryTimeoutAt with | some r => r ≤ now | none => false))
 
 /-! ## The sweeper properties
 
