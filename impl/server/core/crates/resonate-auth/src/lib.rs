@@ -397,13 +397,8 @@ fn verify_jwt(auth: &AuthConfig, token: &str) -> Result<Claims, jsonwebtoken::er
             }
             (Validation::new(header.alg), &vk.decoding_key)
         }
-        None => {
-            // Unsigned mode: accept alg=none only
-            let mut v = Validation::default();
-            v.algorithms = vec![Algorithm::HS256]; // placeholder, overridden below
-            v.insecure_disable_signature_validation();
-            (v, &DecodingKey::from_secret(&[]))
-        }
+        // Unsigned mode: no signature check, the same claim checks.
+        None => return verify_unsigned(auth, token),
     };
 
     let mut validation = validation;
@@ -427,6 +422,49 @@ fn verify_jwt(auth: &AuthConfig, token: &str) -> Result<Claims, jsonwebtoken::er
 
     let token_data = decode::<Claims>(token, decoding_key, &validation)?;
     Ok(token_data.claims)
+}
+
+/// Unsigned mode (debug/testing): the claims without a signature check.
+/// jsonwebtoken 10 builds a verifier from the key even when signature
+/// validation is off, so this reads them with `insecure_decode` and applies
+/// the signed path's checks by hand: `exp` required, a number, and not past
+/// (60 s leeway, jsonwebtoken's default); `iss` and `aud` when configured.
+fn verify_unsigned(auth: &AuthConfig, token: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
+    use jsonwebtoken::errors::{Error, ErrorKind};
+    const LEEWAY: u64 = 60;
+
+    let raw = jsonwebtoken::dangerous::insecure_decode::<Value>(token)?.claims;
+    let exp = raw
+        .get("exp")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| Error::from(ErrorKind::MissingRequiredClaim("exp".to_string())))?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    if exp.saturating_add(LEEWAY) < now {
+        return Err(ErrorKind::ExpiredSignature.into());
+    }
+    if let Some(iss) = &auth.iss {
+        match raw.get("iss") {
+            None => return Err(ErrorKind::MissingRequiredClaim("iss".to_string()).into()),
+            Some(v) if v.as_str() != Some(iss.as_str()) => {
+                return Err(ErrorKind::InvalidIssuer.into());
+            }
+            Some(_) => {}
+        }
+    }
+    if let Some(aud) = &auth.aud {
+        let ok = match raw.get("aud") {
+            None => return Err(ErrorKind::MissingRequiredClaim("aud".to_string()).into()),
+            Some(Value::String(a)) => a == aud,
+            Some(Value::Array(auds)) => auds.iter().any(|a| a.as_str() == Some(aud.as_str())),
+            Some(_) => false,
+        };
+        if !ok {
+            return Err(ErrorKind::InvalidAudience.into());
+        }
+    }
+    serde_json::from_value(raw).map_err(|e| ErrorKind::Json(Arc::new(e)).into())
 }
 
 // ---------------------------------------------------------------------------
@@ -477,5 +515,101 @@ fn extract_resource_id(kind: &str, data: &Value) -> Option<String> {
         // restriction.  This ensures newly added commands are denied by default
         // until explicitly handled here.
         _ => Some(String::new()),
+    }
+}
+
+#[cfg(test)]
+mod unsigned_tests {
+    use super::*;
+
+    fn b64(bytes: &[u8]) -> String {
+        const A: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+        let mut out = String::new();
+        for chunk in bytes.chunks(3) {
+            let n = chunk
+                .iter()
+                .enumerate()
+                .fold(0u32, |n, (i, b)| n | (u32::from(*b) << (16 - 8 * i)));
+            for i in 0..=chunk.len() {
+                out.push(A[((n >> (18 - 6 * i)) & 63) as usize] as char);
+            }
+        }
+        out
+    }
+
+    fn token(alg: &str, claims: Value) -> String {
+        let header = serde_json::json!({ "alg": alg, "typ": "JWT" });
+        format!(
+            "{}.{}.c2ln",
+            b64(header.to_string().as_bytes()),
+            b64(claims.to_string().as_bytes())
+        )
+    }
+
+    fn now() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    }
+
+    fn unsigned(iss: Option<&str>, aud: Option<&str>) -> AuthConfig {
+        AuthConfig {
+            key: None,
+            iss: iss.map(str::to_owned),
+            aud: aud.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn unsigned_mode_accepts_any_alg_with_a_live_exp() {
+        let auth = unsigned(None, None);
+        for alg in ["HS256", "RS256", "EdDSA"] {
+            let t = token(
+                alg,
+                serde_json::json!({ "exp": now() + 60, "role": "admin" }),
+            );
+            assert_eq!(
+                verify_jwt(&auth, &t).expect(alg).role.as_deref(),
+                Some("admin")
+            );
+        }
+    }
+
+    #[test]
+    fn unsigned_mode_checks_exp() {
+        let auth = unsigned(None, None);
+        assert!(verify_jwt(&auth, &token("HS256", serde_json::json!({}))).is_err());
+        let stale = token("HS256", serde_json::json!({ "exp": now() - 3600 }));
+        assert!(verify_jwt(&auth, &stale).is_err());
+        // GHSA-h395-gr6q-cpjc: a mistyped exp is an error, not an absent claim.
+        let mistyped = token("HS256", serde_json::json!({ "exp": "9999999999" }));
+        assert!(verify_jwt(&auth, &mistyped).is_err());
+    }
+
+    #[test]
+    fn unsigned_mode_checks_iss_and_aud() {
+        let auth = unsigned(Some("https://issuer"), Some("resonate"));
+        let exp = now() + 60;
+        let ok = token(
+            "HS256",
+            serde_json::json!({ "exp": exp, "iss": "https://issuer", "aud": ["resonate"] }),
+        );
+        assert!(verify_jwt(&auth, &ok).is_ok());
+        let wrong_iss = token(
+            "HS256",
+            serde_json::json!({ "exp": exp, "iss": "https://other", "aud": ["resonate"] }),
+        );
+        assert!(verify_jwt(&auth, &wrong_iss).is_err());
+        let wrong_aud = token(
+            "HS256",
+            serde_json::json!({ "exp": exp, "iss": "https://issuer", "aud": ["other"] }),
+        );
+        assert!(verify_jwt(&auth, &wrong_aud).is_err());
+        let no_aud = token(
+            "HS256",
+            serde_json::json!({ "exp": exp, "iss": "https://issuer" }),
+        );
+        assert!(verify_jwt(&auth, &no_aud).is_err());
     }
 }
