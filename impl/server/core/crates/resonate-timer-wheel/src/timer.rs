@@ -1,7 +1,7 @@
-//! The asynchronous front for [`TimerWheel`].
+//! The asynchronous front for the wheel.
 //!
-//! [`TimerWheel`] is pure: a sorted, deduplicated, bounded set of deadlines and
-//! four total functions over it. It knows nothing about clocks, tasks or
+//! [`TimerWheel`](crate::TimerWheel) is pure: a sorted, deduplicated, bounded
+//! set of deadlines and four total functions over it. It knows nothing about clocks, tasks or
 //! storage, which is what let it be proved. Everything a running system needs
 //! around that — a clock, a task that sleeps, somewhere to report a deadline
 //! that came due, somewhere to get more deadlines from — lives here.
@@ -26,6 +26,10 @@
 //! from a request path is a send that cannot block on the timer, and the send
 //! is itself the wake-up — there is no separate notification to keep in step
 //! with the queue.
+//!
+//! The wheel is an [`IndexedWheel`]: the proved [`TimerWheel`](crate::TimerWheel)'s
+//! specification at `O(log n)` per arrival, so the task keeps up with a
+//! request path that arms on every transition.
 //!
 //! # Why it can be fed everything
 //!
@@ -54,9 +58,8 @@ use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 
-use crate::comparator::Comparator;
+use crate::indexed::{IndexedWheel, KeyedComparator};
 use crate::timeout::Timeout;
-use crate::wheel::TimerWheel;
 
 /// A future returned by one of the timer's callbacks.
 pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
@@ -131,7 +134,7 @@ struct Driver<T, C> {
     seeded: oneshot::Sender<()>,
 }
 
-/// An asynchronous timer over a [`TimerWheel`].
+/// An asynchronous timer over an [`IndexedWheel`].
 ///
 /// Construct it with [`Timer::new`], start it with [`Timer::init`], feed it
 /// with [`Timer::merge`], and stop it with [`Timer::stop`].
@@ -148,7 +151,8 @@ pub struct Timer<T, C> {
 impl<T, C> Timer<T, C>
 where
     T: Send + 'static,
-    C: Comparator<T> + Send + 'static,
+    C: KeyedComparator<T> + Send + 'static,
+    C::Key: Send,
 {
     /// Build a timer. Nothing runs until [`Timer::init`].
     pub fn new(
@@ -226,9 +230,10 @@ where
 async fn run<T, C>(mut d: Driver<T, C>)
 where
     T: Send + 'static,
-    C: Comparator<T> + Send + 'static,
+    C: KeyedComparator<T> + Send + 'static,
+    C::Key: Send,
 {
-    let mut wheel = TimerWheel::new(d.config.capacity, d.cmp);
+    let mut wheel = IndexedWheel::new(d.config.capacity, d.cmp);
     let mut last_backfill: Option<Instant> = None;
 
     // Seed first, then tell `init` it may return.
@@ -292,13 +297,13 @@ where
 }
 
 async fn backfill<T, C>(
-    wheel: &mut TimerWheel<T, C>,
+    wheel: &mut IndexedWheel<T, C>,
     config: &TimerConfig,
     now: &Clock,
     on_backfill: &OnBackfill<T>,
     last: &mut Option<Instant>,
 ) where
-    C: Comparator<T>,
+    C: KeyedComparator<T>,
 {
     *last = Some(Instant::now());
     let room = config.capacity.saturating_sub(wheel.len());

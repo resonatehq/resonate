@@ -228,3 +228,114 @@ async fn stop_ends_the_task() {
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert!(fired.values().is_empty());
 }
+
+/// Nearest-rank percentile of `xs`, which must be sorted.
+fn pct(xs: &[u64], p: f64) -> u64 {
+    let rank = ((p / 100.0) * xs.len() as f64).ceil() as usize;
+    xs[rank.clamp(1, xs.len()) - 1]
+}
+
+/// The regression for timer lateness under load: deadlines fire on time while
+/// the request path keeps arming.
+///
+/// Sixteen producers each arm two far-future deadlines a millisecond, the
+/// shape of a server under task load (a task arms a retry and a lease). That
+/// fills a wheel of 8192 within a few hundred milliseconds and keeps the merge
+/// queue busy for the rest of the test. Then 500 near deadlines are armed and
+/// their lateness measured.
+///
+/// On the proved `TimerWheel`, each merge rebuilt the full wheel (about 20 ms
+/// at 8192 entries), so the driver took about 50 batches a second against
+/// thousands arriving. The queue never emptied and no deadline fired within
+/// the test. The bound is generous: it fails on a timer that cannot keep up,
+/// not on a slow machine.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn deadlines_fire_on_time_while_the_wheel_is_full_and_busy() {
+    const PRODUCERS: u64 = 16;
+    const TIMERS: u64 = 500;
+
+    let (now, _) = clock();
+    let fired: Arc<Mutex<Vec<(u64, u64)>>> = Arc::default();
+    let on_fire: OnFire<u64> = {
+        let (fired, now) = (fired.clone(), now.clone());
+        Arc::new(move |batch: Vec<Timeout<u64>>| {
+            let at = now();
+            fired
+                .lock()
+                .unwrap()
+                .extend(batch.into_iter().map(|t| (t.value, at)));
+            Box::pin(async {})
+        })
+    };
+    let config = TimerConfig {
+        capacity: 8192,
+        low_watermark: 0,
+        backfill_interval: Duration::from_secs(30),
+        idle: Duration::from_secs(30),
+    };
+    let timer = Arc::new(Timer::new(
+        config,
+        IdComparator,
+        now.clone(),
+        on_fire,
+        no_backfill(),
+    ));
+    timer.init().await;
+
+    // The load: ids from 1_000_000 up, so they never collide with a timer.
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mut producers = Vec::new();
+    for p in 0..PRODUCERS {
+        let (timer, now, stop) = (timer.clone(), now.clone(), stop.clone());
+        producers.push(tokio::spawn(async move {
+            let mut k = 0u64;
+            while !stop.load(Ordering::Relaxed) {
+                let id = 1_000_000 + (p << 32) + k;
+                k += 2;
+                let far = now() + 30_000 + (k % 997);
+                timer.merge(vec![Timeout::new(far, id), Timeout::new(far + 1, id + 1)]);
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+            k
+        }));
+    }
+    tokio::time::sleep(Duration::from_millis(1_000)).await;
+
+    // The timers: 500 deadlines between 300 and 800 ms ahead.
+    let mut due = std::collections::HashMap::new();
+    for i in 0..TIMERS {
+        let at = now() + 300 + (i % 100) * 5;
+        due.insert(i, at);
+        timer.merge(vec![Timeout::new(at, i)]);
+    }
+    tokio::time::sleep(Duration::from_millis(2_500)).await;
+    stop.store(true, Ordering::Relaxed);
+    let mut armed = 0;
+    for p in producers {
+        armed += p.await.unwrap();
+    }
+    timer.stop().await;
+
+    let mut late: Vec<u64> = fired
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|&(v, at)| due.get(&v).map(|&d| at.saturating_sub(d)))
+        .collect();
+    late.sort_unstable();
+    eprintln!(
+        "{armed} deadlines armed by the load; timers fired {}/{TIMERS}",
+        late.len()
+    );
+    if let (Some(_), Some(&max)) = (late.first(), late.last()) {
+        eprintln!(
+            "lateness ms: p50 {}, p95 {}, p99 {}, max {max}",
+            pct(&late, 50.0),
+            pct(&late, 95.0),
+            pct(&late, 99.0),
+        );
+    }
+    assert_eq!(late.len() as u64, TIMERS, "timers did not all fire");
+    let p99 = pct(&late, 99.0);
+    assert!(p99 < 500, "p99 lateness {p99} ms");
+}

@@ -19,7 +19,7 @@ use std::sync::{Arc, Weak};
 use crate::engine::{Scheduled, Timeout};
 use resonate_core::util;
 use resonate_timer_wheel::timer::{BoxFuture, Clock, OnBackfill, OnFire, TimerConfig};
-use resonate_timer_wheel::{Comparator, Timer};
+use resonate_timer_wheel::{Comparator, KeyedComparator, Timer};
 
 use crate::server::Server;
 
@@ -42,6 +42,15 @@ pub struct TimeoutComparator;
 impl Comparator<Timeout> for TimeoutComparator {
     fn eq(&self, a: &Timeout, b: &Timeout) -> bool {
         a.kind() == b.kind() && a.id() == b.id()
+    }
+}
+
+/// The same identity as a key, so the wheel can index it: `(kind, id)`.
+impl KeyedComparator<Timeout> for TimeoutComparator {
+    type Key = (&'static str, String);
+
+    fn key(&self, t: &Timeout) -> Self::Key {
+        (t.kind(), t.id().to_string())
     }
 }
 
