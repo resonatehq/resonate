@@ -527,13 +527,17 @@ def preserved_fulfilled_task (_now : Nat) (a b : ServerState) : Bool :=
 
 /-- `NoDeadDispatch`, state half: no step puts a task into `pending`
     when its promise's deadline has already passed. A task already
-    pending before the step is not a re-pend. -/
+    pending before the step is not a re-pend. A task born pending beside
+    a promise stored pending is not one either: a schedule's occurrence is
+    created as of its own instant (`fireOccurrence`), possibly past its
+    deadline by the time the server gets to it, and every read projects
+    the pair, the promise settled and the task fulfilled. -/
 def preserved_no_dead_dispatch (now : Nat) (a b : ServerState) : Bool :=
   b.objects.all fun o => o.task.all fun u =>
     u.state != .pending
       || (match a.task? o.id with
           | some t => t.state == .pending
-          | none   => false)
+          | none   => o.promise.state == .pending)
       || (match b.promise? o.id with
           | some p => (p.project now).state == .pending
           | none   => true)
