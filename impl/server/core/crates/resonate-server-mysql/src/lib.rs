@@ -46,6 +46,37 @@ use resonate_core::ui;
 use resonate_core::util;
 use resonate_sql::engine::{Engine, Input, Outgoing, Output, Scheduled, Timeout};
 
+/// The longest value a `VARCHAR(255)` column of this schema holds, in
+/// characters.
+const VARCHAR_MAX: usize = 255;
+
+/// Refuse a value its column would cut short.
+///
+/// Every id and address this schema keeps (`promises.id` and the generated
+/// `target`, `listeners.address`, `schedules.id` and `promise_id`) is a
+/// `VARCHAR(255)`, and the engine writes most of them with `INSERT IGNORE`,
+/// which is how it gets idempotent creates. `IGNORE` also turns strict
+/// mode's "Data too long" (1406) into a warning and keeps the first 255
+/// characters, so without this a longer target or listener address is
+/// stored truncated and its messages go to the truncated address. A value
+/// that does not fit is the caller's error, so it is a 400, before anything
+/// is written.
+fn fits(what: &str, value: &str) -> StorageResult<()> {
+    if value.chars().count() > VARCHAR_MAX {
+        return Err(StorageError::InvalidInput(format!(
+            "{what} exceeds maximum length of {VARCHAR_MAX} characters"
+        )));
+    }
+    Ok(())
+}
+
+/// `resonate:target` from a tags document, if it has one.
+fn target_of(tags_json: &str) -> Option<String> {
+    serde_json::from_str::<std::collections::HashMap<String, String>>(tags_json)
+        .ok()?
+        .remove("resonate:target")
+}
+
 pub struct MysqlEngine {
     pool: MySqlPool,
     task_retry_timeout: i64,
@@ -2891,10 +2922,9 @@ impl MysqlDb<'_> {
             already_timedout,
             address,
         } = *params;
-        if id.len() > 255 {
-            return Err(StorageError::InvalidInput(
-                "id exceeds maximum length of 255 characters".to_string(),
-            ));
+        fits("id", id)?;
+        if let Some(addr) = address {
+            fits("resonate:target", addr)?;
         }
         let trt = self.task_retry_timeout;
 
@@ -3121,6 +3151,7 @@ impl MysqlDb<'_> {
         awaited_id: &str,
         address: &str,
     ) -> StorageResult<Option<PromiseRecord>> {
+        fits("address", address)?;
         let row = rt_block_on(
             sqlx::query("SELECT id, state, tags FROM promises WHERE id = ? FOR UPDATE")
                 .bind(awaited_id)
@@ -3234,10 +3265,9 @@ impl MysqlDb<'_> {
             ttl,
             pid,
         } = *params;
-        if promise_id.len() > 255 {
-            return Err(StorageError::InvalidInput(
-                "id exceeds maximum length of 255 characters".to_string(),
-            ));
+        fits("id", promise_id)?;
+        if let Some(addr) = target_of(tags) {
+            fits("resonate:target", &addr)?;
         }
         // No retry deadline here: task.create claims the task at birth, so it
         // goes straight onto the lease queue.
@@ -3403,6 +3433,10 @@ impl MysqlDb<'_> {
             already_timedout,
             address,
         } = *params;
+        fits("id", promise_id)?;
+        if let Some(addr) = address {
+            fits("resonate:target", addr)?;
+        }
         let trt = self.task_retry_timeout;
 
         let task_row = rt_block_on(
@@ -4035,6 +4069,19 @@ impl MysqlDb<'_> {
             created_at,
             next_run_at,
         } = *params;
+        fits("id", id)?;
+        fits("promiseId", promise_id)?;
+        if let Some(addr) = target_of(promise_tags) {
+            fits("resonate:target", &addr)?;
+        }
+        // Every run's promise id is the template expanded: `{{.id}}` by this
+        // id and `{{.timestamp}}` by a time in ms, at most 19 digits for an
+        // i64. Refuse a template whose longest expansion would not fit, or a
+        // run long after the create would be cut short at fire time.
+        let longest = promise_id
+            .replace("{{.id}}", id)
+            .replace("{{.timestamp}}", &"9".repeat(19));
+        fits("promiseId, expanded", &longest)?;
 
         let res = rt_block_on(
             sqlx::query(
