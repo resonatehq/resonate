@@ -5,7 +5,7 @@
 //! `apply_effects(handle(..).0)` and there is no second updater to drift.
 //!
 //! Every operation runs on a swept document. The applier runs
-//! [`drain`](super::drain) at the request's `now` before `handle`, so by the
+//! [`sweep`](super::sweep) at the request's `now` before `handle`, so by the
 //! time an operation looks at a promise, every deadline at or before `now`
 //! has fired and every settlement chain has run — the document is quiescent.
 //! There is no lazy timeout path here: the SQL backends settle the promises a
@@ -26,7 +26,7 @@
 //! # Dependants
 //!
 //! The s3 applier decides every submitted request through [`handle`], and
-//! [`drain`](super::drain) reuses the settlement machinery here (`Tx`,
+//! [`sweep`](super::sweep) reuses the settlement machinery here (`Tx`,
 //! `trigger_settlement`).
 
 use std::collections::BTreeSet;
@@ -1120,7 +1120,7 @@ mod tests {
         now: i64,
     ) -> (OriginDoc, Vec<(String, Message)>, Reply) {
         let mut swept = doc.clone();
-        apply_effects(&mut swept, &crate::kernel::drain(doc, now, &cfg()));
+        apply_effects(&mut swept, &crate::kernel::sweep(doc, now, &cfg()));
         step(&swept, req, now)
     }
 

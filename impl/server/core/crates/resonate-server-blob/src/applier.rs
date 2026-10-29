@@ -23,9 +23,9 @@
 //!
 //! | dies after | orphan | recovery |
 //! |---|---|---|
-//! | timer PUT | a timer for a document that never changed | it fires, the drain finds nothing due and writes nothing, the key is collected |
-//! | CAS | a stale timer | it fires early; the drain either no-ops or legitimately advances |
-//! | sends | a lost Execute or Unblock | Execute: the committed `retry_at` is covered by step 1, so the drain re-emits it. Unblock: lost, as it is today |
+//! | timer PUT | a timer for a document that never changed | it fires, the sweep finds nothing due and writes nothing, the key is collected |
+//! | CAS | a stale timer | it fires early; the sweep either no-ops or legitimately advances |
+//! | sends | a lost Execute or Unblock | Execute: the committed `retry_at` is covered by step 1, so the sweep re-emits it. Unblock: lost, as it is today |
 //! | replies | an unanswered caller | it retries; the operations are idempotent and report current state |
 //!
 //! # The write law
@@ -45,7 +45,7 @@
 //!
 //! # Dependencies
 //!
-//! The kernel (`handle`, `drain`, `apply_effects`) for every decision, the
+//! The kernel (`handle`, `sweep`, `apply_effects`) for every decision, the
 //! codec for the bytes, the store for the objects, the cache for the read
 //! path, the timer queue mirroring every timer key it writes, and the sender
 //! for post-commit sends. [`KeySpace`], defined here, names every key in the
@@ -66,7 +66,7 @@ use std::time::Duration;
 use tokio::sync::{mpsc, oneshot, Mutex as AsyncMutex};
 
 use crate::kernel::state::{apply_effects, Effect, KernelCfg, OriginDoc, Reply, Req};
-use crate::kernel::{drain, handle};
+use crate::kernel::{handle, sweep};
 use resonate_core::Unavailable;
 
 use super::cache::DocCache;
@@ -629,7 +629,7 @@ fn decide(loaded: &OriginDoc, batch: &[Work], shared: &Arc<Shared>) -> Decision 
                 // in memory, the sweep's changes ride the same CAS, and an
                 // idle sweep emits nothing — so this costs no store operation
                 // the request was not going to make.
-                let mut fx = drain(&doc, now, &shared.cfg.kernel);
+                let mut fx = sweep(&doc, now, &shared.cfg.kernel);
                 apply_effects(&mut doc, &fx);
                 let (mut hfx, reply) = handle(&doc, req, now, &shared.cfg.kernel);
                 replies.push(reply);
@@ -638,7 +638,7 @@ fn decide(loaded: &OriginDoc, batch: &[Work], shared: &Arc<Shared>) -> Decision 
             }
             Work::Tick { .. } => {
                 replies.push(Reply::status(200, serde_json::Value::Array(vec![])));
-                drain(&doc, now, &shared.cfg.kernel)
+                sweep(&doc, now, &shared.cfg.kernel)
             }
         };
         // Request k sees request k-1's document.
@@ -1310,7 +1310,7 @@ mod tests {
     // --- crash windows ----------------------------------------------------
 
     #[tokio::test]
-    async fn dying_after_the_timer_put_leaves_a_key_the_drain_ignores() {
+    async fn dying_after_the_timer_put_leaves_a_key_the_sweep_ignores() {
         let inner = shared_store();
         let faulty = Arc::new(FaultStore::new(Arc::clone(&inner)));
         // Let the timer PUT through and kill the document CAS.

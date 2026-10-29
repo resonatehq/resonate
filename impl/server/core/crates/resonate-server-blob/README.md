@@ -33,13 +33,13 @@ corrupting another workflow.
 One line of canonical JSON per entity, joined by `\n`, no trailing newline.
 Every line is an object whose first field `t` names its type:
 
-| `t` | line | one per |
-|---|---|---|
-| `"h"` | header | document (always the first line) |
-| `"p"` | promise | promise, sorted by id |
-| `"k"` | task | task, sorted by id |
+| `t`    | line                   | one per                                                          |
+| ------ | ---------------------- | ---------------------------------------------------------------- |
+| `"h"`  | header                 | document (always the first line)                                 |
+| `"p"`  | promise                | promise, sorted by id                                            |
+| `"k"`  | task                   | task, sorted by id                                               |
 | `"pt"` | armed promise deadline | pending promise carrying `resonate:target`, sorted by `(dl, id)` |
-| `"kt"` | armed task deadline | armed retry or lease, sorted by `(dl, id, kind)` |
+| `"kt"` | armed task deadline    | armed retry or lease, sorted by `(dl, id, kind)`                 |
 
 A document written by this encoder, read back by this decoder, is the same
 document exactly. The example below is real encoder output — an origin
@@ -59,55 +59,55 @@ settled promise (`done`):
 
 ### Header (`"h"`)
 
-| field | type | meaning |
-|---|---|---|
-| `v` | int | Format version, currently `1`. A document with a higher `v` is refused rather than misread. |
-| `clk` | int | The latest `now` observed for the origin, ms. It never decreases and is diagnostic metadata. |
-| `g` | int | Generation — bumped by the shell once per committed write. Diagnostic only. |
-| `og` | string | 16 lowercase hex chars of 64-bit FNV-1a over the origin string. A document whose `og` does not hash the origin it was read under is refused (`OriginMismatch`). |
-| `ta` | int | Deadline of the timer object currently armed for this origin — the minimum of every `pt`/`kt` deadline. Omitted when nothing is armed. |
+| field | type   | meaning                                                                                                                                                         |
+| ----- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `v`   | int    | Format version, currently `1`. A document with a higher `v` is refused rather than misread.                                                                     |
+| `clk` | int    | The latest `now` observed for the origin, ms. It never decreases and is diagnostic metadata.                                                                    |
+| `g`   | int    | Generation — bumped by the shell once per committed write. Diagnostic only.                                                                                     |
+| `og`  | string | 16 lowercase hex chars of 64-bit FNV-1a over the origin string. A document whose `og` does not hash the origin it was read under is refused (`OriginMismatch`). |
+| `ta`  | int    | Deadline of the timer object currently armed for this origin — the minimum of every `pt`/`kt` deadline. Omitted when nothing is armed.                          |
 
 ### Promise (`"p"`)
 
-| field | type | meaning |
-|---|---|---|
-| `id` | string | Relative to the origin: `""` for the origin's own promise, the lineage after the first `':'` otherwise. `order-7:charge` is stored as `"charge"`. |
-| `st` | int | State: `0` pending, `1` resolved, `2` rejected, `3` rejected_canceled, `4` rejected_timedout. |
-| `tg` | map | Tags, keys sorted. Omitted when empty. |
-| `pm` | payload | Param. Omitted when empty. |
-| `vl` | payload | Value. Omitted when empty. |
-| `to` | int | `timeoutAt`, ms. |
-| `ca` | int | `createdAt`, ms. |
-| `sa` | int | `settledAt`, ms. Omitted while pending. |
-| `cb` | array | Callback awaiter ids (relative), in registration order — order is protocol-visible: a settlement fans out to awaiters in the order they registered. Omitted when empty. |
-| `ls` | array | Listener addresses, in registration order, unique. Not ids — never relativized. Omitted when empty. |
+| field | type    | meaning                                                                                                                                                                 |
+| ----- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`  | string  | Relative to the origin: `""` for the origin's own promise, the lineage after the first `':'` otherwise. `order-7:charge` is stored as `"charge"`.                       |
+| `st`  | int     | State: `0` pending, `1` resolved, `2` rejected, `3` rejected_canceled, `4` rejected_timedout.                                                                           |
+| `tg`  | map     | Tags, keys sorted. Omitted when empty.                                                                                                                                  |
+| `pm`  | payload | Param. Omitted when empty.                                                                                                                                              |
+| `vl`  | payload | Value. Omitted when empty.                                                                                                                                              |
+| `to`  | int     | `timeoutAt`, ms.                                                                                                                                                        |
+| `ca`  | int     | `createdAt`, ms.                                                                                                                                                        |
+| `sa`  | int     | `settledAt`, ms. Omitted while pending.                                                                                                                                 |
+| `cb`  | array   | Callback awaiter ids (relative), in registration order — order is protocol-visible: a settlement fans out to awaiters in the order they registered. Omitted when empty. |
+| `ls`  | array   | Listener addresses, in registration order, unique. Not ids — never relativized. Omitted when empty.                                                                     |
 
 A payload is `{"h":{...},"d":"..."}` — headers (keys sorted) and data, each
 half omitted when absent, so an empty payload is `{}` and is itself omitted.
 
 ### Task (`"k"`)
 
-A task's id *is* its promise's id, so `k` lines join to `p` lines by `id`.
+A task's id _is_ its promise's id, so `k` lines join to `p` lines by `id`.
 
-| field | type | meaning |
-|---|---|---|
-| `id` | string | Relative id, as above. |
-| `st` | int | State: `0` pending, `1` acquired, `2` suspended, `3` halted, `4` fulfilled. |
-| `v` | int | Version — the fencing token every task operation is checked against. |
-| `pid` | string | Owning process while acquired. Omitted otherwise. |
-| `ttl` | int | Lease length, ms. Omitted when absent. |
-| `rs` | array | Awaited promise ids (relative) whose settlement this task has not yet observed — `resumes` on the wire is this set's size. Omitted when empty. |
+| field | type   | meaning                                                                                                                                        |
+| ----- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`  | string | Relative id, as above.                                                                                                                         |
+| `st`  | int    | State: `0` pending, `1` acquired, `2` suspended, `3` halted, `4` fulfilled.                                                                    |
+| `v`   | int    | Version — the fencing token every task operation is checked against.                                                                           |
+| `pid` | string | Owning process while acquired. Omitted otherwise.                                                                                              |
+| `ttl` | int    | Lease length, ms. Omitted when absent.                                                                                                         |
+| `rs`  | array  | Awaited promise ids (relative) whose settlement this task has not yet observed — `resumes` on the wire is this set's size. Omitted when empty. |
 
 ### Armed deadlines (`"pt"`, `"kt"`)
 
 The document's own timeout tables — what the SQL backends keep in
 `promise_timeouts` and `task_timeouts`.
 
-| field | type | meaning |
-|---|---|---|
-| `dl` | int | Deadline, ms. |
-| `id` | string | Relative id. |
-| `k` | int | `kt` only — `0` retry (task pending, awaiting re-dispatch), `1` lease (task acquired, lease expiry). |
+| field | type   | meaning                                                                                              |
+| ----- | ------ | ---------------------------------------------------------------------------------------------------- |
+| `dl`  | int    | Deadline, ms.                                                                                        |
+| `id`  | string | Relative id.                                                                                         |
+| `k`   | int    | `kt` only — `0` retry (task pending, awaiting re-dispatch), `1` lease (task acquired, lease expiry). |
 
 A `pt` line exists for a pending promise that is external or runnable — one
 something can wait on. An internal promise never arms a timer: nothing can
@@ -131,8 +131,8 @@ produce identical bytes. The rules —
 - omission, never `null` / `[]` / `false` / `{}`, for anything empty.
 
 This is load-bearing, not cosmetic: the applier compares bytes to decide
-whether a write is needed at all (*if the decision changed nothing, write
-nothing*), and a writer recognizes its own landed write after a lost response
+whether a write is needed at all (_if the decision changed nothing, write
+nothing_), and a writer recognizes its own landed write after a lost response
 by re-encoding and comparing.
 
 ### Evolution
@@ -140,7 +140,7 @@ by re-encoding and comparing.
 The decoder skips unknown line types and unknown fields. That, plus
 omission-when-empty, is the whole compatibility story: a newer server may add
 both without breaking an older reader, and an older document never presents a
-field the newer reader cannot default. What is *not* tolerated: a header `v`
+field the newer reader cannot default. What is _not_ tolerated: a header `v`
 above the reader's own (refused as `UnsupportedVersion`), a body that is not
 the shape a document has (`Malformed`), and an `og` that does not hash the key
 (`OriginMismatch`).
@@ -190,7 +190,7 @@ pub struct TaskDoc {
 The mapping to the wire format is almost 1:1, with two folds and two
 derivations. The `"kt"` deadline lines are not separate state — they are
 `TaskDoc.retry_at` / `lease_at` folded into the task, and `check_invariants`
-holds them to *at most one armed*. The `"pt"` lines are **derived** on encode
+holds them to _at most one armed_. The `"pt"` lines are **derived** on encode
 from `PromiseDoc::timeout_armed()` (pending + carrying `resonate:target`), not
 stored. `timer_at` is likewise derived — the kernel maintains it as
 `min_deadline(&doc)` — and `PromiseDoc` deliberately derives `PartialEq`,
@@ -245,9 +245,9 @@ then `handleExternal`).
 
 **Per batch.** The applier's `decide()` ([`src/applier.rs`](src/applier.rs))
 folds a mailbox batch through the kernel sequentially: clone the loaded
-document, and for each work item run `handle` (or `drain`, for a tick), then
+document, and for each work item run `handle` (or `sweep`, for a tick), then
 `apply_effects(&mut doc, &fx)` — which takes the `SetDocument` payload as the
-new working document — so *request k sees request k−1's document*. The clock
+new working document — so _request k sees request k−1's document_. The clock
 folds monotonically here: `now = work.now().max(clock)`, so a caller with a
 regressed clock cannot un-expire anything. Sends accumulate across the batch;
 `decide` itself is pure — no I/O, no clock reads.
@@ -257,6 +257,6 @@ write law: if `changed()` finds promises, tasks and `timer_at` all equal —
 `clock` and `gen` are deliberately excluded, or every read would become a
 write — nothing is written at all. Otherwise: one conditional PUT of the
 whole document against the etag it was loaded at, so a hot origin costs one
-CAS per *batch* rather than one per request. Losing the race means the batch
+CAS per _batch_ rather than one per request. Losing the race means the batch
 is re-decided against the freshly loaded document, up to `max_cas_retries`
 times before the caller is told there is no answer.

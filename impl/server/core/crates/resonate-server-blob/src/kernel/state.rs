@@ -3,7 +3,7 @@
 //! # Contract
 //!
 //! Everything here is data. The transition function lives in
-//! [`handle`](super::handle) and [`drain`](super::drain), and is *defined* as
+//! [`handle`](super::handle) and [`sweep`](super::sweep), and is *defined* as
 //! `apply_effects(handle(&doc, ..).0)` — there is no second updater that could
 //! drift from the decider.
 //!
@@ -14,7 +14,7 @@
 //! origin (see the validators in `core::types`).
 //!
 //! Collections are `BTree*` so iteration order — and therefore the encoded
-//! bytes and the drain sweep — is a function of the state alone.
+//! bytes and the sweep — is a function of the state alone.
 //!
 //! # Dependencies
 //!
@@ -23,7 +23,7 @@
 //!
 //! # Dependants
 //!
-//! `handle` and `drain` decide over these types; the s3 applier applies the
+//! `handle` and `sweep` decide over these types; the s3 applier applies the
 //! effects and the s3 codec encodes the document.
 
 use std::collections::{BTreeMap, BTreeSet};

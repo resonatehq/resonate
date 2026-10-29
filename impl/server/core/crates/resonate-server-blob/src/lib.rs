@@ -3,7 +3,7 @@
 //!
 //! Two layers. The **kernel** is the protocol's state machine as a pure
 //! function — `handle(&doc, req, now) -> (Vec<Effect>, Reply)` and
-//! `drain(&doc, now) -> Vec<Effect>` — reading no clock, generating no ids,
+//! `sweep(&doc, now) -> Vec<Effect>` — reading no clock, generating no ids,
 //! touching no I/O. The **shell** performs what the kernel decides against one
 //! CAS'd object per origin, with one actor per origin so decisions on a
 //! document are serialized.
