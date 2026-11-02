@@ -33,6 +33,7 @@ from resonate.error import (
     ResonateTimeoutError,
     SerializationError,
     ServerError,
+    SpeculationMismatchError,
     StoppedError,
     Suspended,
 )
@@ -46,6 +47,7 @@ ERRORS = [
     AlreadyRegisteredError("bar"),
     ServerError(500, "boom"),
     StoppedError(),
+    SpeculationMismatchError("root.1"),
     DecodingError("bad bytes"),
     SerializationError(ValueError("nope")),
     ConnectorError(ValueError("net down")),

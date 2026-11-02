@@ -13,17 +13,19 @@ Conventions exercised throughout:
 * ``execute_until_blocked_outer`` returns :data:`Status` and raises on
   failure, so the error-path tests assert ``pytest.raises``.
 
-Two groups are intentionally omitted: the **short-circuit** branch (settling a
-root promise on LocalConnection auto-fulfills its task, so "acquired task +
-already-settled root promise" can't be constructed) and the **redirect loop**
-(needs an awaited promise settled at the exact instant ``task.suspend`` lands
--- a race LocalConnection can't produce deterministically). See the NOTE comments
-inline.
+The short-circuit branch is intentionally untested here: settling a root
+promise on LocalConnection auto-fulfills its task, so "acquired task +
+already-settled root promise" can't be constructed. A speculative flush that
+finds an awaited promise already terminal (a zero-duration sleep) is covered
+below -- that used to redirect forever, because the redirect preload is the
+task's branch and a timer is not on it.
 """
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -525,13 +527,11 @@ async def test_fire_and_forget_local_suspension(fix: CoreFixture) -> None:
     assert status == "suspended"
 
 
-# NOTE: Redirect-loop tests are intentionally omitted. Triggering a redirect
-# from a real workflow requires an
-# awaited promise to be settled at the exact moment Core's task.suspend lands --
-# a race LocalConnection cannot produce deterministically (awaiting a settled
-# record resolves inline and never registers a remote todo, so the workflow
-# can't ask to suspend on a settled awaited). The server-side redirect response
-# itself is covered by test_network.py.
+# A zero-duration sleep is the deterministic form of "awaited promise already
+# settled when task.suspend lands". Speculation logs the create as pending and
+# the body suspends; the flush then finds the server created the timer already
+# resolved. The redirect preload would not include it (its branch is its own
+# id), so Core re-executes with the terminal record carried forward instead.
 
 
 # ── Timer tasks (durable sleep) ─────────────────────────────────────────
@@ -561,6 +561,54 @@ async def _create_timer_promise(
         )
     )
     return await fix.promise_get_raw(id)
+
+
+@pytest.mark.asyncio
+async def test_zero_duration_sleep_completes(fix: CoreFixture) -> None:
+    # ``timeout_at <= now`` makes the server store the timer already resolved.
+    # The attempt must finish, not redirect until the lease dies.
+    async def sleeper(ctx: Context) -> str:
+        await ctx.sleep(timedelta(seconds=0))
+        return "awake"
+
+    fix.reg.register("sleeper", sleeper)
+    version, promise, preload = await fix.create_root_task("p-sleep0", "sleeper")
+
+    status = await asyncio.wait_for(
+        fix.core.execute_until_blocked_outer("p-sleep0", version, promise, preload),
+        timeout=5,
+    )
+
+    assert status == "done"
+    got = await fix.promise_get("p-sleep0")
+    assert got.state == "resolved"
+    assert got.value.data == "awake"
+    # The timer itself was stored, and stored resolved.
+    timer = await fix.promise_get_raw("p-sleep0:1")
+    assert timer.state == "resolved"
+    assert timer.tags.get("resonate:timer") == "true"
+
+
+@pytest.mark.asyncio
+async def test_future_sleep_still_suspends(fix: CoreFixture) -> None:
+    # A sleep whose deadline is still ahead stays pending through the flush,
+    # so the task really does suspend on it.
+    async def sleeper(ctx: Context) -> str:
+        await ctx.sleep(timedelta(seconds=30))
+        return "awake"
+
+    fix.reg.register("sleeper", sleeper)
+    version, promise, preload = await fix.create_root_task("p-sleep30", "sleeper")
+
+    status = await asyncio.wait_for(
+        fix.core.execute_until_blocked_outer("p-sleep30", version, promise, preload),
+        timeout=5,
+    )
+
+    assert status == "suspended"
+    timer = await fix.promise_get_raw("p-sleep30:1")
+    assert timer.state == "pending"
+    assert timer.tags.get("resonate:timer") == "true"
 
 
 @pytest.mark.asyncio

@@ -606,8 +606,10 @@ async def test_on_message_root_decode_failure_releases_task(
 
 @pytest.mark.asyncio
 async def test_chain_failure_rejects_created_so_successors_do_not_deadlock() -> None:
+    # Encode still fails inside ``create_promise``, before anything is logged.
+    # A server failure does not: creates are speculative until ``Effects.flush``,
+    # so this uses an unserializable arg to reject the link itself.
     sender = FailingSender(Transport(LocalConnection(pid="chain-pid")))
-    sender.fail_promise_create = True
     effects = ResonateEffects(sender, Codec(NoopEncryptor()), "r", 1, [])
     ctx = Context.root(
         id="r",
@@ -619,8 +621,11 @@ async def test_chain_failure_rejects_created_so_successors_do_not_deadlock() -> 
         deps=DependencyMap(),
     )
 
-    fut1 = ctx.rpc("a")
-    fut2 = ctx.rpc("b")
+    class Unserializable:
+        pass
+
+    fut1 = ctx.rpc("a", Unserializable())
+    fut2 = ctx.rpc("b", Unserializable())
 
     async def await_fut1() -> Any:
         return await fut1

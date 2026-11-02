@@ -16,6 +16,7 @@ import pytest
 
 from resonate.codec import Codec, NoopEncryptor, dec_hook
 from resonate.effects import ResonateEffects
+from resonate.error import PlatformError, SpeculationMismatchError
 from resonate.send import Sender
 from resonate.transport import Transport
 from resonate.types import PromiseCreateReq, PromiseRecord, Value
@@ -250,6 +251,9 @@ async def test_create_hits_network_when_promise_not_in_preload() -> None:
     req = PromiseCreateReq(id="p2", timeout_at=I64_MAX, param=Value(), tags={})
     record = await effects.create_promise(req)
     assert record.state == "pending"
+    # Logged, not sent. The sync point is what talks to the server.
+    assert harness.get_send_count() == 0
+    await effects.flush()
     assert harness.get_send_count() == 1
 
 
@@ -260,10 +264,13 @@ async def test_create_adds_to_cache_second_call_uses_cache() -> None:
 
     req = PromiseCreateReq(id="p3", timeout_at=I64_MAX, param=Value(), tags={})
     await effects.create_promise(req)
-    assert harness.get_send_count() == 1
+    assert harness.get_send_count() == 0
 
     record = await effects.create_promise(req)
     assert record.state == "pending"
+    assert harness.get_send_count() == 0
+    # The second call was a cache hit, so the batch carries one create.
+    await effects.flush()
     assert harness.get_send_count() == 1
 
 
@@ -291,6 +298,8 @@ async def test_settle_hits_network_when_preloaded_promise_is_pending() -> None:
 
     record = await effects.settle_promise("s2", "ok")
     assert record.state == "resolved"
+    assert harness.get_send_count() == 0
+    await effects.flush()
     assert harness.get_send_count() == 1
 
 
@@ -302,15 +311,17 @@ async def test_settle_updates_cache_second_settle_is_cached() -> None:
     # Create the promise first.
     req = PromiseCreateReq(id="s3", timeout_at=I64_MAX, param=Value(), tags={})
     await effects.create_promise(req)
-    assert harness.get_send_count() == 1
+    assert harness.get_send_count() == 0
 
-    # Settle it.
+    # Settle it. Still local until the flush.
     await effects.settle_promise("s3", "done")
-    assert harness.get_send_count() == 2
+    assert harness.get_send_count() == 0
 
     # Second settle should use cache.
     record = await effects.settle_promise("s3", "done")
     assert record.state == "resolved"
+    assert harness.get_send_count() == 0
+    await effects.flush()
     assert harness.get_send_count() == 2
 
 
@@ -323,6 +334,8 @@ async def test_settle_hits_network_when_promise_not_in_cache() -> None:
 
     record = await effects.settle_promise("s4", "ok")
     assert record.state == "resolved"
+    assert harness.get_send_count() == 0
+    await effects.flush()
     assert harness.get_send_count() == 1
 
 
@@ -413,3 +426,114 @@ async def test_multiple_preloaded_promises_each_have_correct_values() -> None:
     assert r3.value.data == [1, 2, 3]
 
     assert harness.get_send_count() == 0
+
+
+def _create(id: str, scope: str) -> PromiseCreateReq:
+    return PromiseCreateReq(
+        id=id,
+        timeout_at=I64_MAX,
+        param=Value(),
+        tags={"resonate:scope": scope},
+    )
+
+
+# =============================================================================
+# flush: prune, then one ordered batch
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_flush_drops_a_pending_local_create() -> None:
+    """A local promise that never settled is not a checkpoint. Replay re-runs it."""
+    harness = Harness()
+    effects = harness.build_effects([])
+
+    await effects.create_promise(_create("local.1", "local"))
+    await effects.flush()
+
+    assert harness.get_send_count() == 0
+    assert "local.1" not in harness.network.promises
+
+
+@pytest.mark.asyncio
+async def test_flush_keeps_a_pending_local_create_the_suspend_awaits() -> None:
+    harness = Harness()
+    effects = harness.build_effects([])
+
+    await effects.create_promise(_create("local.1", "local"))
+    await effects.flush(["local.1"])
+
+    assert harness.get_send_count() == 1
+    assert harness.network.promises["local.1"].state == "pending"
+
+
+@pytest.mark.asyncio
+async def test_flush_sends_a_local_create_and_its_settle() -> None:
+    """A finished local body is the checkpoint. Both ops go, create first."""
+    harness = Harness()
+    effects = harness.build_effects([])
+
+    await effects.create_promise(_create("local.1", "local"))
+    record = await effects.settle_promise("local.1", 7)
+    assert record.value.data == 7
+    assert harness.get_send_count() == 0
+
+    await effects.flush()
+
+    assert harness.get_send_count() == 2
+    stored = harness.network.promises["local.1"]
+    assert stored.state == "resolved"
+
+
+@pytest.mark.asyncio
+async def test_flush_keeps_a_global_create_that_nobody_awaited() -> None:
+    """Detached and other global creates must exist even with an empty todo set."""
+    harness = Harness()
+    effects = harness.build_effects([])
+
+    await effects.create_promise(_create("remote.1", "global"))
+    await effects.flush()
+
+    assert harness.get_send_count() == 1
+    assert harness.network.promises["remote.1"].state == "pending"
+
+
+@pytest.mark.asyncio
+async def test_flush_drops_only_the_pending_local_beside_a_remote_todo() -> None:
+    harness = Harness()
+    effects = harness.build_effects([])
+
+    await effects.create_promise(_create("local.1", "local"))
+    await effects.create_promise(_create("remote.1", "global"))
+    await effects.flush(["remote.1"])
+
+    assert harness.get_send_count() == 1
+    assert "local.1" not in harness.network.promises
+    assert "remote.1" in harness.network.promises
+
+
+@pytest.mark.asyncio
+async def test_flush_aborts_the_batch_when_the_server_disagrees() -> None:
+    """The body ran as if create returned pending. The server already settled it.
+
+    The conflicting settle is not sent, and neither is anything logged after it.
+    """
+    harness = Harness()
+    harness.add_promise(resolved_promise("c1", 1))
+    effects = harness.build_effects([])
+
+    created = await effects.create_promise(_create("c1", "local"))
+    assert created.state == "pending"
+    await effects.settle_promise("c1", 2)
+    await effects.create_promise(_create("remote.1", "global"))
+
+    with pytest.raises(PlatformError) as exc:
+        await effects.flush(["remote.1"])
+
+    assert isinstance(exc.value.cause, SpeculationMismatchError)
+    assert exc.value.cause.id == "c1"
+    # The create was sent; the settle and the later remote create were not.
+    assert harness.get_send_count() == 1
+    assert "remote.1" not in harness.network.promises
+    stored = harness.network.promises["c1"]
+    assert stored.state == "resolved"

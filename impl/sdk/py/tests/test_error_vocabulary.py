@@ -37,6 +37,7 @@ from resonate.error import (
     SenderError,
     SerializationError,
     ServerError,
+    SpeculationMismatchError,
     StoppedError,
     Suspended,
 )
@@ -61,6 +62,10 @@ _VARIANTS: list[tuple[ResonateError, str]] = [
     ),
     (ServerError(503, "unavailable"), "server error (code=503): unavailable"),
     (StoppedError(), "execution stopped"),
+    (
+        SpeculationMismatchError("root.1"),
+        "speculative execution of root.1 disagreed with the server",
+    ),
     (DecodingError("bad shape"), "decoding error: bad shape"),
     (SerializationError(ValueError("nope")), "serialization error: nope"),
     (ConnectorError(OSError("refused")), "connector error: refused"),
@@ -139,7 +144,12 @@ def test_durable_op_error_union_extends_the_sender_vocabulary() -> None:
     """A durable op inherits the sender's failures and adds the codec's."""
     durable = members(DurableOpError)
     assert members(SenderError) <= durable
-    assert {SerializationError, Base64DecodeError, StoppedError} <= durable
+    assert {
+        SerializationError,
+        Base64DecodeError,
+        StoppedError,
+        SpeculationMismatchError,
+    } <= durable
 
 
 def test_dispatch_error_union_covers_the_front_door() -> None:
@@ -160,11 +170,12 @@ def test_stopped_error_is_not_a_server_failure() -> None:
 
 @pytest.mark.asyncio
 async def test_stopped_error_is_the_cause_after_a_prior_durable_failure() -> None:
-    """The second durable op in a broken attempt fails with ``StoppedError``.
+    """After the flush's first fence fails, later ops fail with ``StoppedError``.
 
-    This is the circuit breaker: once one op has failed, every later one
-    short-circuits so no further durable work happens before the task is
-    released.
+    Creates and settles are logged without touching the server. The flush is
+    the circuit breaker: the first fence failure stops the rest of that batch,
+    and every durable op after it short-circuits so no further work is sent
+    before the task is released.
     """
 
     class Broken:
@@ -183,18 +194,26 @@ async def test_stopped_error_is_the_cause_after_a_prior_durable_failure() -> Non
     effects = ResonateEffects(Broken(), Codec(NoopEncryptor()), "t", 1, [])
     req = PromiseCreateReq(id="p1", timeout_at=FAR_FUTURE, param=Value(), tags={})
 
+    # Both ops are logged locally. The server is not touched until the flush,
+    # and the first fence failure there stops the rest of the batch.
+    await effects.create_promise(req)
+    await effects.create_promise(
+        PromiseCreateReq(id="p2", timeout_at=FAR_FUTURE, param=Value(), tags={})
+    )
+    await effects.settle_promise("p1", 1)
+
     with pytest.raises(PlatformError) as first:
-        await effects.create_promise(req)
+        await effects.flush()
     assert isinstance(first.value.cause, ServerError)
 
     with pytest.raises(PlatformError) as second:
         await effects.create_promise(
-            PromiseCreateReq(id="p2", timeout_at=FAR_FUTURE, param=Value(), tags={})
+            PromiseCreateReq(id="p3", timeout_at=FAR_FUTURE, param=Value(), tags={})
         )
     assert isinstance(second.value.cause, StoppedError)
 
     with pytest.raises(PlatformError) as third:
-        await effects.settle_promise("p1", 1)
+        await effects.flush()
     assert isinstance(third.value.cause, StoppedError)
 
 

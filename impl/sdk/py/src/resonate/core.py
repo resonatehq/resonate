@@ -218,6 +218,13 @@ class Core(msgspec.Struct, kw_only=True):
                     promise.id,
                 )
                 current_preload = preload
+                # Terminal records the branch preload does not carry. A global
+                # promise (sleep, rpc, detached) is its own branch, so a
+                # redirect -- or a re-execution after the flush learned the
+                # promise was already settled -- would otherwise speculate it
+                # pending again and suspend forever.
+                carried: list[PromiseRecord] = []
+                effects: ResonateEffects | None = None
                 while True:
                     effects = ResonateEffects(
                         self.fencing,
@@ -226,8 +233,16 @@ class Core(msgspec.Struct, kw_only=True):
                         task_version,
                         current_preload,
                         self.observer,
+                        carried,
                     )
                     outcome = await self.execute_until_blocked_inner(promise, effects)
+                    # Sync point. Creates and settles were logged, not sent.
+                    # Prune and apply that batch before the task changes state,
+                    # so a suspend's callbacks name promises the server has.
+                    await effects.flush(
+                        outcome.todos if isinstance(outcome, _ExecSuspended) else ()
+                    )
+                    carried = effects.terminal_records()
 
                     match outcome:
                         case _ExecFulfilled(state=state, value=value):
@@ -255,6 +270,20 @@ class Core(msgspec.Struct, kw_only=True):
                             return "done"
 
                         case _ExecSuspended(todos=todos):
+                            # The body suspended on a promise this flush just
+                            # learned is terminal (a zero-duration sleep, an
+                            # idempotent create of an already-settled promise).
+                            # Suspending would only redirect, and the redirect
+                            # preload would drop that promise. Re-enter with it
+                            # carried, which is what an eager create would have
+                            # done by returning the settled record inline.
+                            if effects.todos_settled(todos):
+                                logger.debug(
+                                    "core: awaited promises already terminal, "
+                                    "re-executing task_id=%s",
+                                    task_id,
+                                )
+                                continue
                             logger.debug(
                                 "core: attempting to suspend task task_id=%s "
                                 "remote_deps=%d",
@@ -301,6 +330,18 @@ class Core(msgspec.Struct, kw_only=True):
                     task_id,
                     promise.id,
                 )
+                # Checkpoints logged before the failure still have to land, or
+                # the retry re-runs bodies that already finished. A flush that
+                # itself failed has set ``stopped`` and must not be retried.
+                if effects is not None and effects.has_unsent():
+                    try:
+                        await effects.flush()
+                    except (ResonateError, PlatformError):
+                        logger.exception(
+                            "core: failed to flush speculative log before release "
+                            "task_id=%s",
+                            task_id,
+                        )
                 try:
                     await self.sender.task_release(task_id, task_version)
                 except ResonateError:

@@ -43,6 +43,7 @@ __all__ = [
     "SenderError",
     "SerializationError",
     "ServerError",
+    "SpeculationMismatchError",
     "StoppedError",
     "Suspended",
 ]
@@ -107,6 +108,23 @@ class StoppedError(ResonateError):
 
     def __str__(self) -> str:
         return "execution stopped"
+
+
+class SpeculationMismatchError(ResonateError):
+    """A speculative create disagreed with the promise already on the server.
+
+    The attempt ran a body as if ``promise.create`` had returned pending, then
+    the flush found that promise already settled with a different value. The
+    speculative settle is not sent. The task is released so the next attempt
+    sees the server's record in the preload and skips the body.
+    """
+
+    def __init__(self, id: str) -> None:
+        self.id = id
+        super().__init__(id)
+
+    def __str__(self) -> str:
+        return f"speculative execution of {self.id} disagreed with the server"
 
 
 class DecodingError(ResonateError):
@@ -225,10 +243,16 @@ type SenderError = ServerError | DecodingError | ConnectorError
 
 #: What one durable operation (:mod:`resonate.effects`) can fail with -- the
 #: sender's vocabulary plus the codec's, plus the circuit-breaker's
-#: :class:`StoppedError` for an op skipped after a prior failure. This is the
-#: set that arrives wrapped in a :class:`PlatformError`'s ``causes``.
+#: :class:`StoppedError` for an op skipped after a prior failure, plus
+#: :class:`SpeculationMismatchError` when a flushed create disagrees with the
+#: server. This is the set that arrives wrapped in a :class:`PlatformError`'s
+#: ``causes``.
 type DurableOpError = (
-    SenderError | SerializationError | Base64DecodeError | StoppedError
+    SenderError
+    | SerializationError
+    | Base64DecodeError
+    | StoppedError
+    | SpeculationMismatchError
 )
 
 #: What the SDK's *front door* (register / run / rpc / get) can fail with
@@ -267,6 +291,7 @@ if TYPE_CHECKING:
                 | SerializationError()
                 | Base64DecodeError()
                 | StoppedError()
+                | SpeculationMismatchError()
             ):
                 pass
             case _:

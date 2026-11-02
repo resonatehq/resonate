@@ -180,6 +180,8 @@ async def test_durable_op_events_bracket_each_network_round_trip() -> None:
         )
     )
     await effects.settle_promise("root.1", 42)
+    # The round trip happens at the flush, not at the call.
+    await effects.flush()
 
     kinds = [type(e).__name__ for e in observer.events]
     assert kinds == [
@@ -207,6 +209,7 @@ async def test_global_scope_is_reported_as_an_rpc_invocation() -> None:
             tags={"resonate:scope": "global"},
         )
     )
+    await effects.flush()
     assert observer.of(PromiseCreateRequested)[0].invocation == "rpc"
 
 
@@ -218,6 +221,7 @@ async def test_untagged_scope_is_reported_as_unknown() -> None:
     await effects.create_promise(
         PromiseCreateReq(id="root.1", timeout_at=FAR_FUTURE, param=Value(), tags={})
     )
+    await effects.flush()
     assert observer.of(PromiseCreateRequested)[0].invocation == "unknown"
 
 
