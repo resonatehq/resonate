@@ -36,6 +36,7 @@ use super::Unavailable;
 ///
 /// `new` builds a value and cannot fail. Everything that can fail, and
 /// everything that starts a background task, belongs in [`init`](Self::init).
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait ResonateWorker: Send + Sync {
     /// Acquire resources and start background work.

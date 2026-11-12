@@ -54,6 +54,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use serde::Deserialize;
 use sqlx::Connection;
 
 #[derive(Parser)]
@@ -173,6 +174,24 @@ fn cargo() -> Command {
     let mut c = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()));
     c.current_dir(core());
     c
+}
+
+#[derive(Deserialize)]
+struct CargoMetadata {
+    target_directory: PathBuf,
+}
+
+fn target_dir() -> Result<PathBuf> {
+    let output = cargo()
+        .args(["metadata", "--format-version", "1", "--no-deps"])
+        .output()
+        .map_err(|e| format!("cargo metadata: cannot start: {e}"))?;
+    if !output.status.success() {
+        return Err(format!("cargo metadata: {status}", status = output.status));
+    }
+    let metadata: CargoMetadata = serde_json::from_slice(&output.stdout)
+        .map_err(|e| format!("cargo metadata: invalid output: {e}"))?;
+    Ok(metadata.target_directory)
 }
 
 fn run(what: &str, cmd: &mut Command) -> Result<()> {
@@ -602,6 +621,7 @@ fn scratch(purpose: &str) -> Result<PathBuf> {
 
 async fn porcupine(backend: Backend, db: &DbArgs, porc: &PorcArgs) -> Result<()> {
     let spec = spec_dir(porc)?;
+    let target_dir = target_dir()?;
     if Command::new("go").arg("version").output().is_err() {
         return Err("the linearizability check needs `go` on PATH".into());
     }
@@ -620,7 +640,7 @@ async fn porcupine(backend: Backend, db: &DbArgs, porc: &PorcArgs) -> Result<()>
     with_fresh_db(backend, db, "porcupine", move |url| {
         let dir = scratch("porcupine")?;
         let port = free_port()?;
-        let mut server = Command::new(core().join("target/release/resonate"));
+        let mut server = Command::new(target_dir.join("release/resonate"));
         server
             .arg("serve")
             .current_dir(&dir)
@@ -694,7 +714,7 @@ async fn porcupine(backend: Backend, db: &DbArgs, porc: &PorcArgs) -> Result<()>
         // to be concurrent, fails here rather than linearizing vacuously.
         run(
             "conctrace",
-            Command::new(core().join("target/release/examples/conctrace"))
+            Command::new(target_dir.join("release/examples/conctrace"))
                 .current_dir(&dir)
                 .args([
                     "--url",

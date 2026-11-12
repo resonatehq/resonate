@@ -90,6 +90,7 @@ use resonate_plugin::{ResonateServer, ResonateWorker, Unavailable};
 // Every backend just runs a script and returns an outcome. Lifecycle plumbing
 // (acquire / heartbeat / fulfill / reject) lives in `run_task` below.
 
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait ExecBackend: Send + Sync {
     fn name(&self) -> &'static str;
@@ -532,6 +533,23 @@ async fn run_task(
 
 pub struct LocalBackend;
 
+#[cfg(unix)]
+fn process_exit_status(status: &std::process::ExitStatus) -> (i32, bool) {
+    use std::os::unix::process::ExitStatusExt;
+
+    let killed = status.signal().is_some();
+    let code = status
+        .code()
+        .or_else(|| status.signal().map(|signal| 128 + signal))
+        .unwrap_or(-1);
+    (code, killed)
+}
+
+#[cfg(not(unix))]
+fn process_exit_status(status: &std::process::ExitStatus) -> (i32, bool) {
+    (status.code().unwrap_or(-1), false)
+}
+
 #[async_trait]
 impl ExecBackend for LocalBackend {
     fn name(&self) -> &'static str {
@@ -555,13 +573,7 @@ impl ExecBackend for LocalBackend {
         match child.wait_with_output().await {
             Err(e) => err(format!("bash wait failed: {e}")),
             Ok(out) => {
-                use std::os::unix::process::ExitStatusExt;
-                let killed = out.status.signal().is_some();
-                let code = out
-                    .status
-                    .code()
-                    .or_else(|| out.status.signal().map(|s| 128 + s))
-                    .unwrap_or(-1);
+                let (code, killed) = process_exit_status(&out.status);
                 ok(
                     code,
                     String::from_utf8_lossy(&out.stdout).to_string(),
@@ -605,13 +617,12 @@ impl ExecBackend for DockerBackend {
         match child.wait_with_output().await {
             Err(e) => err(format!("docker wait failed: {e}")),
             Ok(out) => {
-                use std::os::unix::process::ExitStatusExt;
-                let code = out.status.code().unwrap_or(-1);
+                let (code, cli_killed) = process_exit_status(&out.status);
                 // `docker run` exits normally even when the container was killed —
                 // it propagates the container's exit code as 128+signal. Treat the
                 // common signal codes (137=SIGKILL, 143=SIGTERM) as kills, plus the
                 // case where the docker CLI itself was signal-killed.
-                let killed = out.status.signal().is_some() || matches!(code, 137 | 143);
+                let killed = cli_killed || matches!(code, 137 | 143);
                 ok(
                     code,
                     String::from_utf8_lossy(&out.stdout).to_string(),

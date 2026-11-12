@@ -59,6 +59,7 @@ use super::Unavailable;
 /// nowhere to go. That is the ordinary best-effort delivery contract — an
 /// execute message is re-emitted by its retry deadline — and it is a better
 /// failure than a refused connection.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait ResonateGateway: Send + Sync {
     /// Acquire resources and begin accepting requests.

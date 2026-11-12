@@ -78,6 +78,7 @@ impl std::fmt::Display for StoreError {
 impl std::error::Error for StoreError {}
 
 /// An object store with real conditional writes.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait Store: Send + Sync {
     /// Read an object and its version. `Ok(None)` if it does not exist.

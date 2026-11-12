@@ -5767,6 +5767,8 @@ version = "0.0.0"
 dependencies = [
  "clap",
  "neo4rs",
+ "serde",
+ "serde_json",
  "sqlx",
  "tokio",
  "url",

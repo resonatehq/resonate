@@ -188,6 +188,7 @@ impl Output {
 /// The lock-step contract: given the same input at the same time, every
 /// implementation must produce the same response and emit the same messages.
 /// Nothing about *how* state is stored appears here.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait Engine: Send + Sync {
     /// Apply one input at `now`.
