@@ -20,8 +20,8 @@ native-tls = "0.2"
 serde_json = "1"
 tracing = "0.1"
 async-trait = "0.1"
-parking_lot = "0.12"
+parking_lot = "0.13"
 futures = "0.3"
 
 [dev-dependencies]
-test-with = "0.16"
+test-with = "0.17"
