@@ -1,5 +1,5 @@
 # golangci-lint configuration for resonate-sdk-go
-# Schema: golangci-lint v2 (CI pins v2.12.2)
+# Schema: golangci-lint v2 (CI pins v2.15.0)
 
 version: "2"
 

@@ -3,7 +3,9 @@
 #
 # golangci-lint takes its own working directory, and the module cache its own
 # dependency path, because neither is a `run:` step. The cache is keyed on
-# go.mod: this module has no go.sum.
+# go.mod: this module has no go.sum. setup-go's go-version-file is likewise
+# resolved from the repository root; go.mod's `toolchain` line names the exact
+# Go release, and GOTOOLCHAIN=auto switches to it if setup-go installs older.
 
 name: sdk-go
 
@@ -35,7 +37,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version-file: impl/sdk/go/go.mod
           cache: true
           cache-dependency-path: impl/sdk/go/go.mod
 
@@ -56,7 +58,7 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.12.2
+          version: v2.15.0
           working-directory: impl/sdk/go
 
       - name: Build all packages
@@ -79,7 +81,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version-file: impl/sdk/go/go.mod
           cache: true
           cache-dependency-path: impl/sdk/go/go.mod
 
