@@ -1,0 +1,13 @@
+# The one Rust toolchain for every Rust project in this repository: CI, local
+# builds, and (by hand, see below) the Dockerfiles. rustup reads this file from
+# any subdirectory, so `cargo` anywhere under the repo uses this version.
+#
+# Upgrade it on purpose, in its own PR: a new stable can add lints that
+# `clippy -D warnings` rejects, or stop compiling an old dependency. When you
+# change `channel`, change the `FROM rust:<version>` lines in
+# impl/server/core/Dockerfile, .docker/Dockerfile.test and diff/Dockerfile too;
+# Docker builds don't read this file.
+[toolchain]
+channel = "1.100"
+components = ["rustfmt", "clippy"]
+profile = "minimal"
