@@ -22,7 +22,7 @@ validator = { workspace = true }
 tokio = { version = "1", features = ["rt", "sync", "macros", "time"] }
 tracing = "0.1"
 lazy_static = "1"
-cron = "0.12"
+cron = "0.17"
 chrono = "0.4"
 uuid = { version = "1", features = ["v4"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }

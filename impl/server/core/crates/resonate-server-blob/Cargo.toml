@@ -14,7 +14,7 @@ serde_json = { workspace = true }
 validator = { workspace = true }
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
-cron = "0.12"
+cron = "0.17"
 chrono = "0.4"
 lazy_static = "1"
 futures = "0.3"

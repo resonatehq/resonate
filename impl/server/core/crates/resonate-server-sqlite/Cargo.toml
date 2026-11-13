@@ -23,5 +23,5 @@ rusqlite = { version = "0.39", features = ["bundled"] }
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls-ring-webpki", "macros", "migrate"] }
 
 [dev-dependencies]
-base64 = "0.22"
+base64 = "0.23"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
