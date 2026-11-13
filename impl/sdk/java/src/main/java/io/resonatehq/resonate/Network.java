@@ -1269,7 +1269,10 @@ public interface Network {
         private final String group;
         private final String unicast;
         private final String anycast;
-        private final ReentrantLock lock = new ReentrantLock();
+        // Guards {@link #state}. Package-private so tests that inspect {@code state} directly take
+        // the same lock as the tick thread and dispatch; synchronizing on {@code state} would not
+        // exclude them.
+        final ReentrantLock lock = new ReentrantLock();
         private final List<Consumer<String>> subscribers = new ArrayList<>();
         private volatile Thread tickThread;
         // Single virtual worker so dispatch stays FIFO (ordering matters) while still being

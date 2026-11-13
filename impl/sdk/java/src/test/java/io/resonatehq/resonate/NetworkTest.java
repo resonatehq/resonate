@@ -614,13 +614,16 @@ class NetworkTest {
                 deadline,
                 Map.of("resonate:scope", "global", "resonate:target", "poll://any@default"));
 
-        synchronized (net.state) {
+        net.lock.lock();
+        try {
             java.util.Set<String> scheduled = new java.util.HashSet<>();
             for (Network.PTimeout pt : net.state.pTimeouts) {
                 scheduled.add(pt.id);
             }
             assertTrue(scheduled.contains("with-target"), scheduled.toString());
             assertFalse(scheduled.contains("no-target"), scheduled.toString());
+        } finally {
+            net.lock.unlock();
         }
     }
 
@@ -638,12 +641,15 @@ class NetworkTest {
                         "resonate:target", "poll://any@default",
                         "resonate:timer", "true"));
 
-        synchronized (net.state) {
+        net.lock.lock();
+        try {
             net.state.tick(deadline + 1);
             // The timer fires -- and resonate:timer settles it RESOLVED, which is what wakes a
             // sleeping workflow. The bare promise is left alone.
             assertEquals("resolved", net.state.promises.get("timer").state);
             assertEquals("pending", net.state.promises.get("bare").state);
+        } finally {
+            net.lock.unlock();
         }
     }
 }
