@@ -25,7 +25,9 @@ module.exports = {
         esModuleInterop: true
       }
     }],
-    [`/node_modules/(${esmOnlyDeps.join("|")})/.+\\.js$`]: ["ts-jest", {
+    // Unlike transformIgnorePatterns, transform keys are matched against the
+    // raw file path, so accept both separators for Windows.
+    [`[/\\\\]node_modules[/\\\\](${esmOnlyDeps.join("|")})[/\\\\].+\\.js$`]: ["ts-jest", {
       useESM: true,
       tsconfig: {
         allowJs: true,
