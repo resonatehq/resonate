@@ -1,18 +1,18 @@
 <script lang="ts">
-  import { base } from '$app/paths';
+  import { resolve } from '$app/paths';
   import { untrack } from 'svelte';
   import { goto } from '$app/navigation';
-  import { searchExecutions, RpcError } from '$lib/api';
-  import { settings } from '$lib/settings.svelte';
-  import { shell, setPage, matches, scrollToTop } from '$lib/shell.svelte';
-  import { stamp } from '$lib/format';
-  import { STATE_FILTERS, type ExecutionItem, type PromiseState } from '$lib/types';
-  import Status from '$lib/components/Status.svelte';
-  import ErrorPanel from '$lib/components/ErrorPanel.svelte';
-  import StaleNotice from '$lib/components/StaleNotice.svelte';
-  import Empty from '$lib/components/Empty.svelte';
-  import Loading from '$lib/components/Loading.svelte';
-  import InvokeDialog from '$lib/components/InvokeDialog.svelte';
+  import { searchExecutions, RpcError } from '#lib/api.ts';
+  import { settings } from '#lib/settings.svelte.ts';
+  import { shell, setPage, matches, scrollToTop } from '#lib/shell.svelte.ts';
+  import { stamp } from '#lib/format.ts';
+  import { STATE_FILTERS, type ExecutionItem, type PromiseState } from '#lib/types.ts';
+  import Status from '#lib/components/Status.svelte';
+  import ErrorPanel from '#lib/components/ErrorPanel.svelte';
+  import StaleNotice from '#lib/components/StaleNotice.svelte';
+  import Empty from '#lib/components/Empty.svelte';
+  import Loading from '#lib/components/Loading.svelte';
+  import InvokeDialog from '#lib/components/InvokeDialog.svelte';
 
   /**
    * Find the execution you care about.
@@ -181,7 +181,7 @@
     onclose={() => (invoking = false)}
     oncreated={(id) => {
       invoking = false;
-      goto(`${base}/executions/${encodeURIComponent(id)}`);
+      goto(resolve(`executions/${encodeURIComponent(id)}`));
     }}
   />
 {/if}
@@ -256,11 +256,11 @@
           class="row"
           role="button"
           tabindex="0"
-          onclick={() => goto(`${base}/executions/${encodeURIComponent(row.id)}`)}
+          onclick={() => goto(resolve(`executions/${encodeURIComponent(row.id)}`))}
           onkeydown={(e) => {
             if (e.key === 'Enter' || e.key === ' ') {
               e.preventDefault();
-              void goto(`${base}/executions/${encodeURIComponent(row.id)}`);
+              void goto(resolve(`executions/${encodeURIComponent(row.id)}`));
             }
           }}
         >

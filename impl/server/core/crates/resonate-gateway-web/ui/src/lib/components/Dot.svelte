@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { PromiseState } from '$lib/types';
+  import type { PromiseState } from '#lib/types.ts';
 
   /** The glyph on its own, for rows that carry their own label. */
   let { state }: { state: PromiseState } = $props();
