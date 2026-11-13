@@ -13,15 +13,16 @@ This module imports ``pydantic_ai.mcp`` and must only be imported when the
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 from pydantic_ai import WrapperToolset
 from pydantic_ai.mcp import MCPToolset, ToolResult
 from pydantic_ai.messages import InstructionPart
-from pydantic_ai.tools import AgentDepsT, ToolDefinition
+from pydantic_ai.tools import ToolDefinition
 
 from resonate.ext.pydantic_ai.context import workflow_context
+from resonate.ext.pydantic_ai.types import AgentDepsT
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -114,8 +115,7 @@ class ResonateMCPToolset(WrapperToolset[AgentDepsT]):
     @property
     def _toolset(self) -> MCPToolset[AgentDepsT]:
         assert isinstance(self.wrapped, MCPToolset)
-        # `isinstance` erases the deps type parameter; restore it.
-        return cast("MCPToolset[AgentDepsT]", self.wrapped)
+        return self.wrapped
 
     @property
     def id(self) -> str | None:

@@ -28,7 +28,7 @@ from resonate.resonate import Resonate
 from resonate.retry import Never
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Mapping
+    from collections.abc import AsyncGenerator, Mapping
 
     from resonate.context import Context
 
@@ -101,7 +101,7 @@ async def top(ctx: Context, n: int) -> int:
 
 
 @contextlib.asynccontextmanager
-async def _workflow(id: str) -> AsyncIterator[dict[str, Any]]:
+async def _workflow(id: str) -> AsyncGenerator[dict[str, Any]]:
     """Run the workflow above and yield the local server's promise table."""
     r = Resonate(retry_policy=Never())
     for fn in (top, mid, grandchild, leaf, detaches_again, tail):

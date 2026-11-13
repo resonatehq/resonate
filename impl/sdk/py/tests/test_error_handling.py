@@ -55,7 +55,7 @@ from resonate.retry import Never
 from resonate.types import Value
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
 
     from resonate.context import Context
     from resonate.types import PromiseRecord
@@ -65,7 +65,7 @@ if TYPE_CHECKING:
 
 
 @contextlib.asynccontextmanager
-async def local() -> AsyncIterator[Resonate]:
+async def local() -> AsyncGenerator[Resonate]:
     """Yield a local-mode Resonate, stopping it on exit."""
     # Pin ``Never``: these orchestrators run failing pure-leaf steps via
     # ``ctx.run``, which the SDK-default Exponential would retry forever.

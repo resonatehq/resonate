@@ -52,7 +52,7 @@ from resonate.transport import Transport
 from resonate.types import PromiseRecord, Value
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterable, AsyncIterator
+    from collections.abc import AsyncGenerator, AsyncIterable
 
     from pydantic_ai.messages import AgentStreamEvent
 
@@ -65,7 +65,7 @@ I64_MAX = 2**63 - 1
 
 
 @contextlib.asynccontextmanager
-async def local() -> AsyncIterator[Resonate]:
+async def local() -> AsyncGenerator[Resonate]:
     """Yield a local-mode Resonate, stopping it on exit.
 
     Pins ``Never`` so a failing leaf settles immediately instead of retrying

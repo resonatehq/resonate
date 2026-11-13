@@ -23,6 +23,19 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.tools import DeferredToolResults
 from pydantic_ai.usage import RunUsage, UsageLimits
+from typing_extensions import TypeVar
+
+AgentDepsT = TypeVar("AgentDepsT", default=object)
+"""Deps type parameter of ``ResonateAgent`` and ``ResonateMCPToolset``.
+
+Pydantic AI declares its own ``AgentDepsT`` contravariant, but the wrappers
+use it in invariant positions (``dict[str, ToolsetTool[AgentDepsT]]``,
+``Callable[[AbstractToolset[AgentDepsT]], ...]`` and the like), which type
+checkers that verify declared variance reject. An invariant type variable is
+always a valid argument for the contravariant parameter of the base classes,
+so the wrappers declare this one instead; the ``object`` default mirrors
+Pydantic AI's.
+"""
 
 
 class ModelResponseEnvelope(BaseModel):

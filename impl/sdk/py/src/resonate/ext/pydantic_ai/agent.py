@@ -29,7 +29,6 @@ from pydantic_ai.exceptions import UserError
 from pydantic_ai.models import Model
 from pydantic_ai.output import OutputDataT
 from pydantic_ai.run import AgentRunResult
-from pydantic_ai.tools import AgentDepsT
 
 from resonate.ext.pydantic_ai.context import (
     reset_workflow_context,
@@ -37,7 +36,12 @@ from resonate.ext.pydantic_ai.context import (
     workflow_context,
 )
 from resonate.ext.pydantic_ai.model import ResonateModel
-from resonate.ext.pydantic_ai.types import BaseRunResult, RunParams, run_result_model
+from resonate.ext.pydantic_ai.types import (
+    AgentDepsT,
+    BaseRunResult,
+    RunParams,
+    run_result_model,
+)
 from resonate.resonate import Resonate
 
 if TYPE_CHECKING:
@@ -202,12 +206,7 @@ class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 pass
             else:
                 if isinstance(toolset, MCPToolset):
-                    # `isinstance` erases the toolset's deps type parameter, so
-                    # restore it for the wrapper.
-                    return ResonateMCPToolset(
-                        cast("MCPToolset[AgentDepsT]", toolset),
-                        retry_policy=mcp_retry_policy,
-                    )
+                    return ResonateMCPToolset(toolset, retry_policy=mcp_retry_policy)
             return toolset
 
         self._toolsets = [
@@ -794,7 +793,7 @@ class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         spec: dict[str, Any] | AgentSpec | None = None,
     ) -> AbstractAsyncContextManager[AgentRun[AgentDepsT, RunOutputDataT]]: ...
 
-    @asynccontextmanager  # ty: ignore[no-matching-overload] - ty mis-resolves the decorator against the overloads
+    @asynccontextmanager
     async def iter(
         self,
         user_prompt: str | Sequence[_messages.UserContent] | None = None,

@@ -26,7 +26,7 @@ from resonate_pg.connection import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable
+    from collections.abc import AsyncGenerator, AsyncIterator, Callable
 
 # ═══════════════════════════════════════════════════════════════
 #  Postgres -- the session seam
@@ -116,7 +116,7 @@ class _FakeDatabase:
         return taken
 
     @contextlib.asynccontextmanager
-    async def session(self) -> AsyncIterator[_FakeConn]:
+    async def session(self) -> AsyncGenerator[_FakeConn]:
         if self.session_error is not None:
             raise self.session_error
         self.open_sessions += 1
