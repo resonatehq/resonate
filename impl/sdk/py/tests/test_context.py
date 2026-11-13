@@ -44,7 +44,7 @@ from resonate.transport import Transport
 from resonate.types import PromiseRecord, TaskData, Value
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
 
     from resonate.retry import RetryPolicy
 
@@ -787,7 +787,9 @@ async def test_run_unawaited_child_settles_before_parent() -> None:
 
 
 @contextmanager
-def _gated_create_promise(ctx: Context, gate: asyncio.Event) -> Iterator[asyncio.Event]:
+def _gated_create_promise(
+    ctx: Context, gate: asyncio.Event
+) -> Generator[asyncio.Event]:
     entered = asyncio.Event()
     original = ctx._state.effects.create_promise
 
@@ -1349,7 +1351,7 @@ async def test_rpc_presettled_rejected_raises() -> None:
 
 
 @contextmanager
-def _spy_create_promise(ctx: Context) -> Iterator[list[Any]]:
+def _spy_create_promise(ctx: Context) -> Generator[list[Any]]:
     """Capture every PromiseCreateReq passed to ``effects.create_promise``."""
     captured: list[Any] = []
     original = ctx._state.effects.create_promise

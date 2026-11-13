@@ -49,7 +49,7 @@ from resonate.retry import Never
 from resonate.types import Value
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
 
     from resonate.context import Context
     from resonate.retry import RetryPolicy
@@ -79,7 +79,7 @@ def _group() -> str:
 @contextlib.asynccontextmanager
 async def _resonate(
     group: str | None = None, *, retry_policy: RetryPolicy | None = None
-) -> AsyncIterator[Resonate]:
+) -> AsyncGenerator[Resonate]:
     """Start a connector-backed Resonate, stop it however the body exits."""
     g = group if group is not None else _group()
     conn = PostgresConnection(_dsn(), group=g, tick=0.05)

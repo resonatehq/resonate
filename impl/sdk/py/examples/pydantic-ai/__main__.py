@@ -118,7 +118,7 @@ def support_model(messages: list[ModelMessage], info: AgentInfo) -> ModelRespons
     )
 
 
-def build_agent() -> Agent[dict, str]:
+def build_agent() -> Agent[dict, Triage]:
     """Build a support agent with dependency-injected tools and structured output.
 
     ``deps_type=dict`` because deps cross the durability boundary as JSON: they
