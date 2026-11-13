@@ -173,8 +173,9 @@ import { untrack } from 'svelte';
   {:else if loading || !view || !span}
     <Loading what="Loading execution…" />
   {:else}
+    {@const rootId = view.root.id}
     <div class="headline">
-      <h2>{view.nodes.find((n) => n.id === view.root.id)?.func ?? view.root.id}</h2>
+      <h2>{view.nodes.find((n) => n.id === rootId)?.func ?? rootId}</h2>
       <Status state={view.root.state} />
       <div class="grow"></div>
       <button
