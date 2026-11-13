@@ -84,7 +84,7 @@
     "@nats-io/nats-core": "^3.4.0",
     "@nats-io/transport-node": "^3.4.0",
     "@types/jest": "30.0.0",
-    "@types/node": "^25.9.5",
+    "@types/node": "^26.6.6",
     "@types/pg": "^8.11.10",
     "commander": "^15.1.0",
     "esbuild": "^0.28.0",
