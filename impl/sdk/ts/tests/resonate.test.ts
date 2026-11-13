@@ -1412,10 +1412,10 @@ describe("Bearer token authentication", () => {
     const mockFetch = jest.spyOn(global, "fetch").mockImplementation((url, options) => {
       const urlStr = url instanceof URL ? url.href : url;
       if (urlStr === "http://localhost:9999") {
-        expect((options?.headers as { [key: string]: string }).Authorization).toBe("Bearer test-token-123");
+        expect((options!.headers as { [key: string]: string }).Authorization).toBe("Bearer test-token-123");
         p1.resolve(null);
       } else if (urlStr === "http://localhost:9999/poll/default/0") {
-        expect((options?.headers as { [key: string]: string }).Authorization).toBe("Bearer test-token-123");
+        expect((options!.headers as { [key: string]: string }).Authorization).toBe("Bearer test-token-123");
         p2.resolve(null);
       } else {
         throw new Error(`Unexpected URL called: ${urlStr}`);
@@ -1447,10 +1447,10 @@ describe("Bearer token authentication", () => {
     const mockFetch = jest.spyOn(global, "fetch").mockImplementation((url, options) => {
       const urlStr = url instanceof URL ? url.href : url;
       if (urlStr === "http://localhost:9999") {
-        expect((options?.headers as { [key: string]: string }).Authorization).toBe("Bearer priority-token");
+        expect((options!.headers as { [key: string]: string }).Authorization).toBe("Bearer priority-token");
         p1.resolve(null);
       } else if (urlStr === "http://localhost:9999/poll/default/0") {
-        expect((options?.headers as { [key: string]: string }).Authorization).toBe("Bearer priority-token");
+        expect((options!.headers as { [key: string]: string }).Authorization).toBe("Bearer priority-token");
         p2.resolve(null);
       } else {
         throw new Error(`Unexpected URL called: ${urlStr}`);
