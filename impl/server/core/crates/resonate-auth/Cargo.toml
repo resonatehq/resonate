@@ -11,11 +11,14 @@ path = "src/lib.rs"
 
 [dependencies]
 resonate-core = { path = "../resonate-core" }
-jsonwebtoken = "9"
+# 10.3 or later: GHSA-h395-gr6q-cpjc (malformed exp/nbf skipped validation).
+# aws-lc-rs, the backend rustls already brings, rather than rust_crypto;
+# without one of the two, jsonwebtoken panics on the first verify.
+jsonwebtoken = { version = "11", features = ["aws_lc_rs"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = "0.1"
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.13", features = ["json"] }
 
 [dev-dependencies]
 wiremock = "0.6"

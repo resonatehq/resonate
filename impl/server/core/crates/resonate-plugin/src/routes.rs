@@ -27,7 +27,7 @@
 //!     let handler = Arc::clone(&worker);
 //!     deps.routes.add(PLUGIN.id(), move |auth| {
 //!         axum::Router::new()
-//!             .route("/callback/:id", axum::routing::post(handle))
+//!             .route("/callback/{id}", axum::routing::post(handle))
 //!             .with_state(State { worker: handler, auth })
 //!     });
 //!

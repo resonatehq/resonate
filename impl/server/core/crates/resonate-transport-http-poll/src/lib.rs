@@ -67,7 +67,7 @@ fn configure(
 }
 
 /// Where workers connect. On the gateway's listener, alongside the protocol.
-pub const POLL_PATH: &str = "/poll/:group/:id";
+pub const POLL_PATH: &str = "/poll/{group}/{id}";
 
 /// Everything under `[workers.transport_http_poll]`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

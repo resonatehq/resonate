@@ -102,7 +102,7 @@ pub fn run_rusqlite(
         let tx = conn
             .transaction()
             .map_err(|e| MigrateError(format!("migration {version}: {e}")))?;
-        tx.execute_batch(&migration.sql)
+        tx.execute_batch(migration.sql.as_str())
             .map_err(|e| MigrateError(format!("migration {version} failed: {e}")))?;
         tx.execute(
             "INSERT INTO _sqlx_migrations

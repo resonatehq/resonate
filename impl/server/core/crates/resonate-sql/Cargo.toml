@@ -29,7 +29,7 @@ validator = { workspace = true }
 tracing = "0.1"
 lazy_static = "1"
 tokio = { version = "1", features = ["rt", "sync", "macros", "time"] }
-rusqlite = { version = "0.31", features = ["bundled"], optional = true }
+rusqlite = { version = "0.39", features = ["bundled"], optional = true }
 # Not optional: `migrate` carries the `Migrator` type, which the SQLite path
 # also uses even though it executes through rusqlite.
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "macros", "migrate"] }
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls-ring-webpki", "macros", "migrate"] }
