@@ -146,7 +146,7 @@ where
         .route(RPC_PATH, post(handle_rpc))
         .route(MOUNT, get(handle_index))
         .route("/console/", get(handle_index))
-        .route("/console/*path", get(handle_asset));
+        .route("/console/{*path}", get(handle_asset));
     if config.redirect_root {
         router = router.route("/", get(handle_root));
     }

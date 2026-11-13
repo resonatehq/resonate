@@ -15,7 +15,7 @@ resonate-core = { path = "../resonate-core" }
 resonate-plugin = { path = "../resonate-plugin" }
 async-trait = { workspace = true }
 serde = { workspace = true }
-tower-http = { version = "0.6", features = ["trace", "catch-panic", "cors"] }
+tower-http = { version = "0.7", features = ["trace", "catch-panic", "cors"] }
 tokio = { version = "1", features = ["rt", "sync", "macros", "signal", "net"] }
 serde_json = { workspace = true }
 lazy_static = "1"

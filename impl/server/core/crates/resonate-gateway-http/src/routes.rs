@@ -85,11 +85,11 @@ pub fn api_routes() -> Router<AppState> {
         .route("/", post(handle_api))
         .route("/ready", get(handle_ready))
         .route("/promises", any(handle_legacy))
-        .route("/promises/*path", any(handle_legacy))
+        .route("/promises/{*path}", any(handle_legacy))
         .route("/schedules", any(handle_legacy))
-        .route("/schedules/*path", any(handle_legacy))
+        .route("/schedules/{*path}", any(handle_legacy))
         .route("/tasks", any(handle_legacy))
-        .route("/tasks/*path", any(handle_legacy))
+        .route("/tasks/{*path}", any(handle_legacy))
 }
 
 async fn handle_legacy() -> impl IntoResponse {
