@@ -10,7 +10,11 @@
   ],
   "overrides": {
     "@resonatehq/sdk": "file:.",
-    "uuid": "^11.1.1"
+    "uuid": "^11.1.1",
+    "glob": "^14.0.6",
+    "test-exclude": {
+      "minimatch": "^11.0.8"
+    }
   },
   "main": "./dist/src/index.js",
   "types": "./dist/src/index.d.ts",
