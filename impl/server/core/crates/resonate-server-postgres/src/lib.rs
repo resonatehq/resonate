@@ -2873,7 +2873,7 @@ impl PostgresDb<'_> {
             self.task_retry_timeout,
         );
         let row = rt_block_on(
-            sqlx::query(&sql)
+            sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
                 .bind(&ids)
                 .bind(time)
                 .fetch_optional(self.tx().as_mut()),
@@ -2924,7 +2924,7 @@ impl PostgresDb<'_> {
             messages = emitted_json(&["emit_resume"])
         );
         let row = rt_block_on(
-            sqlx::query(&sql)
+            sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
                 .bind(promise_id)
                 .bind(time)
                 .fetch_optional(self.tx().as_mut()),
@@ -2938,9 +2938,11 @@ impl PostgresDb<'_> {
     // P-01: promise.get
     fn promise_get(&self, id: &str) -> StorageResult<Option<PromiseRecord>> {
         let row = rt_block_on(
-            sqlx::query(&format!("SELECT {P_COLS} FROM promises WHERE id = $1"))
-                .bind(id)
-                .fetch_optional(self.tx().as_mut()),
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "SELECT {P_COLS} FROM promises WHERE id = $1"
+            )))
+            .bind(id)
+            .fetch_optional(self.tx().as_mut()),
         )?;
         Ok(row.as_ref().map(row_to_promise))
     }
@@ -2964,7 +2966,7 @@ impl PostgresDb<'_> {
         } = *params;
         let trt = self.task_retry_timeout;
 
-        let rows = rt_block_on(sqlx::query(&format!("
+        let rows = rt_block_on(sqlx::query(sqlx::AssertSqlSafe(format!("
             WITH inserted_or_skipped_promise AS (
               INSERT INTO promises (id, state, param_headers, param_data, tags, timeout_at, created_at, settled_at,
                                     task_state, task_version, retry_timeout_at)
@@ -2988,7 +2990,7 @@ impl PostgresDb<'_> {
               WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM inserted_or_skipped_promise)
             )
             SELECT {P_COLS}, was_created, {messages} FROM result
-        ", messages = emitted_json(&["emit_new"])))
+        ", messages = emitted_json(&["emit_new"]))))
             .bind(id).bind(state).bind(param_headers).bind(param_data).bind(tags)  // $1-$5
             .bind(timeout_at).bind(created_at).bind(settled_at)                     // $6-$8
             .bind(already_timedout).bind(address)                                   // $9-$10
@@ -3042,7 +3044,7 @@ impl PostgresDb<'_> {
             self.task_retry_timeout,
         );
 
-        let rows = rt_block_on(sqlx::query(&format!("
+        let rows = rt_block_on(sqlx::query(sqlx::AssertSqlSafe(format!("
             WITH before AS (
               SELECT id, state, task_state, callbacks, listeners FROM promises WHERE id = $1
             ),
@@ -3062,7 +3064,7 @@ impl PostgresDb<'_> {
               WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM updated_promise)
             )
             SELECT {P_COLS}, was_settled, {messages} FROM result
-        ", messages = emitted_json(&["emit_unblock", "emit_resume"])))
+        ", messages = emitted_json(&["emit_unblock", "emit_resume"]))))
             .bind(id).bind(state).bind(value_headers).bind(value_data).bind(settled_at)
             .fetch_all(self.tx().as_mut()))?;
 
@@ -3088,7 +3090,7 @@ impl PostgresDb<'_> {
         time: i64,
     ) -> StorageResult<RegisterCallbackResult> {
         let trt = self.task_retry_timeout;
-        let rows = rt_block_on(sqlx::query(&format!("
+        let rows = rt_block_on(sqlx::query(sqlx::AssertSqlSafe(format!("
             WITH awaited AS (
               SELECT * FROM promises WHERE id = $1 FOR UPDATE
             ),
@@ -3161,7 +3163,7 @@ impl PostgresDb<'_> {
             awaited_cols = p_cols("awaited"),
             awaiter_cols = p_cols("awaiter"),
             messages = emitted_json(&["emit_resume"]),
-        ))
+        )))
             .bind(awaited_id).bind(awaiter_id).bind(time)
             .fetch_all(self.tx().as_mut()))?;
 
@@ -3189,7 +3191,7 @@ impl PostgresDb<'_> {
         address: &str,
     ) -> StorageResult<Option<PromiseRecord>> {
         let rows = rt_block_on(
-            sqlx::query(&format!(
+            sqlx::query(sqlx::AssertSqlSafe(format!(
                 "
             WITH locked_promise AS (
               SELECT * FROM promises WHERE id = $1 FOR UPDATE
@@ -3206,7 +3208,7 @@ impl PostgresDb<'_> {
             )
             SELECT {cols} FROM locked_promise",
                 cols = p_cols("locked_promise")
-            ))
+            )))
             .bind(awaited_id)
             .bind(address)
             .fetch_all(self.tx().as_mut()),
@@ -3232,14 +3234,14 @@ impl PostgresDb<'_> {
         now: i64,
     ) -> StorageResult<Vec<PromiseRecord>> {
         let rows = rt_block_on(
-            sqlx::query(&format!(
+            sqlx::query(sqlx::AssertSqlSafe(format!(
                 "SELECT {P_COLS} FROM promises
                  WHERE {}
                    AND ($1::jsonb IS NULL OR tags @> $1::jsonb)
                    AND ($2::text IS NULL OR id > $2)
                  ORDER BY id ASC LIMIT $3",
                 resonate_sql::effective_state_sql(state, now)
-            ))
+            )))
             .bind(tags)
             .bind(cursor)
             .bind(limit)
@@ -3289,7 +3291,7 @@ impl PostgresDb<'_> {
             "acquired"
         };
 
-        let rows = rt_block_on(sqlx::query(&format!("
+        let rows = rt_block_on(sqlx::query(sqlx::AssertSqlSafe(format!("
             WITH inserted_promise AS (
               INSERT INTO promises (id, state, param_headers, param_data, tags, timeout_at, created_at, settled_at,
                                     task_state, task_version, lease_timeout_at, ttl, pid)
@@ -3310,7 +3312,7 @@ impl PostgresDb<'_> {
               EXISTS (SELECT 1 FROM inserted_promise) AS task_created,
               p.task_state, p.task_version
             FROM promise p
-        ", cols = p_cols("p")))
+        ", cols = p_cols("p"))))
             .bind(promise_id).bind(state).bind(param_headers).bind(param_data).bind(tags) // $1-$5
             .bind(timeout_at).bind(created_at).bind(settled_at)                            // $6-$8
             .bind(already_timedout).bind(ttl).bind(pid).bind(task_initial_state)           // $9-$12
@@ -3362,7 +3364,7 @@ impl PostgresDb<'_> {
             ttl,
             pid,
         } = *params;
-        let rows = rt_block_on(sqlx::query(&format!("
+        let rows = rt_block_on(sqlx::query(sqlx::AssertSqlSafe(format!("
             WITH before AS (
               SELECT id, task_state, task_version FROM promises WHERE id = $1 AND task_state IS NOT NULL
             ),
@@ -3381,7 +3383,7 @@ impl PostgresDb<'_> {
             FROM before b
             JOIN promises p ON p.id = b.id
             LEFT JOIN acquired_task a ON a.id = b.id
-        ", cols = p_cols("p")))
+        ", cols = p_cols("p"))))
             .bind(task_id).bind(version as i32).bind(time).bind(ttl).bind(pid)
             .fetch_all(self.tx().as_mut()))?;
 
@@ -3425,7 +3427,7 @@ impl PostgresDb<'_> {
         } = *params;
         let trt = self.task_retry_timeout;
 
-        let rows = rt_block_on(sqlx::query(&format!("
+        let rows = rt_block_on(sqlx::query(sqlx::AssertSqlSafe(format!("
             WITH fence_check AS (
               SELECT id, task_state, task_version FROM promises WHERE id = $1 AND task_state IS NOT NULL
             ),
@@ -3463,7 +3465,7 @@ impl PostgresDb<'_> {
               {cols}, {messages}
             FROM (SELECT 1) AS dummy
             LEFT JOIN result r ON true
-        ", cols = p_cols("r"), messages = emitted_json(&["emit_new"])))
+        ", cols = p_cols("r"), messages = emitted_json(&["emit_new"]))))
             .bind(task_id).bind(version as i32)                                            // $1-$2
             .bind(promise_id).bind(state).bind(param_headers).bind(param_data).bind(tags)  // $3-$7
             .bind(timeout_at).bind(created_at).bind(settled_at)                             // $8-$10
@@ -3513,7 +3515,7 @@ impl PostgresDb<'_> {
             self.task_retry_timeout,
         );
 
-        let rows = rt_block_on(sqlx::query(&format!("
+        let rows = rt_block_on(sqlx::query(sqlx::AssertSqlSafe(format!("
             WITH fence_check AS (
               SELECT id, task_state, task_version FROM promises WHERE id = $1 AND task_state IS NOT NULL
             ),
@@ -3547,7 +3549,7 @@ impl PostgresDb<'_> {
               {cols}, {messages}
             FROM (SELECT 1) AS dummy
             LEFT JOIN result r ON true
-        ", cols = p_cols("r"), messages = emitted_json(&["emit_unblock", "emit_resume"])))
+        ", cols = p_cols("r"), messages = emitted_json(&["emit_unblock", "emit_resume"]))))
             .bind(task_id).bind(version as i32)                                                     // $1-$2
             .bind(promise_id).bind(state).bind(value_headers).bind(value_data).bind(settled_at)     // $3-$7
             .fetch_all(self.tx().as_mut()))?;
@@ -3744,7 +3746,7 @@ impl PostgresDb<'_> {
             self.task_retry_timeout,
         );
 
-        let rows = rt_block_on(sqlx::query(&format!("
+        let rows = rt_block_on(sqlx::query(sqlx::AssertSqlSafe(format!("
             WITH before AS (
               SELECT id, state, task_state, task_version, callbacks, listeners FROM promises WHERE id = $3
             ),
@@ -3770,7 +3772,7 @@ impl PostgresDb<'_> {
               (SELECT b.task_state IS NOT NULL FROM before b) AS task_exists,
               {messages}
             FROM result r
-        ", cols = p_cols("r"), messages = emitted_json(&["emit_unblock", "emit_resume"])))
+        ", cols = p_cols("r"), messages = emitted_json(&["emit_unblock", "emit_resume"]))))
             .bind(task_id).bind(version as i32)                                                 // $1-$2
             .bind(promise_id).bind(state).bind(value_headers).bind(value_data).bind(settled_at) // $3-$7
             .fetch_all(self.tx().as_mut()))?;
@@ -3805,7 +3807,7 @@ impl PostgresDb<'_> {
     ) -> StorageResult<TaskReleaseResult> {
         let row = rt_block_on(
             sqlx::query(
-                "
+                sqlx::AssertSqlSafe("
             WITH released_task AS (
               UPDATE promises p SET
                 task_state = 'pending', retry_timeout_at = $3 + $4,
@@ -3824,7 +3826,7 @@ impl PostgresDb<'_> {
               :MESSAGES
         "
             .replace(":MESSAGES", &emitted_json(&["emit_released"]))
-            .as_str(),
+            .as_str()),
             )
             .bind(task_id)
             .bind(version as i32)
@@ -3874,7 +3876,7 @@ impl PostgresDb<'_> {
     fn task_continue(&self, task_id: &str, time: i64) -> StorageResult<TaskContinueResult> {
         let trt = self.task_retry_timeout;
         let row = rt_block_on(
-            sqlx::query(&format!(
+            sqlx::query(sqlx::AssertSqlSafe(format!(
                 "
             WITH locked_task AS (
               SELECT id, task_state, task_version, target FROM promises
@@ -3898,7 +3900,7 @@ impl PostgresDb<'_> {
               {messages}
         ",
                 messages = emitted_json(&["emit_continued"])
-            ))
+            )))
             .bind(task_id)
             .bind(time)
             .fetch_one(self.tx().as_mut()),
@@ -3936,12 +3938,12 @@ impl PostgresDb<'_> {
 
     fn compute_preload(&self, promise_id: &str) -> StorageResult<Vec<PromiseRecord>> {
         let rows = rt_block_on(
-            sqlx::query(&format!(
+            sqlx::query(sqlx::AssertSqlSafe(format!(
                 "SELECT {P_COLS} FROM promises
                  WHERE branch_id = (SELECT branch_id FROM promises WHERE id = $1)
                    AND branch_id IS NOT NULL AND id <> $1
                  ORDER BY id ASC LIMIT $2"
-            ))
+            )))
             .bind(promise_id)
             .bind(self.preload_limit as i64)
             .fetch_all(self.tx().as_mut()),
@@ -4066,7 +4068,7 @@ impl PostgresDb<'_> {
         );
         let (after_key, after_id) = split_keyset(q.after.as_ref());
         let rows = rt_block_on(
-            sqlx::query(&sql)
+            sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
                 .bind(q.id_from.as_deref())
                 .bind(q.id_to.as_deref())
                 .bind(q.tags_json.as_deref())
@@ -4094,7 +4096,7 @@ impl PostgresDb<'_> {
             states = q.states_sql(),
         );
         let row = rt_block_on(
-            sqlx::query(&sql)
+            sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
                 .bind(q.id_from.as_deref())
                 .bind(q.id_to.as_deref())
                 .bind(q.tags_json.as_deref())
@@ -4113,7 +4115,7 @@ impl PostgresDb<'_> {
     /// re-run every 5s.
     fn ui_execution_nodes(&self, q: &ui::ExecutionQuery) -> StorageResult<Vec<ui::NodeRow>> {
         let rows = rt_block_on(
-            sqlx::query(&format!(
+            sqlx::query(sqlx::AssertSqlSafe(format!(
                 "SELECT {P_COLS}, task_state, task_version,
                         cardinality(resumes) AS resumes,
                         ttl, pid, retry_timeout_at, lease_timeout_at
@@ -4121,7 +4123,7 @@ impl PostgresDb<'_> {
                  WHERE origin_id = $1
                  ORDER BY created_at ASC, id ASC
                  LIMIT $2"
-            ))
+            )))
             .bind(&q.root_id)
             .bind(q.max_nodes + 1)
             .fetch_all(self.tx().as_mut()),
@@ -4160,7 +4162,7 @@ impl PostgresDb<'_> {
         );
         let (after_key, after_id) = split_keyset(q.after.as_ref());
         let rows = rt_block_on(
-            sqlx::query(&sql)
+            sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
                 .bind(q.id_from.as_deref())
                 .bind(q.id_to.as_deref())
                 .bind(q.tags_json.as_deref())
@@ -4263,7 +4265,7 @@ impl PostgresDb<'_> {
         let trt = self.task_retry_timeout;
         let promise_tags_json = serde_json::to_string(promise_tags).unwrap();
         // $1=schedule_id, $2=fired_at, $3=next_run_at, $4=promise_tags, $5=time
-        let rows = rt_block_on(sqlx::query(&format!("
+        let rows = rt_block_on(sqlx::query(sqlx::AssertSqlSafe(format!("
             WITH schedule AS (
               SELECT *,
                 REPLACE(REPLACE(promise_id, '{{{{.id}}}}', id), '{{{{.timestamp}}}}', CAST($2 AS TEXT)) AS computed_promise_id,
@@ -4309,7 +4311,7 @@ impl PostgresDb<'_> {
                    (SELECT already_timedout FROM schedule) AS promise_already_timedout,
                    {messages}
             FROM updated_schedule
-        ", messages = emitted_json(&["emit_new"])))
+        ", messages = emitted_json(&["emit_new"]))))
             .bind(schedule_id).bind(fired_at).bind(next_run_at).bind(promise_tags_json).bind(time)
             .fetch_all(self.tx().as_mut()))?;
 
@@ -4383,7 +4385,7 @@ impl PostgresDb<'_> {
                 trt,
             );
             let expired_row = rt_block_on(
-                sqlx::query(&sql)
+                sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
                     .bind(time)
                     .bind(&id)
                     .fetch_optional(self.tx().as_mut()),
@@ -4397,7 +4399,7 @@ impl PostgresDb<'_> {
         // message and push the deadline out.
         if let Some(id) = selected("retry") {
             let retry_row = rt_block_on(
-                sqlx::query(&format!(
+                sqlx::query(sqlx::AssertSqlSafe(format!(
                     "
             WITH expired_retry AS (
               SELECT id, task_version, target FROM promises
@@ -4418,7 +4420,7 @@ impl PostgresDb<'_> {
             SELECT {messages}
         ",
                     messages = emitted_json(&["emit_retry"])
-                ))
+                )))
                 .bind(time)
                 .bind(&id)
                 .fetch_optional(self.tx().as_mut()),
@@ -4431,7 +4433,7 @@ impl PostgresDb<'_> {
         // Statement 3: expired leases — the holder went away, hand the task back.
         if let Some(id) = selected("lease") {
             let lease_row = rt_block_on(
-                sqlx::query(&format!(
+                sqlx::query(sqlx::AssertSqlSafe(format!(
                     "
             WITH expired_lease AS (
               SELECT id, task_version, target FROM promises
@@ -4454,7 +4456,7 @@ impl PostgresDb<'_> {
             SELECT {messages}
         ",
                     messages = emitted_json(&["emit_released"])
-                ))
+                )))
                 .bind(time)
                 .bind(&id)
                 .fetch_optional(self.tx().as_mut()),
@@ -4470,8 +4472,10 @@ impl PostgresDb<'_> {
     // D-04: debug.snap — every section is now a projection of the one table
     fn snap(&self) -> StorageResult<Snapshot> {
         let promise_rows = rt_block_on(
-            sqlx::query(&format!("SELECT {P_COLS} FROM promises ORDER BY id"))
-                .fetch_all(self.tx().as_mut()),
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "SELECT {P_COLS} FROM promises ORDER BY id"
+            )))
+            .fetch_all(self.tx().as_mut()),
         )?;
         let promises: Vec<PromiseRecord> = promise_rows.iter().map(row_to_promise).collect();
 

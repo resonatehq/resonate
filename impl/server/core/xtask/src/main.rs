@@ -269,7 +269,7 @@ impl FreshDb {
                 let mut conn = sqlx::PgConnection::connect(admin_url)
                     .await
                     .map_err(|e| format!("postgres admin: {e}"))?;
-                sqlx::query(&format!("CREATE DATABASE \"{name}\""))
+                sqlx::query(sqlx::AssertSqlSafe(format!("CREATE DATABASE \"{name}\"")))
                     .execute(&mut conn)
                     .await
                     .map_err(|e| format!("create database {name}: {e}"))?;
@@ -278,7 +278,7 @@ impl FreshDb {
                 let mut conn = sqlx::MySqlConnection::connect(admin_url)
                     .await
                     .map_err(|e| format!("mysql admin: {e}"))?;
-                sqlx::query(&format!("CREATE DATABASE `{name}`"))
+                sqlx::query(sqlx::AssertSqlSafe(format!("CREATE DATABASE `{name}`")))
                     .execute(&mut conn)
                     .await
                     .map_err(|e| format!("create database {name}: {e}"))?;
@@ -306,21 +306,25 @@ impl FreshDb {
         }
         let dropped = match self.kind {
             Backend::Postgres => match sqlx::PgConnection::connect(&self.admin_url).await {
-                Ok(mut conn) => {
-                    sqlx::query(&format!("DROP DATABASE \"{}\" WITH (FORCE)", self.name))
-                        .execute(&mut conn)
-                        .await
-                        .map(|_| ())
-                        .map_err(|e| e.to_string())
-                }
+                Ok(mut conn) => sqlx::query(sqlx::AssertSqlSafe(format!(
+                    "DROP DATABASE \"{}\" WITH (FORCE)",
+                    self.name
+                )))
+                .execute(&mut conn)
+                .await
+                .map(|_| ())
+                .map_err(|e| e.to_string()),
                 Err(e) => Err(e.to_string()),
             },
             Backend::Mysql => match sqlx::MySqlConnection::connect(&self.admin_url).await {
-                Ok(mut conn) => sqlx::query(&format!("DROP DATABASE `{}`", self.name))
-                    .execute(&mut conn)
-                    .await
-                    .map(|_| ())
-                    .map_err(|e| e.to_string()),
+                Ok(mut conn) => sqlx::query(sqlx::AssertSqlSafe(format!(
+                    "DROP DATABASE `{}`",
+                    self.name
+                )))
+                .execute(&mut conn)
+                .await
+                .map(|_| ())
+                .map_err(|e| e.to_string()),
                 Err(e) => Err(e.to_string()),
             },
             // Only what the job wrote: the database was empty when it began.

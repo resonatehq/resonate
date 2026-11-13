@@ -18,7 +18,7 @@ serde_json = { workspace = true }
 validator = { workspace = true }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros"] }
 tracing = "0.1"
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "macros", "migrate", "postgres"] }
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls-ring-webpki", "macros", "migrate", "postgres"] }
 
 [dev-dependencies]
 base64 = "0.22"

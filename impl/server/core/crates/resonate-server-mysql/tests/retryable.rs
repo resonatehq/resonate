@@ -27,14 +27,18 @@ async fn lock_wait_timeout_is_retryable() {
 
     let mut holder = MySqlConnection::connect(&url).await.expect("connect");
     let mut waiter = MySqlConnection::connect(&url).await.expect("connect");
-    sqlx::query(&format!("CREATE TABLE {table} (id INT PRIMARY KEY)"))
-        .execute(&mut holder)
-        .await
-        .expect("create table");
-    sqlx::query(&format!("INSERT INTO {table} VALUES (1)"))
-        .execute(&mut holder)
-        .await
-        .expect("insert");
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "CREATE TABLE {table} (id INT PRIMARY KEY)"
+    )))
+    .execute(&mut holder)
+    .await
+    .expect("create table");
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "INSERT INTO {table} VALUES (1)"
+    )))
+    .execute(&mut holder)
+    .await
+    .expect("insert");
     sqlx::query("SET SESSION innodb_lock_wait_timeout = 1")
         .execute(&mut waiter)
         .await
@@ -42,13 +46,13 @@ async fn lock_wait_timeout_is_retryable() {
 
     let lock = format!("SELECT id FROM {table} WHERE id = 1 FOR UPDATE");
     let mut held = holder.begin().await.expect("begin");
-    sqlx::query(&lock)
+    sqlx::query(sqlx::AssertSqlSafe(lock.as_str()))
         .fetch_one(&mut *held)
         .await
         .expect("take the row lock");
 
     let mut waiting = waiter.begin().await.expect("begin");
-    let err = sqlx::query(&lock)
+    let err = sqlx::query(sqlx::AssertSqlSafe(lock.as_str()))
         .fetch_one(&mut *waiting)
         .await
         .expect_err("the row is locked, so this must time out");
@@ -65,7 +69,7 @@ async fn lock_wait_timeout_is_retryable() {
         .number();
     let sqlstate = db_err.code().map(|c| c.into_owned());
 
-    sqlx::query(&format!("DROP TABLE {table}"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("DROP TABLE {table}")))
         .execute(&mut holder)
         .await
         .expect("drop table");
