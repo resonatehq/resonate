@@ -7,7 +7,7 @@ license.workspace = true
 [dependencies]
 resonate-core = { path = "../resonate-core" }
 resonate-plugin = { path = "../resonate-plugin" }
-object_store = { version = "0.14.1", features = ["aws"] }
+object_store = { version = "0.14.2", features = ["aws"] }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

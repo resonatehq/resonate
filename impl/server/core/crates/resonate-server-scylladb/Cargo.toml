@@ -14,7 +14,7 @@ description = "Resonate server: durable state in ScyllaDB — origin-partitioned
 resonate-core = { path = "../resonate-core" }
 resonate-plugin = { path = "../resonate-plugin" }
 resonate-timer-wheel = { path = "../resonate-timer-wheel" }
-scylla = { version = "1.8", features = ["rustls-023"] }
+scylla = { version = "1.10", features = ["rustls-023"] }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -27,4 +27,4 @@ chrono = "0.4"
 uuid = { version = "1", features = ["v4"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 rustls-pemfile = "2"
-webpki-roots = "0.26"
+webpki-roots = "1.0"
