@@ -128,13 +128,13 @@ public final class Handle {
         @SuppressWarnings("unchecked")
         private T decodeResult(PromiseResult result) {
             return switch (result.state()) {
-                    // ``type`` is recovered at runtime (Durable.returnType / Object for the untyped
-                    // paths), so the coercion is dynamic and the cast to T is unchecked -- exactly the
-                    // gap Python closes by passing ``type_`` explicitly.
+                // ``type`` is recovered at runtime (Durable.returnType / Object for the untyped
+                // paths), so the coercion is dynamic and the cast to T is unchecked -- exactly the
+                // gap Python closes by passing ``type_`` explicitly.
                 case "resolved" -> (T) codec.convert(codec.decode(result.value()), type);
-                    // Python does a bare ``raise`` of the recovered error. CompletableFuture funnels
-                    // every failure through CompletionException, so wrapping here lands the original
-                    // throwable on getCause() exactly as an unwrapped throw would.
+                // Python does a bare ``raise`` of the recovered error. CompletableFuture funnels
+                // every failure through CompletionException, so wrapping here lands the original
+                // throwable on getCause() exactly as an unwrapped throw would.
                 case "rejected" -> throw new CompletionException(codec.decodeError(result.value()));
                 case "rejected_canceled" -> throw new ApplicationError("Promise canceled");
                 case "rejected_timedout" -> throw new ResonateTimeoutError();

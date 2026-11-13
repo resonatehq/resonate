@@ -133,7 +133,9 @@ class CodecTest {
     // can reshape the decoded builtins into it via convert (msgspec.convert).
     // =============================================================================
 
-    record Point(@JsonProperty(required = true) int x, @JsonProperty(required = true) int y) {}
+    record Point(
+            @JsonProperty(required = true) int x,
+            @JsonProperty(required = true) int y) {}
 
     record MixedShape(@JsonProperty(required = true) Point corner, String label) {}
 

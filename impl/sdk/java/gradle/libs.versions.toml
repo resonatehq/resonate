@@ -4,8 +4,8 @@
 [versions]
 jackson = "2.18.2"
 junit = "5.11.4"
-spotless = "7.0.2"
-maven-publish = "0.30.0"
+spotless = "8.11.0"
+maven-publish = "0.37.0"
 
 [libraries]
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
