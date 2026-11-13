@@ -143,7 +143,8 @@ class IdFormatTest {
         // child that detaches again -> 4 detached promises, all settled.
         long deadline = System.currentTimeMillis() + 5_000;
         while (System.currentTimeMillis() < deadline) {
-            synchronized (net.state) {
+            net.lock.lock();
+            try {
                 long detached = net.state.promises.keySet().stream()
                         .filter(pid -> pid.startsWith(id + ":d"))
                         .count();
@@ -152,6 +153,8 @@ class IdFormatTest {
                 if (detached == 4 && allSettled) {
                     break;
                 }
+            } finally {
+                net.lock.unlock();
             }
             try {
                 Thread.sleep(5);
@@ -162,8 +165,11 @@ class IdFormatTest {
         }
 
         Map<String, Map<String, String>> out = new LinkedHashMap<>();
-        synchronized (net.state) {
+        net.lock.lock();
+        try {
             net.state.promises.forEach((pid, p) -> out.put(pid, p.tags));
+        } finally {
+            net.lock.unlock();
         }
         return out;
     }

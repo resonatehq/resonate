@@ -458,17 +458,19 @@ class EffectsTest {
         harness.network.failKind = "promise.create";
         Effects effects = harness.buildEffects(List.of());
 
-        CompletionException first = assertThrows(CompletionException.class, () -> effects.createPromise(
-                        new PromiseCreateReq("e1", I64_MAX, new Value(), Map.of()))
-                .join());
+        CompletionException first = assertThrows(
+                CompletionException.class,
+                () -> effects.createPromise(new PromiseCreateReq("e1", I64_MAX, new Value(), Map.of()))
+                        .join());
         PlatformError pe1 = assertInstanceOf(PlatformError.class, first.getCause());
         assertInstanceOf(ServerError.class, pe1.cause());
         assertEquals(1, harness.sendCount());
 
         // Breaker is now armed: a second op (even a different id) never hits the network.
-        CompletionException second = assertThrows(CompletionException.class, () -> effects.createPromise(
-                        new PromiseCreateReq("e2", I64_MAX, new Value(), Map.of()))
-                .join());
+        CompletionException second = assertThrows(
+                CompletionException.class,
+                () -> effects.createPromise(new PromiseCreateReq("e2", I64_MAX, new Value(), Map.of()))
+                        .join());
         PlatformError pe2 = assertInstanceOf(PlatformError.class, second.getCause());
         assertInstanceOf(StoppedError.class, pe2.cause());
         assertEquals(1, harness.sendCount());

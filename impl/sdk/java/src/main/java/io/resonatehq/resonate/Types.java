@@ -56,7 +56,10 @@ public final class Types {
             Value param,
             Value value,
             Map<String, String> tags,
-            @JsonProperty(value = "timeoutAt", required = true) long timeoutAt,
+
+            @JsonProperty(value = "timeoutAt", required = true)
+            long timeoutAt,
+
             long createdAt,
             Long settledAt) {
         public PromiseRecord {
@@ -74,7 +77,10 @@ public final class Types {
     public record TaskRecord(
             @JsonProperty(value = "id", required = true) String id,
             @JsonProperty(value = "state", required = true) String state,
-            @JsonProperty(value = "version", required = true) int version,
+
+            @JsonProperty(value = "version", required = true)
+            int version,
+
             Object resumes,
             Long ttl,
             String pid) {}
@@ -84,8 +90,13 @@ public final class Types {
     public record ScheduleRecord(
             @JsonProperty(value = "id", required = true) String id,
             @JsonProperty(value = "cron", required = true) String cron,
-            @JsonProperty(value = "promiseId", required = true) String promiseId,
-            @JsonProperty(value = "promiseTimeout", required = true) long promiseTimeout,
+
+            @JsonProperty(value = "promiseId", required = true)
+            String promiseId,
+
+            @JsonProperty(value = "promiseTimeout", required = true)
+            long promiseTimeout,
+
             Value promiseParam,
             Map<String, String> promiseTags,
             long createdAt) {
@@ -123,8 +134,11 @@ public final class Types {
     /** Payload for the register-callback request body. */
     @JsonPropertyOrder({"awaited", "awaiter"})
     public record PromiseRegisterCallbackData(
-            @JsonProperty(value = "awaited", required = true) String awaited,
-            @JsonProperty(value = "awaiter", required = true) String awaiter) {}
+            @JsonProperty(value = "awaited", required = true)
+            String awaited,
+
+            @JsonProperty(value = "awaiter", required = true)
+            String awaiter) {}
 
     /** The packed {@code *args} / {@code **kwargs} slot. Both default to empty. */
     @JsonPropertyOrder({"args", "kwargs"})

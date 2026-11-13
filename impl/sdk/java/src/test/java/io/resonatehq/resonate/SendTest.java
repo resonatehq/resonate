@@ -186,16 +186,12 @@ class SendTest {
      */
     private static String capturing(JsonNode req) {
         String kind = req.get("kind").asText();
-        String id =
-                switch (kind) {
-                    case "promise.create" -> req.get("data").get("id").asText();
-                    case "task.create", "task.fulfill" -> req.get("data")
-                            .get("action")
-                            .get("data")
-                            .get("id")
-                            .asText();
-                    default -> "x";
-                };
+        String id = switch (kind) {
+            case "promise.create" -> req.get("data").get("id").asText();
+            case "task.create", "task.fulfill" ->
+                req.get("data").get("action").get("data").get("id").asText();
+            default -> "x";
+        };
         Object data = kind.equals("task.create")
                 ? Map.of("task", cannedTask(id), "promise", cannedPromise(id), "preload", List.of())
                 : Map.of("promise", cannedPromise(id));
@@ -460,8 +456,8 @@ class SendTest {
     @Test
     void promiseSearchParsesDropsMalformedAndReadsCursor() {
         Map<String, Object> bad = Map.of("id", "broken"); // missing required state / timeoutAt
-        StubNetwork net = new StubNetwork(
-                req -> response(req, 200, Map.of("promises", List.of(cannedPromise("ok"), bad), "cursor", "next")));
+        StubNetwork net = new StubNetwork(req ->
+                response(req, 200, Map.of("promises", List.of(cannedPromise("ok"), bad), "cursor", "next")));
         Sender sender = sender(net, null);
 
         PromiseSearchResult result = await(sender.promiseSearch(null, null, null, null));
@@ -507,8 +503,8 @@ class SendTest {
     @Test
     void scheduleSearchParsesDropsMalformedAndReadsCursor() {
         Map<String, Object> bad = Map.of("id", "broken"); // missing required cron / promiseId / promiseTimeout
-        StubNetwork net = new StubNetwork(
-                req -> response(req, 200, Map.of("schedules", List.of(cannedSchedule("s1"), bad), "cursor", "c2")));
+        StubNetwork net = new StubNetwork(req ->
+                response(req, 200, Map.of("schedules", List.of(cannedSchedule("s1"), bad), "cursor", "c2")));
         Sender sender = sender(net, null);
 
         ScheduleSearchResult result = await(sender.scheduleSearch(null, null, null));
