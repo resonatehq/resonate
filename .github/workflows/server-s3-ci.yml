@@ -35,7 +35,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
@@ -125,7 +125,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
@@ -141,7 +141,7 @@ jobs:
       # repository, which the script clones, so this only needs a toolchain new
       # enough to read that go.mod.
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: stable
 
