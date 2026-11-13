@@ -1007,7 +1007,7 @@ export class Server {
 
     for (const ref of req.data.tasks) {
       const task = this.tasks.get(ref.id);
-      if (!task || task.state !== "acquired" || task.version !== ref.version || task.pid !== req.data.pid) {
+      if (task?.state !== "acquired" || task.version !== ref.version || task.pid !== req.data.pid) {
         continue;
       }
       // Logical-state check: if the task's promise is logically settled,
@@ -1335,7 +1335,7 @@ export class Server {
     if (this.timeoutMode !== "eager") return [];
 
     const promise = this.promises.get(id);
-    if (!promise || promise.state !== "pending" || now < promise.timeoutAt) {
+    if (promise?.state !== "pending" || now < promise.timeoutAt) {
       return [];
     }
 
