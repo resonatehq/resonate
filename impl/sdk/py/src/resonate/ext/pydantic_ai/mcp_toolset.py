@@ -160,7 +160,7 @@ class ResonateMCPToolset(WrapperToolset[AgentDepsT]):
             if self._toolset.cache_tools:
                 ctx._mcp_tool_defs_cache[cache_key] = cached  # noqa: SLF001
         return {
-            name: self._toolset.tool_for_tool_def(tool_def)
+            name: self._toolset.tool_for_tool_def(tool_def, ctx=ctx)
             for name, tool_def in cached.items()
         }
 

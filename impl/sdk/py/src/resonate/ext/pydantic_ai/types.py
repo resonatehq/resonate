@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 from pydantic import BaseModel, TypeAdapter, create_model
+from pydantic_ai.conversation import Conversation
 from pydantic_ai.messages import (
     ModelMessage,
     ModelResponse,
@@ -55,9 +56,11 @@ class RunParams(BaseModel):
     """
 
     user_prompt: str | list[UserContent] | None = None
+    conversation: Conversation | None = None
     message_history: list[ModelMessage] | None = None
     deferred_tool_results: DeferredToolResults | None = None
     conversation_id: str | None = None
+    run_id: str | None = None
     instructions: str | list[str] | None = None
     deps: Any = None
     model_settings: dict[str, Any] | None = None
@@ -83,6 +86,14 @@ class BaseRunResult(BaseModel):
     usage: RunUsage
     run_id: str
     conversation_id: str
+    # The rest of the run's public state (``AgentRunResult``'s serialized
+    # shape). Defaulted so envelopes journaled before these fields existed
+    # still validate on recovery.
+    metadata: dict[str, Any] | None = None
+    conversation_revision: str | None = None
+    conversation_unsaved: list[ModelMessage] | None = None
+    conversation_unchecked: bool = False
+    conversation_saved: bool = False
 
 
 def run_result_model(output_type: Any) -> type[BaseRunResult]:

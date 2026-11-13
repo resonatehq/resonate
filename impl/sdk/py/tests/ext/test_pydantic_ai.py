@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, Self
 
 import pytest
 from pydantic import BaseModel
-from pydantic_ai import Agent
+from pydantic_ai import Agent, CancellationToken
 from pydantic_ai.exceptions import UserError
 from pydantic_ai.messages import (
     ModelMessage,
@@ -25,10 +25,9 @@ from pydantic_ai.messages import (
     ToolCallPart,
     ToolReturnPart,
 )
-from pydantic_ai.models import ModelRequestParameters
+from pydantic_ai.models import CompletedStreamedResponse, ModelRequestParameters
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.test import TestModel
-from pydantic_ai.models.wrapper import CompletedStreamedResponse
 from pydantic_ai.tools import RunContext
 from pydantic_ai.usage import RunUsage
 
@@ -334,6 +333,45 @@ async def test_run_pins_conversation_id_across_replay() -> None:
         first = await durable.run("hi", id="pin-1")
         again = await durable.run("hi", id="pin-1")
         assert first.conversation_id == again.conversation_id
+        # The agent run id is pinned the same way.
+        assert first.run_id == again.run_id
+
+
+@pytest.mark.asyncio
+async def test_run_honors_explicit_run_id() -> None:
+    async with local() as r:
+        durable = ResonateAgent(Agent(TestModel(), name="run-id"), r)
+
+        result = await durable.run("hi", id="run-id-1", run_id="agent-run-7")
+        assert result.run_id == "agent-run-7"
+        assert all(m.run_id == "agent-run-7" for m in result.new_messages())
+
+
+@pytest.mark.asyncio
+async def test_run_continues_a_conversation() -> None:
+    async with local() as r:
+        durable = ResonateAgent(Agent(TestModel(), name="conversation"), r)
+
+        first = await durable.run("hi", id="conversation-1")
+        second = await durable.run(
+            "again", id="conversation-2", conversation=first.conversation
+        )
+
+        assert second.conversation_id == first.conversation_id
+        assert second.all_messages()[: len(first.all_messages())] == (
+            first.all_messages()
+        )
+        assert len(second.new_messages()) == 2
+
+        # A `conversation` already carries its id; passing one as well is
+        # rejected before anything is dispatched.
+        with pytest.raises(UserError, match="already carries"):
+            await durable.run(
+                "again",
+                id="conversation-3",
+                conversation=first.conversation,
+                conversation_id="other",
+            )
 
 
 @pytest.mark.asyncio
@@ -515,9 +553,10 @@ async def test_name_cannot_be_reassigned() -> None:
         {"output_type": City},
         {"toolsets": []},
         {"capabilities": []},
+        {"workspace": "new"},
         {"spec": {}},
     ],
-    ids=["model", "output_type", "toolsets", "capabilities", "spec"],
+    ids=["model", "output_type", "toolsets", "capabilities", "workspace", "spec"],
 )
 async def test_run_rejects_unserializable_arguments(kwargs: dict[str, Any]) -> None:
     async with local() as r:
@@ -525,6 +564,26 @@ async def test_run_rejects_unserializable_arguments(kwargs: dict[str, Any]) -> N
             Agent(TestModel(), name=f"reject-{next(iter(kwargs))}"), r
         )
         with pytest.raises(UserError, match="cannot be set at agent run time"):
+            await durable.run("hi", **kwargs)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"cancellation_token": CancellationToken()}, "`cancellation_token` cannot"),
+        ({"timeout": 30.0}, "`timeout` cannot"),
+    ],
+    ids=["cancellation_token", "timeout"],
+)
+async def test_run_rejects_same_process_run_controls(
+    kwargs: dict[str, Any], match: str
+) -> None:
+    async with local() as r:
+        durable = ResonateAgent(
+            Agent(TestModel(), name=f"reject-{next(iter(kwargs))}"), r
+        )
+        with pytest.raises(UserError, match=match):
             await durable.run("hi", **kwargs)
 
 
@@ -730,7 +789,7 @@ class StubMCPToolset(MCPToolset[Any]):
             },
             description="Add two integers.",
         )
-        return {"add": self.tool_for_tool_def(tool_def)}
+        return {"add": self.tool_for_tool_def(tool_def, ctx=ctx)}
 
     async def call_tool(
         self, name: str, tool_args: dict[str, Any], ctx: RunContext[Any], tool: Any
