@@ -1792,12 +1792,12 @@ provides-extras = ["pydantic", "pydantic-ai"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "attrs", specifier = ">=24.0.0" },
+    { name = "attrs", specifier = ">=26.1.0" },
     { name = "aws-lambda-typing", specifier = ">=2.20.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pydantic-ai-slim", extras = ["mcp"], specifier = ">=2.65" },
-    { name = "pytest", specifier = ">=9.0.3" },
-    { name = "pytest-asyncio", specifier = ">=1.4.0" },
+    { name = "pytest", specifier = ">=9.2.0" },
+    { name = "pytest-asyncio", specifier = ">=1.5.0" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
     { name = "resonate-nats", editable = "packages/resonate-nats" },
     { name = "resonate-pg", editable = "packages/resonate-pg" },
