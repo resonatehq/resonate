@@ -86,7 +86,7 @@
     "@types/jest": "30.0.0",
     "@types/node": "^25.9.5",
     "@types/pg": "^8.11.10",
-    "commander": "^14.0.0",
+    "commander": "^15.1.0",
     "esbuild": "^0.28.0",
     "pg": "^8.13.1",
     "ts-jest": "^29.4.9",
