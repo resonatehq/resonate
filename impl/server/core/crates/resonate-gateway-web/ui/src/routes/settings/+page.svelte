@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { setPage } from '$lib/shell.svelte';
-  import { rpc, RpcError } from '$lib/api';
+  import { setPage } from '#lib/shell.svelte.ts';
+  import { rpc, RpcError } from '#lib/api.ts';
   import {
     settings,
     save,
@@ -8,7 +8,7 @@
     DEFAULTS,
     parseInterval,
     formatInterval
-  } from '$lib/settings.svelte';
+  } from '#lib/settings.svelte.ts';
 
   /**
    * Where the console reads from, and how often.

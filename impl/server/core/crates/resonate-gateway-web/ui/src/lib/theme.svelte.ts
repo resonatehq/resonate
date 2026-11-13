@@ -1,4 +1,4 @@
-import { browser } from '$app/environment';
+import { browser } from '$app/env';
 
 const KEY = 'resonate.console.theme';
 export type Theme = 'light' | 'dark';

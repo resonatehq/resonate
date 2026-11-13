@@ -1,9 +1,9 @@
 <script lang="ts">
   import '../app.css';
-  import { base } from '$app/paths';
+  import { resolve } from '$app/paths';
   import { page } from '$app/state';
-  import { shell } from '$lib/shell.svelte';
-  import { theme, toggleTheme } from '$lib/theme.svelte';
+  import { shell } from '#lib/shell.svelte.ts';
+  import { theme, toggleTheme } from '#lib/theme.svelte.ts';
 
   let { children } = $props();
 
@@ -13,8 +13,8 @@
    */
   const section = $derived.by(() => {
     const p = page.url.pathname;
-    if (p.startsWith(`${base}/schedules`)) return 'schedules';
-    if (p.startsWith(`${base}/settings`)) return 'settings';
+    if (p.startsWith(resolve('/schedules'))) return 'schedules';
+    if (p.startsWith(resolve('/settings'))) return 'settings';
     return 'executions';
   });
 </script>
@@ -36,7 +36,7 @@
     <nav>
       <!-- Lucide (MIT): workflow, clock, settings. Three SVGs, not a package. -->
       <a
-        href="{base}/executions"
+        href={resolve('/executions')}
         title="Durable Executions"
         class="navbtn"
         class:on={section === 'executions'}
@@ -49,7 +49,7 @@
         </svg>
       </a>
       <a
-        href="{base}/schedules"
+        href={resolve('/schedules')}
         title="Schedules"
         class="navbtn"
         class:on={section === 'schedules'}
@@ -61,7 +61,7 @@
         </svg>
       </a>
       <a
-        href="{base}/settings"
+        href={resolve('/settings')}
         title="Settings"
         class="navbtn"
         class:on={section === 'settings'}

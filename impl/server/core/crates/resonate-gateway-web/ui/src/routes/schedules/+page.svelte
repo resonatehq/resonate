@@ -1,14 +1,14 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { searchSchedules, RpcError } from '$lib/api';
-  import { settings } from '$lib/settings.svelte';
-  import { shell, setPage, matches, scrollToTop } from '$lib/shell.svelte';
-  import { stamp } from '$lib/format';
-  import type { ScheduleItem } from '$lib/types';
-  import ErrorPanel from '$lib/components/ErrorPanel.svelte';
-  import StaleNotice from '$lib/components/StaleNotice.svelte';
-  import Empty from '$lib/components/Empty.svelte';
-  import Loading from '$lib/components/Loading.svelte';
+  import { searchSchedules, RpcError } from '#lib/api.ts';
+  import { settings } from '#lib/settings.svelte.ts';
+  import { shell, setPage, matches, scrollToTop } from '#lib/shell.svelte.ts';
+  import { stamp } from '#lib/format.ts';
+  import type { ScheduleItem } from '#lib/types.ts';
+  import ErrorPanel from '#lib/components/ErrorPanel.svelte';
+  import StaleNotice from '#lib/components/StaleNotice.svelte';
+  import Empty from '#lib/components/Empty.svelte';
+  import Loading from '#lib/components/Loading.svelte';
 
   /**
    * Schedules: a table and nothing else.

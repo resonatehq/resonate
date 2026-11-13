@@ -1,4 +1,4 @@
-import { base } from '$app/paths';
+import { resolve } from '$app/paths';
 import { base64 } from './duration';
 import { settings } from './settings.svelte';
 import type {
@@ -46,7 +46,10 @@ function endpoint(): string {
   // Empty `serverUrl` means the server that served this page: same origin, so
   // no CORS and no configuration to get wrong.
   const root = settings.serverUrl.trim().replace(/\/+$/, '');
-  return root ? `${root}${base}/rpc` : `${base}/rpc`;
+  // `/rpc` is served by the gateway, not a page route, so resolve() won't take it;
+  // resolve('/') is the console's base, `/console/`.
+  const path = `${resolve('/')}rpc`;
+  return root ? `${root}${path}` : path;
 }
 
 export async function rpc<T>(kind: string, data: unknown, signal?: AbortSignal): Promise<T> {

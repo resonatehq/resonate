@@ -1,0 +1,1 @@
+import{I as e,K as t,L as n,P as r,S as i,b as a,j as o,v as s}from"./nb086GhJ.js";var c=i(`<div class="empty svelte-1m5lo4h"><div class="title svelte-1m5lo4h"> </div> <div class="line svelte-1m5lo4h"> </div></div>`);function l(i,l){var u=c(),d=r(u),f=e(d,!0),p=n(d,2),m=e(p,!0);t(u),o(()=>{s(f,l.title),s(m,l.line)}),a(i,u)}export{l as t};

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { STATE_LABEL, type PromiseState } from '$lib/types';
+  import { STATE_LABEL, type PromiseState } from '#lib/types.ts';
 
   /**
    * Dot + word. No pills, no badges, no uppercase.

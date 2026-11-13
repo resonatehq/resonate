@@ -1,19 +1,19 @@
 <script lang="ts">
-  import { base } from '$app/paths';
+  import { resolve } from '$app/paths';
   import { page } from '$app/state';
 import { untrack } from 'svelte';
   import { goto, replaceState } from '$app/navigation';
-  import { getExecution, cancelExecution, RpcError } from '$lib/api';
-  import { settings } from '$lib/settings.svelte';
-  import { shell, setPage } from '$lib/shell.svelte';
-  import { clock, stamp, duration, decodeBody, tickLabel } from '$lib/format';
-  import { rows as buildRows, span as buildSpan, bar, shortName } from '$lib/tree';
-  import { STATE_LABEL, type ExecutionView, type ExecutionNode } from '$lib/types';
-  import Status from '$lib/components/Status.svelte';
-  import Dot from '$lib/components/Dot.svelte';
-  import ErrorPanel from '$lib/components/ErrorPanel.svelte';
-  import StaleNotice from '$lib/components/StaleNotice.svelte';
-  import Loading from '$lib/components/Loading.svelte';
+  import { getExecution, cancelExecution, RpcError } from '#lib/api.ts';
+  import { settings } from '#lib/settings.svelte.ts';
+  import { shell, setPage } from '#lib/shell.svelte.ts';
+  import { clock, stamp, duration, decodeBody, tickLabel } from '#lib/format.ts';
+  import { rows as buildRows, span as buildSpan, bar, shortName } from '#lib/tree.ts';
+  import { STATE_LABEL, type ExecutionView, type ExecutionNode } from '#lib/types.ts';
+  import Status from '#lib/components/Status.svelte';
+  import Dot from '#lib/components/Dot.svelte';
+  import ErrorPanel from '#lib/components/ErrorPanel.svelte';
+  import StaleNotice from '#lib/components/StaleNotice.svelte';
+  import Loading from '#lib/components/Loading.svelte';
 
   /**
    * Understand what an execution did and where it is stuck.
@@ -128,7 +128,7 @@ import { untrack } from 'svelte';
 
   /** Keep `?step=` in the address bar, without a navigation. */
   function syncUrl(step: string | null) {
-    const url = new URL(page.url);
+    const url = new URL(page.url.href);
     if (step) url.searchParams.set('step', step);
     else url.searchParams.delete('step');
     replaceState(url, page.state);
@@ -159,7 +159,7 @@ import { untrack } from 'svelte';
 </script>
 
 <section>
-  <button class="back" onclick={() => goto(`${base}/executions`)}>← All executions</button>
+  <button class="back" onclick={() => goto(resolve('/executions'))}>← All executions</button>
 
   {#if error}
     <ErrorPanel
@@ -173,8 +173,9 @@ import { untrack } from 'svelte';
   {:else if loading || !view || !span}
     <Loading what="Loading execution…" />
   {:else}
+    {@const rootId = view.root.id}
     <div class="headline">
-      <h2>{view.nodes.find((n) => n.id === view.root.id)?.func ?? view.root.id}</h2>
+      <h2>{view.nodes.find((n) => n.id === rootId)?.func ?? rootId}</h2>
       <Status state={view.root.state} />
       <div class="grow"></div>
       <button
