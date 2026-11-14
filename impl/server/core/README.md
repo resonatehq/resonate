@@ -233,10 +233,13 @@ Supported backends:
 | **SQLite** | *(default)* |
 | **PostgreSQL** | `--storage-type postgres` |
 | **MySQL** | `--storage-type mysql` |
+| **TiDB** (v8.5+) | `--storage-type mysql`, pointed at TiDB |
 | **ScyllaDB** | `--storage-type scylladb` |
 | **Blob** | `--storage-type blob` |
 
 All backends are held to the same behaviour by the differential test suite — the same requests go to every engine and to an executable model of the specification, and any divergence fails the build.
+
+TiDB runs on the MySQL plugin: it speaks the MySQL protocol, and the plugin detects it, pins pessimistic transactions per session and retries TiDB's retryable errors. Its differential and linearizability checks run nightly and on demand (`server-core-tidb.yml`) rather than on every pull request, because the full differential takes about an hour against TiDB.
 
 ---
 
