@@ -1300,10 +1300,21 @@ fn gen_promise_create(rng: &mut fastrand::Rng, oracle: &Oracle, now: i64) -> Req
     // callback on an external promise is a 200, on a plain one a 422. One
     // create in six is a timer with no target — a durable sleep as the SDK
     // could issue it — which must arm on its own and resolve, not time out,
-    // when its deadline passes.
-    let tags = match rng.u32(0..6) {
+    // when its deadline passes. One in seven is a targeted create carrying
+    // `resonate:delay` (the spec's createPromise: the first dispatch is held
+    // back to max(delay, now)): half the delays still ahead, which must emit
+    // nothing at create, half already past, which must behave as no delay.
+    let tags = match rng.u32(0..7) {
         0..=2 => json!({ "resonate:external": "true" }),
         3 => json!({ "resonate:timer": "true" }),
+        4 => {
+            let delay = if rng.bool() {
+                now + rng.i64(1..(timeout_at - now))
+            } else {
+                (now - rng.i64(0..10_000)).max(0)
+            };
+            json!({ "resonate:target": WORKER_URL, "resonate:delay": delay.to_string() })
+        }
         _ => json!({}),
     };
     req(
