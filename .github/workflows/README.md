@@ -27,22 +27,33 @@ every pull request that matters right now.
 The inert copies under each subproject (`impl/*/.github/`, `spec/.github/`)
 have since been removed, along with the subprojects' `dependabot.yml` files and
 the TypeScript SDK's issue and PR templates, none of which GitHub reads from a
-subdirectory. They are in git history at `b0ab037` and earlier.
+subdirectory. They are in git history at `b0ab037` and earlier; the release
+workflows among them were moved here, manual only (below).
 
-## Deliberately not moved
+## Release workflows: manual only
 
-These are outward-facing or destructive, and enabling them is a decision for
-whoever owns the release process, not a side effect of repairing CI. They
-were never active in this repository and were removed with the other inert
-copies; to enable one, restore it from `b0ab037` (e.g.
-`git show b0ab037:impl/sdk/ts/.github/workflows/cd.yml`) into the root
-`.github/workflows/` and adapt it as above:
+The subprojects' release and publish workflows are here too, but **none of them
+runs on its own**: their release, tag and push triggers were replaced with
+`workflow_dispatch`, so they run only when someone starts them from the Actions
+tab. Publishing is outward-facing and needs secrets this repository may not
+carry yet; enabling it is a decision for whoever owns the release process.
 
-| Workflow (path at `b0ab037`) | Why it was not moved |
-| --- | --- |
-| `impl/{sdk/*,server/core}/.github/workflows/cd.yml`, `impl/sdk/rs/.github/workflows/publish.yml` | Publish to npm, PyPI, Maven and crates.io on release. Moving them arms real publishing, and they need secrets this repository may not carry. |
-| `spec/.github/workflows/binaries.yml` | Publishes GitHub Releases on `v*` tags, and builds on every push to every branch. |
-| `impl/server/core/.github/workflows/remove-stale-branches.yml` | Deletes branches. |
-| `impl/sdk/ts/.github/workflows/dst.yml` | `workflow_dispatch` only, and it opens issues. |
-| `impl/sdk/ts/.github/workflows/docs.yaml` | Publishes the TypeScript SDK's docs site. |
+| Workflow | Publishes | Was |
+| --- | --- | --- |
+| `release-sdk-ts.yml` | npm (trusted publishing) | `impl/sdk/ts/.github/workflows/cd.yml` |
+| `release-sdk-py.yml` | PyPI | `impl/sdk/py/.github/workflows/cd.yml` |
+| `release-sdk-java.yml` | Maven Central | `impl/sdk/java/.github/workflows/cd.yml` |
+| `release-sdk-rs.yml` | crates.io (runs `sdk-rs-ci.yml` first) | `impl/sdk/rs/.github/workflows/publish.yml` |
+| `release-server.yml` | Docker Hub, GHCR, Artifact Registry, release binaries, Homebrew PR | `impl/server/core/.github/workflows/cd.yml` |
+| `release-spec-binaries.yml` | `lincheck` / `scenarios` binaries, optionally a GitHub Release | `spec/.github/workflows/binaries.yml` |
+| `docs-sdk-ts.yml` | TypeScript SDK docs to GitHub Pages | `impl/sdk/ts/.github/workflows/docs.yaml` |
 
+Each takes a `tag` input in place of the release tag it used to read (the docs
+workflow takes none), and each file's header lists the secrets it needs. Two
+things to settle before the first real run: the secrets, and a tag scheme, since
+every subproject used to tag `vX.Y.Z` in its own repository and those collide
+here. None has been exercised from the monorepo yet.
+
+Not carried over (still in history at `b0ab037`): `impl/sdk/ts/.github/workflows/dst.yml`
+(`workflow_dispatch` only, opens issues) and
+`impl/server/core/.github/workflows/remove-stale-branches.yml` (deletes branches).
