@@ -472,8 +472,8 @@ theorem writesGood_processPromiseTimeout (req : ServerModel.PromiseTimeoutReq) (
   · exact writesGood_pure _ _ _
   · intro p hp _ _; exact writesGood_pure _ _ _
 
-theorem writesGood_resumeOne (awaited awaiter : ServerModel.Ident) (now : Nat) :
-    WritesGood g e (Internal.resumeOne awaited awaiter now) := by
+theorem writesGood_resumeOne (awaited awaiter : ServerModel.Ident) (since now : Nat) :
+    WritesGood g e (Internal.resumeOne awaited awaiter since now) := by
   unfold Internal.resumeOne touchTaskObject
   refine writesGood_afterMatReadTaskObject hq true hs _ _ _
     (writesGood_pure _ _ _) ?_
@@ -505,7 +505,7 @@ theorem writesGood_processCallback (req : ServerModel.PromiseRegisterCallbackReq
     refine writesGood_ite _ _ _ _ _ ?_ (writesGood_pure _ _ _)
     exact writesGood_bind' _ _ _ _
       (writesGood_setPromise _ _ _ _ (hq.dropCallback _ p.promise _ hsto (by simpa using hns) hp))
-      (writesGood_resumeOne hq hs _ _ _)
+      (writesGood_resumeOne hq hs _ _ _ _)
 
 theorem writesGood_processListener (req : ServerModel.PromiseRegisterListenerReq) (now : Nat) :
     WritesGood g e (Internal.processListener req now) := by
@@ -522,20 +522,10 @@ theorem writesGood_processListener (req : ServerModel.PromiseRegisterListenerReq
 
 theorem writesGood_processLeaseTimeout (req : ServerModel.TaskLeaseTimeoutReq) (now : Nat) :
     WritesGood g e (Internal.processLeaseTimeout req now) := by
-  unfold Internal.processLeaseTimeout viewTaskObject
-  refine writesGood_afterMatReadTaskObject hq false hs _ _ _
+  unfold Internal.processLeaseTimeout touchTaskObject
+  refine writesGood_afterMatReadTaskObject hq true hs _ _ _
     (writesGood_pure _ _ _) ?_
-  intro o ho _ _
-  dsimp only
-  split
-  · exact writesGood_pure _ _ _
-  · rename_i t hteq
-    have hgt : g.task t = true := QObj_task ho hteq
-    split
-    · exact writesGood_pure _ _ _
-    · refine writesGood_ite _ _ _ _ _ ?_ (writesGood_pure _ _ _)
-      refine writesGood_ite _ _ _ _ _ ?_ (writesGood_pure _ _ _)
-      exact writesGood_setTask _ _ _ _ (hq.tRepend t _ hgt)
+  intro _ _ _ _; exact writesGood_pure _ _ _
 
 theorem writesGood_processRetryTimeout (req : ServerModel.TaskRetryTimeoutReq) (now : Nat) :
     WritesGood g e (Internal.processRetryTimeout req now) := by

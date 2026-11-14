@@ -95,8 +95,8 @@ open ServerModel AbstractModel Abstraction Equivalence TraceCheck TraceCheck.Cor
     `resumes` as a count, `ttl` and `pid` — not `retryTimeoutAt`, and not
     `leaseTimeoutAt` — so neither deadline is on the wire. `retryTimeoutAt` is
     erased here because a retry internal step writes nothing else observable;
-    `leaseTimeoutAt` is KEPT, because `processLeaseTimeout` moves the task's
-    state and `task.get` projects that. -/
+    `leaseTimeoutAt` is KEPT, because its passing moves the task's state
+    (`TaskObject.lapse`) and `task.get` projects that. -/
 def Visible (s : ServerState) : ServerState :=
   { s with outbox := [],
            objects := s.objects.map fun o =>

@@ -145,6 +145,22 @@ def TaskObject.fulfill (t : TaskObject) : TaskObject :=
 def TaskObject.view (t : TaskObject) (p : PromiseObject) : TaskObject :=
   if p.state != .pending ∧ t.state != .fulfilled then t.fulfill else t
 
+/-- A lease past its end is lost. The holder is presumed gone: the task is
+    pending again at the same version, with nothing of the holder's left on
+    it, and its offers run on the grid anchored at the lease's end, the
+    first due at the end itself. The end is a deadline the server computed
+    (`now + ttl`), a fact of the clock as a promise's `timeoutAt` is, so it
+    is read the same way: projected at `now`, not awaited from a scheduler.
+    A client never sees a dead holder's lease as held. -/
+def TaskObject.lapse (t : TaskObject) (now : Nat) : TaskObject :=
+  match t.leaseTimeoutAt with
+  | some d =>
+      if t.state == .acquired ∧ d ≤ now then
+        { t with state := .pending, pid := none, ttl := none,
+                 leaseTimeoutAt := none, retryTimeoutAt := some d }
+      else t
+  | none => t
+
 /-- A promise, its id, and the task that executes it — if it has one.
 
     The `Option` is not free information: it is `promise.otype`, and
@@ -161,10 +177,12 @@ structure Object where
 /-- The whole object at an instant. Promise projection and the task's
     view of it were always the same fact read twice — the promise
     settles at its deadline, and a task whose promise is settled is
-    fulfilled. One row, one function. -/
+    fulfilled. The lease is the third reading of the clock: a task whose
+    promise is still pending but whose lease has ended is pending again.
+    One row, one function. -/
 def Object.project (o : Object) (now : Nat) : Object :=
   let p := o.promise.project now
-  { o with promise := p, task := o.task.map (·.view p) }
+  { o with promise := p, task := o.task.map fun t => (t.view p).lapse now }
 
 structure ServerState where
   objects   : List Object      := []
@@ -249,6 +267,17 @@ def applyAll (s : ServerState) : List Effect → ServerState
 structure ServerConfig where
   retryTimeout : Nat := 5000
   deriving Repr
+
+/-- The next offer of a pending task: the first instant on its grid,
+    `due + k·retryTimeout`, strictly after `now`. The grid is anchored at
+    `due`, the instant the task was last offered, not at `now`, so the
+    instant does not depend on when the server got to the step. A server
+    that is late re-offers the task once, and its next offer is where an
+    on-time server's would have been: the offers of a task can be computed
+    in advance from its state alone. With `retryTimeout = 0` this is `due`
+    itself; `well_formed_config_retry_positive` rules that out. -/
+def nextOffer (due now retryTimeout : Nat) : Nat :=
+  if now < due then due else due + retryTimeout * ((now - due) / retryTimeout + 1)
 
 structure Env where
   state  : ServerState
