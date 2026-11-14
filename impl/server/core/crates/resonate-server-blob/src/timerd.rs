@@ -67,6 +67,7 @@ use super::timer_queue::TimerQueue;
 ///
 /// A port rather than a direct dependency so the poller does not need to know
 /// what a schedule is: it reads a key, sees a schedule id, and hands it over.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait ScheduleFirer: Send + Sync {
     async fn fire(&self, id: &str, deadline: i64, now: i64) -> Result<(), Unavailable>;

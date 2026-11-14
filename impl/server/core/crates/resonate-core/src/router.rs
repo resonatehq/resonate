@@ -11,6 +11,7 @@ use super::Unavailable;
 /// string as a URL, reads the scheme, and hands the whole untouched address to
 /// the [`ResonateWorker`](super::ResonateWorker) registered for it — so a new
 /// scheme is a registration, never a change to `core`.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait ResonateRouter: Send + Sync {
     /// Start whatever the router owns, and hand each worker the debug flag.

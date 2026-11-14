@@ -172,6 +172,7 @@ pub struct HttpAddress {
 // Token provider abstraction
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::double_must_use)]
 #[async_trait::async_trait]
 pub trait TokenProvider: Send + Sync {
     async fn get_token(&self, audience: &str) -> Result<String, String>;

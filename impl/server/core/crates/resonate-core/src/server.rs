@@ -36,6 +36,7 @@ use super::Unavailable;
 /// What an implementation still answers for itself is whether `kind` names an
 /// operation it has, and whether `data` carries what that operation needs. Only
 /// it knows.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait ResonateServer: Send + Sync {
     /// Acquire resources and start background work.
