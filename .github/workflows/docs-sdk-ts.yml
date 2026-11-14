@@ -1,14 +1,33 @@
-name: Docs
+# MANUAL ONLY: this workflow never runs on its own.
+#
+# Builds the TypeScript SDK's API docs (typedoc) and deploys them to GitHub
+# Pages.
+# Moved from impl/sdk/ts/.github/workflows/docs.yaml (inert there: GitHub reads
+# workflows only from the root
+# .github/workflows/). Its release/push triggers were replaced with
+# workflow_dispatch so nothing publishes until someone runs it on purpose.
+#
+# Before the first real run:
+#   - add the secrets it reads: none, but GitHub Pages must be enabled for this
+#     repository with GitHub Actions as the source
+#   - decide the monorepo's tag scheme; every subproject used to tag `vX.Y.Z`
+#     in its own repository, which collides here. It takes no tag.
+#   - it has not yet been exercised from the monorepo; do a dry run first.
+#
+name: docs-sdk-ts
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
 
 permissions:
   contents: read
   id-token: write
   pages: write
+
+
+defaults:
+  run:
+    working-directory: impl/sdk/ts
 
 jobs:
   build:
@@ -16,9 +35,9 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"

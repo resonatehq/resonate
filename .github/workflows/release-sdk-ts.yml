@@ -1,8 +1,37 @@
-name: cd
+# MANUAL ONLY: this workflow never runs on its own.
+#
+# Checks, builds and publishes the TypeScript SDK and its packages to npm
+# (trusted publishing, with provenance).
+# Moved from impl/sdk/ts/.github/workflows/cd.yml (inert there: GitHub reads
+# workflows only from the root
+# .github/workflows/). Its release/push triggers were replaced with
+# workflow_dispatch so nothing publishes until someone runs it on purpose.
+#
+# Before the first real run:
+#   - add the secrets it reads: none; npm trusted publishing (OIDC) must be
+#     configured for this repository on npmjs.com
+#   - decide the monorepo's tag scheme; every subproject used to tag `vX.Y.Z`
+#     in its own repository, which collides here. The version check compares
+#     package.json's version with the `tag` input.
+#   - it has not yet been exercised from the monorepo; do a dry run first.
+#
+name: release-sdk-ts
 
 on:
-  release:
-    types: [released]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, e.g. v1.2.3 (the version check compares against it)"
+        required: true
+        type: string
+
+env:
+  RELEASE_TAG: ${{ inputs.tag }}
+
+
+defaults:
+  run:
+    working-directory: impl/sdk/ts
 
 jobs:
   # One job: every check that can reject a bad release (version == tag, lint,
@@ -16,10 +45,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: set up node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
@@ -35,8 +64,8 @@ jobs:
       - name: verify the root version matches the release tag
         run: |
           version=$(npm pkg get version | tr -d '"')
-          test "$version" = "${GITHUB_REF_NAME#v}" \
-            || { echo "root version $version != tag ${GITHUB_REF_NAME#v}"; exit 1; }
+          test "$version" = "${RELEASE_TAG#v}" \
+            || { echo "root version $version != tag ${RELEASE_TAG#v}"; exit 1; }
 
       - name: install
         run: npm ci

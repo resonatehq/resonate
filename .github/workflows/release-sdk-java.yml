@@ -1,0 +1,59 @@
+# MANUAL ONLY: this workflow never runs on its own.
+#
+# Publishes the Java SDK to Maven Central.
+# Moved from impl/sdk/java/.github/workflows/cd.yml (inert there: GitHub reads
+# workflows only from the root
+# .github/workflows/). Its release/push triggers were replaced with
+# workflow_dispatch so nothing publishes until someone runs it on purpose.
+#
+# Before the first real run:
+#   - add the secrets it reads: MAVEN_CENTRAL_USERNAME, MAVEN_CENTRAL_PASSWORD,
+#     MAVEN_SIGNING_KEY, MAVEN_SIGNING_KEY_PASSWORD
+#   - decide the monorepo's tag scheme; every subproject used to tag `vX.Y.Z`
+#     in its own repository, which collides here. 
+#   - it has not yet been exercised from the monorepo; do a dry run first.
+#
+name: release-sdk-java
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, e.g. v1.2.3 (the version check compares against it)"
+        required: true
+        type: string
+
+env:
+  RELEASE_TAG: ${{ inputs.tag }}
+
+
+defaults:
+  run:
+    working-directory: impl/sdk/java
+
+jobs:
+  run:
+    name: release
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: set up java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: setup gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      - name: publish to maven central
+        # --no-configuration-cache: vanniktech's publish task isn't CC-compatible yet.
+        run: ./gradlew publishAndReleaseToMavenCentral --no-configuration-cache
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.MAVEN_SIGNING_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.MAVEN_SIGNING_KEY_PASSWORD }}

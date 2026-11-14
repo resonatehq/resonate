@@ -1,31 +1,47 @@
+# MANUAL ONLY: this workflow never runs on its own.
+#
+# Publishes the server: Docker images (Docker Hub, GHCR, Google Artifact
+# Registry), binaries for linux/darwin x86_64/aarch64 attached to the GitHub
+# Release, and a PR to resonatehq/homebrew-tap.
+# Moved from impl/server/core/.github/workflows/cd.yml (inert there: GitHub
+# reads workflows only from the root
+# .github/workflows/). Its release/push triggers were replaced with
+# workflow_dispatch so nothing publishes until someone runs it on purpose.
+#
+# Before the first real run:
+#   - add the secrets it reads: DOCKER_USERNAME, DOCKER_PASSWORD,
+#     WIF_PROVIDER, WIF_SERVICE_ACCOUNT (GCP workload identity, for Artifact
+#     Registry), HOMEBREW_TAP_TOKEN (opens PRs on resonatehq/homebrew-tap)
+#   - decide the monorepo's tag scheme; every subproject used to tag `vX.Y.Z`
+#     in its own repository, which collides here. The version check compares
+#     impl/server/core/Cargo.toml with the `tag` input; the binaries job uploads
+#     to an existing GitHub Release of that tag.
+#   - it has not yet been exercised from the monorepo; do a dry run first.
+#
 # Unified CD Pipeline for Resonate Server (Rust)
 #
 # Triggered by:
-#   - GitHub Release published (production)
-#   - Manual workflow_dispatch (testing)
+#   - Manual workflow_dispatch only (see the note above)
 #
 # Pipeline:
 #   1. check-version — Validates Cargo.toml matches release tag
 #   2. publish-dockerhub — Multi-platform Docker images → DockerHub
 #   3. publish-github-image — Multi-platform Docker images → GHCR
-#   4. publish-gcr-image — Multi-platform Docker images → GCR (Artifact Registry)
+#   4. publish-gcr-image — Multi-platform Docker images → GCR (Artifact
+# Registry)
 #   5. publish-github-artifacts — Cross-platform binary artifacts
 #   6. update-homebrew — Opens PR to update resonatehq/homebrew-tap formula
 #   7. verify-artifacts — Post-publication verification
 #
-# See .github/CD_PIPELINE.md for full documentation.
 
-name: CD
+name: release-server
 
 on:
-  release:
-    types:
-      - published
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag (e.g., v0.2.0)"
-        required: false
+        description: "Release tag (e.g., v0.2.0); the GitHub Release must already exist"
+        required: true
         type: string
 
 env:
@@ -51,11 +67,11 @@ jobs:
       - name: Resolve tag
         id: tag
         run: |
-          TAG="${{ github.event.release.tag_name || github.event.inputs.tag || github.ref_name }}"
+          TAG="${{ inputs.tag }}"
           echo "value=${TAG}" >> $GITHUB_OUTPUT
 
       - name: Checkout repository at tag
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           ref: ${{ steps.tag.outputs.value }}
 
@@ -63,7 +79,7 @@ jobs:
         id: version
         run: |
           # Extract version from Cargo.toml [package] section
-          CARGO_VERSION=$(grep -m1 '^version' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          CARGO_VERSION=$(grep -m1 '^version' impl/server/core/Cargo.toml | sed 's/version = "\(.*\)"/\1/')
 
           # Ensure tag starts with 'v'
           TAG="${{ steps.tag.outputs.value }}"
@@ -118,7 +134,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           ref: ${{ needs.check-version.outputs.tag }}
 
@@ -146,7 +162,7 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v7
         with:
-          context: .
+          context: impl/server/core
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
@@ -171,7 +187,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           ref: ${{ needs.check-version.outputs.tag }}
 
@@ -200,7 +216,7 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v7
         with:
-          context: .
+          context: impl/server/core
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
@@ -225,7 +241,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           ref: ${{ needs.check-version.outputs.tag }}
 
@@ -250,7 +266,7 @@ jobs:
       - name: Build Docker image (cache only)
         uses: docker/build-push-action@v7
         with:
-          context: .
+          context: impl/server/core
           platforms: linux/amd64,linux/arm64
           push: false
           tags: ${{ steps.meta.outputs.tags }}
@@ -281,7 +297,7 @@ jobs:
       - name: Push Docker image
         uses: docker/build-push-action@v7
         with:
-          context: .
+          context: impl/server/core
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
@@ -339,17 +355,18 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           ref: ${{ needs.check-version.outputs.tag }}
 
       - name: Setup Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: stable
           cache: true
+          cache-workspaces: impl/server/core
 
       - name: Build binary
+        working-directory: impl/server/core
         run: |
           cargo build --release
 
@@ -358,6 +375,7 @@ jobs:
             (echo "Binary architecture mismatch"; exit 1)
 
       - name: Create tarball and checksum
+        working-directory: impl/server/core
         run: |
           TARBALL="resonate_${{ matrix.systems.os }}_${{ matrix.systems.arch }}.tar.gz"
           TARBALL_CHECKSUM="${TARBALL}.sha256"
@@ -379,6 +397,7 @@ jobs:
           cat "${TARBALL_CHECKSUM}"
 
       - name: Upload artifacts to GitHub Release
+        working-directory: impl/server/core
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.check-version.outputs.tag }}
@@ -449,7 +468,7 @@ jobs:
           echo "  linux_x86_64:   ${LINUX_X86_64}"
 
       - name: Checkout homebrew-tap repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           repository: resonatehq/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
@@ -590,7 +609,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Verify GitHub Release artifacts
         env:

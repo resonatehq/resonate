@@ -1,22 +1,51 @@
-name: Publish to crates.io
+# MANUAL ONLY: this workflow never runs on its own.
+#
+# Runs the Rust SDK's CI, then publishes resonate-sdk-macros, resonate-sdk and
+# resonate-sdk-postgres to crates.io.
+# Moved from impl/sdk/rs/.github/workflows/publish.yml (inert there: GitHub
+# reads workflows only from the root
+# .github/workflows/). Its release/push triggers were replaced with
+# workflow_dispatch so nothing publishes until someone runs it on purpose.
+#
+# Before the first real run:
+#   - add the secrets it reads: CARGO_REGISTRY_TOKEN
+#   - decide the monorepo's tag scheme; every subproject used to tag `vX.Y.Z`
+#     in its own repository, which collides here. 
+#   - it has not yet been exercised from the monorepo; do a dry run first.
+#
+name: release-sdk-rs
 
 on:
-  release:
-    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, e.g. v1.2.3 (the version check compares against it)"
+        required: true
+        type: string
+
+env:
+  RELEASE_TAG: ${{ inputs.tag }}
+
+
+defaults:
+  run:
+    working-directory: impl/sdk/rs
 
 jobs:
   ci:
-    uses: ./.github/workflows/ci.yml
+    uses: ./.github/workflows/sdk-rs-ci.yml
 
   publish:
     needs: ci
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: impl/sdk/rs
 
       - name: Publish resonate-sdk-macros
         # Treat "already exists" as success so re-runs and version-unchanged

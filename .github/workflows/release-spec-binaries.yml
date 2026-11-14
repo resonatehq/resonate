@@ -1,3 +1,20 @@
+# MANUAL ONLY: this workflow never runs on its own.
+#
+# Builds the spec's two Go tools (lincheck, scenarios) for five platforms; with
+# a `tag` input, publishes them as a GitHub Release.
+# Moved from spec/.github/workflows/binaries.yml (inert there: GitHub reads
+# workflows only from the root
+# .github/workflows/). Its release/push triggers were replaced with
+# workflow_dispatch so nothing publishes until someone runs it on purpose.
+#
+# Before the first real run:
+#   - add the secrets it reads: none (uses the job's GITHUB_TOKEN)
+#   - decide the monorepo's tag scheme; every subproject used to tag `vX.Y.Z`
+#     in its own repository, which collides here. An empty `tag` builds
+#     artifacts only; `gh release create` creates the tag if it does not exist
+#     yet.
+#   - it has not yet been exercised from the monorepo; do a dry run first.
+#
 # Two binaries, built for every platform anyone here runs.
 #
 #   lincheck    the linearizability checker — reads a recorded trace on
@@ -14,14 +31,18 @@
 # Pushing a `v*` tag additionally publishes a GitHub Release with the
 # binaries attached as plain files, so they can be fetched with curl.
 
-name: binaries
+name: release-spec-binaries
 
 on:
-  push:
-    branches: ["**"]
-    tags: ["v*"]
-  pull_request:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Optional: a tag (e.g. spec-v0.1.0) to publish a GitHub Release with the binaries. Empty: build artifacts only."
+        required: false
+        type: string
+
+env:
+  RELEASE_TAG: ${{ inputs.tag }}
 
 permissions:
   contents: read
@@ -33,16 +54,16 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
-          go-version-file: valid/porc/go.mod
-          cache-dependency-path: valid/porc/go.sum
+          go-version-file: spec/valid/porc/go.mod
+          cache-dependency-path: spec/valid/porc/go.sum
       - name: go vet
-        working-directory: valid/porc
+        working-directory: spec/valid/porc
         run: go vet ./...
       - name: go test
-        working-directory: valid/porc
+        working-directory: spec/valid/porc
         run: go test ./...
 
   build:
@@ -63,24 +84,24 @@ jobs:
       CGO_ENABLED: "0"
       SUFFIX: ${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
-          go-version-file: valid/porc/go.mod
+          go-version-file: spec/valid/porc/go.mod
           cache-dependency-path: |
-            valid/porc/go.sum
-            work/go/go.sum
+            spec/valid/porc/go.sum
+            spec/work/go/go.sum
 
       - run: mkdir -p "${GITHUB_WORKSPACE}/dist"
 
       - name: Build lincheck
-        working-directory: valid/porc
+        working-directory: spec/valid/porc
         run: |
           go build -trimpath -ldflags="-s -w" \
             -o "${GITHUB_WORKSPACE}/dist/lincheck-${SUFFIX}" ./cmd/lincheck
 
       - name: Build scenarios
-        working-directory: work/go
+        working-directory: spec/work/go
         run: |
           go build -trimpath -ldflags="-s -w" \
             -o "${GITHUB_WORKSPACE}/dist/scenarios-${SUFFIX}" .
@@ -104,16 +125,16 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
-  # Tag `v0.1.0` and push it, and the binaries land on the release page as
-  # plain downloadable files — no unzipping, no Actions login.
+  # Given a `tag` input, the binaries land on that release's page as plain
+  # downloadable files — no unzipping, no Actions login.
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: inputs.tag != ''
     needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -151,12 +172,12 @@ jobs:
           Verify with `SHA256SUMS`. The macOS builds are unsigned, so
           `xattr -d com.apple.quarantine <file>` before the first run.
           NOTES
-          sed -i "s|__REPO__|${GITHUB_REPOSITORY}|g; s|__TAG__|${GITHUB_REF_NAME}|g" notes.md
+          sed -i "s|__REPO__|${GITHUB_REPOSITORY}|g; s|__TAG__|${RELEASE_TAG}|g" notes.md
 
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" \
+          gh release create "${RELEASE_TAG}" \
             artifacts/lincheck-* artifacts/scenarios-* artifacts/SHA256SUMS \
-            --title "${GITHUB_REF_NAME}" --notes-file notes.md
+            --title "${RELEASE_TAG}" --notes-file notes.md

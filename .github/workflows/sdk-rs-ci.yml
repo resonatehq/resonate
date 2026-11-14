@@ -18,6 +18,8 @@ on:
       - "impl/sdk/rs/**"
       - ".github/workflows/sdk-rs-ci.yml"
   workflow_dispatch:
+  # release-sdk-rs.yml runs this CI before it publishes.
+  workflow_call:
 
 env:
   RUSTFLAGS: "-D warnings"

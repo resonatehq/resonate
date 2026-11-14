@@ -2,9 +2,8 @@
 # repository root. The grafted sub-projects each kept their own
 # `.github/workflows/` when they were merged in, and those are inert: nothing
 # under `impl/` or `spec/` is ever read by Actions. This file is the server
-# core's CI, moved here so it runs again, and the copy at
-# impl/server/core/.github/workflows/ci.yml is kept only as the sub-project's
-# own record.
+# core's CI, moved here so it runs again. (The inert copy under
+# impl/server/core/.github/ was later removed.)
 #
 # Two things change in the move. Every `run:` step needs the sub-project as
 # its working directory, which `defaults` below sets once. And `paths` keeps
