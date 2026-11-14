@@ -1068,7 +1068,21 @@ fn gen_promise_create(rng: &mut fastrand::Rng, oracle: &Oracle, now: i64) -> Req
     // id's tags are fixed by its first success and the pool stays split —
     // which is what keeps both sides of the awaitability rule reachable: a
     // callback on an external promise is a 200, on a plain one a 422.
-    let tags = if rng.bool() {
+    //
+    // One time in eight it is a targeted create carrying `resonate:delay`, so
+    // the task's first dispatch is held back to the delay (the spec's
+    // createPromise: retry deadline at max(delay, now)). Half of those delays
+    // are still ahead, which must emit nothing at create and dispatch on the
+    // retry path when due; half are already past, which must behave as no
+    // delay. Validation requires the delay before timeoutAt and a target.
+    let tags = if rng.u8(0..8) == 0 {
+        let delay = if rng.bool() {
+            now + rng.i64(1..(timeout_at - now))
+        } else {
+            (now - rng.i64(0..10_000)).max(0)
+        };
+        json!({ "resonate:target": WORKER_URL, "resonate:delay": delay.to_string() })
+    } else if rng.bool() {
         json!({ "resonate:external": "true" })
     } else {
         json!({})
