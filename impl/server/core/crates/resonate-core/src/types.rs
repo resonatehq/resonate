@@ -337,6 +337,16 @@ fn validate_promise_create_data(
         return Err(validator::ValidationError::new("null_bytes")
             .with_message("Promise ID must not contain null bytes".into()));
     }
+    // ':' separates an id's origin from its lineage, once: deeper lineage
+    // segments are joined with '.' ('app:1.2', see `origin()` and the
+    // resonate:branch / resonate:parent checks below). An id with a second ':'
+    // is not of that form, and the engines disagreed on it -- Postgres's schema
+    // refused it with a 500 while SQLite, MySQL, blob and the oracle stored it
+    // (#1189) -- so it is refused here, as a 400, the same on every engine.
+    if data.id.matches(':').count() > 1 {
+        return Err(validator::ValidationError::new("multiple_colons")
+            .with_message("Promise ID must contain at most one ':'".into()));
+    }
     if let Some(origin) = data.tags.get("resonate:origin") {
         // '.' is deliberately *not* rejected: it separates lineage segments below
         // the origin, which are only ever read once the origin has been split off
@@ -810,6 +820,15 @@ fn validate_schedule_create_data(
     if data.id.contains(':') {
         return Err(validator::ValidationError::new("colon_in_schedule_id")
             .with_message("Schedule ID must not contain ':'".into()));
+    }
+    // The template expands `{{.id}}` (no ':', above) and `{{.timestamp}}`
+    // (digits), so its own literal ':' are the fired ids' ':'. More than one
+    // would fire promises the promise rules refuse.
+    if data.promise_id.matches(':').count() > 1 {
+        return Err(
+            validator::ValidationError::new("multiple_colons_in_promise_id")
+                .with_message("Promise ID template must contain at most one ':'".into()),
+        );
     }
     if let Some(origin) = data.promise_tags.get("resonate:origin") {
         if origin.contains(':') {
@@ -1379,6 +1398,49 @@ mod tests {
     fn schedule(data: Value) -> Result<(), String> {
         let r: ScheduleCreateData = serde_json::from_value(data).expect("shape");
         r.validate().map_err(|e| format!("{e:?}"))
+    }
+
+    #[test]
+    fn promise_ids_with_at_most_one_colon_are_accepted() {
+        for id in ["myapp", "myapp:1", "myapp:1.2.3", "my.app:1"] {
+            assert!(
+                promise(json!({ "id": id, "timeoutAt": 1000 })).is_ok(),
+                "{id} must be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn promise_id_with_more_than_one_colon_is_rejected() {
+        for id in ["a:1:2", "a::b", ":a:", "a:1.2:3"] {
+            let err = promise(json!({ "id": id, "timeoutAt": 1000 }))
+                .expect_err("a second ':' must be refused");
+            assert!(err.contains("multiple_colons"), "{id}: unexpected: {err}");
+        }
+    }
+
+    #[test]
+    fn schedule_promise_id_template_with_more_than_one_colon_is_rejected() {
+        let ok = schedule(json!({
+            "id": "mysched",
+            "cron": "* * * * *",
+            "promiseId": "{{.id}}:{{.timestamp}}",
+            "promiseTimeout": 1000,
+            "promiseTags": { "resonate:target": "poll://any" }
+        }));
+        assert!(ok.is_ok(), "one ':' must be accepted: {ok:?}");
+        let err = schedule(json!({
+            "id": "mysched",
+            "cron": "* * * * *",
+            "promiseId": "{{.id}}:x:{{.timestamp}}",
+            "promiseTimeout": 1000,
+            "promiseTags": { "resonate:target": "poll://any" }
+        }))
+        .expect_err("a second ':' in the template must be refused");
+        assert!(
+            err.contains("multiple_colons_in_promise_id"),
+            "unexpected: {err}"
+        );
     }
 
     #[test]
