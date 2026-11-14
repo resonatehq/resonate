@@ -67,6 +67,12 @@ path = "diff/port.rs"
 #
 # See "Build a server with the plugins you want" in the README for the shape a
 # smaller build takes: ten lines of `main`, and only what it names is compiled.
+# GCP ID tokens for the HTTP push transport (`auth.mode = "gcp"`, for Cloud
+# Run and Cloud Functions). Off by default: it compiles in google-cloud-auth
+# and its dependencies, which a server that does not push to GCP does not
+# need. Without it, a configuration that asks for `mode = "gcp"` is refused at
+# startup. `cargo build --release --features gcp-idtoken` to include it.
+gcp-idtoken = ["resonate-transport-http-push/gcp-idtoken"]
 concurrency-stress = [
     "resonate-server-sqlite/concurrency-stress",
     "resonate-server-mysql/concurrency-stress",
