@@ -335,13 +335,13 @@ When Resonate calls protected endpoints, it can attach an auth header under `[wo
 
 | Mode | TOML | CLI |
 |---|---|---|
-| **GCP ID token** (Cloud Run / Cloud Functions) | `mode = "gcp"` | `--transports-http-push-auth-mode gcp` |
+| **GCP ID token** (Cloud Run / Cloud Functions); needs a server built with `--features gcp-idtoken` | `mode = "gcp"` | `--transports-http-push-auth-mode gcp` |
 | **Static bearer** | `mode = "bearer"` <br> `token = "my-token"` | `--transports-http-push-auth-mode bearer` <br> `--transports-http-push-auth-token my-token` |
 | **None** (default) | `mode = "none"` | — |
 
 Tokens come from [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials); on Cloud Run this resolves to the service account identity automatically. Acquisition and refresh are handled by the `google-cloud-auth` crate.
 
-The GCP mode is the `gcp-idtoken` feature of `resonate-transport-http-push`, on by default. A build that names the crate with `default-features = false` leaves out `google-cloud-auth` and refuses `mode = "gcp"` at startup.
+The GCP mode is behind the `gcp-idtoken` feature, **off by default**: build the server with `cargo build --release --features gcp-idtoken` to include it (in your own binary, enable `resonate-transport-http-push`'s `gcp-idtoken` feature). A server built without it leaves out `google-cloud-auth` and its dependencies, and refuses `mode = "gcp"` at startup with an error naming the setting.
 
 ---
 
