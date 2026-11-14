@@ -1,0 +1,115 @@
+# The server's MySQL plugin held to the same checks as every other backend,
+# against TiDB, nightly and on demand rather than on every pull request.
+#
+# TiDB speaks the MySQL protocol, so it is a dialect of the mysql plugin, not
+# a plugin of its own: on TiDB the plugin pins `tidb_txn_mode = 'pessimistic'`
+# per session (READ COMMITTED and `FOR UPDATE` locks take effect only in
+# pessimistic mode) and retries TiDB's retryable error numbers. See
+# resonate-server-mysql and resonate-sql's MYSQL_RETRYABLE_ERRNOS.
+#
+# Why not per PR: against TiDB the engine differential's default trajectory
+# takes 60-70 minutes (each statement is a distributed commit), against 45 for
+# the per-PR legs. TiDB-specific regressions are rare per change, so a nightly
+# run plus workflow_dispatch before a release keeps the coverage without
+# adding an hour to every server PR. Results and the design are in #1161;
+# the change itself comes from #1163.
+#
+# The service is TiDB with its embedded storage (unistore): the SQL layer,
+# the MySQL protocol and pessimistic transactions are TiDB's own, which is
+# what the plugin is held to here. The image has no shell client, so
+# readiness is waited for in a step rather than a health-cmd.
+
+name: server-core-tidb
+
+on:
+  schedule:
+    - cron: "17 3 * * *" # nightly, 03:17 UTC
+  workflow_dispatch:
+  # Only when this file changes, so an edit to it is tested before it lands
+  # (schedule and workflow_dispatch run only once it is on main). Ordinary
+  # server PRs do not run it.
+  pull_request:
+    paths:
+      - ".github/workflows/server-core-tidb.yml"
+
+defaults:
+  run:
+    working-directory: impl/server/core
+
+jobs:
+  differential:
+    name: Differential (tidb)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    services:
+      tidb:
+        image: pingcap/tidb:v8.5.8
+        ports:
+          - 4000:4000
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-workspaces: impl/server/core
+
+      - name: Wait for TiDB
+        run: |
+          for i in $(seq 1 60); do
+            (echo > /dev/tcp/127.0.0.1/4000) 2>/dev/null && exit 0
+            sleep 2
+          done
+          echo "tidb did not open port 4000"; exit 1
+
+      # The engine differential and the port differential, each on a
+      # database the xtask creates fresh and drops after.
+      - name: Differential
+        env:
+          XTASK_TIDB_ADMIN_URL: mysql://root@127.0.0.1:4000/mysql
+        run: cargo xtask differential --backend tidb
+
+  # Porcupine against a live server on TiDB; see server-core-ci.yml's
+  # linearizability job for what it checks and why conccheck.
+  linearizability:
+    name: Linearizability (tidb)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    services:
+      tidb:
+        image: pingcap/tidb:v8.5.8
+        ports:
+          - 4000:4000
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-workspaces: impl/server/core
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: spec/valid/porc/go.mod
+          cache-dependency-path: spec/valid/porc/go.sum
+
+      - name: Wait for TiDB
+        run: |
+          for i in $(seq 1 60); do
+            (echo > /dev/tcp/127.0.0.1/4000) 2>/dev/null && exit 0
+            sleep 2
+          done
+          echo "tidb did not open port 4000"; exit 1
+
+      - name: Linearizability
+        env:
+          XTASK_TIDB_ADMIN_URL: mysql://root@127.0.0.1:4000/mysql
+          XTASK_SPEC_DIR: ${{ github.workspace }}/spec/valid/porc
+        run: cargo xtask porcupine --backend tidb
