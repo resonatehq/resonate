@@ -1,0 +1,63 @@
+# The web console (impl/server/core/crates/resonate-gateway-web/ui) is a
+# SvelteKit app whose build is committed as `assets/` and embedded in the
+# server binary, so `cargo build` never needs node. Nothing else in CI builds
+# the UI, so without this job a dependency bump or a source change could break
+# the console, or leave `assets/` stale, and still go green.
+#
+# This job type-checks the app, builds it, and fails if the build differs from
+# the committed `assets/` (the build is reproducible: a fixed version name,
+# content-hashed file names). To fix a failure, run `make console` in
+# impl/server/core and commit `assets/` with the source change.
+
+name: console
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "impl/server/core/crates/resonate-gateway-web/ui/**"
+      - "impl/server/core/crates/resonate-gateway-web/assets/**"
+      - ".github/workflows/console-ci.yml"
+  pull_request:
+    paths:
+      - "impl/server/core/crates/resonate-gateway-web/ui/**"
+      - "impl/server/core/crates/resonate-gateway-web/assets/**"
+      - ".github/workflows/console-ci.yml"
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: impl/server/core/crates/resonate-gateway-web/ui
+
+jobs:
+  console:
+    name: Console (check, build, assets up to date)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # Vite 8 needs node >= 22.12.
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: impl/server/core/crates/resonate-gateway-web/ui/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Type check (svelte-check)
+        run: npm run check
+
+      - name: Build
+        run: npm run build
+
+      - name: Committed assets match the build
+        run: |
+          if ! diff -r build ../assets; then
+            echo "::error::assets/ is out of date with ui/. Run 'make console' in impl/server/core and commit assets/."
+            exit 1
+          fi

@@ -352,8 +352,9 @@ class ContextTest {
     @Test
     void rpcStillRejectsNonSerializableArg() {
         Context ctx = root();
-        PlatformError exc = assertThrows(PlatformError.class, () -> ctx.rpc("remote_fn", new Resource("db"))
-                .await());
+        PlatformError exc = assertThrows(
+                PlatformError.class,
+                () -> ctx.rpc("remote_fn", new Resource("db")).await());
         assertInstanceOf(SerializationError.class, exc.getCause());
     }
 
@@ -477,8 +478,9 @@ class ContextTest {
     @Test
     void runCompletedSiblingSettlesButParentStillSuspends() {
         Context ctx = root();
-        assertThrows(Suspended.class, () -> ctx.run(ContextTest::completesThenSuspends)
-                .await());
+        assertThrows(
+                Suspended.class,
+                () -> ctx.run(ContextTest::completesThenSuspends).await());
         assertEquals(List.of("remote-dep"), ctx.spawnedRemote());
         assertEquals("resolved", ctx.effects().cache().get("root:1.1").state());
         assertEquals(42, ctx.effects().cache().get("root:1.1").value().data());
@@ -496,8 +498,9 @@ class ContextTest {
     @Test
     void runFireAndForgetChildSuspensionPropagates() {
         Context ctx = root();
-        assertThrows(Suspended.class, () -> ctx.run(ContextTest::parentWithFireAndForget)
-                .await());
+        assertThrows(
+                Suspended.class,
+                () -> ctx.run(ContextTest::parentWithFireAndForget).await());
         assertEquals(List.of("remote-dep"), ctx.spawnedRemote());
         assertEquals("pending", ctx.effects().cache().get("root:1").state());
         assertEquals("pending", ctx.effects().cache().get("root:1.1").state());
@@ -720,9 +723,11 @@ class ContextTest {
     void rpcWithOptionsTimeoutSetsChildDeadline() {
         Context ctx = root();
         long before = Send.nowMs();
-        assertThrows(Suspended.class, () -> ctx.options(new Opts().withTimeout(Duration.ofSeconds(30)))
-                .rpc("fn")
-                .await());
+        assertThrows(
+                Suspended.class,
+                () -> ctx.options(new Opts().withTimeout(Duration.ofSeconds(30)))
+                        .rpc("fn")
+                        .await());
         long after = Send.nowMs();
         long timeoutAt = ctx.effects().cache().get("root:1").timeoutAt();
         assertTrue(before + 30_000 <= timeoutAt && timeoutAt <= after + 30_000);
@@ -732,9 +737,11 @@ class ContextTest {
     void rpcWithOptionsTimeoutCappedToParent() {
         long cap = Send.nowMs() + 5_000;
         Context ctx = rootTimeout(cap);
-        assertThrows(Suspended.class, () -> ctx.options(new Opts().withTimeout(Duration.ofDays(365)))
-                .rpc("fn")
-                .await());
+        assertThrows(
+                Suspended.class,
+                () -> ctx.options(new Opts().withTimeout(Duration.ofDays(365)))
+                        .rpc("fn")
+                        .await());
         assertEquals(cap, ctx.effects().cache().get("root:1").timeoutAt());
     }
 
@@ -813,9 +820,11 @@ class ContextTest {
     void sleepIgnoresOptsTimeoutForDuration() {
         Context ctx = root();
         long before = Send.nowMs();
-        assertThrows(Suspended.class, () -> ctx.options(new Opts().withTimeout(Duration.ofSeconds(5)))
-                .sleep(Duration.ofSeconds(30))
-                .await());
+        assertThrows(
+                Suspended.class,
+                () -> ctx.options(new Opts().withTimeout(Duration.ofSeconds(5)))
+                        .sleep(Duration.ofSeconds(30))
+                        .await());
         long after = Send.nowMs();
         long timeoutAt = ctx.effects().cache().get("root:1").timeoutAt();
         assertTrue(before + 30_000 <= timeoutAt && timeoutAt <= after + 30_000);
@@ -1122,9 +1131,11 @@ class ContextTest {
     void ctxRunWithOptsRetryPolicyOverridesContextDefault() {
         Counter.calls = 0;
         Context ctx = root(List.of(), I64_MAX, new Dependencies(), new Constant(9, 0), null);
-        assertThrows(ApplicationError.class, () -> ctx.options(new Opts().withRetryPolicy(new Never()))
-                .run(ContextTest::leafFlakyApp)
-                .await());
+        assertThrows(
+                ApplicationError.class,
+                () -> ctx.options(new Opts().withRetryPolicy(new Never()))
+                        .run(ContextTest::leafFlakyApp)
+                        .await());
         assertEquals(1, Counter.calls);
     }
 
@@ -1224,9 +1235,11 @@ class ContextTest {
         Registry registry = new Registry();
         registry.register("remote_impl", ContextTest::doubleFn, 2);
         Context ctx = root(List.of(), I64_MAX, new Dependencies(), null, registry);
-        assertThrows(Suspended.class, () -> ctx.options(new Opts().withVersion(9))
-                .rpc(ContextTest::doubleFn, 5)
-                .await());
+        assertThrows(
+                Suspended.class,
+                () -> ctx.options(new Opts().withVersion(9))
+                        .rpc(ContextTest::doubleFn, 5)
+                        .await());
         assertEquals(
                 2, taskData(ctx.effects().cache().get("root:1").param().data()).version());
     }

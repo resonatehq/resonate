@@ -23,7 +23,7 @@ import psycopg
 from psycopg_pool import AsyncConnectionPool
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Sequence
+    from collections.abc import AsyncGenerator, AsyncIterator, Sequence
     from contextlib import AbstractAsyncContextManager
 
 __all__ = [
@@ -116,7 +116,7 @@ class PsycopgSessions:
         self._lock = asyncio.Lock()
 
     @contextlib.asynccontextmanager
-    async def session(self) -> AsyncIterator[PgConn]:
+    async def session(self) -> AsyncGenerator[PgConn]:
         pool = await self._ensure_pool()
         async with pool.connection() as conn:
             yield cast("PgConn", conn)

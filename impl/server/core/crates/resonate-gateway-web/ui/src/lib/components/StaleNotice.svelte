@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { clock } from '$lib/format';
+  import { clock } from '#lib/format.ts';
 
   /**
    * The poll failed but the last good answer is still on screen.

@@ -17,7 +17,6 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -191,9 +190,7 @@ public interface Network {
         Map<String, String> out = new LinkedHashMap<>();
         JsonNode tags = get(v, "tags");
         if (tags != null && tags.isObject()) {
-            Iterator<Map.Entry<String, JsonNode>> it = tags.fields();
-            while (it.hasNext()) {
-                Map.Entry<String, JsonNode> e = it.next();
+            for (Map.Entry<String, JsonNode> e : tags.properties()) {
                 if (e.getValue().isTextual()) {
                     out.put(e.getKey(), e.getValue().asText());
                 }
@@ -1272,7 +1269,10 @@ public interface Network {
         private final String group;
         private final String unicast;
         private final String anycast;
-        private final ReentrantLock lock = new ReentrantLock();
+        // Guards {@link #state}. Package-private so tests that inspect {@code state} directly take
+        // the same lock as the tick thread and dispatch; synchronizing on {@code state} would not
+        // exclude them.
+        final ReentrantLock lock = new ReentrantLock();
         private final List<Consumer<String>> subscribers = new ArrayList<>();
         private volatile Thread tickThread;
         // Single virtual worker so dispatch stays FIFO (ordering matters) while still being

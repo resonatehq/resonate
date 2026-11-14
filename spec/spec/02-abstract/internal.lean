@@ -22,7 +22,10 @@ open ServerModel (Ident nextCron occurrences expand Schedule
 def processPromiseTimeout (req : PromiseTimeoutReq) (now : Nat) : H Unit := do
   let _ ← touchObject req.id now
 
-def resumeOne (awaited awaiter : Ident) (now : Nat) : H Unit := do
+/-- `since` is the instant the awaited promise settled at: the resumed
+    task's first offer, so that its grid is anchored at a fact of the state
+    rather than at the instant the drain ran. -/
+def resumeOne (awaited awaiter : Ident) (since now : Nat) : H Unit := do
   match ← touchTaskObject awaiter now with
   | none => pure ()
   | some o =>
@@ -32,7 +35,7 @@ def resumeOne (awaited awaiter : Ident) (now : Nat) : H Unit := do
       match t.state with
       | .suspended =>
           setTask o.id { t with state := .pending, resumes := [awaited],
-                                retryTimeoutAt := some now }
+                                retryTimeoutAt := some since }
       | .pending | .acquired | .halted =>
           if !(t.resumes.contains awaited) then
             setTask o.id { t with resumes := t.resumes ++ [awaited] }
@@ -48,7 +51,7 @@ def processCallback (req : PromiseRegisterCallbackReq) (now : Nat) : H Unit := d
       else if o.promise.callbacks.contains req.awaiter then
         setPromise o.id { o.promise with
                           callbacks := o.promise.callbacks.filter (· != req.awaiter) }
-        resumeOne o.id req.awaiter now
+        resumeOne o.id req.awaiter (o.promise.settledAt.getD now) now
 
 def processListener (req : PromiseRegisterListenerReq) (now : Nat) : H Unit := do
   match ← touchObject req.awaited now with
@@ -61,30 +64,21 @@ def processListener (req : PromiseRegisterListenerReq) (now : Nat) : H Unit := d
                           listeners := o.promise.listeners.filter (· != req.address) }
         setMessage req.address (.unblock (o.promise.toRecord o.id))
 
+/-- The lease's end is a projection (`TaskObject.lapse`): a read already
+    shows the task pending. This step persists it, as the promise timeout
+    does. The re-offer is the retry step's: the task's first offer is due
+    at the lease's end. -/
 def processLeaseTimeout (req : TaskLeaseTimeoutReq) (now : Nat) : H Unit := do
-  match ← viewTaskObject req.id now with
-  | none => pure ()
-  | some o =>
-  match o.task with
-  | none => pure ()
-  | some t =>
-      match t.leaseTimeoutAt with
-      | none => pure ()
-      | some deadline =>
-          if t.state == .acquired ∧ deadline ≤ now then
-            if o.promise.state == .pending then
-              setTask o.id { t with state := .pending, pid := none, ttl := none,
-                                    leaseTimeoutAt := none, retryTimeoutAt := some now }
+  let _ ← touchTaskObject req.id now
 
 /-- Redispatch a pending task whose dispatch clock is due.
 
-    The next instant is COMPUTED, from the server's dial and the
-    clock — it is not supplied by whoever fires the step. Every other
-    arming site (`createPromise`, `taskRelease`, `taskContinue`,
-    `resumeOne`, `processLeaseTimeout`) already computed it; this was
-    the one exception, and the exception was the only place the
-    environment could write a value into the store. It could write a
-    past one, leaving the step enabled at the instant it fired.
+    The next instant is COMPUTED, from the server's dial and the task's
+    own grid (`nextOffer`) — it is not supplied by whoever fires the step,
+    and it does not depend on when the step ran. Every other arming site
+    (`createPromise`, `taskRelease`, `taskContinue`, `resumeOne`,
+    `TaskObject.lapse`) anchors the grid at a fact of the state: the
+    instant the task came to be pending. This step walks it.
 
     The interval is `config.retryTimeout`, read from the environment.
     It is the SERVER's dial — how long to wait before re-offering a task
@@ -112,7 +106,7 @@ def processRetryTimeout (req : TaskRetryTimeoutReq) (now : Nat) : H Unit := do
           if t.state == .pending ∧ due ≤ now then
             if o.promise.state == .pending then
               setTask o.id { t with
-                             retryTimeoutAt := some (now + (← ask).config.retryTimeout) }
+                             retryTimeoutAt := some (nextOffer due now (← ask).config.retryTimeout) }
               setMessage ((o.promise.tags.get? "resonate:target").getD "")
                 (.execute o.id t.version)
 

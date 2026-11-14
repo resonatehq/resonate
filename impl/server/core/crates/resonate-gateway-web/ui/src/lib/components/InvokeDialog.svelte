@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { getPromise, invoke, RpcError, type InvokeRequest } from '$lib/api';
-  import { parseDuration } from '$lib/duration';
+  import { getPromise, invoke, RpcError, type InvokeRequest } from '#lib/api.ts';
+  import { parseDuration } from '#lib/duration.ts';
 
   /**
    * Start a durable execution.

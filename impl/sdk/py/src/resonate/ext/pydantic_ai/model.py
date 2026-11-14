@@ -19,7 +19,8 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
-from pydantic_ai.models.wrapper import CompletedStreamedResponse, WrapperModel
+from pydantic_ai.models import CompletedStreamedResponse
+from pydantic_ai.models.wrapper import WrapperModel
 
 from resonate.ext.pydantic_ai.context import workflow_context
 from resonate.ext.pydantic_ai.types import ModelResponseEnvelope
@@ -149,4 +150,6 @@ class ResonateModel(WrapperModel):
             run_context,
             self._get_event_stream_handler(),
         )
-        yield CompletedStreamedResponse(model_request_parameters, envelope.response)
+        yield CompletedStreamedResponse(
+            envelope.response, model_request_parameters=model_request_parameters
+        )

@@ -30,6 +30,6 @@
     "typescript": ">=5.9.3"
   },
   "devDependencies": {
-    "@types/aws-lambda": "^8.10.156"
+    "@types/aws-lambda": "^8.10.164"
   }
 }

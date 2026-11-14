@@ -20,16 +20,21 @@ from typing import TYPE_CHECKING, Any, Literal, NoReturn, cast, overload
 from uuid import uuid4
 
 from pydantic_ai import _utils
-from pydantic_ai._agent_graph import GraphAgentState, resolve_conversation_id
+from pydantic_ai._agent_graph import (
+    GraphAgentState,
+    resolve_conversation,
+    resolve_conversation_id,
+    resolve_run_id,
+)
 from pydantic_ai.agent import WrapperAgent
 from pydantic_ai.durable_exec._runtime_toolsets import (
+    reject_cancellation_token,
     reject_unsupported_runtime_toolsets,
 )
 from pydantic_ai.exceptions import UserError
 from pydantic_ai.models import Model
 from pydantic_ai.output import OutputDataT
 from pydantic_ai.run import AgentRunResult
-from pydantic_ai.tools import AgentDepsT
 
 from resonate.ext.pydantic_ai.context import (
     reset_workflow_context,
@@ -37,7 +42,12 @@ from resonate.ext.pydantic_ai.context import (
     workflow_context,
 )
 from resonate.ext.pydantic_ai.model import ResonateModel
-from resonate.ext.pydantic_ai.types import BaseRunResult, RunParams, run_result_model
+from resonate.ext.pydantic_ai.types import (
+    AgentDepsT,
+    BaseRunResult,
+    RunParams,
+    run_result_model,
+)
 from resonate.resonate import Resonate
 
 if TYPE_CHECKING:
@@ -47,6 +57,7 @@ if TYPE_CHECKING:
 
     from pydantic_ai import (
         AbstractToolset,
+        CancellationToken,
         _instructions,
         messages as _messages,
         models,
@@ -66,6 +77,7 @@ if TYPE_CHECKING:
     )
     from pydantic_ai.agent.spec import AgentSpec
     from pydantic_ai.capabilities import AgentCapability
+    from pydantic_ai.conversation import Conversation
     from pydantic_ai.output import OutputSpec
     from pydantic_ai.result import StreamedRunResult
     from pydantic_ai.tools import (
@@ -75,6 +87,7 @@ if TYPE_CHECKING:
         Tool,
         ToolFuncEither,
     )
+    from pydantic_ai.workspaces import WorkspaceBackend, WorkspaceRef
 
     from resonate.context import Context
     from resonate.retry import RetryPolicy
@@ -92,6 +105,24 @@ ResonateParallelExecutionMode = Literal["sequential", "parallel_ordered_events"]
 A subset of Pydantic AI's ``ParallelExecutionMode``: plain ``'parallel'``
 cannot guarantee deterministic checkpoint ordering across replays.
 """
+
+
+def _reject_cancellation_and_timeout(
+    cancellation_token: CancellationToken | None, timeout: float | None
+) -> None:
+    """Reject the per-run controls a durable Resonate run cannot honor.
+
+    A cancellation token is a same-process handle, and a ``timeout`` is a
+    wall-clock deadline that a replay or crash recovery would not reproduce.
+    """
+    reject_cancellation_token(cancellation_token, engine="Resonate")
+    if timeout is not None:
+        msg = (
+            "`timeout` cannot be used with Resonate durable execution, because its wall-clock "
+            "deadline is not reproduced when the run is replayed or recovered. Set `run_timeout` "
+            "when constructing the `ResonateAgent` instead."
+        )
+        raise UserError(msg)
 
 
 class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
@@ -202,12 +233,7 @@ class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 pass
             else:
                 if isinstance(toolset, MCPToolset):
-                    # `isinstance` erases the toolset's deps type parameter, so
-                    # restore it for the wrapper.
-                    return ResonateMCPToolset(
-                        cast("MCPToolset[AgentDepsT]", toolset),
-                        retry_policy=mcp_retry_policy,
-                    )
+                    return ResonateMCPToolset(toolset, retry_policy=mcp_retry_policy)
             return toolset
 
         self._toolsets = [
@@ -226,9 +252,11 @@ class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 with self._resonate_overrides():
                     result = await super(WrapperAgent, self).run(
                         params.user_prompt,
+                        conversation=params.conversation,
                         message_history=params.message_history,
                         deferred_tool_results=params.deferred_tool_results,
                         conversation_id=params.conversation_id,
+                        run_id=params.run_id,
                         instructions=params.instructions,
                         deps=cast("AgentDepsT", params.deps),
                         model_settings=cast("Any", params.model_settings),
@@ -250,6 +278,11 @@ class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 usage=result.usage,
                 run_id=state.run_id,
                 conversation_id=state.conversation_id,
+                metadata=state.metadata,
+                conversation_revision=state.conversation_revision,
+                conversation_unsaved=state.conversation_unsaved,
+                conversation_unchecked=state.conversation_unchecked,
+                conversation_saved=state.conversation_saved,
             )
 
         # The registered return annotation is the agent-specific envelope, so the
@@ -343,14 +376,18 @@ class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         *,
         id: str | None = None,
         output_type: None = None,
+        conversation: Conversation | None = None,
         message_history: Sequence[_messages.ModelMessage] | None = None,
         deferred_tool_results: DeferredToolResults | None = None,
         conversation_id: str | None = None,
+        run_id: str | None = None,
         model: models.Model | models.KnownModelName | str | None = None,
         instructions: _instructions.AgentInstructions[AgentDepsT] = None,
         deps: AgentDepsT = _NO_DEPS,
         model_settings: AgentModelSettings[AgentDepsT] | None = None,
         usage_limits: _usage.UsageLimits | None = None,
+        cancellation_token: CancellationToken | None = None,
+        timeout: float | None = None,  # noqa: ASYNC109 - mirrors AbstractAgent's signature
         usage: _usage.RunUsage | None = None,
         metadata: AgentMetadata[AgentDepsT] | None = None,
         retries: int | AgentRetries | None = None,
@@ -358,6 +395,7 @@ class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         toolsets: Sequence[AbstractToolset[AgentDepsT]] | None = None,
         event_stream_handler: EventStreamHandler[AgentDepsT] | None = None,
         capabilities: Sequence[AgentCapability[AgentDepsT]] | None = None,
+        workspace: WorkspaceBackend | WorkspaceRef | Literal["new"] | None = None,
         spec: dict[str, Any] | AgentSpec | None = None,
     ) -> AgentRunResult[OutputDataT]: ...
 
@@ -368,14 +406,18 @@ class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         *,
         id: str | None = None,
         output_type: OutputSpec[RunOutputDataT],
+        conversation: Conversation | None = None,
         message_history: Sequence[_messages.ModelMessage] | None = None,
         deferred_tool_results: DeferredToolResults | None = None,
         conversation_id: str | None = None,
+        run_id: str | None = None,
         model: models.Model | models.KnownModelName | str | None = None,
         instructions: _instructions.AgentInstructions[AgentDepsT] = None,
         deps: AgentDepsT = _NO_DEPS,
         model_settings: AgentModelSettings[AgentDepsT] | None = None,
         usage_limits: _usage.UsageLimits | None = None,
+        cancellation_token: CancellationToken | None = None,
+        timeout: float | None = None,  # noqa: ASYNC109 - mirrors AbstractAgent's signature
         usage: _usage.RunUsage | None = None,
         metadata: AgentMetadata[AgentDepsT] | None = None,
         retries: int | AgentRetries | None = None,
@@ -383,6 +425,7 @@ class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         toolsets: Sequence[AbstractToolset[AgentDepsT]] | None = None,
         event_stream_handler: EventStreamHandler[AgentDepsT] | None = None,
         capabilities: Sequence[AgentCapability[AgentDepsT]] | None = None,
+        workspace: WorkspaceBackend | WorkspaceRef | Literal["new"] | None = None,
         spec: dict[str, Any] | AgentSpec | None = None,
     ) -> AgentRunResult[RunOutputDataT]: ...
 
@@ -392,14 +435,18 @@ class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         *,
         id: str | None = None,
         output_type: OutputSpec[RunOutputDataT] | None = None,
+        conversation: Conversation | None = None,
         message_history: Sequence[_messages.ModelMessage] | None = None,
         deferred_tool_results: DeferredToolResults | None = None,
         conversation_id: str | None = None,
+        run_id: str | None = None,
         model: models.Model | models.KnownModelName | str | None = None,
         instructions: _instructions.AgentInstructions[AgentDepsT] = None,
         deps: AgentDepsT = _NO_DEPS,
         model_settings: AgentModelSettings[AgentDepsT] | None = None,
         usage_limits: _usage.UsageLimits | None = None,
+        cancellation_token: CancellationToken | None = None,
+        timeout: float | None = None,  # noqa: ASYNC109 - mirrors AbstractAgent's signature
         usage: _usage.RunUsage | None = None,
         metadata: AgentMetadata[AgentDepsT] | None = None,
         retries: int | AgentRetries | None = None,
@@ -407,6 +454,7 @@ class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         toolsets: Sequence[AbstractToolset[AgentDepsT]] | None = None,
         event_stream_handler: EventStreamHandler[AgentDepsT] | None = None,
         capabilities: Sequence[AgentCapability[AgentDepsT]] | None = None,
+        workspace: WorkspaceBackend | WorkspaceRef | Literal["new"] | None = None,
         spec: dict[str, Any] | AgentSpec | None = None,
     ) -> AgentRunResult[Any]:
         """Run the agent as a durable Resonate workflow.
@@ -429,10 +477,17 @@ class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             output_type: Custom output type for this run. Only supported when
                 running inline inside an active workflow; a durable run's
                 output type must be set on the agent at construction time.
+            conversation: The conversation to continue, in place of passing
+                its ``message_history``, ``usage`` and ``conversation_id``
+                separately. Carried into the durable run's parameters.
             message_history: History of the conversation so far.
             deferred_tool_results: Optional results for deferred tool calls in
                 the message history.
             conversation_id: ID of the conversation this run belongs to.
+            run_id: Optional ID for this agent run, as stamped on its messages
+                (Pydantic AI's ``run_id``; distinct from the durable ``id``).
+                When omitted, one is generated at dispatch and pinned into the
+                durable parameters, so it stays the same across recovery.
             model: Not supported at run time with Resonate; set the model when
                 constructing the agent.
             instructions: Optional additional instructions for this run.
@@ -442,6 +497,10 @@ class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             model_settings: Optional settings for the model's requests.
                 Callables are only supported inline inside an active workflow.
             usage_limits: Optional limits on model request count or token usage.
+            cancellation_token: Not supported with Resonate: it is a
+                same-process handle that cannot cross the durability boundary.
+            timeout: Not supported with Resonate: a wall-clock deadline is not
+                reproduced on replay. Use ``run_timeout`` on construction.
             usage: Optional usage to start with.
             metadata: Optional metadata dict to attach to this run. Callables
                 are only supported inline inside an active workflow.
@@ -454,6 +513,7 @@ class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 Honored on the live path; a crash-recovery replay falls back to
                 the handler configured at construction time.
             capabilities: Only supported inline inside an active workflow.
+            workspace: Only supported inline inside an active workflow.
             spec: Only supported inline inside an active workflow.
 
         Returns:
@@ -471,13 +531,16 @@ class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 )
                 raise UserError(msg)
             self._reject_unsupported_runtime_toolsets(toolsets)
+            _reject_cancellation_and_timeout(cancellation_token, timeout)
             with self._resonate_overrides(event_stream_handler=event_stream_handler):
                 return await super(WrapperAgent, self).run(
                     user_prompt,
                     output_type=output_type,
+                    conversation=conversation,
                     message_history=message_history,
                     deferred_tool_results=deferred_tool_results,
                     conversation_id=conversation_id,
+                    run_id=run_id,
                     model=model,
                     instructions=instructions,
                     deps=deps,
@@ -489,6 +552,7 @@ class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                     infer_name=False,
                     toolsets=toolsets,
                     capabilities=capabilities,
+                    workspace=workspace,
                     spec=spec,
                 )
 
@@ -508,33 +572,54 @@ class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             )
             raise UserError(msg)
 
+        _reject_cancellation_and_timeout(cancellation_token, timeout)
         self._reject_unserializable_run_arguments(
             output_type=output_type,
             model=model,
             toolsets=toolsets,
             capabilities=capabilities,
+            workspace=workspace,
             spec=spec,
             instructions=instructions,
             model_settings=model_settings,
             metadata=metadata,
         )
 
+        # Resolve the conversation and run ids once, here on the dispatch path,
+        # and pin the concrete values into the durable params. The run loop's
+        # own resolution (explicit arg -> `message_history` -> fresh UUID7)
+        # would otherwise run inside the replayable workflow body and mint *new*
+        # ids on every crash-recovery replay; pinning them keeps a run's
+        # `conversation_id` and `run_id` stable across recovery. A
+        # `conversation` already carries a concrete `conversation_id` (and
+        # passing one alongside it is an error, raised here rather than from
+        # inside the durable run).
+        if conversation is not None:
+            history = resolve_conversation(
+                conversation,
+                message_history=message_history,
+                usage=usage,
+                conversation_id=conversation_id,
+            )[0]
+            pinned_conversation_id = None
+        else:
+            history = message_history
+            pinned_conversation_id = resolve_conversation_id(
+                conversation_id, message_history
+            )
+        pinned_run_id = resolve_run_id(run_id, history)
+
         params = RunParams(
             user_prompt=user_prompt
             if isinstance(user_prompt, (str, type(None)))
             else list(user_prompt),
+            conversation=conversation,
             message_history=list(message_history)
             if message_history is not None
             else None,
             deferred_tool_results=deferred_tool_results,
-            # Resolve the conversation id once, here on the dispatch path, and
-            # pin the concrete value into the durable params. The run loop's own
-            # resolution (explicit arg -> `message_history` -> fresh UUID7) would
-            # otherwise run inside the replayable workflow body and mint a *new*
-            # id on every crash-recovery replay; pinning it keeps a run's
-            # `conversation_id` stable across recovery. (`run_id` has no such
-            # entry point on `Agent.run`, so it still drifts on replay.)
-            conversation_id=resolve_conversation_id(conversation_id, message_history),
+            conversation_id=pinned_conversation_id,
+            run_id=pinned_run_id,
             # Validated non-callable above; the envelope revalidates the shape.
             instructions=cast("Any", instructions),
             deps=deps,
@@ -556,7 +641,7 @@ class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         # ``resonate:origin`` of every promise this run creates, and the origin
         # is everything before an id's first ``:`` (see
         # :func:`resonate.ids.validate_root_id`).
-        run_id = id or f"{self._name}-run-{uuid4()}"
+        durable_id = id or f"{self._name}-run-{uuid4()}"
 
         if self._run_timeout is not None:
             resonate = resonate.options(timeout=self._run_timeout)
@@ -569,7 +654,7 @@ class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             event_stream_handler or self._run_event_stream_handler.get()
         )
         try:
-            handle = resonate.run(run_id, self._run_workflow, params)
+            handle = resonate.run(durable_id, self._run_workflow, params)
             # Surface creation/serialization failures instead of waiting forever.
             await handle.id()
         finally:
@@ -585,6 +670,11 @@ class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 usage=envelope.usage,
                 run_id=envelope.run_id,
                 conversation_id=envelope.conversation_id,
+                metadata=envelope.metadata,
+                conversation_revision=envelope.conversation_revision,
+                conversation_unsaved=envelope.conversation_unsaved,
+                conversation_unchecked=envelope.conversation_unchecked,
+                conversation_saved=envelope.conversation_saved,
             ),
             _new_message_index=envelope.new_message_index,
         )
@@ -607,7 +697,14 @@ class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         anything that cannot be rebuilt from JSON must be configured on the
         agent at construction time instead.
         """
-        for arg in ("model", "output_type", "toolsets", "capabilities", "spec"):
+        for arg in (
+            "model",
+            "output_type",
+            "toolsets",
+            "capabilities",
+            "workspace",
+            "spec",
+        ):
             if kwargs[arg] is not None:
                 msg = (
                     f"`{arg}` cannot be set at agent run time with Resonate, because it cannot be "
@@ -641,14 +738,18 @@ class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         user_prompt: str | Sequence[_messages.UserContent] | None = None,
         *,
         output_type: None = None,
+        conversation: Conversation | None = None,
         message_history: Sequence[_messages.ModelMessage] | None = None,
         deferred_tool_results: DeferredToolResults | None = None,
         conversation_id: str | None = None,
+        run_id: str | None = None,
         model: models.Model | models.KnownModelName | str | None = None,
         instructions: _instructions.AgentInstructions[AgentDepsT] = None,
         deps: AgentDepsT = _NO_DEPS,
         model_settings: AgentModelSettings[AgentDepsT] | None = None,
         usage_limits: _usage.UsageLimits | None = None,
+        cancellation_token: CancellationToken | None = None,
+        timeout: float | None = None,
         usage: _usage.RunUsage | None = None,
         metadata: AgentMetadata[AgentDepsT] | None = None,
         retries: int | AgentRetries | None = None,
@@ -656,6 +757,7 @@ class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         toolsets: Sequence[AbstractToolset[AgentDepsT]] | None = None,
         event_stream_handler: EventStreamHandler[AgentDepsT] | None = None,
         capabilities: Sequence[AgentCapability[AgentDepsT]] | None = None,
+        workspace: WorkspaceBackend | WorkspaceRef | Literal["new"] | None = None,
         spec: dict[str, Any] | AgentSpec | None = None,
     ) -> AbstractAsyncContextManager[StreamedRunResult[AgentDepsT, OutputDataT]]: ...
 
@@ -665,14 +767,18 @@ class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         user_prompt: str | Sequence[_messages.UserContent] | None = None,
         *,
         output_type: OutputSpec[RunOutputDataT],
+        conversation: Conversation | None = None,
         message_history: Sequence[_messages.ModelMessage] | None = None,
         deferred_tool_results: DeferredToolResults | None = None,
         conversation_id: str | None = None,
+        run_id: str | None = None,
         model: models.Model | models.KnownModelName | str | None = None,
         instructions: _instructions.AgentInstructions[AgentDepsT] = None,
         deps: AgentDepsT = _NO_DEPS,
         model_settings: AgentModelSettings[AgentDepsT] | None = None,
         usage_limits: _usage.UsageLimits | None = None,
+        cancellation_token: CancellationToken | None = None,
+        timeout: float | None = None,
         usage: _usage.RunUsage | None = None,
         metadata: AgentMetadata[AgentDepsT] | None = None,
         retries: int | AgentRetries | None = None,
@@ -680,6 +786,7 @@ class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         toolsets: Sequence[AbstractToolset[AgentDepsT]] | None = None,
         event_stream_handler: EventStreamHandler[AgentDepsT] | None = None,
         capabilities: Sequence[AgentCapability[AgentDepsT]] | None = None,
+        workspace: WorkspaceBackend | WorkspaceRef | Literal["new"] | None = None,
         spec: dict[str, Any] | AgentSpec | None = None,
     ) -> AbstractAsyncContextManager[StreamedRunResult[AgentDepsT, RunOutputDataT]]: ...
 
@@ -688,14 +795,18 @@ class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         user_prompt: str | Sequence[_messages.UserContent] | None = None,
         *,
         output_type: OutputSpec[RunOutputDataT] | None = None,
+        conversation: Conversation | None = None,
         message_history: Sequence[_messages.ModelMessage] | None = None,
         deferred_tool_results: DeferredToolResults | None = None,
         conversation_id: str | None = None,
+        run_id: str | None = None,
         model: models.Model | models.KnownModelName | str | None = None,
         instructions: _instructions.AgentInstructions[AgentDepsT] = None,
         deps: AgentDepsT = _NO_DEPS,
         model_settings: AgentModelSettings[AgentDepsT] | None = None,
         usage_limits: _usage.UsageLimits | None = None,
+        cancellation_token: CancellationToken | None = None,
+        timeout: float | None = None,
         usage: _usage.RunUsage | None = None,
         metadata: AgentMetadata[AgentDepsT] | None = None,
         retries: int | AgentRetries | None = None,
@@ -703,6 +814,7 @@ class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         toolsets: Sequence[AbstractToolset[AgentDepsT]] | None = None,
         event_stream_handler: EventStreamHandler[AgentDepsT] | None = None,
         capabilities: Sequence[AgentCapability[AgentDepsT]] | None = None,
+        workspace: WorkspaceBackend | WorkspaceRef | Literal["new"] | None = None,
         spec: dict[str, Any] | AgentSpec | None = None,
     ) -> AbstractAsyncContextManager[StreamedRunResult[AgentDepsT, Any]]:
         """Run the agent with a streamed response, outside a durable workflow.
@@ -722,14 +834,18 @@ class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         return super().run_stream(
             user_prompt,
             output_type=output_type,
+            conversation=conversation,
             message_history=message_history,
             deferred_tool_results=deferred_tool_results,
             conversation_id=conversation_id,
+            run_id=run_id,
             model=model,
             instructions=instructions,
             deps=deps,
             model_settings=model_settings,
             usage_limits=usage_limits,
+            cancellation_token=cancellation_token,
+            timeout=timeout,
             usage=usage,
             metadata=metadata,
             retries=retries,
@@ -737,6 +853,7 @@ class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             toolsets=toolsets,
             event_stream_handler=event_stream_handler,
             capabilities=capabilities,
+            workspace=workspace,
             spec=spec,
         )
 
@@ -754,20 +871,25 @@ class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         user_prompt: str | Sequence[_messages.UserContent] | None = None,
         *,
         output_type: None = None,
+        conversation: Conversation | None = None,
         message_history: Sequence[_messages.ModelMessage] | None = None,
         deferred_tool_results: DeferredToolResults | None = None,
         conversation_id: str | None = None,
+        run_id: str | None = None,
         model: models.Model | models.KnownModelName | str | None = None,
         instructions: _instructions.AgentInstructions[AgentDepsT] = None,
         deps: AgentDepsT = _NO_DEPS,
         model_settings: AgentModelSettings[AgentDepsT] | None = None,
         usage_limits: _usage.UsageLimits | None = None,
+        cancellation_token: CancellationToken | None = None,
+        timeout: float | None = None,
         usage: _usage.RunUsage | None = None,
         metadata: AgentMetadata[AgentDepsT] | None = None,
         retries: int | AgentRetries | None = None,
         infer_name: bool = True,
         toolsets: Sequence[AbstractToolset[AgentDepsT]] | None = None,
         capabilities: Sequence[AgentCapability[AgentDepsT]] | None = None,
+        workspace: WorkspaceBackend | WorkspaceRef | Literal["new"] | None = None,
         spec: dict[str, Any] | AgentSpec | None = None,
     ) -> AbstractAsyncContextManager[AgentRun[AgentDepsT, OutputDataT]]: ...
 
@@ -777,43 +899,53 @@ class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         user_prompt: str | Sequence[_messages.UserContent] | None = None,
         *,
         output_type: OutputSpec[RunOutputDataT],
+        conversation: Conversation | None = None,
         message_history: Sequence[_messages.ModelMessage] | None = None,
         deferred_tool_results: DeferredToolResults | None = None,
         conversation_id: str | None = None,
+        run_id: str | None = None,
         model: models.Model | models.KnownModelName | str | None = None,
         instructions: _instructions.AgentInstructions[AgentDepsT] = None,
         deps: AgentDepsT = _NO_DEPS,
         model_settings: AgentModelSettings[AgentDepsT] | None = None,
         usage_limits: _usage.UsageLimits | None = None,
+        cancellation_token: CancellationToken | None = None,
+        timeout: float | None = None,
         usage: _usage.RunUsage | None = None,
         metadata: AgentMetadata[AgentDepsT] | None = None,
         retries: int | AgentRetries | None = None,
         infer_name: bool = True,
         toolsets: Sequence[AbstractToolset[AgentDepsT]] | None = None,
         capabilities: Sequence[AgentCapability[AgentDepsT]] | None = None,
+        workspace: WorkspaceBackend | WorkspaceRef | Literal["new"] | None = None,
         spec: dict[str, Any] | AgentSpec | None = None,
     ) -> AbstractAsyncContextManager[AgentRun[AgentDepsT, RunOutputDataT]]: ...
 
-    @asynccontextmanager  # ty: ignore[no-matching-overload] - ty mis-resolves the decorator against the overloads
+    @asynccontextmanager
     async def iter(
         self,
         user_prompt: str | Sequence[_messages.UserContent] | None = None,
         *,
         output_type: OutputSpec[RunOutputDataT] | None = None,
+        conversation: Conversation | None = None,
         message_history: Sequence[_messages.ModelMessage] | None = None,
         deferred_tool_results: DeferredToolResults | None = None,
         conversation_id: str | None = None,
+        run_id: str | None = None,
         model: models.Model | models.KnownModelName | str | None = None,
         instructions: _instructions.AgentInstructions[AgentDepsT] = None,
         deps: AgentDepsT = _NO_DEPS,
         model_settings: AgentModelSettings[AgentDepsT] | None = None,
         usage_limits: _usage.UsageLimits | None = None,
+        cancellation_token: CancellationToken | None = None,
+        timeout: float | None = None,  # noqa: ASYNC109 - mirrors AbstractAgent's signature
         usage: _usage.RunUsage | None = None,
         metadata: AgentMetadata[AgentDepsT] | None = None,
         retries: int | AgentRetries | None = None,
         infer_name: bool = True,
         toolsets: Sequence[AbstractToolset[AgentDepsT]] | None = None,
         capabilities: Sequence[AgentCapability[AgentDepsT]] | None = None,
+        workspace: WorkspaceBackend | WorkspaceRef | Literal["new"] | None = None,
         spec: dict[str, Any] | AgentSpec | None = None,
     ) -> AsyncGenerator[AgentRun[AgentDepsT, Any]]:
         """Iterate over the agent graph with the durable model and toolsets applied.
@@ -831,24 +963,31 @@ class ResonateAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             )
             raise UserError(msg)
         self._reject_unsupported_runtime_toolsets(toolsets)
+        if workflow_context() is not None:
+            _reject_cancellation_and_timeout(cancellation_token, timeout)
         with self._resonate_overrides():
             async with super().iter(
                 user_prompt,
                 output_type=output_type,
+                conversation=conversation,
                 message_history=message_history,
                 deferred_tool_results=deferred_tool_results,
                 conversation_id=conversation_id,
+                run_id=run_id,
                 model=model,
                 instructions=instructions,
                 deps=deps,
                 model_settings=model_settings,
                 usage_limits=usage_limits,
+                cancellation_token=cancellation_token,
+                timeout=timeout,
                 usage=usage,
                 metadata=metadata,
                 retries=retries,
                 infer_name=infer_name,
                 toolsets=toolsets,
                 capabilities=capabilities,
+                workspace=workspace,
                 spec=spec,
             ) as agent_run:
                 yield agent_run

@@ -3,7 +3,7 @@
 //! # Contract
 //!
 //! `handle(&doc, req, now) -> (Vec<Effect>, Reply)` and
-//! `drain(&doc, now) -> Vec<Effect>` decide; they read no clock, generate no
+//! `sweep(&doc, now) -> Vec<Effect>` decide; they read no clock, generate no
 //! ids, and touch no I/O. Everything a decision implies — persist the
 //! document, arm a timer, clear a timer, send a message — comes back as an
 //! [`Effect`] for the shell in the shell modules at the crate root to perform. Ids are strings,
@@ -27,17 +27,17 @@
 //!
 //! # Dependants
 //!
-//! The S3 shell: the applier runs `handle` and `drain` for every decision and
+//! The S3 shell: the applier runs `handle` and `sweep` for every decision and
 //! `apply_effects` to update its documents, and the codec encodes the state
 //! declared here.
 
-pub mod drain;
 pub mod handle;
 pub mod state;
+pub mod sweep;
 
-pub use drain::drain;
 pub use handle::handle;
 pub use state::{
     apply_effects, check_invariants, min_deadline, Effect, KernelCfg, OriginDoc, PromiseDoc, Reply,
     Req, TaskDoc,
 };
+pub use sweep::sweep;

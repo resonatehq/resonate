@@ -73,6 +73,21 @@ impl MysqlEngine {
                     sqlx::query("SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED")
                         .execute(&mut *conn)
                         .await?;
+                    // TiDB speaks this protocol, but READ COMMITTED and the
+                    // `FOR UPDATE` row locks this engine relies on take effect
+                    // only in pessimistic mode. A cluster whose default is
+                    // optimistic would run every transaction as snapshot
+                    // isolation with commit-time conflict detection, so pin
+                    // the mode per session. MySQL has no such variable, hence
+                    // the check.
+                    let version: String = sqlx::query_scalar("SELECT VERSION()")
+                        .fetch_one(&mut *conn)
+                        .await?;
+                    if version.contains("TiDB") {
+                        sqlx::query("SET SESSION tidb_txn_mode = 'pessimistic'")
+                            .execute(&mut *conn)
+                            .await?;
+                    }
                     Ok(())
                 })
             })
@@ -2571,7 +2586,7 @@ impl<'a> MysqlDb<'a> {
                  WHERE id IN ({})",
                 ph(n)
             );
-            let mut q = sqlx::query(&sql);
+            let mut q = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()));
             for id in expired_ids {
                 q = q.bind(id.as_str());
             }
@@ -2581,7 +2596,7 @@ impl<'a> MysqlDb<'a> {
         // Delete callbacks where expired task is the awaiter
         {
             let sql = format!("DELETE FROM callbacks WHERE awaiter_id IN ({})", ph(n));
-            let mut q = sqlx::query(&sql);
+            let mut q = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()));
             for id in expired_ids {
                 q = q.bind(id.as_str());
             }
@@ -2598,7 +2613,7 @@ impl<'a> MysqlDb<'a> {
                 ph(n),
                 ph(n)
             );
-            let mut q = sqlx::query(&sql);
+            let mut q = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()));
             for id in expired_ids {
                 q = q.bind(id.as_str());
             }
@@ -2616,7 +2631,7 @@ impl<'a> MysqlDb<'a> {
                 ph(n),
                 ph(n)
             );
-            let mut q = sqlx::query(&sql);
+            let mut q = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()));
             for id in expired_ids {
                 q = q.bind(id.as_str());
             }
@@ -2650,7 +2665,7 @@ impl<'a> MysqlDb<'a> {
                 "SELECT promise_id, address FROM listeners WHERE promise_id IN ({})",
                 ph(n)
             );
-            let mut q = sqlx::query(&sql);
+            let mut q = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()));
             for id in expired_ids {
                 q = q.bind(id.as_str());
             }
@@ -2665,7 +2680,7 @@ impl<'a> MysqlDb<'a> {
 
         {
             let sql = format!("DELETE FROM listeners WHERE promise_id IN ({})", ph(n));
-            let mut q = sqlx::query(&sql);
+            let mut q = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()));
             for id in expired_ids {
                 q = q.bind(id.as_str());
             }
@@ -2801,7 +2816,7 @@ impl MysqlDb<'_> {
                 "SELECT id FROM promises WHERE id IN ({}) AND state = 'pending' AND timeout_at <= ? ORDER BY id",
                 ph(n)
             );
-            let mut q = sqlx::query(&sql);
+            let mut q = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()));
             for id in &ids {
                 q = q.bind(id.as_str());
             }
@@ -2828,7 +2843,7 @@ impl MysqlDb<'_> {
                  WHERE id IN ({}) AND state = 'pending' AND timeout_at <= ?",
                 ph(m)
             );
-            let mut q = sqlx::query(&sql);
+            let mut q = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()));
             for id in &expired_ids {
                 q = q.bind(id.as_str());
             }
@@ -3164,7 +3179,7 @@ impl MysqlDb<'_> {
         now: i64,
     ) -> StorageResult<Vec<PromiseRecord>> {
         let rows = rt_block_on(
-            sqlx::query(&format!(
+            sqlx::query(sqlx::AssertSqlSafe(format!(
                 "SELECT id, state, param_headers, param_data, value_headers, value_data, tags, timeout_at, created_at, settled_at
                  FROM promises
                  WHERE {}
@@ -3173,7 +3188,7 @@ impl MysqlDb<'_> {
                  ORDER BY id ASC
                  LIMIT ?",
                 resonate_sql::effective_state_sql(state, now)
-            ))
+            )))
             .bind(tags).bind(tags)
             .bind(cursor).bind(cursor)
             .bind(limit)
@@ -3588,7 +3603,7 @@ impl MysqlDb<'_> {
                 "SELECT id FROM promises WHERE id IN ({}) ORDER BY id FOR UPDATE",
                 placeholders
             );
-            let mut q = sqlx::query(&sql);
+            let mut q = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()));
             for id in &awaited_ids {
                 q = q.bind(id.as_str());
             }
@@ -3638,7 +3653,7 @@ impl MysqlDb<'_> {
                 "SELECT COUNT(*) AS cnt FROM promises WHERE id IN ({})",
                 placeholders
             );
-            let mut q = sqlx::query(&sql);
+            let mut q = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()));
             for id in &awaited_ids {
                 q = q.bind(id.as_str());
             }
@@ -3671,7 +3686,7 @@ impl MysqlDb<'_> {
                  AND NOT external",
                 placeholders
             );
-            let mut q = sqlx::query(&sql);
+            let mut q = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()));
             for id in &awaited_ids {
                 q = q.bind(id.as_str());
             }
@@ -3700,7 +3715,7 @@ impl MysqlDb<'_> {
                 "SELECT COUNT(*) AS cnt FROM promises WHERE id IN ({}) AND state != 'pending'",
                 placeholders
             );
-            let mut q = sqlx::query(&sql);
+            let mut q = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()));
             for id in &awaited_ids {
                 q = q.bind(id.as_str());
             }
@@ -4136,7 +4151,7 @@ impl MysqlDb<'_> {
         );
         let (after_key, after_id) = split_keyset(q.after.as_ref());
         let rows = rt_block_on(
-            sqlx::query(&sql)
+            sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
                 .bind(q.id_from.as_deref())
                 .bind(q.id_from.as_deref())
                 .bind(q.id_to.as_deref())
@@ -4171,7 +4186,7 @@ impl MysqlDb<'_> {
             states = q.states_sql(),
         );
         let row = rt_block_on(
-            sqlx::query(&sql)
+            sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
                 .bind(q.id_from.as_deref())
                 .bind(q.id_from.as_deref())
                 .bind(q.id_to.as_deref())
@@ -4246,7 +4261,7 @@ impl MysqlDb<'_> {
         );
         let (after_key, after_id) = split_keyset(q.after.as_ref());
         let rows = rt_block_on(
-            sqlx::query(&sql)
+            sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
                 .bind(q.id_from.as_deref())
                 .bind(q.id_from.as_deref())
                 .bind(q.id_to.as_deref())
@@ -4562,7 +4577,7 @@ impl MysqlDb<'_> {
                      WHERE id IN ({})",
                     ph(n)
                 );
-                let mut q = sqlx::query(&sql);
+                let mut q = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()));
                 for id in &expired_ids {
                     q = q.bind(id.as_str());
                 }
@@ -4603,7 +4618,9 @@ impl MysqlDb<'_> {
                     "UPDATE promises SET retry_timeout_at = ? + ?, pid = NULL WHERE id IN ({})",
                     ph(n)
                 );
-                let mut q = sqlx::query(&sql).bind(time).bind(trt);
+                let mut q = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
+                    .bind(time)
+                    .bind(trt);
                 for id in &retry_ids {
                     q = q.bind(id.as_str());
                 }
@@ -4652,7 +4669,9 @@ impl MysqlDb<'_> {
                      WHERE id IN ({})",
                     ph(n)
                 );
-                let mut q = sqlx::query(&sql).bind(time).bind(trt);
+                let mut q = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
+                    .bind(time)
+                    .bind(trt);
                 for id in &lease_ids {
                     q = q.bind(id.as_str());
                 }

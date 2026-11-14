@@ -16,23 +16,23 @@
         document.documentElement.dataset.theme = 'light';
       }
     </script>
-    <link href="/console/app/immutable/entry/start.U5fsNrNH.js" rel="modulepreload">
-		<link href="/console/app/immutable/chunks/-yjF4C8Y.js" rel="modulepreload">
-		<link href="/console/app/immutable/chunks/Dcg49T0u.js" rel="modulepreload">
-		<link href="/console/app/immutable/chunks/DB-WyGTP.js" rel="modulepreload">
-		<link href="/console/app/immutable/chunks/-UyI9lYi.js" rel="modulepreload">
-		<link href="/console/app/immutable/entry/app.D9xLLlvc.js" rel="modulepreload">
-		<link href="/console/app/immutable/chunks/BNMoJmDo.js" rel="modulepreload">
-		<link href="/console/app/immutable/chunks/CWUj_aFe.js" rel="modulepreload">
-		<link href="/console/app/immutable/chunks/CR-Ullt2.js" rel="modulepreload">
-		<link href="/console/app/immutable/chunks/C_MPijE4.js" rel="modulepreload">
-		<link href="/console/app/immutable/nodes/0.cNxvxqf1.js" rel="modulepreload">
-		<link href="/console/app/immutable/chunks/cSDYIJQN.js" rel="modulepreload">
-		<link href="/console/app/immutable/chunks/DyUubjGc.js" rel="modulepreload">
-		<link href="/console/app/immutable/chunks/Bodcevmm.js" rel="modulepreload">
-		<link href="/console/app/immutable/chunks/DCakJuFU.js" rel="modulepreload">
+    <link href="/console/app/immutable/entry/start.DLFM7hWv.js" rel="modulepreload">
+		<link href="/console/app/immutable/entry/payload.DSmR2FwN.js" rel="modulepreload">
+		<link href="/console/app/immutable/chunks/DclECHGd.js" rel="modulepreload">
+		<link href="/console/app/immutable/chunks/DnUdMYO5.js" rel="modulepreload">
+		<link href="/console/app/immutable/chunks/DXuBMLn_.js" rel="modulepreload">
+		<link href="/console/app/immutable/chunks/nb086GhJ.js" rel="modulepreload">
+		<link href="/console/app/immutable/chunks/BnucolrN.js" rel="modulepreload">
+		<link href="/console/app/immutable/chunks/BGPr72vw.js" rel="modulepreload">
+		<link href="/console/app/immutable/chunks/Bbkvzshl.js" rel="modulepreload">
+		<link href="/console/app/immutable/entry/app.D1cuTroG.js" rel="modulepreload">
+		<link href="/console/app/immutable/nodes/0.im8iCJOe.js" rel="modulepreload">
+		<link href="/console/app/immutable/chunks/DK3Fl9T5.js" rel="modulepreload">
+		<link href="/console/app/immutable/chunks/BJcQpAFp.js" rel="modulepreload">
+		<link href="/console/app/immutable/chunks/BRVJW3BW.js" rel="modulepreload">
+		<link href="/console/app/immutable/chunks/D2ABgzLM.js" rel="modulepreload">
 		
-		<link href="/console/app/immutable/assets/0.XuRlKoxb.css" rel="stylesheet">
+		<link href="/console/app/immutable/assets/0.D1asOau4.css" rel="stylesheet">
   </head>
   <body data-sveltekit-preload-data="hover">
     <div style="display: contents">
@@ -40,15 +40,15 @@
 				{
 					__sveltekit_da53xm = {
 						base: "/console",
+						version: "resonate-console",
 						assets: "/console"
 					};
 
 					const element = document.currentScript.parentElement;
 
-					Promise.all([
-						import("/console/app/immutable/entry/start.U5fsNrNH.js"),
-						import("/console/app/immutable/entry/app.D9xLLlvc.js")
-					]).then(([kit, app]) => {
+					import("/console/app/immutable/entry/start.DLFM7hWv.js").then(async (kit) => {
+						kit.init(__sveltekit_da53xm);
+						const app = await import("/console/app/immutable/entry/app.D1cuTroG.js");
 						kit.start(app, element);
 					});
 				}

@@ -41,12 +41,12 @@ jobs:
         test-java-version: ["21", "24", "25"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # Install both JDKs so Gradle can compile with 21 and run tests on the
       # matrix version. The last entry sets JAVA_HOME / runs Gradle itself.
       - name: set up java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: |
@@ -54,9 +54,7 @@ jobs:
             21
 
       - name: setup gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          build-root-directory: impl/sdk/java
+        uses: gradle/actions/setup-gradle@v5
 
       - name: check linting
         run: ./gradlew spotlessCheck
@@ -75,18 +73,16 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: set up java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
 
       - name: setup gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          build-root-directory: impl/sdk/java
+        uses: gradle/actions/setup-gradle@v5
 
       - name: install just
         uses: extractions/setup-just@v3

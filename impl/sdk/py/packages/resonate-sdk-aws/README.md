@@ -11,9 +11,11 @@ from resonate_aws import Resonate
 
 resonate = Resonate()
 
+
 @resonate.register
 def greet(ctx, name: str) -> str:
     return f"hello {name}"
+
 
 lambda_handler = resonate.handler()
 ```

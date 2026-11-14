@@ -13,4 +13,4 @@ serde_json = { workspace = true }
 url = { workspace = true }
 tokio = { version = "1", features = ["rt", "sync", "macros", "time"] }
 tracing = "0.1"
-google-cloud-pubsub = "0.33.1"
+google-cloud-pubsub = "1.8.0"

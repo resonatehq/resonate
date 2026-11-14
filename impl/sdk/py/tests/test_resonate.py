@@ -52,7 +52,7 @@ from resonate.retry import Never
 from resonate.types import Value
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable
+    from collections.abc import AsyncGenerator, Callable
 
     from resonate.codec import Encryptor
     from resonate.context import Context
@@ -71,7 +71,7 @@ async def local(
     encryptor: Encryptor | None = None,
     max_concurrent_tasks: int | None = None,
     subscription_refresh_secs: float = DEFAULT_SUBSCRIPTION_REFRESH_SECS,
-) -> AsyncIterator[Resonate]:
+) -> AsyncGenerator[Resonate]:
     """Yield a local-mode Resonate, stopping it (and its refresh task) on exit."""
     # Pin ``Never`` so a failing pure leaf settles immediately: the SDK default
     # is now an effectively-unbounded Exponential, which would retry such a leaf
@@ -500,7 +500,7 @@ async def test_network_passed_as_source_raises_type_error() -> None:
 @contextlib.asynccontextmanager
 async def multi_source(
     pid: str = "pid1", group: str = "default"
-) -> AsyncIterator[tuple[Resonate, LocalConnection, FakeSource, FakeSource]]:
+) -> AsyncGenerator[tuple[Resonate, LocalConnection, FakeSource, FakeSource]]:
     """Yield a Resonate over a real LocalConnection with two injectable sources."""
     net = LocalConnection(pid=pid, group=group)
     primary = FakeSource(pid=pid, group=group)

@@ -10,7 +10,11 @@
   ],
   "overrides": {
     "@resonatehq/sdk": "file:.",
-    "uuid": "^11.1.1"
+    "uuid": "^11.1.1",
+    "glob": "^14.0.6",
+    "test-exclude": {
+      "minimatch": "^11.0.8"
+    }
   },
   "main": "./dist/src/index.js",
   "types": "./dist/src/index.d.ts",
@@ -64,7 +68,7 @@
   },
   "dependencies": {
     "cron-parser": "^5.3.0",
-    "eventsource": "^4.0.0"
+    "eventsource": "^5.1.5"
   },
   "peerDependencies": {
     "@nats-io/transport-node": "^3.0.0",
@@ -79,24 +83,24 @@
     }
   },
   "devDependencies": {
-    "@biomejs/biome": "2.4.10",
-    "@jest/globals": "^30.0.0",
+    "@biomejs/biome": "2.6.7",
+    "@jest/globals": "^30.5.2",
     "@nats-io/nats-core": "^3.4.0",
     "@nats-io/transport-node": "^3.4.0",
     "@types/jest": "30.0.0",
-    "@types/node": "^25.9.5",
-    "@types/pg": "^8.11.10",
-    "commander": "^14.0.0",
-    "esbuild": "^0.28.0",
-    "pg": "^8.13.1",
-    "ts-jest": "^29.4.9",
-    "tsx": "^4.20.5",
-    "typedoc": "^0.28.18",
-    "typedoc-material-theme": "^1.4.0",
-    "typescript": "^6.0.2"
+    "@types/node": "^26.6.6",
+    "@types/pg": "^8.23.1",
+    "commander": "^15.1.0",
+    "esbuild": "^0.28.2",
+    "pg": "^8.23.1",
+    "ts-jest": "^29.4.15",
+    "tsx": "^4.23.15",
+    "typedoc": "^0.28.20",
+    "typedoc-material-theme": "^1.4.1",
+    "typescript": "^6.0.3"
   },
   "engines": {
-    "node": ">= 22",
+    "node": ">= 22.12",
     "npm": ">= 10"
   }
 }

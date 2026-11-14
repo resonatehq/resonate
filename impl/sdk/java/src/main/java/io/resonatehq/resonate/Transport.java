@@ -64,13 +64,16 @@ public final class Transport {
     public sealed interface Message permits ExecuteMsg, UnblockMsg {}
 
     /** Reference to a task carried by an {@link ExecuteMsg}. {@code version} defaults to {@code 0}. */
-    public record TaskRef(@JsonProperty(value = "id", required = true) String id, int version) {}
+    public record TaskRef(
+            @JsonProperty(value = "id", required = true) String id, int version) {}
 
     /** Payload of an {@link ExecuteMsg}. */
-    public record ExecuteData(@JsonProperty(value = "task", required = true) TaskRef task) {}
+    public record ExecuteData(
+            @JsonProperty(value = "task", required = true) TaskRef task) {}
 
     /** "execute" message: the server is asking this worker to run a task. */
-    public record ExecuteMsg(@JsonProperty(value = "data", required = true) ExecuteData data) implements Message {
+    public record ExecuteMsg(
+            @JsonProperty(value = "data", required = true) ExecuteData data) implements Message {
 
         /** Shorthand for {@code data.task().id()}. */
         public String taskId() {
@@ -84,10 +87,13 @@ public final class Transport {
     }
 
     /** Payload of an {@link UnblockMsg}. */
-    public record UnblockData(@JsonProperty(value = "promise", required = true) PromiseRecord promise) {}
+    public record UnblockData(
+            @JsonProperty(value = "promise", required = true)
+            PromiseRecord promise) {}
 
     /** "unblock" message: a promise an execution was awaiting has settled. */
-    public record UnblockMsg(@JsonProperty(value = "data", required = true) UnblockData data) implements Message {
+    public record UnblockMsg(
+            @JsonProperty(value = "data", required = true) UnblockData data) implements Message {
 
         /** The settled promise — shorthand for {@code data.promise()}. */
         public PromiseRecord promise() {

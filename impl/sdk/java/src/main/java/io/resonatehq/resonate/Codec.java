@@ -299,8 +299,8 @@ public final class Codec {
         }
         return switch (record.state()) {
             case "resolved" -> record.value().data();
-            case "rejected", "rejected_canceled", "rejected_timedout" -> throw deserializeError(
-                    record.value().data());
+            case "rejected", "rejected_canceled", "rejected_timedout" ->
+                throw deserializeError(record.value().data());
             default -> null;
         };
     }

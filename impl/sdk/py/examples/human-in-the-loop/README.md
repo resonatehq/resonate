@@ -61,6 +61,7 @@ import asyncio
 from resonate.resonate import Resonate
 from resonate.types import Value
 
+
 async def main():
     r = Resonate(url="http://localhost:8001")
     await r.promises.resolve(
@@ -68,6 +69,7 @@ async def main():
         Value.from_serializable({"approve": True, "note": "lgtm"}),
     )
     await r.stop()
+
 
 asyncio.run(main())
 ```

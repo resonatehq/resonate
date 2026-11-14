@@ -200,7 +200,6 @@ Resonate ships with the following plugins:
 | Server | `server_mysql` |
 | Server | `server_scylladb` |
 | Server | `server_blob` |
-| Server | `server_neo4j` |
 | Worker | `transport_http_push` |
 | Worker | `transport_http_poll` |
 | Worker | `transport_gcps` |
@@ -234,13 +233,13 @@ Supported backends:
 | **SQLite** | *(default)* |
 | **PostgreSQL** | `--storage-type postgres` |
 | **MySQL** | `--storage-type mysql` |
+| **TiDB** (v8.5+) | `--storage-type mysql`, pointed at TiDB |
 | **ScyllaDB** | `--storage-type scylladb` |
 | **Blob** | `--storage-type blob` |
-| **Neo4j** | `--storage-type neo4j` |
 
 All backends are held to the same behaviour by the differential test suite — the same requests go to every engine and to an executable model of the specification, and any divergence fails the build.
 
-On Neo4j every promise is a node, every await is an edge, and every call tree is a path — open the database in Neo4j Browser and the execution draws itself. See [`crates/resonate-server-neo4j`](crates/resonate-server-neo4j) for the queries.
+TiDB runs on the MySQL plugin: it speaks the MySQL protocol, and the plugin detects it, pins pessimistic transactions per session and retries TiDB's retryable errors. Its differential and linearizability checks run nightly and on demand (`server-core-tidb.yml`) rather than on every pull request, because the full differential takes about an hour against TiDB.
 
 ---
 
@@ -328,7 +327,6 @@ Configuration layers in order of increasing precedence:
 RESONATE_GATEWAYS__GATEWAY_HTTP__BIND=0.0.0.0:3000
 RESONATE_SERVERS__ACTIVE=server_postgres
 RESONATE_SERVERS__SERVER_POSTGRES__URL=postgres://...
-RESONATE_SERVERS__SERVER_NEO4J__URI=bolt://...
 ```
 
 ### Outbound authentication for HTTP push
