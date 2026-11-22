@@ -2,9 +2,9 @@
 
 ![Resonate](./impl/server/core/assets/resonate-banner.png)
 
-[![License](https://img.shields.io/badge/license-Apache--2.0-1EE3CF?style=flat-square)](./LICENSE)
-[![Discord](https://img.shields.io/badge/Discord-join-1EE3CF?style=flat-square&logo=discord&logoColor=white)](https://resonatehq.io/discord)
-[![Docs](https://img.shields.io/badge/docs-resonatehq.io-1EE3CF?style=flat-square)](https://docs.resonatehq.io/)
+[![License](https://img.shields.io/badge/license-Apache--2.0-FF3C00?style=flat-square)](./LICENSE)
+[![Discord](https://img.shields.io/badge/Discord-join-FF3C00?style=flat-square&logo=discord&logoColor=white)](https://resonatehq.io/discord)
+[![Docs](https://img.shields.io/badge/docs-resonatehq.io-FF3C00?style=flat-square)](https://docs.resonatehq.io/)
 
 [Example](#example) · [Architecture](#architecture) · [Layout](#layout) · [Get started](#get-started) · [Docs](https://docs.resonatehq.io/)
 
