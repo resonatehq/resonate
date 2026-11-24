@@ -2,7 +2,7 @@ import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
 export default defineConfig({
-  site: 'https://resonatehq.github.io',
+  site: process.env.PAGES_ORIGIN || 'https://resonatehq.github.io',
   base: '/resonate',
   trailingSlash: 'always',
   integrations: [starlight({
