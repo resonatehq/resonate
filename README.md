@@ -1,6 +1,11 @@
 <div align="center">
 
-![Resonate](./impl/server/core/assets/resonate-banner.png)
+![Echo above an orange and white waveform](./docs/src/assets/echo-wave.png)
+
+# Resonate
+
+**The open-source durable execution platform.**<br>
+Functions that survive restarts.
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-FF3C00?style=flat-square)](./LICENSE)
 [![Discord](https://img.shields.io/badge/Discord-join-FF3C00?style=flat-square&logo=discord&logoColor=white)](https://resonatehq.io/discord)

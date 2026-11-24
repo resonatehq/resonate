@@ -1,0 +1,52 @@
+---
+const stages = [
+  { status: 'Running', log: 'Countdown: 5\nStep recorded. Sleeping between ticks…', action: 'Stop worker' },
+  { status: 'Worker offline', log: 'Countdown: 5\nWorker stopped. The recorded tick is still on the server.', action: 'Restart worker' },
+  { status: 'Resumed', log: 'Countdown: 5\nWorker restarted. Completed step skipped.\nCountdown: 4', action: 'Try again' },
+];
+---
+<section aria-label="Countdown illustration" class="demo not-content">
+  <header><span>Interactive illustration</span><strong>Execution / countdown.1</strong></header>
+  <countdown-demo>
+    <div aria-live="polite" aria-atomic="true">
+      {stages.map(({ status, log }, index) => (
+        <div data-step hidden={index !== 0}>
+          <h3>{status}</h3><pre>{log}</pre>
+        </div>
+      ))}
+    </div>
+    <button type="button" hidden data-actions={JSON.stringify(stages.map(s => s.action))}>{stages[0].action}</button>
+  </countdown-demo>
+  <noscript>Restarting the worker resumes countdown.1 at 4, without repeating 5.</noscript>
+</section>
+
+<script>
+  class CountdownDemo extends HTMLElement {
+    connectedCallback() {
+      const button = this.querySelector('button')!;
+      const steps = [...this.querySelectorAll<HTMLElement>('[data-step]')];
+      const actions: string[] = JSON.parse(button.dataset.actions!);
+      let current = 0;
+      button.hidden = false;
+      button.onclick = () => {
+        steps[current].hidden = true;
+        current = (current + 1) % steps.length;
+        steps[current].hidden = false;
+        button.textContent = actions[current];
+      };
+    }
+  }
+  customElements.define('countdown-demo', CountdownDemo);
+</script>
+
+<style>
+  .demo { background: #252323; color: #faf6f1; padding: clamp(1.25rem, 4vw, 3rem); border-radius: .65rem; }
+  header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .5rem 2rem; padding-bottom: 1rem; border-bottom: 1px solid #675e58; color: #d2c9c1; font: .8rem/1.5 var(--__sl-font-mono); }
+  header span { text-transform: uppercase; letter-spacing: .08em; }
+  countdown-demo { display: block; padding-top: 1.5rem; }
+  h3 { color: #ffab8f; font-weight: 500; }
+  pre { min-height: 6rem; margin: .5rem 0 1.25rem; font: .94rem/1.65 var(--__sl-font-mono); white-space: pre-wrap; }
+  button { background: #faf6f1; color: #252323; border: 1px solid transparent; border-radius: 2rem; padding: .65rem 1.2rem; font: inherit; font-weight: 600; cursor: pointer; }
+  button:hover { background: #ffd5c7; }
+  button:focus-visible { outline: 3px solid #ffab8f; outline-offset: 4px; }
+</style>

@@ -1,10 +1,14 @@
 ---
-title: Quickstart
+title: Your first durable function.
+sidebar:
+  label: Quickstart
 slug: docs/get-started/quickstart
 description: Install the server and SDK and run your first Resonate workflow.
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+<p class="guide-label">Quickstart / Local development</p>
 
 Install the server and an SDK, run a countdown, then restart the worker to see the countdown resume.
 
@@ -15,6 +19,8 @@ brew install resonatehq/tap/resonate
 ```
 
 ## Install the SDK
+
+Choose a language here. The function, worker command, and result below will use the same SDK.
 
 <Tabs syncKey="sdk-language">
 
@@ -455,7 +461,9 @@ Inspect the execution with `resonate tree` — it renders the call graph as dura
 resonate tree countdown.1
 ```
 
-Now kill the worker mid-countdown and restart it with the same start command (keep `resonate dev` running). Because the invocation `countdown.1` already exists, **the countdown resumes where it stopped** instead of starting over. Use a delay long enough to interrupt it mid-countdown — for example `--arg 5 --arg 60`.
+:::tip[Stop. Restart. Resume.]
+While the countdown is sleeping between ticks, press **Ctrl+C** in the worker terminal. Leave `resonate dev` running. Restart the worker with the same start command; don’t invoke `countdown.1` again. **The countdown resumes where it stopped.**
+:::
 
 ## Next steps
 

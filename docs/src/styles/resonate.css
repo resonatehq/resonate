@@ -1,0 +1,77 @@
+/* Use Starlight's theme switch for both the guide and the splash. */
+:root {
+  --sl-font: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --sl-color-white: #faf6f1;
+  --sl-color-gray-1: #ede6df;
+  --sl-color-gray-2: #d2c9c1;
+  --sl-color-gray-3: #b9aea5;
+  --sl-color-gray-4: #85786e;
+  --sl-color-gray-5: #504943;
+  --sl-color-gray-6: #2d2926;
+  --sl-color-black: #1b1918;
+  --sl-color-accent: #ff936e;
+  --sl-color-accent-high: #ffab8f;
+  --sl-color-accent-low: #472317;
+  --sl-color-bg-nav: var(--sl-color-black);
+  --sl-color-bg-sidebar: var(--sl-color-black);
+}
+:root[data-theme='light'] {
+  --sl-color-white: #201c19;
+  --sl-color-gray-1: #332d29;
+  --sl-color-gray-2: #49413b;
+  --sl-color-gray-3: #645a52;
+  --sl-color-gray-4: #87786c;
+  --sl-color-gray-5: #cec3ba;
+  --sl-color-gray-6: #e7dfd6;
+  --sl-color-gray-7: #f1ebe4;
+  --sl-color-black: #faf6f1;
+  --sl-color-accent: #a6300b;
+  --sl-color-accent-high: #762506;
+  --sl-color-accent-low: #ffe2d5;
+}
+.site-title { gap: .5rem; color: var(--sl-color-white); font-weight: 550; letter-spacing: -.05em; }
+.site-title img { height: 1.65rem; filter: brightness(0) invert(1); }
+[data-theme='light'] .site-title img { filter: brightness(0); }
+h1, h2 { letter-spacing: -.045em; }
+.guide-label, .signal figcaption, .hero .stack::before {
+  font: .75rem/1.5 var(--__sl-font-mono);
+  text-transform: uppercase;
+  letter-spacing: .085em;
+  color: var(--sl-color-gray-3);
+}
+.guide-label { color: var(--sl-color-text-accent); }
+:focus-visible { outline-color: var(--sl-color-text-accent); }
+
+/* Splash-only layout; keep the guide's native sidebar, outline, and tabs. */
+[data-has-hero] .hero { display: block; padding: clamp(1.5rem, 5vw, 4rem) 0 0; }
+.hero .stack { text-align: start; gap: 1.25rem; }
+.hero .stack::before { content: 'Open-source durable execution'; }
+.hero .copy { align-items: start; }
+.hero h1 { max-width: 11ch; font-size: clamp(3.5rem, 6.3vw, 6.3rem); font-weight: 450; line-height: .97; letter-spacing: -.065em; }
+.hero .tagline { max-width: 36ch; font-size: clamp(1.1rem, 2vw, 1.35rem); line-height: 1.45; }
+.hero .actions { justify-content: start; align-items: center; gap: .5rem 1.25rem; }
+.hero .primary { background: #ff5725; border-color: transparent; color: #211710; font-weight: 600; }
+.hero .primary:hover { background: #ff855d; color: #211710; }
+@media (min-width: 50rem) {
+  .hero .stack { display: grid; grid-template-columns: 1.3fr 1fr; column-gap: clamp(2rem, 5vw, 5rem); }
+  .hero .stack::before { grid-column: 1 / -1; }
+  .hero .copy { display: contents; }
+  .hero h1 { grid-row: span 2; align-self: end; }
+  .hero .tagline { align-self: end; }
+}
+.signal { margin: 2rem 0 0; }
+.signal img { width: 100%; height: auto; background: #eee8e1; border-radius: .5rem; }
+[data-theme='light'] .signal img { background: transparent; }
+.signal figcaption { display: flex; justify-content: space-between; gap: 1.5rem; padding: .8rem 0; border-bottom: 1px solid var(--sl-color-hairline-light); }
+[data-has-hero] .guide-label { margin-top: clamp(2.5rem, 6vw, 5rem); }
+[data-has-hero] .guide-label + .sl-heading-wrapper { margin-top: .5rem; }
+[data-has-hero] .sl-markdown-content > p:not(.guide-label) { max-width: 61ch; font-size: 1.15rem; }
+[data-has-hero] .sl-markdown-content > .demo { margin-top: 1.5rem; }
+.get-started { display: grid; align-items: center; gap: 1rem; margin-top: 3rem; padding: clamp(1.5rem, 4vw, 3rem); background: #ff3c00; border-radius: .65rem; color: #20140e; }
+.get-started h2 { font-size: clamp(2rem, 4vw, 3.5rem); line-height: 1; color: inherit; }
+.get-started p { margin-block: .8rem; }
+.get-started img { width: 100%; height: auto; }
+.get-started .primary { background: #211b17; color: #fff; border: 0; }
+.get-started .primary:hover { background: #3b2b23; color: #fff; }
+.get-started :focus-visible { outline-color: #211b17; }
+@media (min-width: 42rem) { .get-started { grid-template-columns: 1.2fr 1fr; } }
