@@ -1,6 +1,6 @@
 ---
 title: Resonate
-description: Stop a worker, restart it, and see how Resonate continues the same durable execution.
+description: Resonate records completed steps so your functions can resume after a worker restarts.
 template: splash
 hero:
   title: Functions that survive restarts.
@@ -15,7 +15,6 @@ hero:
 ---
 
 import { LinkButton, Tabs, TabItem } from '@astrojs/starlight/components';
-import CountdownDemo from '../../components/CountdownDemo.astro';
 import signal from '../../../../impl/server/core/assets/resonate-banner.png';
 import wave from '../../assets/echo-wave.png';
 
@@ -24,15 +23,7 @@ import wave from '../../assets/echo-wave.png';
   <figcaption><span>The worker is temporary.</span><span>The execution continues.</span></figcaption>
 </figure>
 
-<p class="guide-label">01 / Make it stop. Watch it continue.</p>
-
-## Pull the plug. Not the progress.
-
-Stop the worker after the first tick. Restart it, and watch 4 come next, not 5 all over again. Same execution ID. Completed step remembered.
-
-<CountdownDemo />
-
-<p class="guide-label">02 / Your code. With a memory.</p>
+<p class="guide-label">Your code. With a memory.</p>
 
 ## A function. Not a flowchart.
 

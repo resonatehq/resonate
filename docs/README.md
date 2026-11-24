@@ -1,6 +1,6 @@
 # Resonate documentation
 
-A static Astro + Starlight site for the `/resonate/` GitHub Pages project path. The two pages live together in `src/content/docs/`: `index.mdx` uses the built-in splash template, and `quickstart.mdx` uses the default guide layout and SDK tabs. Prefer Markdown for new pages; use MDX when a built-in component helps the reader. The splash includes a browser-only countdown illustration. Shared colors and typography live in `src/styles/resonate.css`.
+A static Astro + Starlight site for the `/resonate/` GitHub Pages project path. The two pages live together in `src/content/docs/`: `index.mdx` uses the built-in splash template, and `quickstart.mdx` uses the default guide layout and SDK tabs. Prefer Markdown for new pages; use MDX when a built-in component helps the reader. Shared colors and typography live in `src/styles/resonate.css`.
 
 From this directory, using Node.js 24.22.3 or later:
 
