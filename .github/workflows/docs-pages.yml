@@ -37,7 +37,7 @@ jobs:
         run: |
           npm ci
           npm run build
-      - name: Check countdown controls and quickstart SDK tabs
+      - name: Check quickstart SDK tabs
         working-directory: docs
         run: |
           npx playwright install --with-deps --no-shell chromium
