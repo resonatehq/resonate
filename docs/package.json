@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
-    "preview": "astro preview"
+    "preview": "astro preview",
+    "test:browser": "playwright test"
   },
   "engines": {
     "node": ">=24.22.3"
@@ -13,5 +14,8 @@
   "dependencies": {
     "@astrojs/starlight": "0.43.1",
     "astro": "7.4.13"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1"
   }
 }
