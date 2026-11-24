@@ -7,7 +7,8 @@
     "build": "astro build",
     "check:pages": "node scripts/check-pages.mjs",
     "test:pages": "node --test scripts/check-pages.test.mjs",
-    "preview": "astro preview"
+    "preview": "astro preview",
+    "test:browser": "playwright test"
   },
   "engines": {
     "node": ">=24.22.3"
@@ -17,6 +18,7 @@
     "astro": "7.4.13"
   },
   "devDependencies": {
+    "@playwright/test": "1.64.1",
     "css-tree": "3.2.1",
     "es-module-lexer": "3.0.5",
     "parse-srcset": "1.0.2",

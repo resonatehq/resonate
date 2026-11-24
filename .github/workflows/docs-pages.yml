@@ -37,6 +37,11 @@ jobs:
         run: |
           npm ci
           npm run build
+      - name: Check quickstart SDK tabs
+        working-directory: docs
+        run: |
+          npx playwright install --with-deps --no-shell chromium
+          npm run test:browser
       - name: Build the TypeScript API reference into the same site
         working-directory: impl/sdk/ts
         run: |
