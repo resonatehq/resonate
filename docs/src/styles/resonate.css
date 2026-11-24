@@ -66,7 +66,6 @@ h1, h2 { letter-spacing: -.045em; }
 [data-has-hero] .guide-label { margin-top: clamp(2.5rem, 6vw, 5rem); }
 [data-has-hero] .guide-label + .sl-heading-wrapper { margin-top: .5rem; }
 [data-has-hero] .sl-markdown-content > p:not(.guide-label) { max-width: 61ch; font-size: 1.15rem; }
-[data-has-hero] .sl-markdown-content > .demo { margin-top: 1.5rem; }
 .get-started { display: grid; align-items: center; gap: 1rem; margin-top: 3rem; padding: clamp(1.5rem, 4vw, 3rem); background: #ff3c00; border-radius: .65rem; color: #20140e; }
 .get-started h2 { font-size: clamp(2rem, 4vw, 3.5rem); line-height: 1; color: inherit; }
 .get-started p { margin-block: .8rem; }
