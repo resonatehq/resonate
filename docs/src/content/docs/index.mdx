@@ -1,0 +1,70 @@
+---
+title: Resonate
+description: Stop a worker, restart it, and see how Resonate continues the same durable execution.
+template: splash
+hero:
+  title: Functions that survive restarts.
+  tagline: Your worker can stop. Your work doesn’t have to. Resonate records completed steps so a new worker can continue the <em>same execution.</em>
+  actions:
+    - text: Run the quickstart
+      link: ./docs/get-started/quickstart/
+      icon: right-arrow
+    - text: Browse the full docs
+      link: https://docs.resonatehq.io/
+      variant: minimal
+---
+
+import { LinkButton, Tabs, TabItem } from '@astrojs/starlight/components';
+import CountdownDemo from '../../components/CountdownDemo.astro';
+import signal from '../../../../impl/server/core/assets/resonate-banner.png';
+import wave from '../../assets/echo-wave.png';
+
+<figure class="signal not-content">
+  <img src={signal.src} width={signal.width} height={signal.height} alt="Echo floats above a signal made of blocks." />
+  <figcaption><span>The worker is temporary.</span><span>The execution continues.</span></figcaption>
+</figure>
+
+<p class="guide-label">01 / Make it stop. Watch it continue.</p>
+
+## Pull the plug. Not the progress.
+
+Stop the worker after the first tick. Restart it, and watch 4 come next, not 5 all over again. Same execution ID. Completed step remembered.
+
+<CountdownDemo />
+
+<p class="guide-label">02 / Your code. With a memory.</p>
+
+## A function. Not a flowchart.
+
+Keep the loops and branches you already know. Wrap a step to record its result. Use a durable sleep between ticks.
+
+<Tabs>
+<TabItem label="TypeScript">
+
+```typescript title="Inside countdown.ts"
+for (let i = count; i > 0; i--) {
+  yield* context.run((context: Context) => console.log(`Countdown: ${i}`));
+  yield* context.sleep(delay * 1000);
+}
+```
+
+</TabItem>
+<TabItem label="Python">
+
+```python title="Inside countdown.py"
+for i in range(count, 0, -1):
+    await ctx.run(ntfy, i)
+    await ctx.sleep(timedelta(seconds=delay))
+```
+
+</TabItem>
+</Tabs>
+
+<div class="get-started not-content">
+  <div>
+    <h2>Give your function a second life.</h2>
+    <p>Run the countdown in TypeScript, Python, Rust, Go, or Java.</p>
+    <LinkButton href="./docs/get-started/quickstart/" icon="right-arrow">Run the quickstart</LinkButton>
+  </div>
+  <img src={wave.src} alt="" width={wave.width} height={wave.height} loading="lazy" />
+</div>
