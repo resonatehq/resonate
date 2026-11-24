@@ -24,6 +24,7 @@
 //! }
 //! ```
 
+pub mod metered;
 pub mod router;
 
 use std::collections::HashMap;
@@ -340,6 +341,7 @@ pub fn build(
         ServerDependencies::new(Arc::clone(&router) as Arc<dyn ResonateRouter>),
     )
     .map_err(|e| e.to_string())?;
+    let server: Arc<dyn ResonateServer> = Arc::new(metered::MeteredServer::new(chosen.id(), server));
     tracing::info!(server = %chosen.id(), "Server plugin selected");
 
     // 3. The workers, each downgrading the server that now exists.
@@ -360,6 +362,8 @@ pub fn build(
             tracing::info!(worker = %plugin.id(), "Worker plugin disabled");
             continue;
         };
+        let worker: Arc<dyn ResonateWorker> =
+            Arc::new(metered::MeteredWorker::new(plugin.id(), worker));
         for scheme in plugin.schemes {
             by_scheme.insert((*scheme).to_string(), Arc::clone(&worker));
         }
@@ -382,6 +386,8 @@ pub fn build(
             tracing::info!(gateway = %plugin.id(), "Gateway plugin disabled");
             continue;
         };
+        let gateway: Arc<dyn ResonateGateway> =
+            Arc::new(metered::MeteredGateway::new(plugin.id(), gateway));
         tracing::info!(gateway = %plugin.id(), "Gateway plugin registered");
         gateways.push((plugin.id(), gateway));
     }
