@@ -81,10 +81,6 @@
 
     <div class="spacer"></div>
 
-    <div class="rail-foot">
-      <img class="echo-mark" src={asset('images/resonate/echo.png')} width="42" height="42" alt="" />
-      <div class="overline">Durable execution</div>
-    </div>
     <button
       class="navbtn theme"
       onclick={toggleTheme}
@@ -184,14 +180,6 @@
   }
   .rail > .overline {
     padding: 0 12px 13px;
-  }
-  .rail-foot {
-    padding: 32px 12px 20px;
-  }
-  .rail-foot img {
-    display: block;
-    opacity: .65;
-    margin-bottom: 13px;
   }
   .skip {
     position: fixed;
@@ -356,7 +344,7 @@
       padding: 8px 12px;
       align-items: center;
     }
-    .rail > .overline, .rail-foot, .spacer { display: none; }
+    .rail > .overline, .spacer { display: none; }
     nav { flex-direction: row; flex: 1; gap: 2px; }
     nav .navbtn { justify-content: center; padding: 11px 8px; font-size: 12px; }
     nav :global(svg) { display: none; }
