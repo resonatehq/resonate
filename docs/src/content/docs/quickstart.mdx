@@ -1,12 +1,12 @@
 ---
 title: Quickstart
+slug: docs/get-started/quickstart
 description: Install the server and SDK and run your first Resonate workflow.
 ---
 
-import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+import { Tabs, TabItem } from '@astrojs/starlight/components';
 
-<img class="light:sl-hidden" src={`${import.meta.env.BASE_URL}images/banner-quickstart-dark.png`} alt="" width="1024" height="341" />
-<img class="dark:sl-hidden" src={`${import.meta.env.BASE_URL}images/banner-quickstart-light.png`} alt="" width="1024" height="341" />
+Install the server and an SDK, run a countdown, then restart the worker to see the countdown resume.
 
 ## Install the server
 
@@ -30,11 +30,7 @@ npm install @resonatehq/sdk
 
 <TabItem label="Python">
 
-<Aside type="note">
-
 The Resonate Python SDK (v0.7.4) requires **Python ≥3.12**.
-
-</Aside>
 
 ```shell
 pip install resonate-sdk
