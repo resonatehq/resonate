@@ -47,6 +47,13 @@ jobs:
         run: |
           npm ci
           npm run docs -- --out "$GITHUB_WORKSPACE/docs/dist/api/ts"
+      - name: Check generated Pages links and assets
+        working-directory: docs
+        env:
+          PAGES_ORIGIN: ${{ steps.pages.outputs.origin }}
+        run: |
+          npm run test:pages
+          npm run check:pages
       - uses: actions/upload-pages-artifact@v5
         if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
         with:
