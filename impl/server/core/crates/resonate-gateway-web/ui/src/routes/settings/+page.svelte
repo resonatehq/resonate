@@ -111,7 +111,7 @@
     </div>
 
     {#if result}
-      <div class="result" class:bad={!result.ok}>{result.message}</div>
+      <div class="result" class:bad={!result.ok} role="status">{result.message}</div>
     {/if}
   </div>
 </section>
@@ -185,8 +185,8 @@
   .primary {
     border: 1px solid var(--accent);
     background: var(--accent);
-    color: #fff;
-    border-radius: 6px;
+    color: var(--on-accent);
+    border-radius: 999px;
     padding: 8px 14px;
     font-size: 13px;
     font-weight: 500;
@@ -200,7 +200,7 @@
     border: 1px solid var(--line2);
     background: transparent;
     color: var(--dim);
-    border-radius: 6px;
+    border-radius: 999px;
     padding: 8px 14px;
     font-size: 13px;
     cursor: pointer;

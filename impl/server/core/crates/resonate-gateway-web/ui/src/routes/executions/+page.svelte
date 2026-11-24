@@ -6,7 +6,7 @@
   import { settings } from '#lib/settings.svelte.ts';
   import { shell, setPage, matches, scrollToTop } from '#lib/shell.svelte.ts';
   import { stamp } from '#lib/format.ts';
-  import { STATE_FILTERS, type ExecutionItem, type PromiseState } from '#lib/types.ts';
+  import { STATE_FILTERS, STATE_LABEL, type ExecutionItem, type PromiseState } from '#lib/types.ts';
   import Status from '#lib/components/Status.svelte';
   import ErrorPanel from '#lib/components/ErrorPanel.svelte';
   import StaleNotice from '#lib/components/StaleNotice.svelte';
@@ -252,17 +252,10 @@
         <div>Timeout at</div>
       </div>
       {#each visible as row (row.id)}
-        <div
+        <a
           class="row"
-          role="button"
-          tabindex="0"
-          onclick={() => goto(resolve(`executions/${encodeURIComponent(row.id)}`))}
-          onkeydown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              void goto(resolve(`executions/${encodeURIComponent(row.id)}`));
-            }
-          }}
+          href={resolve(`executions/${encodeURIComponent(row.id)}`)}
+          aria-label={`${row.id}, ${STATE_LABEL[row.state]}, ${row.func ?? 'execution'}. Open execution details`}
         >
           <Status state={row.state} />
           <div class="id mono">{row.id}</div>
@@ -273,7 +266,7 @@
                the same timestamp in two adjacent columns. -->
           <div class="ts">{settledCell(row)}</div>
           <div class="ts">{stamp(row.timeoutAt)}</div>
-        </div>
+        </a>
       {/each}
     </div>
 
@@ -297,7 +290,6 @@
     align-items: center;
     gap: 9px;
     padding: 14px 26px;
-    border-bottom: 1px solid var(--line);
     flex-wrap: wrap;
   }
   .select {
@@ -317,6 +309,13 @@
     line-height: 30px;
     background: var(--elev);
   }
+  .select:focus-within {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .select select:focus-visible {
+    outline: none;
+  }
   .select select {
     border: 0;
     background: transparent;
@@ -329,11 +328,15 @@
   .count {
     font-size: 13px;
     color: var(--dim);
-    padding-left: 5px;
+    margin-left: auto;
   }
 
   .scroll {
     overflow-x: auto;
+    margin: 3px 26px 0;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--panel);
   }
   .head,
   .row {
@@ -341,31 +344,43 @@
     grid-template-columns: 118px minmax(200px, 1fr) minmax(200px, 1fr) 104px 104px 104px;
     gap: 18px;
     min-width: 920px;
-    padding: 0 26px;
+    padding: 0 15px;
   }
   .head {
-    padding: 11px 26px;
+    padding: 13px 15px;
     border-bottom: 1px solid var(--line);
     font-size: 11.5px;
     font-weight: 600;
     color: var(--dim);
+    background: var(--elev);
   }
   .row {
-    height: 44px;
+    min-height: 56px;
     align-items: center;
     border-bottom: 1px solid var(--line);
     cursor: pointer;
+    color: var(--text);
+    text-decoration: none;
   }
-  .row:hover,
-  .row:focus-visible {
+  .row:last-child {
+    border-bottom: 0;
+  }
+  .row:hover {
     background: var(--elev);
-    outline: none;
+  }
+  .row:focus-visible {
+    background: var(--selected);
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
   }
   .id {
     font-size: 12.5px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    text-decoration: underline;
+    text-decoration-color: var(--line2);
+    text-underline-offset: 4px;
   }
   .func {
     font-size: 13px;
@@ -386,5 +401,9 @@
   .page {
     font-size: 12.5px;
     color: var(--faint);
+  }
+  @media (max-width: 860px) {
+    .scroll { margin-left: 14px; margin-right: 14px; }
+    .count { margin-left: 0; }
   }
 </style>

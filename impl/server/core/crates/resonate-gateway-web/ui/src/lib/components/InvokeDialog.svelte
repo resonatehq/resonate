@@ -306,10 +306,11 @@
     resize: vertical;
     line-height: 1.6;
   }
-  input:focus,
-  textarea:focus {
-    border-color: var(--dim);
-    outline: none;
+  input:focus-visible,
+  textarea:focus-visible {
+    border-color: var(--accent);
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
 
   .error {
