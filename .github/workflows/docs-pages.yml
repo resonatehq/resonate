@@ -1,0 +1,65 @@
+name: Documentation Pages
+
+on:
+  pull_request:
+    paths:
+      - docs/**
+      - impl/sdk/ts/**
+      - .github/workflows/docs-pages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: read
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            docs/package-lock.json
+            impl/sdk/ts/package-lock.json
+      - name: Get the published site origin
+        if: github.event_name == 'workflow_dispatch'
+        id: pages
+        uses: actions/configure-pages@v5
+      - name: Build the landing page and guides
+        working-directory: docs
+        env:
+          PAGES_ORIGIN: ${{ steps.pages.outputs.origin }}
+        run: |
+          npm ci
+          npm run build
+      - name: Build the TypeScript API reference into the same site
+        working-directory: impl/sdk/ts
+        run: |
+          npm ci
+          npm run docs -- --out "$GITHUB_WORKSPACE/docs/dist/api/ts"
+      - uses: actions/upload-pages-artifact@v5
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        with:
+          path: docs/dist
+
+  deploy:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -46,10 +46,12 @@ carry yet; enabling it is a decision for whoever owns the release process.
 | `release-sdk-rs.yml` | crates.io (runs `sdk-rs-ci.yml` first) | `impl/sdk/rs/.github/workflows/publish.yml` |
 | `release-server.yml` | Docker Hub, GHCR, Artifact Registry, release binaries, Homebrew PR | `impl/server/core/.github/workflows/cd.yml` |
 | `release-spec-binaries.yml` | `lincheck` / `scenarios` binaries, optionally a GitHub Release | `spec/.github/workflows/binaries.yml` |
-| `docs-sdk-ts.yml` | TypeScript SDK docs to GitHub Pages | `impl/sdk/ts/.github/workflows/docs.yaml` |
+| `docs-pages.yml` | Landing page, quickstart, and TypeScript SDK API docs to GitHub Pages | `impl/sdk/ts/.github/workflows/docs.yaml` |
 
-Each takes a `tag` input in place of the release tag it used to read (the docs
-workflow takes none), and each file's header lists the secrets it needs. Two
+The docs workflow builds on relevant pull requests, but only deploys when
+manually run from `main`. See the [site README](../../docs/README.md).
+Each release workflow takes a `tag` input in place of the release tag it used
+to read, and its header lists the secrets it needs. Two
 things to settle before the first real run: the secrets, and a tag scheme, since
 every subproject used to tag `vX.Y.Z` in its own repository and those collide
 here. None has been exercised from the monorepo yet.

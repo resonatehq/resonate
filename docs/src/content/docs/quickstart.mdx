@@ -1,0 +1,463 @@
+---
+title: Quickstart
+slug: docs/get-started/quickstart
+description: Install the server and SDK and run your first Resonate workflow.
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+Install the server and an SDK, run a countdown, then restart the worker to see the countdown resume.
+
+## Install the server
+
+```shell
+brew install resonatehq/tap/resonate
+```
+
+## Install the SDK
+
+<Tabs syncKey="sdk-language">
+
+<TabItem label="TypeScript">
+
+Requires **Node.js 22** or later.
+
+```shell
+npm install @resonatehq/sdk
+```
+
+</TabItem>
+
+<TabItem label="Python">
+
+The Resonate Python SDK (v0.7.4) requires **Python ≥3.12**.
+
+```shell
+pip install resonate-sdk
+```
+
+</TabItem>
+
+<TabItem label="Rust">
+
+```toml title="Cargo.toml"
+[dependencies]
+resonate = { package = "resonate-sdk", version = "0.6" }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+```
+
+</TabItem>
+
+<TabItem label="Go">
+
+Requires **Go 1.22** or later.
+
+```shell
+go mod init countdown
+go get github.com/resonatehq/resonate-sdk-go@latest
+```
+
+The `0.1.0` git tag lacks the `v` prefix Go's module resolver requires, so `@latest` resolves to a pseudo-version pinned to the latest `main` commit instead. See the [Go SDK guide](https://docs.resonatehq.io/develop/go) for details.
+
+</TabItem>
+
+<TabItem label="Java">
+
+Requires **Java 21** or later (the SDK uses virtual threads).
+
+```kotlin title="build.gradle.kts"
+dependencies {
+    implementation("io.resonatehq:resonate-sdk-java:0.1.1")
+}
+```
+
+The SDK is published on Maven Central; `0.1.1` is the latest release. The SDK is pre-release (v0.1.x) — expect API changes before `v1.0`. See the [Java SDK guide](https://docs.resonatehq.io/develop/java) for Maven coordinates and details.
+
+</TabItem>
+
+</Tabs>
+
+## Write a function
+
+A countdown loop that survives restarts — minutes, hours, or days.
+
+<Tabs syncKey="sdk-language">
+
+<TabItem label="TypeScript">
+
+```typescript title="countdown.ts"
+import { Resonate, type Context } from "@resonatehq/sdk";
+
+function* countdown(context: Context, count: number, delay: number) {
+  for (let i = count; i > 0; i--) {
+    // Run a function, persist its result
+    yield* context.run((context: Context) => console.log(`Countdown: ${i}`));
+    // Sleep
+    yield* context.sleep(delay * 1000);
+  }
+  console.log("Done!");
+}
+// Instantiate Resonate
+const resonate = new Resonate({ url: "http://localhost:8001" });
+// Register the function
+resonate.register(countdown);
+```
+
+[Working example](https://github.com/resonatehq-examples/example-quickstart-ts)
+
+</TabItem>
+
+<TabItem label="Python">
+
+```python title="countdown.py"
+import asyncio
+from datetime import timedelta
+
+from resonate.context import Context
+from resonate.resonate import Resonate
+
+
+async def countdown(ctx: Context, count: int, delay: int) -> None:
+    for i in range(count, 0, -1):
+        # Run a function, persist its result
+        await ctx.run(ntfy, i)
+        # Sleep
+        await ctx.sleep(timedelta(seconds=delay))
+
+
+async def ntfy(ctx: Context, i: int) -> None:
+    print(f"Countdown: {i}")
+
+
+async def main() -> None:
+    # Instantiate Resonate
+    resonate = Resonate(url="http://localhost:8001")
+    # Register the functions
+    resonate.register(countdown)
+    resonate.register(ntfy)
+    # Keep the worker alive to receive invocations
+    await asyncio.Event().wait()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+[Working example](https://github.com/resonatehq-examples/example-quickstart-py)
+
+</TabItem>
+
+<TabItem label="Rust">
+
+```rust title="src/main.rs"
+use resonate::prelude::*;
+use std::time::Duration;
+
+#[resonate::function]
+async fn countdown(ctx: &Context, count: i32, delay: u64) -> Result<()> {
+    for i in (1..=count).rev() {
+        ctx.run(notify, i).await?;
+        ctx.sleep(Duration::from_secs(delay)).await?;
+    }
+    println!("Done!");
+    Ok(())
+}
+
+#[resonate::function]
+async fn notify(i: i32) -> Result<()> {
+    println!("Countdown: {i}");
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() {
+    let resonate = Resonate::new(ResonateConfig {
+        url: Some("http://localhost:8001".into()),
+        ..Default::default()
+    });
+    resonate.register(countdown).unwrap();
+    resonate.register(notify).unwrap();
+    // Keep the process alive to receive work
+    tokio::signal::ctrl_c().await.unwrap();
+}
+```
+
+[Working example](https://github.com/resonatehq-examples/example-hello-world-rs)
+
+</TabItem>
+
+<TabItem label="Go">
+
+```go title="main.go"
+package main
+
+import (
+	"fmt"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	resonate "github.com/resonatehq/resonate-sdk-go"
+)
+
+// CLI args arrive as a slice: `--arg 5 --arg 60` becomes args[0]=5, args[1]=60.
+func countdown(ctx *resonate.Context, args []int) (struct{}, error) {
+	count, delay := args[0], args[1]
+	for i := count; i > 0; i-- {
+		// Run a function, persist its result
+		f, err := ctx.Run(notify, i)
+		if err != nil {
+			return struct{}{}, err
+		}
+		if err := f.Await(nil); err != nil {
+			return struct{}{}, err
+		}
+		// Sleep
+		s, err := ctx.Sleep(time.Duration(delay) * time.Second)
+		if err != nil {
+			return struct{}{}, err
+		}
+		if err := s.Await(nil); err != nil {
+			return struct{}{}, err
+		}
+	}
+	fmt.Println("Done!")
+	return struct{}{}, nil
+}
+
+func notify(i int) (struct{}, error) {
+	fmt.Printf("Countdown: %d\n", i)
+	return struct{}{}, nil
+}
+
+func main() {
+	// Instantiate Resonate
+	r, err := resonate.New(resonate.Config{URL: "http://localhost:8001"})
+	if err != nil {
+		log.Fatalf("resonate.New: %v", err)
+	}
+	// Register the function
+	if _, err := resonate.Register(r, "countdown", countdown); err != nil {
+		log.Fatalf("Register: %v", err)
+	}
+	// Keep the worker alive to receive work
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	<-sig
+}
+```
+
+Go's `Register` takes a single args type, so the CLI's `--arg 5 --arg 60` arrives as `[]int{5, 60}`. Most workflows use a named struct instead — see the [Go SDK guide](https://docs.resonatehq.io/develop/go).
+
+[Working example](https://github.com/resonatehq-examples/example-quickstart-go)
+
+</TabItem>
+
+<TabItem label="Java">
+
+```java title="src/main/java/io/resonatehq/examples/quickstart/Quickstart.java"
+package io.resonatehq.examples.quickstart;
+
+import io.resonatehq.resonate.Context;
+import io.resonatehq.resonate.Resonate;
+import java.time.Duration;
+import java.util.concurrent.CountDownLatch;
+
+public final class Quickstart {
+    private Quickstart() {}
+
+    // The two CLI --arg values arrive as positional arguments:
+    // `--arg 5 --arg 60` binds to (count=5, delaySeconds=60).
+    public static String countdown(Context ctx, int count, int delaySeconds) {
+        for (int i = count; i > 0; i--) {
+            // Run a function, persist its result.
+            ctx.run(Quickstart::tick, i).await();
+            // Suspend between ticks (but not after the last one) — a durable sleep.
+            if (i > 1) {
+                ctx.sleep(Duration.ofSeconds(delaySeconds)).await();
+            }
+        }
+        return "done";
+    }
+
+    public static String tick(Context ctx, int i) {
+        System.out.println("Countdown: " + i);
+        return "ok";
+    }
+
+    public static void main(String[] args) throws InterruptedException {
+        String url = System.getenv().getOrDefault("RESONATE_URL", "http://localhost:8001");
+        // Instantiate Resonate
+        Resonate r = Resonate.builder().url(url).build();
+        // Register the workflow + its leaf
+        r.register(Quickstart::countdown);
+        r.register(Quickstart::tick);
+        System.out.println("worker ready — registered 'countdown'. Invoke it with the Resonate CLI. Ctrl-C to exit.");
+        // Keep the worker alive to receive work.
+        new CountDownLatch(1).await();
+    }
+}
+```
+
+Java binds each CLI `--arg` to one method parameter positionally — the shared `--arg 5 --arg 60` step below becomes `(count=5, delaySeconds=60)`. This is the opposite of Go's single-slice binding. See the [Java SDK guide](https://docs.resonatehq.io/develop/java).
+
+[Working example](https://github.com/resonatehq-examples/example-quickstart-java)
+
+</TabItem>
+
+</Tabs>
+
+## Start the server
+
+```shell
+resonate dev
+```
+
+## Start the worker
+
+<Tabs syncKey="sdk-language">
+
+<TabItem label="TypeScript">
+
+```shell
+npx ts-node countdown.ts
+```
+
+</TabItem>
+
+<TabItem label="Python">
+
+```shell
+python countdown.py
+```
+
+</TabItem>
+
+<TabItem label="Rust">
+
+```shell
+cargo run
+```
+
+</TabItem>
+
+<TabItem label="Go">
+
+```shell
+go run .
+```
+
+</TabItem>
+
+<TabItem label="Java">
+
+In a Gradle project with the `application` plugin pointed at `Quickstart` (the [working example](https://github.com/resonatehq-examples/example-quickstart-java) ships one ready to run):
+
+```shell
+./gradlew run
+```
+
+</TabItem>
+
+</Tabs>
+
+## Run the function
+
+Run the function with execution ID `countdown.1`:
+
+```shell
+resonate invoke countdown.1 --func countdown --arg 5 --arg 60
+```
+
+## Result
+
+<Tabs syncKey="sdk-language">
+
+<TabItem label="TypeScript">
+
+```shell
+npx ts-node countdown.ts
+Countdown: 5
+Countdown: 4
+Countdown: 3
+Countdown: 2
+Countdown: 1
+Done!
+```
+
+</TabItem>
+
+<TabItem label="Python">
+
+```shell
+python countdown.py
+Countdown: 5
+Countdown: 4
+Countdown: 3
+Countdown: 2
+Countdown: 1
+```
+
+</TabItem>
+
+<TabItem label="Rust">
+
+```shell
+cargo run
+Countdown: 5
+Countdown: 4
+Countdown: 3
+Countdown: 2
+Countdown: 1
+Done!
+```
+
+</TabItem>
+
+<TabItem label="Go">
+
+```shell
+go run .
+Countdown: 5
+Countdown: 4
+Countdown: 3
+Countdown: 2
+Countdown: 1
+Done!
+```
+
+</TabItem>
+
+<TabItem label="Java">
+
+```shell
+./gradlew run
+worker ready — registered 'countdown'. Invoke it with the Resonate CLI. Ctrl-C to exit.
+Countdown: 5
+Countdown: 4
+Countdown: 3
+Countdown: 2
+Countdown: 1
+```
+
+</TabItem>
+
+</Tabs>
+
+## What to try
+
+Inspect the execution with `resonate tree` — it renders the call graph as durable promises.
+
+```shell
+resonate tree countdown.1
+```
+
+Now kill the worker mid-countdown and restart it with the same start command (keep `resonate dev` running). Because the invocation `countdown.1` already exists, **the countdown resumes where it stopped** instead of starting over. Use a delay long enough to interrupt it mid-countdown — for example `--arg 5 --arg 60`.
+
+## Next steps
+
+- [Learn how Resonate works](https://docs.resonatehq.io/evaluate/how-it-works)
+- [Explore examples](https://docs.resonatehq.io/get-started/examples)
