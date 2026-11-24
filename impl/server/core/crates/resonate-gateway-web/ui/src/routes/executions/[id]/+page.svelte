@@ -1,8 +1,8 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
   import { page } from '$app/state';
-import { untrack } from 'svelte';
-  import { goto, replaceState } from '$app/navigation';
+  import { untrack } from 'svelte';
+  import { replaceState } from '$app/navigation';
   import { getExecution, cancelExecution, RpcError } from '#lib/api.ts';
   import { settings } from '#lib/settings.svelte.ts';
   import { shell, setPage } from '#lib/shell.svelte.ts';
@@ -159,7 +159,7 @@ import { untrack } from 'svelte';
 </script>
 
 <section>
-  <button class="back" onclick={() => goto(resolve('/executions'))}>← All executions</button>
+  <a class="back" href={resolve('/executions')}>← All executions</a>
 
   {#if error}
     <ErrorPanel
@@ -207,10 +207,11 @@ import { untrack } from 'svelte';
       <div class="tree card">
         <div class="rows-scroll">
           <div class="ruler">
-            <div class="namecol"></div>
+            <div class="namecol">Execution tree</div>
             <div class="track">
               {#each span.ticks as t (t)}<span>{tickLabel(t)}</span>{/each}
             </div>
+            <div class="dur">Duration</div>
           </div>
 
           {#each rows as row (row.key)}
@@ -233,6 +234,9 @@ import { untrack } from 'svelte';
                 class="steprow"
                 class:on={selectedId === row.node.id}
                 role="button"
+                aria-label={`${row.node.func ?? shortName(row.node, view.root.id)}, ${STATE_LABEL[row.node.state]}. Inspect step`}
+                aria-pressed={selectedId === row.node.id}
+                aria-controls={selectedId === row.node.id ? 'step-inspector' : undefined}
                 tabindex="0"
                 onclick={() => select(row.node.id)}
                 onkeydown={(e) => {
@@ -265,7 +269,7 @@ import { untrack } from 'svelte';
       </div>
 
       {#if selected}
-        <aside class="inspector card">
+        <aside class="inspector card" id="step-inspector" aria-label="Selected step inspector">
           <div class="ins-head">
             <div class="ins-title">
               <Dot state={selected.state} />
@@ -321,6 +325,7 @@ import { untrack } from 'svelte';
     padding: 20px 26px 40px;
   }
   .back {
+    display: inline-block;
     border: 0;
     background: transparent;
     color: var(--faint);
@@ -383,20 +388,27 @@ import { untrack } from 'svelte';
   .rows-scroll {
     overflow-x: auto;
   }
+  .ruler, .taskrow, .steprow {
+    display: grid;
+    grid-template-columns: minmax(146px, 27%) minmax(185px, 1fr) 64px;
+    gap: 12px;
+    min-width: 455px;
+  }
 
   .ruler {
-    display: flex;
-    padding: 8px 18px 4px;
+    align-items: center;
+    padding: 10px 18px;
     border-bottom: 1px solid var(--line);
-    min-width: 1310px;
+    background: var(--elev);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--dim);
   }
   .ruler .namecol {
-    background: var(--panel);
+    background: var(--elev);
     z-index: 2;
   }
   .track {
-    width: 900px;
-    flex: none;
     display: flex;
     justify-content: space-between;
     font-family: var(--mono);
@@ -405,8 +417,6 @@ import { untrack } from 'svelte';
   }
 
   .namecol {
-    width: 300px;
-    flex: none;
     display: flex;
     align-items: center;
     gap: 9px;
@@ -418,13 +428,10 @@ import { untrack } from 'svelte';
   }
 
   .taskrow {
-    display: flex;
     align-items: center;
-    gap: 12px;
     padding: 0 18px;
     height: 28px;
     background: var(--elev);
-    min-width: 1310px;
   }
   .taskrow .namecol {
     background: var(--elev);
@@ -438,31 +445,31 @@ import { untrack } from 'svelte';
     white-space: nowrap;
   }
   .steprow {
-    display: flex;
     align-items: center;
-    gap: 12px;
     padding: 0 18px;
     height: var(--row);
     cursor: pointer;
     border-bottom: 1px solid var(--line);
-    min-width: 1310px;
     background: transparent;
   }
-  .steprow:hover,
+  .steprow:hover {
+    background: var(--elev);
+  }
   .steprow:focus-visible {
     background: var(--elev);
-    outline: none;
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
   }
   .steprow:hover .namecol,
   .steprow:focus-visible .namecol {
     background: var(--elev);
   }
   .steprow.on {
-    background: var(--elev);
-    box-shadow: inset 2px 0 0 var(--dim);
+    background: var(--selected);
+    box-shadow: inset 2px 0 0 var(--accent);
   }
   .steprow.on .namecol {
-    background: var(--elev);
+    background: var(--selected);
   }
   .name {
     font-size: 13px;
@@ -503,8 +510,6 @@ import { untrack } from 'svelte';
   }
 
   .dur {
-    width: 74px;
-    flex: none;
     text-align: right;
     font-family: var(--mono);
     font-size: 11.5px;
@@ -580,7 +585,7 @@ import { untrack } from 'svelte';
     font-size: 11.5px;
     line-height: 1.6;
     color: var(--dim);
-    background: var(--bg);
+    background: var(--elev);
     border: 1px solid var(--line);
     border-radius: 6px;
     padding: 11px 13px;

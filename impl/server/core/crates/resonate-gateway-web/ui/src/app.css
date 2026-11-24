@@ -1,15 +1,6 @@
-/*
- * The design's tokens, verbatim, and the handful of primitives that are not
- * worth scoping to a component.
- *
- * The neutral scale is cool, not warm — the one deliberate departure from
- * `resonate-ui`'s brand file. Accent, ok/warn/late/idle and the tinted `-bg`
- * values are that file's, carried over unchanged; dark `--err` is a muted
- * brick rather than the brand's pink, which read as friendly on a failure.
- *
- * Self-hosted Inter, deliberately: the console has to work on air-gapped and
- * on-prem installs, so nothing here reaches for a CDN.
- */
+/* Reviewed Resonate identity, with local Inter for offline installations.
+ * Warm paper surfaces and a restrained burnt-orange interaction accent.
+ * Status colors remain separate from navigation and action colors. */
 
 @font-face {
   font-family: 'Inter';
@@ -20,22 +11,25 @@
 }
 
 :root {
-  --bg: #ffffff;
-  --panel: #fafbfc;
-  --elev: #f1f3f6;
-  --line: #e4e7ec;
-  --line2: #d2d7de;
-  --text: #14171c;
-  --dim: #535a65;
-  --faint: #858c96;
-  --accent: #0a6b61;
-  --accent-fill: #0fb3a1;
+  color-scheme: light;
+  --bg: #faf6f1;
+  --panel: #fdfaf7;
+  --elev: #f0eae4;
+  --selected: #e8e0d9;
+  --line: #dbd4cf;
+  --line2: #bdb3aa;
+  --text: #24211f;
+  --dim: #625e5b;
+  --faint: #716963;
+  --accent: #ad340e;
+  --accent-fill: #ff3c00;
+  --on-accent: #fdfaf7;
   --ok: #0fb3a1;
   --ok-fg: #115e59;
   --ok-bg: rgba(15, 179, 161, 0.13);
-  --err: #831843;
-  --err-fg: #831843;
-  --err-bg: rgba(131, 24, 67, 0.13);
+  --err: #b12e20;
+  --err-fg: #a1291d;
+  --err-bg: rgba(177, 46, 32, 0.1);
   --warn: #d97706;
   --warn-fg: #92400e;
   --warn-bg: rgba(217, 119, 6, 0.13);
@@ -45,23 +39,26 @@
   --idle: #7a828d;
   --idle-fg: #565d68;
   --idle-bg: rgba(122, 130, 141, 0.13);
-  --tint: rgba(15, 179, 161, 0.13);
-  --tint-soft: rgba(15, 179, 161, 0.08);
+  --tint: rgba(173, 52, 14, 0.12);
+  --tint-soft: rgba(173, 52, 14, 0.06);
   --row: 40px;
   --mono: 'SF Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace;
 }
 
 html[data-theme='dark'] {
-  --bg: #080a0e;
-  --panel: #0f1115;
-  --elev: #1a1e26;
-  --line: #2a2f3a;
-  --line2: #3a3f4a;
-  --text: #e4e7eb;
-  --dim: #94a3b8;
-  --faint: #7a8699;
-  --accent: #1ee3cf;
-  --accent-fill: #1ee3cf;
+  color-scheme: dark;
+  --bg: #1c1917;
+  --panel: #231f1c;
+  --elev: #302923;
+  --selected: #3b3029;
+  --line: #423931;
+  --line2: #6e6055;
+  --text: #f4ede6;
+  --dim: #c1b6ac;
+  --faint: #ac9d90;
+  --accent: #f49b76;
+  --accent-fill: #ff754b;
+  --on-accent: #231f1c;
   --ok: #6ee7b7;
   --ok-fg: #6ee7b7;
   --ok-bg: rgba(110, 231, 183, 0.15);
@@ -77,8 +74,8 @@ html[data-theme='dark'] {
   --idle: #b5b2ab;
   --idle-fg: #b5b2ab;
   --idle-bg: rgba(181, 178, 171, 0.15);
-  --tint: rgba(30, 227, 207, 0.15);
-  --tint-soft: rgba(30, 227, 207, 0.1);
+  --tint: rgba(244, 155, 118, 0.15);
+  --tint-soft: rgba(244, 155, 118, 0.08);
 }
 
 * {
@@ -87,6 +84,7 @@ html[data-theme='dark'] {
 
 body {
   margin: 0;
+  min-height: 100dvh;
   background: var(--bg);
   color: var(--text);
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -110,8 +108,23 @@ button,
 select {
   font-family: inherit;
 }
-input:focus {
-  outline: none;
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+::selection {
+  background: var(--selected);
+  color: var(--text);
+}
+
+/* Echo is a single local asset; only the identity silhouette changes by theme. */
+.echo-mark {
+  object-fit: contain;
+  filter: brightness(0);
+}
+html[data-theme='dark'] .echo-mark {
+  filter: brightness(0) invert(1);
 }
 
 ::-webkit-scrollbar {
@@ -164,16 +177,16 @@ input:focus {
 
 .card {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 6px;
   background: var(--panel);
 }
 
 .btn {
   border: 1px solid var(--line2);
-  background: var(--elev);
+  background: var(--panel);
   color: var(--dim);
-  border-radius: 6px;
-  padding: 6px 11px;
+  border-radius: 999px;
+  padding: 8px 14px;
   font-size: 12.5px;
   cursor: pointer;
   white-space: nowrap;
@@ -195,9 +208,9 @@ input:focus {
 .btn-danger {
   border: 1px solid var(--err);
   background: transparent;
-  color: var(--err);
-  border-radius: 6px;
-  padding: 6px 11px;
+  color: var(--err-fg);
+  border-radius: 999px;
+  padding: 8px 14px;
   font-size: 12.5px;
   cursor: pointer;
   white-space: nowrap;
@@ -213,26 +226,24 @@ input:focus {
 }
 .btn-danger[disabled]:hover {
   background: transparent;
-  color: var(--err);
+  color: var(--err-fg);
 }
 
-/* Invoke. The affirmative counterpart to `.btn-danger`, and deliberately the
-   same shape: outlined in its colour until you are on it, then filled. The
-   fill's text is `--bg` rather than white, because the dark accent is a bright
-   cyan that white cannot sit on. */
+/* Invoke stays outlined until hovered. Its foreground follows the accent's
+   contrast in each theme, independently of the execution's status. */
 .btn-accent {
   border: 1px solid var(--accent);
   background: transparent;
   color: var(--accent);
-  border-radius: 6px;
-  padding: 6px 11px;
+  border-radius: 999px;
+  padding: 8px 14px;
   font-size: 12.5px;
   cursor: pointer;
   white-space: nowrap;
 }
 .btn-accent:hover {
   background: var(--accent);
-  color: var(--bg);
+  color: var(--on-accent);
   border-color: var(--accent);
 }
 .btn-accent[disabled] {

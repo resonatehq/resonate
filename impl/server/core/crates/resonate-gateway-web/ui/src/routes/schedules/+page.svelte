@@ -180,11 +180,10 @@
   }
   .head {
     padding: 10px 18px;
-    font-family: var(--mono);
-    font-size: 10.5px;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--faint);
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--dim);
+    background: var(--elev);
   }
   .row:hover {
     background: var(--elev);
@@ -202,6 +201,7 @@
   }
   /* Timestamps are never coloured, here or anywhere. */
   .when {
+    font-family: var(--mono);
     font-size: 12.5px;
     color: var(--dim);
     white-space: nowrap;
