@@ -2,22 +2,37 @@
 //
 // Several simulated workers, each running the real SDK engine (Core), talk to
 // one in-memory Resonate server (network/local.ts) through a simulated
-// network. Nothing runs concurrently: the simulation advances one step at a
-// time, and every step applies exactly one Action chosen by a Driver. All
-// nondeterminism goes through that choice or through the tape:
+// network. One global scheduler owns everything. Each worker's Core is a set
+// of fibers on a synchronous Kernel (src/kernel.ts): a completion goes in,
+// submissions come out, and nothing awaits. The scheduler turns submissions
+// into envelopes (send), timers (sleep) and leaves (invoke), and every step
+// applies exactly one Action chosen by a Driver. All nondeterminism goes
+// through that choice or through the tape:
 //
 //   scheduling and message order  -> which envelope / timer the step delivers
 //   anycast routing               -> which worker receives an anycast message
+//   leaf functions                -> "run" executes one leaf to completion while
+//                                    the world is frozen; "resume" later hands
+//                                    its outcome back to the worker
 //   time                          -> the clock moves only on an "advance" step
 //   faults                        -> drop, delay, crash and restart are actions
 //   randomness in user code       -> Math.random values are recorded on the tape
 //
+// Leaves are the only async code. A run step awaits exactly one leaf and
+// nothing else moves until it settles. A leaf must not leave async work
+// running after it returns, and must settle within `leafTimeout` of real time;
+// either is reported as a "leaf" failure rather than silently breaking
+// determinism.
+//
 // Ids (corrIds, uuids) are minted from counters, so they are a function of the
 // step sequence too. A run is therefore a pure function of (scenario, tape).
 
+import { AsyncLocalStorage, createHook } from "node:async_hooks";
 import { Codec } from "../../src/codec.js";
+import type { InnerContext } from "../../src/context.js";
 import { Core } from "../../src/core.js";
 import { NoopHeartbeat } from "../../src/heartbeat.js";
+import { type Completion, Kernel, type Outcome, type Submission } from "../../src/kernel.js";
 import type { Logger } from "../../src/logger.js";
 import { type Change, Server } from "../../src/network/local.js";
 import { isMessage, type Message, type PromiseRecord, type Request, type Response } from "../../src/network/types.js";
@@ -25,7 +40,7 @@ import { OptionsBuilder } from "../../src/options.js";
 import { Registry } from "../../src/registry.js";
 import type { Func, Send } from "../../src/types.js";
 import { VERSION } from "../../src/util.js";
-import { install, quiesce } from "./sandbox.js";
+import { install, real } from "./sandbox.js";
 import { type Action, type DecisionEntry, describeAction, emptyTape, type Tape } from "./tape.js";
 
 // ---------------------------------------------------------------------------
@@ -59,6 +74,8 @@ export type Scenario<W = unknown> = {
   ttl?: number;
   /** A worker gives up on an unanswered request after this many ms (default 10s), like the HTTP transport. */
   requestTimeout?: number;
+  /** Real (wall clock) ms a single leaf may take before the run fails (default 10s). */
+  leafTimeout?: number;
 };
 
 export type Settled = { state: PromiseRecord["state"]; value: unknown };
@@ -84,6 +101,17 @@ export type EnvelopeView = {
 
 export type TimerView = { id: number; owner: string; due: number };
 
+export type LeafView = {
+  id: number;
+  worker: string;
+  /** Function name. */
+  func: string;
+  /** Id of the durable promise the leaf computes. */
+  subject: string;
+  /** "ready" to run, or "done" with its outcome waiting to be resumed. */
+  state: "ready" | "done";
+};
+
 export type SimulationView = {
   step: number;
   now: number;
@@ -91,6 +119,7 @@ export type SimulationView = {
   enabled: Action[];
   envelopes: EnvelopeView[];
   timers: TimerView[];
+  leaves: LeafView[];
   workers: { name: string; alive: boolean }[];
   /** The server's view of every promise. */
   promises: () => PromiseRecord[];
@@ -110,7 +139,7 @@ export interface Driver {
 // ---------------------------------------------------------------------------
 
 export type Failure = {
-  kind: "invariant" | "check" | "panic" | "divergence" | "liveness";
+  kind: "invariant" | "check" | "panic" | "divergence" | "liveness" | "leaf";
   message: string;
   step: number;
 };
@@ -162,12 +191,28 @@ type Envelope = {
 
 type Timer = { id: number; owner: string; due: number; ms: number; repeat: boolean; fn: () => void };
 
-type Pending = { resolve: (res: Response) => void; req: Request; timer: number };
+type Pending = { sub: number; req: Request; timer: number };
+
+type Leaf = {
+  id: number;
+  worker: string;
+  incarnation: number;
+  sub: number;
+  func: (ctx: InnerContext, ...args: any[]) => unknown;
+  ctx: InnerContext;
+  args: any[];
+  outcome?: Outcome;
+};
+
+class LeafFailure extends Error {
+  name = "LeafFailure";
+}
 
 class SimWorker {
   alive = true;
   incarnation = 0;
   core!: Core;
+  kernel!: Kernel;
   pending = new Map<number, Pending>();
   corr = 0;
 
@@ -202,6 +247,9 @@ export class Simulation<W = unknown> {
   private readonly workers: SimWorker[];
   private envelopes: Envelope[] = [];
   private timers: Timer[] = [];
+  private leaves: Leaf[] = [];
+  private nextLeaf = 1;
+  private leafRunning = false;
   private now = 0;
   private step = 0;
   private nextEnvelope = 1;
@@ -243,6 +291,7 @@ export class Simulation<W = unknown> {
       },
     });
 
+    this.active = true;
     try {
       for (const w of this.workers) this.boot(w);
       for (const s of this.scenario.start) this.invoke(s);
@@ -292,6 +341,11 @@ export class Simulation<W = unknown> {
             status = "failed";
             break;
           }
+          if (e instanceof LeafFailure) {
+            failure = { kind: "leaf", message: e.message, step: this.step };
+            status = "failed";
+            break;
+          }
           throw e;
         }
         if (this.panic) {
@@ -320,6 +374,7 @@ export class Simulation<W = unknown> {
         log: this.log,
       };
     } finally {
+      this.active = false;
       restore();
     }
   }
@@ -339,6 +394,8 @@ export class Simulation<W = unknown> {
   }
 
   private setTimer(fn: () => void, ms: number, repeat: boolean): object {
+    // Inside a leaf the simulated clock is frozen, so a leaf's own timers run on real time.
+    if (this.leafRunning) return repeat ? real.setInterval(fn, ms) : real.setTimeout(fn, ms);
     const id = this.nextTimer++;
     const delay = Math.max(0, Math.floor(ms));
     this.timers.push({ id, owner: this.current ?? "sim", due: this.now + delay, ms: delay, repeat, fn });
@@ -358,8 +415,10 @@ export class Simulation<W = unknown> {
   private boot(w: SimWorker): void {
     w.incarnation++;
     w.pending = new Map();
-    const incarnation = w.incarnation;
-    const send = ((req: Request) => this.send(w, incarnation, req)) as Send;
+    w.kernel = new Kernel();
+    const send = (() => {
+      throw new Error("a simulated Core sends through its kernel");
+    }) as Send;
     const deps = new Map<string, any>([["world", this.world]]);
     w.core = new Core({
       pid: w.name,
@@ -400,11 +459,40 @@ export class Simulation<W = unknown> {
 
   // -- network ---------------------------------------------------------------
 
-  private send(w: SimWorker, incarnation: number, req: Request): Promise<Response> {
-    if (!w.alive || w.incarnation !== incarnation) {
-      // A dead incarnation's leftover code: never answered.
-      return new Promise(() => {});
+  /** Hand the scheduler what a worker's kernel submitted. */
+  private submit(w: SimWorker, subs: Submission[]): void {
+    for (const s of subs) {
+      switch (s.op) {
+        case "send":
+          this.request(w, s.id, s.req);
+          break;
+        case "sleep": {
+          const prev = this.current;
+          this.current = w.name;
+          this.setTimer(() => this.complete(w, { id: s.id, ok: true, value: undefined }), s.ms, false);
+          this.current = prev;
+          break;
+        }
+        case "invoke":
+          this.leaves.push({
+            id: this.nextLeaf++,
+            worker: w.name,
+            incarnation: w.incarnation,
+            sub: s.id,
+            func: s.func,
+            ctx: s.ctx,
+            args: s.args,
+          });
+          break;
+      }
     }
+  }
+
+  private complete(w: SimWorker, c: Completion): void {
+    this.submit(w, w.kernel.complete(c));
+  }
+
+  private request(w: SimWorker, sub: number, req: Request): void {
     const corr = ++w.corr;
     this.envelopes.push({
       id: this.nextEnvelope++,
@@ -415,29 +503,31 @@ export class Simulation<W = unknown> {
       subject: subjectOf(req.kind, req),
       body: JSON.stringify(req),
       corr,
-      incarnation,
+      incarnation: w.incarnation,
       readyAt: this.now,
     });
-    return new Promise<Response>((resolve) => {
-      const prev = this.current;
-      this.current = w.name;
-      const timer = this.setTimer(
-        () => {
-          const p = w.pending.get(corr);
-          if (!p) return;
-          w.pending.delete(corr);
-          p.resolve({
+    const prev = this.current;
+    this.current = w.name;
+    const timer = this.setTimer(
+      () => {
+        const p = w.pending.get(corr);
+        if (!p) return;
+        w.pending.delete(corr);
+        this.complete(w, {
+          id: p.sub,
+          ok: true,
+          value: {
             kind: req.kind,
             head: { corrId: req.head.corrId, status: 500, version: req.head.version },
             data: "request timed out",
-          } as Response);
-        },
-        this.scenario.requestTimeout ?? 10_000,
-        false,
-      ) as any;
-      this.current = prev;
-      w.pending.set(corr, { resolve, req, timer: timer.dstTimer });
-    });
+          },
+        });
+      },
+      this.scenario.requestTimeout ?? 10_000,
+      false,
+    ) as any;
+    this.current = prev;
+    w.pending.set(corr, { sub, req, timer: timer.dstTimer });
   }
 
   private route(changes: Change[]): void {
@@ -509,6 +599,7 @@ export class Simulation<W = unknown> {
         out.push({ t: "deliver", env: e.id });
       }
     }
+    for (const l of this.leaves) out.push(l.outcome ? { t: "resume", leaf: l.id } : { t: "run", leaf: l.id });
     const due = this.timers
       .filter((t) => t.due <= this.now && this.ownerAlive(t.owner))
       .sort((a, b) => a.due - b.due || a.id - b.id);
@@ -552,6 +643,14 @@ export class Simulation<W = unknown> {
         if (a.to !== next) return `next deadline is ${next}`;
         return undefined;
       }
+      case "run":
+      case "resume": {
+        const l = this.leaves.find((x) => x.id === a.leaf);
+        if (!l) return "no such leaf";
+        if (a.t === "run" && l.outcome) return "leaf already ran";
+        if (a.t === "resume" && !l.outcome) return "leaf has not run";
+        return undefined;
+      }
       case "crash": {
         const w = this.worker(a.worker);
         if (!w) return "no such worker";
@@ -577,7 +676,19 @@ export class Simulation<W = unknown> {
           return;
         }
         const w = e.to.kind === "anycast" ? this.worker(a.to)! : this.worker(e.to.worker)!;
-        await this.inside(w.name, () => this.deliverToWorker(w, e));
+        this.inside(w.name, () => this.deliverToWorker(w, e));
+        return;
+      }
+      case "run": {
+        const l = this.leaves.find((x) => x.id === a.leaf)!;
+        l.outcome = await this.runLeaf(l);
+        return;
+      }
+      case "resume": {
+        const l = this.leaves.find((x) => x.id === a.leaf)!;
+        this.leaves = this.leaves.filter((x) => x !== l);
+        const w = this.worker(l.worker)!;
+        this.inside(w.name, () => this.complete(w, { id: l.sub, ...l.outcome! }));
         return;
       }
       case "drop": {
@@ -596,7 +707,7 @@ export class Simulation<W = unknown> {
         } else {
           this.timers = this.timers.filter((x) => x !== t);
         }
-        await this.inside(t.owner === "sim" ? undefined : t.owner, t.fn);
+        this.inside(t.owner === "sim" ? undefined : t.owner, t.fn);
         return;
       }
       case "advance": {
@@ -614,6 +725,8 @@ export class Simulation<W = unknown> {
         w.alive = false;
         w.pending = new Map();
         this.timers = this.timers.filter((t) => t.owner !== w.name);
+        // Its leaves die with it, including outcomes it has not seen yet.
+        this.leaves = this.leaves.filter((l) => l.worker !== w.name);
         // In-flight envelopes addressed to it die with it; anycast ones may still reach another worker.
         this.envelopes = this.envelopes.filter(
           (e) =>
@@ -627,26 +740,65 @@ export class Simulation<W = unknown> {
       case "restart": {
         const w = this.worker(a.worker)!;
         w.alive = true;
-        await this.inside(w.name, () => this.boot(w));
+        this.inside(w.name, () => this.boot(w));
         return;
       }
     }
   }
 
-  /** Run `fn` as one step on behalf of `owner`, then drain every microtask it caused. */
-  private async inside(owner: string | undefined, fn: () => void): Promise<void> {
+  /** Run `fn` as one step on behalf of `owner`. Everything it does is synchronous. */
+  private inside(owner: string | undefined, fn: () => void): void {
     this.current = owner;
-    this.active = true;
     try {
-      try {
-        fn();
-      } catch (e) {
-        if (!(e instanceof Panic)) throw e;
-      }
-      await quiesce();
-      await quiesce();
+      fn();
+    } catch (e) {
+      if (!(e instanceof Panic)) throw e;
     } finally {
-      this.active = false;
+      this.current = undefined;
+    }
+  }
+
+  /**
+   * Run one leaf to completion while the rest of the world is frozen. This is
+   * the only place the simulation awaits.
+   */
+  private async runLeaf(l: Leaf): Promise<Outcome> {
+    this.current = l.worker;
+    this.leafRunning = true;
+    const leak = new LeakDetector();
+    try {
+      const run = leak.track(() => Promise.resolve().then(() => l.func(l.ctx, ...l.args)));
+      const limit = this.scenario.leafTimeout ?? 10_000;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<never>((_, reject) => {
+        timer = real.setTimeout(
+          () => reject(new LeafFailure(`leaf ${l.ctx.func} (${l.ctx.id}) did not settle within ${limit}ms`)),
+          limit,
+        );
+      });
+      let outcome: Outcome;
+      try {
+        outcome = { ok: true, value: await Promise.race([run, timeout]) };
+      } catch (error) {
+        if (error instanceof LeafFailure) throw error;
+        outcome = { ok: false, error };
+      } finally {
+        real.clearTimeout(timer);
+      }
+      // Let anything the leaf left behind show itself before checking.
+      await new Promise((resolve) => real.setImmediate(resolve));
+      await new Promise((resolve) => real.setImmediate(resolve));
+      const left = leak.pending();
+      if (left.length > 0) {
+        throw new LeafFailure(
+          `leaf ${l.ctx.func} (${l.ctx.id}) returned with async work still running: ${left.join(", ")}`,
+        );
+      }
+      if (this.panic) throw new Panic(this.panic);
+      return outcome;
+    } finally {
+      leak.dispose();
+      this.leafRunning = false;
       this.current = undefined;
     }
   }
@@ -681,12 +833,12 @@ export class Simulation<W = unknown> {
       if (!p) return; // already timed out
       w.pending.delete(e.corr!);
       this.timers = this.timers.filter((t) => t.id !== p.timer);
-      p.resolve(JSON.parse(e.body));
+      this.complete(w, { id: p.sub, ok: true, value: JSON.parse(e.body) as Response });
       return;
     }
     const msg = JSON.parse(e.body) as Message;
     if (!isMessage(msg) || msg.kind !== "execute") return;
-    w.core.onMessage(msg).catch(() => {});
+    this.submit(w, w.kernel.spawn(w.core.handle(msg)));
   }
 
   // -- observation -----------------------------------------------------------
@@ -705,6 +857,10 @@ export class Simulation<W = unknown> {
                 : `any@${e.to.group}`;
         return `${describeAction(a)}: ${e.type} ${e.kind}${e.subject ? `(${e.subject})` : ""} ${e.from} -> ${to}`;
       }
+    }
+    if (a.t === "run" || a.t === "resume") {
+      const l = this.leaves.find((x) => x.id === a.leaf);
+      if (l) return `${describeAction(a)}: ${l.ctx.func}(${l.ctx.id}) on ${l.worker}`;
     }
     if (a.t === "fire") {
       const t = this.timers.find((x) => x.id === a.timer);
@@ -729,6 +885,13 @@ export class Simulation<W = unknown> {
         readyAt: e.readyAt,
       })),
       timers: this.timers.map((t) => ({ id: t.id, owner: t.owner, due: t.due })),
+      leaves: this.leaves.map((l) => ({
+        id: l.id,
+        worker: l.worker,
+        func: l.ctx.func,
+        subject: l.ctx.id,
+        state: l.outcome ? "done" : "ready",
+      })),
       workers: this.workers.map((w) => ({ name: w.name, alive: w.alive })),
       promises: () => [...this.server.promises.values()].map((p) => ({ ...p }) as any),
     };
@@ -765,6 +928,50 @@ export class Simulation<W = unknown> {
     } catch (e) {
       return { kind: "check", message: e instanceof Error ? e.message : String(e), step: this.step };
     }
+  }
+}
+
+/**
+ * Records async resources (promises, timers, immediates) created while a leaf
+ * runs, and reports those still outstanding after it settled.
+ */
+class LeakDetector {
+  private static readonly storage = new AsyncLocalStorage<LeakDetector>();
+  private static readonly hook = createHook({
+    init(id, type) {
+      const d = LeakDetector.storage.getStore();
+      if (d && (type === "PROMISE" || type === "Timeout" || type === "Immediate")) d.live.set(id, type);
+    },
+    promiseResolve(id) {
+      for (const d of LeakDetector.active) d.live.delete(id);
+    },
+    destroy(id) {
+      for (const d of LeakDetector.active) d.live.delete(id);
+    },
+  });
+  private static readonly active = new Set<LeakDetector>();
+  private readonly live = new Map<number, string>();
+
+  constructor() {
+    if (LeakDetector.active.size === 0) LeakDetector.hook.enable();
+    LeakDetector.active.add(this);
+  }
+
+  track<T>(fn: () => Promise<T>): Promise<T> {
+    return LeakDetector.storage.run(this, fn);
+  }
+
+  pending(): string[] {
+    const counts = new Map<string, number>();
+    for (const type of this.live.values()) counts.set(type, (counts.get(type) ?? 0) + 1);
+    return [...counts].map(
+      ([type, n]) => `${n} ${type === "PROMISE" ? "promise" : type.toLowerCase()}${n > 1 ? "s" : ""}`,
+    );
+  }
+
+  dispose(): void {
+    LeakDetector.active.delete(this);
+    if (LeakDetector.active.size === 0) LeakDetector.hook.disable();
   }
 }
 

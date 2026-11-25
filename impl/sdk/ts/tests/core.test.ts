@@ -5,6 +5,7 @@ import { Codec } from "../src/codec.js";
 import type { Status } from "../src/computation.js";
 import { Core } from "../src/core.js";
 import type { Heartbeat } from "../src/heartbeat.js";
+import type { Fiber } from "../src/kernel.js";
 import { ConsoleLogger } from "../src/logger.js";
 import { LocalNetwork } from "../src/network/local.js";
 import type { PromiseRecord, Request, TaskRecord } from "../src/network/types.js";
@@ -29,6 +30,11 @@ class MockComputation {
   constructor(responses: (Status | Error)[], onExec?: (effects: Effects) => Promise<void>) {
     this.responses = responses;
     this.onExec = onExec;
+  }
+
+  // Core runs the computation as a fiber; the mock does its async work as one leaf invocation.
+  *run(rootPromise: PromiseRecord): Fiber<Status> {
+    return yield { op: "invoke", func: () => this.executeUntilBlocked(rootPromise), ctx: undefined as any, args: [] };
   }
 
   async executeUntilBlocked(rootPromise: PromiseRecord): Promise<Status> {

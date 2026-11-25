@@ -7,7 +7,7 @@
 // All of them produce the same kind of tape, and any tape can be replayed.
 
 import { Prng } from "./prng.js";
-import { DivergenceError, type Driver, type EnvelopeView, type SimulationView } from "./simulation.js";
+import { DivergenceError, type Driver, type EnvelopeView, type LeafView, type SimulationView } from "./simulation.js";
 import type { Action } from "./tape.js";
 import { isRandomEntry, type Tape } from "./tape.js";
 
@@ -81,10 +81,25 @@ export type Match = {
   subject?: string | RegExp;
 };
 
+/** Selects a leaf by what it is. */
+export type LeafMatch = {
+  func?: string;
+  worker?: string;
+  /** Id of the durable promise the leaf computes. */
+  subject?: string | RegExp;
+};
+
 export type ScriptStep =
   | ({ deliver: Match; to?: string } & { count?: number })
   | { drop: Match }
   | { delay: Match; ms: number }
+  /**
+   * Run a ready leaf to completion; its outcome is held until resumed. Until
+   * such a leaf exists, the oldest pending delivery or due timer goes first.
+   */
+  | { run: LeafMatch }
+  /** Hand a finished leaf's outcome back to its worker. */
+  | { resume: LeafMatch }
   | { crash: string }
   | { restart: string }
   /** Fire the oldest due timer, optionally the one owned by this worker. */
@@ -113,7 +128,15 @@ function matches(e: EnvelopeView, m: Match): boolean {
   return true;
 }
 
-function describe(m: Match): string {
+function leafMatches(l: LeafView, m: LeafMatch): boolean {
+  if (m.func !== undefined && l.func !== m.func) return false;
+  if (m.worker !== undefined && l.worker !== m.worker) return false;
+  if (m.subject !== undefined && (typeof m.subject === "string" ? l.subject !== m.subject : !m.subject.test(l.subject)))
+    return false;
+  return true;
+}
+
+function describe(m: Match | LeafMatch): string {
   return JSON.stringify({ ...m, subject: m.subject instanceof RegExp ? String(m.subject) : m.subject });
 }
 
@@ -175,6 +198,21 @@ export function scripted(steps: ScriptStep[], { after = "fifo" }: ScriptOptions 
         const a = view.enabled.find((x) => x.t === "advance");
         if (!a) throw new DivergenceError("script: advance, but nothing to wait for");
         return a;
+      }
+      if ("run" in step || "resume" in step) {
+        const want = "run" in step ? "ready" : "done";
+        const m = "run" in step ? step.run : step.resume;
+        const l = view.leaves.find((x) => x.state === want && leafMatches(x, m));
+        if (!l && want === "ready") {
+          const other = view.enabled.find((a) => a.t === "deliver" || a.t === "fire");
+          if (other) return other;
+        }
+        queue.shift();
+        if (!l) {
+          const leaves = view.leaves.map((x) => `${x.func}(${x.subject}) on ${x.worker}: ${x.state}`);
+          throw new DivergenceError(`script: no ${want} leaf matches ${describe(m)}; leaves: [${leaves.join(", ")}]`);
+        }
+        return "run" in step ? { t: "run", leaf: l.id } : { t: "resume", leaf: l.id };
       }
       if ("crash" in step) {
         queue.shift();

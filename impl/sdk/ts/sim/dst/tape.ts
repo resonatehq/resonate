@@ -12,6 +12,10 @@ export type Action =
   | { t: "drop"; env: number }
   /** Hold an in-flight envelope back for `ms` of simulated time (fault). */
   | { t: "delay"; env: number; ms: number }
+  /** Run a leaf function to completion while everything else waits. Its outcome is held for "resume". */
+  | { t: "run"; leaf: number }
+  /** Hand a leaf's held outcome back to the worker that submitted it. */
+  | { t: "resume"; leaf: number }
   /** Run a due timer (setTimeout / setInterval) on its owner. */
   | { t: "fire"; timer: number }
   /** Move the simulated clock to the next deadline and let the server process its timeouts. */
@@ -31,7 +35,7 @@ export type DecisionEntry = { step: number } & Action;
 export type TapeEntry = DecisionEntry | RandomEntry;
 
 export type Tape = {
-  format: "resonate-dst-tape/1";
+  format: "resonate-dst-tape/2";
   /** Seed of the driver that recorded this tape, when it was seeded. Informational only. */
   seed?: number;
   entries: TapeEntry[];
@@ -39,8 +43,8 @@ export type Tape = {
 
 export function emptyTape(seed?: number): Tape {
   return seed === undefined
-    ? { format: "resonate-dst-tape/1", entries: [] }
-    : { format: "resonate-dst-tape/1", seed, entries: [] };
+    ? { format: "resonate-dst-tape/2", entries: [] }
+    : { format: "resonate-dst-tape/2", seed, entries: [] };
 }
 
 export function isRandomEntry(e: TapeEntry): e is RandomEntry {
@@ -54,7 +58,7 @@ export function serializeTape(tape: Tape): string {
 
 export function parseTape(text: string): Tape {
   const tape = JSON.parse(text) as Tape;
-  if (tape?.format !== "resonate-dst-tape/1" || !Array.isArray(tape.entries)) {
+  if (tape?.format !== "resonate-dst-tape/2" || !Array.isArray(tape.entries)) {
     throw new Error("not a resonate-dst tape");
   }
   return tape;
@@ -68,6 +72,10 @@ export function describeAction(a: Action): string {
       return `drop #${a.env}`;
     case "delay":
       return `delay #${a.env} by ${a.ms}ms`;
+    case "run":
+      return `run leaf ${a.leaf}`;
+    case "resume":
+      return `resume leaf ${a.leaf}`;
     case "fire":
       return `fire timer ${a.timer}`;
     case "advance":

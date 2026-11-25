@@ -1,11 +1,13 @@
 import type { Context, InnerContext } from "./context.js";
 import { Decorator, type PromiseCompleted, type Value } from "./decorator.js";
+import { drive, type Fiber } from "./kernel.js";
 import type { Logger } from "./logger.js";
 import type { PromiseRecord } from "./network/types.js";
 import { randomUUID } from "./platform.js";
 import { Never } from "./retries.js";
 import type { TraceCollector } from "./trace.js";
-import type { Effects, Result, Yieldable } from "./types.js";
+import type { Effects, Func, Result, Yieldable } from "./types.js";
+import type { FencedEffects } from "./util.js";
 import * as util from "./util.js";
 
 export type Suspended = {
@@ -28,17 +30,23 @@ const logged: Map<string, boolean> = new Map();
 
 type LocalWorkEntry = {
   funcName: string;
-  promise: Promise<Suspended | Done>;
+  handle: number;
 };
 
 export class Coroutine<T> {
   private ctx: InnerContext;
   private logger: Logger;
   private decorator: Decorator<T>;
-  private effects: Effects;
+  private effects: FencedEffects;
   private trace: TraceCollector;
 
-  constructor(ctx: InnerContext, logger: Logger, decorator: Decorator<T>, effects: Effects, trace: TraceCollector) {
+  constructor(
+    ctx: InnerContext,
+    logger: Logger,
+    decorator: Decorator<T>,
+    effects: FencedEffects,
+    trace: TraceCollector,
+  ) {
     this.ctx = ctx;
     this.logger = logger;
     this.decorator = decorator;
@@ -59,7 +67,8 @@ export class Coroutine<T> {
     this.logger.debug({ component: "trace", ...event }, `trace: ${event.kind}`);
   }
 
-  public static async exec(
+  /** Runs a coroutine to completion with the production driver. `effects` must come from `buildEffects`. */
+  public static exec(
     logger: Logger,
     ctx: InnerContext,
     func: (ctx: Context, ...args: any[]) => Generator<Yieldable, any, any>,
@@ -67,11 +76,23 @@ export class Coroutine<T> {
     effects: Effects,
     trace: TraceCollector,
   ): Promise<Suspended | Done> {
-    const coroutine = new Coroutine(ctx, logger, new Decorator(func(ctx, ...args)), effects, trace);
-    return await coroutine.exec();
+    const fenced = effects as FencedEffects;
+    return drive(Coroutine.run(logger, ctx, func, args, fenced, trace), { send: fenced.send });
   }
 
-  private async exec(): Promise<Suspended | Done> {
+  public static run(
+    logger: Logger,
+    ctx: InnerContext,
+    func: (ctx: Context, ...args: any[]) => Generator<Yieldable, any, any>,
+    args: any[],
+    effects: FencedEffects,
+    trace: TraceCollector,
+  ): Fiber<Suspended | Done> {
+    const coroutine = new Coroutine(ctx, logger, new Decorator(func(ctx, ...args)), effects, trace);
+    return coroutine.exec();
+  }
+
+  private *exec(): Fiber<Suspended | Done> {
     const remote: RemoteTodo[] = [];
     const localWork: Map<string, LocalWorkEntry> = new Map();
 
@@ -87,7 +108,7 @@ export class Coroutine<T> {
 
       // Handle internal.async.l (lfi/lfc) — local child creation (run)
       if (action.type === "internal.async.l") {
-        const res = await this.effects.promiseCreate(action.createReq, action.func.name);
+        const res = yield* this.effects.create(action.createReq, action.func.name);
 
         // Emit "run p q" — parent creates local child
         this.emitTrace({ kind: "run", id: this.ctx.id, callee: action.id });
@@ -103,20 +124,12 @@ export class Coroutine<T> {
 
         if (res.state === "pending") {
           // Start local work eagerly — both regular functions and generators
-          let localPromise: Promise<Suspended | Done>;
+          let local: Fiber<Suspended | Done>;
 
           if (!util.isGeneratorFunction(action.func)) {
-            // For regular functions, emit spawn/return around execution
-            localPromise = (async () => {
-              this.emitTrace({ kind: "spawn", id: action.id });
-              const result = await util.executeWithRetry(ctx, action.func, action.args, this.logger);
-              const state = result.kind === "value" ? "resolved" : "rejected";
-              const value = result.kind === "value" ? result.value : result.error;
-              this.emitTrace({ kind: "return", id: action.id, state, value });
-              return { type: "done" as const, result };
-            })();
+            local = this.leaf(action.id, ctx, action.func, action.args);
           } else {
-            localPromise = Coroutine.exec(
+            local = Coroutine.run(
               this.logger,
               ctx,
               action.func as (ctx: Context, ...args: any[]) => Generator<Yieldable, any, any>,
@@ -125,8 +138,9 @@ export class Coroutine<T> {
               this.trace,
             );
           }
+          const handle: number = yield { op: "fork", fiber: local };
 
-          localWork.set(action.id, { funcName: action.func.name, promise: localPromise });
+          localWork.set(action.id, { funcName: action.func.name, handle });
           input = {
             type: "internal.promise",
             state: "pending",
@@ -145,7 +159,7 @@ export class Coroutine<T> {
 
       // Handle internal.async.r — remote child creation (rpc)
       if (action.type === "internal.async.r") {
-        const res = await this.effects.promiseCreate(action.createReq, "unknown");
+        const res = yield* this.effects.create(action.createReq, "unknown");
 
         // Emit "rpc p q" — parent creates remote child
         this.emitTrace({ kind: "rpc", id: this.ctx.id, callee: action.id });
@@ -211,10 +225,10 @@ export class Coroutine<T> {
         if (localEntry) {
           // This is a local in-flight task — await it inline
           localWork.delete(action.id);
-          const localResult = await localEntry.promise;
+          const localResult: Suspended | Done = yield { op: "join", handle: localEntry.handle };
 
           if (localResult.type === "done") {
-            const settleRes = await this.settle(action.id, localResult.result, localEntry.funcName);
+            const settleRes = yield* this.settle(action.id, localResult.result, localEntry.funcName);
 
             util.assert(settleRes.state !== "pending", "promise must be completed");
 
@@ -231,7 +245,7 @@ export class Coroutine<T> {
 
           // localResult.type === "suspended": child generator has remote deps
           // Flush remaining local work and collect all remote todos
-          const res = await this.flushLocalWork(localWork);
+          const res = yield* this.flushLocalWork(localWork);
 
           // Emit suspend — parent cannot continue
           this.emitTrace({ kind: "suspend", id: this.ctx.id });
@@ -242,7 +256,7 @@ export class Coroutine<T> {
 
         // Not in localWork — it's a remote pending promise.
         // Flush any in-flight local work so their remote dependencies are surfaced
-        const flushResult = await this.flushLocalWork(localWork);
+        const flushResult = yield* this.flushLocalWork(localWork);
 
         // Emit suspend — parent cannot continue (blocked on remote)
         this.emitTrace({ kind: "suspend", id: this.ctx.id });
@@ -258,7 +272,7 @@ export class Coroutine<T> {
 
         // Structured concurrency: flush all in-flight local work before completing
         if (localWork.size > 0) {
-          const flushResult = await this.flushLocalWork(localWork);
+          const flushResult = yield* this.flushLocalWork(localWork);
 
           const allRemote = [...remote, ...flushResult.remote];
           if (allRemote.length > 0) {
@@ -289,18 +303,28 @@ export class Coroutine<T> {
     }
   }
 
+  private *leaf(id: string, ctx: InnerContext, func: Func, args: any[]): Fiber<Suspended | Done> {
+    this.emitTrace({ kind: "spawn", id });
+    const result = yield* util.retrying(ctx, func, args, this.logger);
+    const state = result.kind === "value" ? "resolved" : "rejected";
+    const value = result.kind === "value" ? result.value : result.error;
+    this.emitTrace({ kind: "return", id, state, value });
+    return { type: "done", result };
+  }
+
   /**
-   * Awaits all in-flight local work entries, settles completed durable promises,
+   * Joins all in-flight local work, settles completed durable promises,
    * and collects remote todos from any suspended child generators.
    */
-  private async flushLocalWork(localWork: Map<string, LocalWorkEntry>): Promise<{ remote: RemoteTodo[] }> {
+  private *flushLocalWork(localWork: Map<string, LocalWorkEntry>): Fiber<{ remote: RemoteTodo[] }> {
     const entries = [...localWork.entries()];
     localWork.clear();
 
-    // Await all in-flight promises concurrently before checking results
-    const results = await Promise.all(
-      entries.map(async ([id, { funcName, promise }]) => ({ id, funcName, result: await promise })),
-    );
+    // Every entry is already running; join them all before checking results
+    const results: { id: string; funcName: string; result: Suspended | Done }[] = [];
+    for (const [id, { funcName, handle }] of entries) {
+      results.push({ id, funcName, result: yield { op: "join", handle } });
+    }
 
     const allRemote: RemoteTodo[] = [];
 
@@ -310,15 +334,15 @@ export class Coroutine<T> {
         allRemote.push(...result.todo.remote);
       } else {
         // Child completed (success or user error), settle its durable promise
-        await this.settle(id, result.result, funcName);
+        yield* this.settle(id, result.result, funcName);
       }
     }
 
     return { remote: allRemote };
   }
 
-  private settle(id: string, result: Result<any, any>, funcName: string) {
-    return this.effects.promiseSettle(
+  private settle(id: string, result: Result<any, any>, funcName: string): Fiber<PromiseRecord> {
+    return this.effects.settle(
       {
         kind: "promise.settle",
         head: { corrId: randomUUID(), version: util.VERSION },

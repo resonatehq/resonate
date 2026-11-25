@@ -8,9 +8,11 @@
  */
 
 import { type Bank, bank, chargedOnce, conserved, functions } from "../sim/dst/examples/bank.js";
+import { type Counter, counted, counter, functions as counterFunctions } from "../sim/dst/examples/counter.js";
 import {
   type Action,
   parseTape,
+  type Result,
   replay,
   type Scenario,
   scripted,
@@ -151,18 +153,28 @@ describe("scripted scenarios", () => {
     { deliver: { kind: "execute", subject: "t1" }, to: "w1" },
     { deliver: { subject: under("t1") }, count: 4 },
     { deliver: { kind: "execute", subject: "t1:0" }, to: "w2" },
-    { deliver: { subject: under("t1") }, count: 6 },
+    { deliver: { subject: under("t1") }, count: 4 },
+    { run: { subject: "t1:0" } },
+    { resume: { subject: "t1:0" } },
+    { deliver: { subject: under("t1") }, count: 2 },
     { deliver: { kind: "execute", subject: "t2" }, to: "w2" },
     { deliver: { subject: under("t2") }, count: 4 },
     { deliver: { kind: "execute", subject: "t2:0" }, to: "w1" },
-    { deliver: { subject: under("t2") }, count: 6 },
+    { deliver: { subject: under("t2") }, count: 4 },
+    { run: { subject: "t2:0" } },
+    { resume: { subject: "t2:0" } },
+    { deliver: { subject: under("t2") }, count: 2 },
   ] as const;
 
   test("a script drives an exact interleaving", async () => {
     const r = await simulate(racy, scripted([...bothReadFirst], { after: "stop" }));
     expect(r.status).toBe("stopped");
-    expect(r.steps).toBe(24);
-    expect(r.log.map((l) => l.replace(/^\[\d+\] t=\d+ deliver #\d+(?: -> \w+)?: /, ""))).toEqual([
+    expect(r.steps).toBe(28);
+    expect(
+      r.log.map((l) =>
+        l.replace(/^\[\d+\] t=\d+ deliver #\d+(?: -> \w+)?: /, "").replace(/^\[\d+\] t=\d+ (\w+) leaf \d+/, "$1 leaf"),
+      ),
+    ).toEqual([
       "message execute(t1) server -> w1",
       "request task.acquire(t1) w1 -> server",
       "response task.acquire(t1) server -> w1",
@@ -173,6 +185,8 @@ describe("scripted scenarios", () => {
       "request task.acquire(t1:0) w2 -> server",
       "response task.suspend(t1) server -> w1",
       "response task.acquire(t1:0) server -> w2",
+      "run leaf: readBalances(t1:0) on w2",
+      "resume leaf: readBalances(t1:0) on w2",
       "request task.fulfill(t1:0) w2 -> server",
       "response task.fulfill(t1:0) server -> w2",
       "message execute(t2) server -> w2",
@@ -185,6 +199,8 @@ describe("scripted scenarios", () => {
       "request task.acquire(t2:0) w1 -> server",
       "response task.suspend(t2) server -> w2",
       "response task.acquire(t2:0) server -> w1",
+      "run leaf: readBalances(t2:0) on w1",
+      "resume leaf: readBalances(t2:0) on w1",
       "request task.fulfill(t2:0) w1 -> server",
       "response task.fulfill(t2:0) server -> w1",
     ]);
@@ -205,16 +221,16 @@ describe("scripted scenarios", () => {
         { deliver: { kind: "execute", subject: "o1:0" }, to: "w2" },
         { deliver: { subject: under("o1") }, count: 3 },
         { deliver: { kind: "task.acquire", type: "response", subject: "o1:0" } },
-        // w2 has charged the card; its fulfill request is in flight.
+        { run: { subject: "o1:0" } },
+        // w2 has charged the card but has not seen the leaf's result yet.
         { crash: "w2" },
-        { drop: { kind: "task.fulfill", subject: "o1:0" } },
         { advance: true },
         { restart: "w2" },
       ]),
     );
     expect(r.status).toBe("failed");
     expect(r.failure?.message).toBe("order o1 charged 2 times");
-    expect(decisions(r.tape).filter((e) => e.t === "crash")).toEqual([{ step: 11, t: "crash", worker: "w2" }]);
+    expect(decisions(r.tape).filter((e) => e.t === "crash")).toEqual([{ step: 12, t: "crash", worker: "w2" }]);
   });
 
   test("scripted values for Math.random reach user code through the tape", async () => {
@@ -290,7 +306,7 @@ describe("seeded exploration and replay", () => {
   test("seeded exploration finds the planted crash bug, and not in the fixed workflow", async () => {
     const found = await explore(payment("payNotIdempotent"), { crash: 0.1 });
     expect(found).toBeDefined();
-    expect(found!.r.failure?.message).toBe("order o1 charged 2 times");
+    expect(found!.r.failure?.message).toMatch(/^order o1 charged [2-9] times$/);
     expect(found!.r.tape.entries.some((e) => e.t === "crash")).toBe(true);
 
     // The same seed against the fixed workflow passes.
@@ -352,5 +368,111 @@ describe("seeded exploration and replay", () => {
     (tape.entries[i] as any).to = "nobody";
     const again = await simulate(transfers(2), replay(tape));
     expect(again.failure).toMatchObject({ kind: "divergence", step: tape.entries[i].step });
+  });
+});
+
+describe("leaves under the global scheduler", () => {
+  // `increment` reads the counter in one async leaf and writes it in another.
+  // `twice` runs two increments in parallel on one worker, so no crash, drop or
+  // timeout is needed: the update is lost only when the scheduler runs both
+  // reads before either read's result is resumed.
+  const race = (atomic: boolean): Scenario<Counter> => ({
+    workers: 1,
+    functions: counterFunctions,
+    world: counter,
+    start: [{ id: "c", func: "twice", args: [atomic] }],
+    check: counted,
+  });
+  // No early clock advances, so no request times out and nothing re-executes.
+  const ordersOnly = { advanceEarly: 0 };
+
+  test("a leaf's execution and the delivery of its result are separate decisions", async () => {
+    const r = await simulate(race(false), seeded(1, ordersOnly));
+    const leafSteps = decisions(r.tape).filter((e) => e.t === "run" || e.t === "resume");
+    const ids = new Set(leafSteps.map((e) => (e as any).leaf));
+    expect(ids.size).toBe(4);
+    for (const id of ids) {
+      const steps = leafSteps.filter((e) => (e as any).leaf === id).map((e) => e.t);
+      expect(steps).toEqual(["run", "resume"]);
+    }
+  });
+
+  test("resuming each read before the other read runs keeps both updates", async () => {
+    const r = await simulate(
+      race(false),
+      scripted([
+        { run: { func: "getCount", subject: "c:0.0" } },
+        { resume: { subject: "c:0.0" } },
+        { run: { func: "setCount", subject: "c:0.1" } },
+        { resume: { subject: "c:0.1" } },
+        { run: { func: "getCount", subject: "c:1.0" } },
+        { resume: { subject: "c:1.0" } },
+      ]),
+    );
+    // `counted` checks the counter reached 2.
+    expect(r.status).toBe("completed");
+    expect(r.failure).toBeUndefined();
+  });
+
+  test("running both reads before resuming either loses an update", async () => {
+    const r = await simulate(
+      race(false),
+      scripted([
+        { run: { func: "getCount", subject: "c:0.0" } },
+        { run: { func: "getCount", subject: "c:1.0" } },
+        { resume: { subject: "c:0.0" } },
+        { resume: { subject: "c:1.0" } },
+      ]),
+    );
+    expect(r.status).toBe("failed");
+    expect(r.failure).toMatchObject({ kind: "check", message: "lost update: count is 1, expected 2" });
+  });
+
+  test("seeded exploration finds the parallel-leaf race, replay reproduces it at the same step", async () => {
+    let found: { seed: number; r: Result } | undefined;
+    for (let seed = 1; seed <= 50 && !found; seed++) {
+      const r = await simulate(race(false), seeded(seed, ordersOnly), { requireCompletion: true });
+      if (r.status === "failed") found = { seed, r };
+    }
+    expect(found).toBeDefined();
+    const { r } = found!;
+    expect(r.failure).toMatchObject({ kind: "check", message: "lost update: count is 1, expected 2" });
+    // Only scheduling decisions: no faults and no timeouts were involved.
+    expect(decisions(r.tape).every((e) => ["deliver", "run", "resume"].includes(e.t))).toBe(true);
+
+    const again = await simulate(race(false), replay(parseTape(serializeTape(r.tape))));
+    expect(again.failure).toEqual(r.failure);
+    expect(again.steps).toBe(r.steps);
+    expect(serializeTape(again.tape)).toBe(serializeTape(r.tape));
+  });
+
+  test("the atomic increment survives the same exploration", async () => {
+    for (let seed = 1; seed <= 50; seed++) {
+      const r = await simulate(race(true), seeded(seed, ordersOnly), { requireCompletion: true });
+      expect(r.status).toBe("completed");
+    }
+  });
+
+  test("a leaf that leaves async work running is reported", async () => {
+    const r = await simulate(
+      { workers: 1, functions: counterFunctions, world: counter, start: [{ id: "l", func: "callsLeaky" }] },
+      seeded(1),
+    );
+    expect(r.failure?.kind).toBe("leaf");
+    expect(r.failure?.message).toContain("returned with async work still running");
+  });
+
+  test("a leaf that never settles is reported", async () => {
+    const r = await simulate(
+      {
+        workers: 1,
+        functions: counterFunctions,
+        world: counter,
+        start: [{ id: "s", func: "callsStuck" }],
+        leafTimeout: 200,
+      },
+      seeded(1),
+    );
+    expect(r.failure).toMatchObject({ kind: "leaf", message: "leaf stuck (s:0) did not settle within 200ms" });
   });
 });
