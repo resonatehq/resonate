@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { Command } from "commander";
-import { Core } from "../src/async/core.js";
 import { StepClock } from "../src/clock.js";
 import { Codec } from "../src/codec.js";
 import type { Context } from "../src/context.js";
@@ -9,10 +8,7 @@ import { Registry } from "../src/registry.js";
 import { VERSION } from "../src/util.js";
 import { ServerProcess } from "./src/server.js";
 import { Message, Random, Simulator, unicast } from "./src/simulator.js";
-import { type EngineFactory, genEngine, WorkerProcess } from "./src/worker.js";
-import { workloads } from "./src/workloads.js";
-
-const asyncEngine: EngineFactory = (deps) => new Core(deps);
+import { WorkerProcess } from "./src/worker.js";
 
 // Function definition
 function* fibLfi(ctx: Context, n: number): Generator<any, number, any> {
@@ -162,10 +158,6 @@ program
       throw new Error(`Invalid activateProb: ${value} (must be 0–1)`);
     }
     return n;
-  })
-  .option("--engine <name>", "Execution engine: gen | async", (value) => {
-    if (value !== "gen" && value !== "async") throw new Error(`Invalid engine: ${value} (must be gen|async)`);
-    return value;
   });
 
 program.parse(process.argv);
@@ -174,7 +166,6 @@ type Options = {
   seed: number;
   steps: number;
   func?: string;
-  engine?: "gen" | "async";
   randomDelay?: number;
   dropProb?: number;
   duplProb?: number;
@@ -215,11 +206,7 @@ export async function run(options: Options) {
   const codec = new Codec();
   const registry = new Registry();
 
-  // Choose the engine and its matching workload set. The async engine only has
-  // the call-and-await forms (fibLfc/fibRfc); the begin* forms stay generator-only.
-  const engine = options.engine ?? "gen";
-  const funcs = engine === "async" ? workloads.async : availableFuncs;
-  const factory: EngineFactory = engine === "async" ? asyncEngine : genEngine;
+  const funcs = availableFuncs;
 
   for (const [name, func] of Object.entries(funcs)) {
     registry.add(func, name);
@@ -246,7 +233,7 @@ export async function run(options: Options) {
   // workers
   for (let i = 1; i <= 3; i++) {
     sim.register(
-      new WorkerProcess(rnd, clock, registry, { charFlipProb: faults.charFlipProb }, `worker-${i}`, "default", factory),
+      new WorkerProcess(rnd, clock, registry, { charFlipProb: faults.charFlipProb }, `worker-${i}`, "default"),
     );
   }
 

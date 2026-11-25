@@ -1,6 +1,6 @@
 /**
  * Timer tasks (durable sleep). Mirrors resonate-sdk-py/tests/test_core.py's
- * timer-task group, for both engines.
+ * timer-task group.
  *
  * A `resonate:timer` promise is a durable sleep: the wake IS its deadline, and
  * `resonate:timer` makes timing out settle it *resolved*. It carries a
@@ -11,7 +11,6 @@
  * spin): it drops it and lets the deadline do the waking.
  */
 
-import { Core as AsyncCore } from "../src/async/core.js";
 import { WallClock } from "../src/clock.js";
 import { Codec } from "../src/codec.js";
 import { Core } from "../src/core.js";
@@ -83,13 +82,10 @@ async function acquireTimerTask(
   return { task: acquireRes.data.task, promise: acquireRes.data.promise };
 }
 
-describe.each([
-  ["generator engine", (common: any) => new Core(common)],
-  ["async engine", (common: any) => new AsyncCore(common)],
-])("timer tasks — %s", (_name, makeCore) => {
+describe("timer tasks", () => {
   test("a not-yet-due timer task is dropped", async () => {
     const { sent, send, common } = buildHarness();
-    const core = makeCore(common);
+    const core = new Core(common);
     const { task, promise } = await acquireTimerTask(send, "t-pending", FAR_FUTURE);
     expect(promise.state).toBe("pending");
 
@@ -114,7 +110,7 @@ describe.each([
     // timer's empty param holds no TaskData, so this has to short-circuit
     // before the decode rather than fail on it.
     const { sent, send, common } = buildHarness();
-    const core = makeCore(common);
+    const core = new Core(common);
     const { task, promise } = await acquireTimerTask(send, "t-due", FAR_FUTURE);
 
     // The record as the worker would observe it after the deadline settled it.

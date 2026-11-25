@@ -90,7 +90,7 @@ jobs:
           npm run build --workspaces --if-present
 
       - name: verify sdk bundles for browser
-        run: npx esbuild src/index.ts src/async/index.ts --bundle --format=esm --outdir=/tmp/browser-check
+        run: npx esbuild src/index.ts --bundle --format=esm --outdir=/tmp/browser-check
 
   examples:
     runs-on: ubuntu-latest

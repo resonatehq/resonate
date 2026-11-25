@@ -107,7 +107,6 @@ jobs:
           (cd "$work" && npm init -y >/dev/null && npm install $tarballs)
           (cd "$work" && node --input-type=module -e "
             await import('@resonatehq/sdk');
-            await import('@resonatehq/sdk/async');
             console.log('core entry points import cleanly from the packed tarballs');
           ")
 
