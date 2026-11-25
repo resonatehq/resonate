@@ -1,0 +1,2035 @@
+theory Resonate
+begin
+
+/*
+================================================================================
+
+  The Resonate protocol as a Tamarin state machine.
+
+  Modelled after the Lean abstract machine in this repository's `spec/`
+  (`spec/01-protocol`, `spec/02-abstract`): one rule per transition of that
+  machine, with the same guards, the same state fields, and the same effects.
+  On top of that faithful core this theory adds two things the specification
+  does not have, and which are the subject of the analysis:
+
+    (1) an IDENTITY AND CAPABILITY model.  Servers, workers and clients are
+        principals with long-term signing keys.  Every request is signed.  A
+        task is OFFERED by the server to a worker group; a worker CLAIMS it
+        with `task.acquire`; on a successful claim the server mints a
+        capability
+
+            cap = sign(<'cap', S, tid, version, W>, sk(S))
+
+        bound to that particular worker W and to that particular version.
+        `task.fence`, `task.suspend`, `task.complete`, `task.release` and
+        `task.heartbeat` are gated on presenting that capability AND on the
+        request being signed by the worker the capability names.
+
+    (2) END-TO-END ENCRYPTION of promise params and values.  A promise carries
+
+            pblob = senc(param, ek)
+            kblob = aenc(<'ek', pid, ek>, pk(gsk(G)))
+
+        where `ek` is a fresh envelope key and `gsk(G)` is the private key of
+        the worker group G that will execute the promise.  The server stores
+        and forwards both blobs and holds no key that opens either.  Values
+        are sealed under the same envelope key by the completing worker.
+
+  ------------------------------------------------------------------------
+  WHAT IS MODELLED, AND WHAT IS ABSTRACTED
+  ------------------------------------------------------------------------
+
+  Modelled, transition for transition, from `02-abstract/external.lean` and
+  `02-abstract/internal.lean`:
+
+    promise.create (all four promise kinds, plus the idempotent re-create)
+    promise.settle (the `settable` guard, plus the already-settled no-op)
+    promise.get
+    promise.register_callback  (all branches: 400 / 404 / 422 / register / settled)
+    promise.register_listener  (all branches)
+    task.create
+    task.acquire
+    task.fence   (create and settle actions)
+    task.suspend (arity 1 and arity 2, all branches incl. the 300 branch)
+    task.complete  (= `taskFulfill` in the Lean spec)
+    task.release
+    task.halt / task.continue
+    task.heartbeat
+    r1  promise timeout          (timer -> resolved, otherwise -> rejectedTimedout)
+    r3  listener drain           (emits `unblock`)
+    r4  callback drain           (`resumeOne`)
+    r5  lease timeout
+    r6  retry dispatch           (emits `execute`)
+
+  Deliberately abstracted, with the reason in each case:
+
+    TIME.  Tamarin terms carry no order relation, so `now`, `timeoutAt`,
+    `expiresAt` and `retryAt` are not represented as values.  Every step whose
+    only guard is a deadline comparison -- the promise timeout (r1), the lease
+    timeout (r5), the retry dispatch (r6) -- is modelled as a rule that may
+    fire at ANY point at which its non-temporal guards hold.  This is a strict
+    OVER-approximation: every run of the Lean machine has a corresponding run
+    here, and this theory additionally admits runs in which deadlines fire
+    early.  Safety properties proved here therefore hold of the real machine.
+    It is not a reduction of the state space; it enlarges it.
+
+    THE `resumes` LEDGER.  `TaskObject.resumes` gates no transition in the
+    specification -- it is read only by `TaskObject.toRecord`, which reports
+    its LENGTH.  Multiset rewriting cannot clear an unbounded ledger in one
+    step, so resumes are recorded as `TaskResume(S, tid, ver, awaited)` facts
+    tagged with the task version at which they were recorded.  Clearing on
+    acquisition (which bumps the version) is therefore exact; clearing on
+    suspension, which does not bump the version, leaves a residue visible
+    only in the reported count.  No guard and no security property reads it.
+
+    BIRTH PAST THE DEADLINE.  `createPromise` has a second branch: a promise
+    whose `timeoutAt` has already passed is born SETTLED -- `resolved` if it
+    is a timer, `rejectedTimedout` otherwise -- with its task, if it has one,
+    born `fulfilled`.  With time abstracted, that state is reached here by
+    creating the promise pending and firing `Internal_Promise_Timeout`
+    immediately after, with no step in between that could observe the
+    difference.  The branch is therefore present, as a two-rule path rather
+    than a one-rule one.
+
+    SCHEDULES.  `nextCron`, `occurrences` and `expand` are `opaque` in the
+    specification -- calendar arithmetic explicitly outside the protocol, and
+    carried unexercised there.  A schedule contributes exactly one thing the
+    rest of the protocol can see: another way for a promise to be born, with
+    a server-chosen id.  That is modelled by `Schedule_Fire` below, with
+    `expand` as a free function symbol.
+
+    SEARCH.  `promiseSearch` and `taskSearch` answer 501 in the specification.
+
+    RESPONSE ECHOES.  A response here carries the outcome -- the status, the
+    state a promise settled into -- but not a payload the requester itself
+    supplied a moment earlier.  Two messages DO carry payload, because that is
+    their job: the `task.acquire` response, which delivers a promise's param to
+    the worker that claimed it, and the `unblock`, which delivers a value to a
+    listener.  Everywhere else a payload in a response would be a term going
+    straight back out the way it came in, which no principal learns anything
+    from and which costs the prover an open chain apiece.
+
+  The envelope is DOMAIN-SEPARATED: a param is sealed as
+  `senc(<'param', p>, ek)` and a value as `senc(<'value', v>, ek)`.  The tags
+  are not decoration.  Without them the two blobs are interchangeable, and
+  `models/resonate-payload.spthy` shows what that costs: the prover finds, in
+  four steps, a run in which the creator accepts its OWN PARAM back as the
+  answer to its promise, replayed off the wire as an `unblock`, with no worker
+  having run at all.  Sealing under one key is not enough; what is sealed has
+  to say what it is.
+
+  ------------------------------------------------------------------------
+  WHY A COMPROMISED SERVER IS THE RIGHT WAY TO ASK "CAN THE SERVER READ IT?"
+  ------------------------------------------------------------------------
+
+  Everything the server ever holds -- `pblob`, `kblob`, `vblob` -- also travels
+  over the public network, so the Dolev-Yao adversary already knows every term
+  in the server's store.  Adding `Compromise_Agent` on the server hands the
+  adversary the server's long-term key as well.  At that point the adversary
+  knows strictly more than the server does.  A secrecy lemma that holds while
+  `LtkReveal(S)` is permitted therefore says exactly: THE SERVER CANNOT READ
+  IT.  The secrecy lemmas below do not exclude server compromise; they exclude
+  only compromise of the worker group's key or of a worker in the group.
+
+================================================================================
+*/
+
+builtins: signing, asymmetric-encryption, symmetric-encryption
+
+functions: vsucc/1, expand/2
+
+// ============================================================================
+// SECTION 0 -- restrictions
+// ============================================================================
+
+restriction equality:
+  "All x y #i. Eq(x, y) @ #i ==> x = y"
+
+restriction inequality:
+  "All x #i. Neq(x, x) @ #i ==> F"
+
+restriction only_once:
+  "All x #i #j. OnlyOnce(x) @ #i & OnlyOnce(x) @ #j ==> #i = #j"
+
+/* `PromiseState.settable`: `pending` is not a settlement and `rejectedTimedout`
+   is server-owned -- only the timeout path writes it, so a client can never
+   forge one.  (`01-protocol/validation.lean`.) */
+restriction settable:
+  "All s #i. Settable(s) @ #i ==>
+       s = 'resolved' | s = 'rejected' | s = 'rejectedCanceled'"
+
+/* A promise id names at most one promise.  `promiseCreate` reads the store
+   before writing and returns the existing record if the id is taken; the
+   `*_Idempotent` rules below cover that branch, so restricting genuine births
+   to one per id loses no behaviour. */
+restriction unique_promise_id:
+  "All s pid #i #j. PromiseBorn(s, pid) @ #i & PromiseBorn(s, pid) @ #j
+       ==> #i = #j"
+
+/* `PromiseObject.addCallback` / `addListener` are idempotent: a second
+   registration of the same pair is a no-op that still answers 200.  The
+   `*_Duplicate` rules cover the no-op; this keeps the ledger a set. */
+restriction unique_callback:
+  "All s pid aw #i #j. CallbackAdded(s, pid, aw) @ #i
+                     & CallbackAdded(s, pid, aw) @ #j ==> #i = #j"
+
+restriction unique_listener:
+  "All s pid a #i #j. ListenerAdded(s, pid, a) @ #i
+                    & ListenerAdded(s, pid, a) @ #j ==> #i = #j"
+
+/* `TaskObject.resumes` is deduplicated by `resumeOne`. */
+restriction unique_resume:
+  "All s tid v aw #i #j. ResumeAdded(s, tid, v, aw) @ #i
+                       & ResumeAdded(s, tid, v, aw) @ #j ==> #i = #j"
+
+/* ---------------------------------------------------------------------------
+   COLLAPSING IDENTICAL REPETITIONS.
+
+   Three steps can fire again and again with no observable difference between
+   one firing and the next, and each of them is a rule that CONSUMES a linear
+   fact and puts back exactly what it took.  That shape is a cycle in the
+   prover's backward search -- every `TaskSt` goal has the rule as one of its
+   own sources -- and it is the reason the capability lemmas did not converge.
+
+   These three restrictions keep the first firing of each and drop the
+   repeats.  The argument that this loses nothing is the same in all three
+   cases, and it is a statement about the model, not a hope:
+
+     * the rule restores the linear facts it consumed, unchanged, so the store
+       after the second firing is identical to the store after the first;
+     * the term it sends is identical to the one the first firing sent, so the
+       adversary's knowledge after is identical to its knowledge before;
+     * nothing in the theory reads the fields the rule does write -- the
+       outbox slot's contents are read by no rule, and `expiresAt`, which the
+       heartbeat exists to move, is not represented at all.
+
+   So for any trace containing a repeat there is a trace without it, over the
+   same states, with the same adversary knowledge, and satisfying the same
+   action-fact formulas.  Any attack in the first is an attack in the second.
+
+   `Internal_Retry_Dispatch` at a NEW version is a different event and is not
+   collapsed -- the restrictions are keyed on the version. -------------------- */
+
+restriction dispatch_once_per_version:
+  "All s tid v #i #j. Dispatch(s, tid, v) @ #i & Dispatch(s, tid, v) @ #j
+       ==> #i = #j"
+
+restriction heartbeat_once_per_lease:
+  "All s tid v w #i #j. Heartbeat(s, tid, v, w) @ #i & Heartbeat(s, tid, v, w) @ #j
+       ==> #i = #j"
+
+restriction suspend_refusal_once_per_lease:
+  "All s tid v w #i #j. SuspendRefused(s, tid, v, w) @ #i
+                      & SuspendRefused(s, tid, v, w) @ #j ==> #i = #j"
+
+
+
+/* ---------------------------------------------------------------------------
+   THE ANALYSIS CONFIGURATION, `-D=Core`.
+
+   Twelve rules are gated behind this flag.  Unlike `-D=Reduced`, which drops
+   rules that provably change nothing, this one drops rules that DO change
+   things -- so a result under `-D=Core` is a statement about the sub-protocol
+   that remains, not about the whole theory.  It is stated here so that what
+   was verified, and over what, is not a matter of inference:
+
+     Schedule_Create, Schedule_Fire
+         A promise birth site with a server-derived id.  `nextCron` and
+         `expand` are opaque in the specification; nothing else reads a
+         schedule.
+
+     Server_Task_Create, Server_Task_Create_Adopt, Worker_Task_Create,
+     Worker_Start_Own
+         The `task.create` family: a SECOND way to reach `acquired`, and a
+         second sealed-payload delivery path.  `task.acquire` remains, and it
+         is the path every capability lemma is about.  What is lost with
+         these is coverage of the version-less adoption branch.
+
+     Server_Mark_External_Timer, Internal_Promise_Timeout_Timer
+         Timer promises.  A timer is never targeted, carries no task, and
+         resolves at its deadline; the non-timer timeout rules remain, so the
+         deadline path itself is still exercised.
+
+     Server_Promise_Register_Callback
+         Standalone callback registration.  `task.suspend` still registers
+         callbacks, so the callback drain and `resumeOne` are still reached.
+
+     Server_Task_Suspend_2, Server_Task_Suspend_2_AlreadySettled,
+     Worker_Suspend_2
+         Suspend at arity two.  Arity one remains, with both its branches.
+         What is lost is the all-or-nothing across a multi-await suspend.
+
+   Why: the prover's source refinement does not converge on the full theory on
+   a 16 GB host.  The cost is in the sealed payload: a worker must DECONSTRUCT
+   what the server passed through as an unconstrained variable, and each
+   delivery path that does so opens chains.  `-D=Core` leaves exactly one such
+   path -- `task.acquire` to `Worker_Start` -- plus the `unblock` that delivers
+   a value to a listener, which is the least the protocol can be modelled with
+   and still be the protocol.
+   --------------------------------------------------------------------------- */
+
+// ============================================================================
+// SECTION 1 -- principals, keys and compromise
+// ============================================================================
+
+/* A worker group.  `gsk` is the group's decryption key: it is the ONLY key
+   that opens a promise's `kblob`, and therefore the only key that reaches a
+   param or a value.  It is held by every worker of the group and by nobody
+   else -- in particular not by the server. */
+rule Setup_Group:
+    [ Fr(~gsk) ]
+  --[ NewGroup($G), OnlyOnce(<'group', $G>) ]->
+    [ !GroupKey($G, ~gsk), !Pk($G, pk(~gsk)), Out(pk(~gsk)) ]
+
+rule Register_Server:
+    [ Fr(~ltkS) ]
+  --[ NewServer($S), OnlyOnce(<'agent', $S>) ]->
+    [ !Ltk($S, ~ltkS), !Pk($S, pk(~ltkS)), !Server($S), Out(pk(~ltkS)) ]
+
+rule Register_Worker:
+    [ Fr(~ltkW), !GroupKey($G, ~gsk) ]
+  --[ NewWorker($W, $G), OnlyOnce(<'agent', $W>) ]->
+    [ !Ltk($W, ~ltkW), !Pk($W, pk(~ltkW))
+    , !Worker($W, $G, ~gsk), !Member($W, $G)
+    , Out(pk(~ltkW)) ]
+
+rule Register_Client:
+    [ Fr(~ltkC) ]
+  --[ NewClient($C), OnlyOnce(<'agent', $C>) ]->
+    [ !Ltk($C, ~ltkC), !Pk($C, pk(~ltkC)), !Client($C), Out(pk(~ltkC)) ]
+
+/* Long-term key compromise.  Applies to servers, workers and clients alike.
+   For a SERVER this is the "honest-but-curious / fully compromised server"
+   scenario discussed in the header: the adversary already sees every blob the
+   server stores, and now holds its signing key too. */
+rule Compromise_Agent:
+    [ !Ltk($A, ~lt) ]
+  --[ LtkReveal($A) ]->
+    [ Out(~lt) ]
+
+/* A compromised worker.  It gives up its signing key AND the group
+   decryption key it holds.  Because every worker of a group holds the same
+   `gsk`, compromising ANY member exposes every param and every value ever
+   sealed to that group -- a property of this key distribution, and one the
+   secrecy lemmas below make explicit rather than hide. */
+rule Compromise_Worker:
+    [ !Worker($W, $G, ~gsk), !Ltk($W, ~ltkW) ]
+  --[ WorkerCompromised($W, $G), GroupReveal($G), LtkReveal($W) ]->
+    [ Out(~gsk), Out(~ltkW) ]
+
+/* Compromise of a worker group's decryption key on its own -- a leaked key
+   store rather than a leaked worker.  This is the only compromise that can
+   open a param or a value. */
+rule Compromise_Group:
+    [ !GroupKey($G, ~gsk) ]
+  --[ GroupReveal($G) ]->
+    [ Out(~gsk) ]
+
+
+// ============================================================================
+// SECTION 2 -- promise birth
+//
+//   `AbstractModel.createPromise` (state.lean).  A promise is born pending if
+//   its deadline is in the future, and born settled if it is not; a promise
+//   carrying `resonate:target` is born together with a task.  The four kinds
+//   below are the four tag shapes the specification distinguishes:
+//
+//     'targeted'  -- carries `resonate:target`; a worker owns its execution,
+//                    so it is born with a pending task and an armed dispatch.
+//     'ext'       -- carries `resonate:external`; settled from outside, no task.
+//     'timer'     -- carries `resonate:timer`; resolves at its deadline, no task.
+//     'local'     -- no tags; not `external`, so it takes no callbacks and no
+//                    listeners.
+//
+//   The first three are `PromiseObject.external`.
+// ============================================================================
+
+/* A client creates a targeted promise.  It seals the param under a fresh
+   envelope key and seals that key to the worker group's public key.  It keeps
+   `ek` so that it can read the value later. */
+rule Client_Create_Targeted:
+let pblob = senc(<'param', ~param>, ~ek)
+    kblob = aenc(<'ek', $pid, ~ek>, pkG)
+    body  = <'promise.create', $S, $pid, 'targeted', $tgt, $G, pblob, kblob>
+in
+    [ Fr(~ek), Fr(~param)
+    , !Client($C), !Ltk($C, ~ltkC), !Server($S), !Pk($G, pkG) ]
+  --[ ClientCreates($C, $pid, $G)
+    , SecretParam(~param, $pid, $G)
+    , Seal(~ek, $pid, $G)
+    , OnlyOnce(<'client-create', $C, $pid>) ]->
+    [ Out(<body, sign(body, ~ltkC)>)
+    , ClientAwaits($C, $S, $pid, ~ek, ~param) ]
+
+/* A client creates an external (untargeted) promise -- the "human approval",
+   "webhook", "outside event" shape.  No worker executes it; someone settles
+   it with `promise.settle`, and clients learn of the settlement through
+   `promise.register_listener` and the `unblock` message. */
+rule Client_Create_External:
+let pblob = senc(<'param', ~param>, ~ek)
+    kblob = aenc(<'ek', $pid, ~ek>, pkG)
+    body  = <'promise.create', $S, $pid, 'ext', 'none', $G, pblob, kblob>
+in
+    [ Fr(~ek), Fr(~param)
+    , !Client($C), !Ltk($C, ~ltkC), !Server($S), !Pk($G, pkG) ]
+  --[ ClientCreates($C, $pid, $G)
+    , SecretParam(~param, $pid, $G)
+    , Seal(~ek, $pid, $G)
+    , OnlyOnce(<'client-create', $C, $pid>) ]->
+    [ Out(<body, sign(body, ~ltkC)>)
+    , ClientAwaits($C, $S, $pid, ~ek, ~param) ]
+
+/* Server side of `promise.create` for a TARGETED promise.  `createPromise`:
+   the promise is born pending, and because it carries `resonate:target` a
+   task is born with it, pending, at version zero, with its dispatch armed.
+   `ExecSlot` is the outbox slot keyed by task id -- `Effect.setMessage`
+   replaces the entry with the same key, so a task has exactly one. */
+rule Server_Promise_Create_Targeted:
+let body = <'promise.create', $S, pid, 'targeted', tgt, grp, pblob, kblob>
+    resp = <'promise.created', $S, pid, 'pending', 'novalue'>
+in
+    [ In(<body, sig>)
+    , !Server($S), !Ltk($S, ~ltkS), !Pk($A, pkA) ]
+  --[ Eq(verify(sig, body, pkA), true)
+    , PromiseBorn($S, pid)
+    , TaskBorn($S, pid, 'v0')
+    , CreatedBy($S, pid, $A) ]->
+    [ !PromiseMeta($S, pid, 'targeted', tgt, grp, pblob, kblob, $A)
+    , !ExternalP($S, pid)
+    , PromiseSt($S, pid, 'pending', 'novalue')
+    , TaskSt($S, pid, 'tpending', 'v0', 'nobody')
+    , ExecSlot($S, pid, 'empty')
+    , Out(<resp, sign(resp, ~ltkS)>) ]
+
+/* Server side of `promise.create` for an untargeted promise: external, timer
+   or local.  `kind` is constrained by the restriction below so that this rule
+   cannot be used to smuggle a targeted promise past the task birth above. */
+rule Server_Promise_Create_Untargeted:
+let body = <'promise.create', $S, pid, kind, 'none', grp, pblob, kblob>
+    resp = <'promise.created', $S, pid, 'pending', 'novalue'>
+in
+    [ In(<body, sig>)
+    , !Server($S), !Ltk($S, ~ltkS), !Pk($A, pkA) ]
+  --[ Eq(verify(sig, body, pkA), true)
+    , Untargeted(kind)
+    , PromiseBorn($S, pid)
+    , CreatedBy($S, pid, $A) ]->
+    [ !PromiseMeta($S, pid, kind, 'none', grp, pblob, kblob, $A)
+    , PromiseSt($S, pid, 'pending', 'novalue')
+    , Out(<resp, sign(resp, ~ltkS)>) ]
+
+restriction untargeted_kinds:
+  "All k #i. Untargeted(k) @ #i ==> k = 'ext' | k = 'timer' | k = 'local'"
+
+/* `PromiseObject.external`: the external tag, a target tag, or the timer tag.
+   Emitted as a separate rule so that the untargeted-creation rule above stays
+   one rule rather than three. */
+rule Server_Mark_External_Ext:
+    [ !PromiseMeta($S, pid, 'ext', 'none', grp, pblob, kblob, cr) ]
+  --[ MarkExternal($S, pid), OnlyOnce(<'ext', $S, pid>) ]->
+    [ !ExternalP($S, pid) ]
+
+#ifdef Core
+// Server_Mark_External_Timer: omitted under -D=Core -- see the note in section 0
+#else
+rule Server_Mark_External_Timer:
+    [ !PromiseMeta($S, pid, 'timer', 'none', grp, pblob, kblob, cr) ]
+  --[ MarkExternal($S, pid), OnlyOnce(<'ext', $S, pid>) ]->
+    [ !ExternalP($S, pid) ]
+#endif
+
+
+/* ---------------------------------------------------------------------------
+   THE RESPONSE-ONLY RULES, and why they can be switched off.
+
+   The eight rules below share a shape: they leave the store EXACTLY as they
+   found it and emit a response.  `promise.get` and `task.get` are reads; the
+   `*_Idempotent`, `*_Duplicate`, `*_Settled` and `*_Noop` rules are the
+   branches where the specification answers 200 with the record that is
+   already there and writes nothing.
+
+   They are part of the protocol and they are modelled.  But they cost the
+   prover a great deal: each is a source for the very linear fact it consumes,
+   which is a cycle in the backward search, and `promise.get` in particular
+   hands back three opaque blobs, which is what opens the chains that stall
+   the precomputation.
+
+   Building with `-D=Reduced` removes them, and the reduction is SOUND for
+   every property in this theory:
+
+     (i)  they write nothing, so the reachable set of store states is
+          unchanged -- delete them from any trace and the remaining steps
+          still apply, to the same states, in the same order;
+
+     (ii) they add nothing to the adversary.  Every term they emit is already
+          derivable: a promise's `pblob` and `kblob` cross the network in the
+          `promise.create` request that carried them, `vblob` in the
+          `task.fulfill` or `promise.settle` request that carried it, and a
+          task's version in the `execute` message and the claim response.  The
+          one genuinely new term is the server's signature over the response,
+          and no rule in the theory consumes a `promise.record`,
+          `task.record`, `promise.created`, `promise.settled`,
+          `promise.callback.*` or `promise.listener.*` message.  A signature
+          nothing accepts extends no attack.
+
+   So a trace of the full theory maps to a trace of the reduced one with the
+   same action facts on the store-changing steps, and every lemma here is
+   stated over those.  Verify under `-D=Reduced`, and read the result as a
+   statement about the full theory.
+   --------------------------------------------------------------------------- */
+#ifdef Reduced
+// Server_Promise_Create_Idempotent: response-only, omitted under -D=Reduced
+#else
+/* `promiseCreate` on an id that is taken: read the store, answer 200 with the
+   record that is already there, write nothing.  This is Resonate's
+   idempotency, and it is the branch the `unique_promise_id` restriction
+   defers to. */
+rule Server_Promise_Create_Idempotent:
+let body = <'promise.create', $S, pid, kind, tgt, grp, pblob2, kblob2>
+    resp = <'promise.created', $S, pid, st>
+in
+    [ In(<body, sig>)
+    , !Server($S), !Ltk($S, ~ltkS), !Pk($A, pkA)
+    , !PromiseMeta($S, pid, kind0, tgt0, grp0, pblob, kblob, cr)
+    , PromiseSt($S, pid, st, vblob) ]
+  --[ Eq(verify(sig, body, pkA), true)
+    , PromiseCreateNoop($S, pid) ]->
+    [ PromiseSt($S, pid, st, vblob)
+    , Out(<resp, sign(resp, ~ltkS)>) ]
+#endif
+
+#ifdef Core
+// Server_Task_Create: omitted under -D=Core -- see the note in section 0
+#else
+/* `task.create`: a worker announces a promise AND claims its task in one
+   step -- the task is born already `acquired`, at version one, held by the
+   caller.  (`taskCreate`, external.lean.)  This is the root-invocation path;
+   `Server_Promise_Create_Targeted` above is the path that leaves the task on
+   offer. */
+rule Server_Task_Create:
+let body   = <'task.create', $S, pid, $W, tgt, grp, pblob, kblob>
+    nver   = vsucc('v0')
+    capTok = sign(<'cap', $S, pid, nver, $W>, ~ltkS)
+    resp   = <'task.created', $S, pid, nver, $W, pblob, kblob, capTok>
+in
+    [ In(<body, sig>)
+    , !Server($S), !Ltk($S, ~ltkS)
+    , !Pk($W, pkW), !Member($W, grp) ]
+  --[ Eq(verify(sig, body, pkW), true)
+    , PromiseBorn($S, pid)
+    , TaskBorn($S, pid, nver)
+    , CreatedBy($S, pid, $W)
+    , Acquire($S, pid, nver, $W)
+    , GrantCap($S, pid, nver, $W)
+    , LeaseHeld($S, pid, nver, $W) ]->
+    [ !PromiseMeta($S, pid, 'targeted', tgt, grp, pblob, kblob, $W)
+    , !ExternalP($S, pid)
+    , PromiseSt($S, pid, 'pending', 'novalue')
+    , TaskSt($S, pid, 'acquired', nver, $W)
+    , ExecSlot($S, pid, 'empty')
+    , Out(<resp, sign(resp, ~ltkS)>) ]
+#endif
+
+#ifdef Core
+// Server_Task_Create_Adopt: omitted under -D=Core -- see the note in section 0
+#else
+/* `taskCreate` when the id is ALREADY TAKEN and its task is on offer.  The
+   specification's second branch:
+
+       else if t.state == .pending then
+         let t := { t with state := .acquired, version := t.version + 1, ... }
+
+   Note what is missing: `taskCreate` does not carry a version, so this is an
+   acquisition WITHOUT the version check `taskAcquire` performs.  A worker that
+   knows only the promise id can take a task off the offer queue without having
+   seen the offer.  It is a distinct authorisation path and it is modelled as
+   one; the version still increments, so `claim_is_exclusive` and the fencing
+   theorem are unaffected -- what changes is who can start, not who can finish.
+
+   `taskCreate` on a fulfilled task answers 200 and writes nothing, and on an
+   acquired or suspended one answers 409; neither moves the state. */
+rule Server_Task_Create_Adopt:
+let body   = <'task.create', $S, pid, $W, tgt, grp, pblob2, kblob2>
+    nver   = vsucc(ver)
+    capTok = sign(<'cap', $S, pid, nver, $W>, ~ltkS)
+    resp   = <'task.created', $S, pid, nver, $W, pblob, kblob, capTok>
+in
+    [ In(<body, sig>)
+    , !Server($S), !Ltk($S, ~ltkS)
+    , !Pk($W, pkW), !Member($W, grp)
+    , TaskSt($S, pid, 'tpending', ver, 'nobody')
+    , PromiseSt($S, pid, 'pending', vblob)
+    , !PromiseMeta($S, pid, 'targeted', tgt0, grp, pblob, kblob, cr) ]
+  --[ Eq(verify(sig, body, pkW), true)
+    , Acquire($S, pid, nver, $W)
+    , GrantCap($S, pid, nver, $W)
+    , Revoke($S, pid, ver)
+    , AdoptedWithoutVersion($S, pid, nver, $W)
+    , LeaseHeld($S, pid, nver, $W) ]->
+    [ TaskSt($S, pid, 'acquired', nver, $W)
+    , PromiseSt($S, pid, 'pending', vblob)
+    , Out(<resp, sign(resp, ~ltkS)>) ]
+#endif
+
+#ifdef Core
+// Worker_Task_Create: omitted under -D=Core -- see the note in section 0
+#else
+/* The worker side of `task.create`: the worker announces the promise and
+   claims its task in one step.  It seals the param to its OWN group, since it
+   is both the creator and the first holder. */
+rule Worker_Task_Create:
+let pblob = senc(<'param', ~param>, ~ek)
+    kblob = aenc(<'ek', $pid, ~ek>, pk(~gsk))
+    body  = <'task.create', $S, $pid, $W, $tgt, $G, pblob, kblob>
+in
+    [ Fr(~ek), Fr(~param)
+    , !Worker($W, $G, ~gsk), !Ltk($W, ~ltkW), !Server($S) ]
+  --[ SecretParam(~param, $pid, $G)
+    , Seal(~ek, $pid, $G)
+    , ClaimSent($W, $S, $pid, vsucc('v0'))
+    , WorkerCreates($W, $pid, $G)
+    , OnlyOnce(<'task-create', $W, $pid>) ]->
+    [ Out(<body, sign(body, ~ltkW)>)
+    , WorkerSelfClaiming($W, $S, $pid, ~ek, ~param) ]
+#endif
+
+#ifdef Core
+// Schedule_Create: omitted under -D=Core -- see the note in section 0
+#else
+/* Schedules.  `nextCron`/`occurrences`/`expand` are opaque in the
+   specification; the only thing a schedule contributes to the rest of the
+   protocol is another birth site for a promise, at an id derived from the
+   schedule's template and an occurrence instant.  `expand` is a free function
+   symbol here, so occurrence ids are not client-choosable -- which is exactly
+   the `expand_ids_are_not_forgeable` assumption the specification flags as
+   load-bearing and unproved. */
+rule Schedule_Create:
+let body = <'schedule.create', $S, $sid, $tgt, $G, pblob, kblob>
+in
+    [ In(<body, sig>), !Server($S), !Pk($A, pkA) ]
+  --[ Eq(verify(sig, body, pkA), true)
+    , ScheduleBorn($S, $sid)
+    , OnlyOnce(<'schedule', $S, $sid>) ]->
+    [ !ScheduleRec($S, $sid, $tgt, $G, pblob, kblob) ]
+#endif
+
+#ifdef Core
+// Schedule_Fire: omitted under -D=Core -- see the note in section 0
+#else
+rule Schedule_Fire:
+let pid  = expand($sid, ~occ)
+    resp = <'promise.created', $S, pid, 'pending', 'novalue'>
+in
+    [ Fr(~occ)
+    , !ScheduleRec($S, $sid, $tgt, $G, pblob, kblob)
+    , !Ltk($S, ~ltkS) ]
+  --[ PromiseBorn($S, pid)
+    , TaskBorn($S, pid, 'v0')
+    , ScheduleFired($S, $sid, pid) ]->
+    [ !PromiseMeta($S, pid, 'targeted', $tgt, $G, pblob, kblob, $S)
+    , !ExternalP($S, pid)
+    , PromiseSt($S, pid, 'pending', 'novalue')
+    , TaskSt($S, pid, 'tpending', 'v0', 'nobody')
+    , ExecSlot($S, pid, 'empty')
+    , Out(<resp, sign(resp, ~ltkS)>) ]
+#endif
+
+
+// ============================================================================
+// SECTION 3 -- the offer, and the claim
+//
+//   r6 `processRetryTimeout` re-offers a pending task on the server's own
+//   cadence; the offer is the `execute` message, addressed to the promise's
+//   `resonate:target`.  A worker answers with `task.acquire`, and a successful
+//   claim mints the capability.
+// ============================================================================
+
+/* r6, `processRetryTimeout`.  Guards: the task is pending, its dispatch clock
+   is due, and its promise is still pending.  Time is abstracted, so "due" is
+   unconstrained -- see the header.  The effect is to re-arm the clock and to
+   write the `execute` entry into the task's outbox slot, replacing whatever
+   was there (`Effect.setMessage` is keyed by task id).
+
+   The offer is signed by the server: a worker must not be made to start work
+   by anyone who can put a packet on the wire. */
+rule Internal_Retry_Dispatch:
+let msg = <'execute', $S, tid, ver>
+in
+    [ TaskSt($S, tid, 'tpending', ver, 'nobody')
+    , PromiseSt($S, tid, 'pending', vblob)
+    , !PromiseMeta($S, tid, 'targeted', tgt, grp, pblob, kblob, cr)
+    , ExecSlot($S, tid, slot)
+    , !Ltk($S, ~ltkS) ]
+  --[ Dispatch($S, tid, ver)
+    , ServerOffers($S, tid, ver, tgt, grp) ]->
+    [ TaskSt($S, tid, 'tpending', ver, 'nobody')
+    , PromiseSt($S, tid, 'pending', vblob)
+    , ExecSlot($S, tid, <tgt, ver>)
+    , Out(<msg, sign(msg, ~ltkS)>) ]
+
+/* A worker sees an offer it can authenticate and answers with a claim.  The
+   claim names the worker, so the server can bind the capability to it. */
+rule Worker_Claim:
+let msg  = <'execute', $S, tid, ver>
+    body = <'task.acquire', $S, tid, ver, $W>
+in
+    [ In(<msg, sigS>)
+    , !Worker($W, $G, ~gsk), !Ltk($W, ~ltkW)
+    , !Server($S), !Pk($S, pkS) ]
+  --[ Eq(verify(sigS, msg, pkS), true)
+    , WorkerSawOffer($W, $S, tid, ver)
+    , ClaimSent($W, $S, tid, vsucc(ver)) ]->
+    [ Out(<body, sign(body, ~ltkW)>)
+    , WorkerClaiming($W, $S, tid, ver) ]
+
+/* `taskAcquire`.  Guards, in the specification's order: the task exists; its
+   promise exists; the task is pending; the promise is pending; the stored
+   version equals the version the claimant quoted.  All five are enforced by
+   pattern matching on `TaskSt` / `PromiseSt` -- a claim quoting the wrong
+   version simply does not unify, which is the 409.
+
+   Added by the identity model: the claim must be signed by the worker it
+   names, and that worker must be a member of the group the promise was sealed
+   to.  A principal outside the group could not read the param anyway; refusing
+   the claim keeps it from taking the task off the offer queue.
+
+   Effect (`external.lean`): acquired, version incremented, holder recorded,
+   dispatch disarmed, resumes cleared -- the version bump is what clears the
+   resume ledger here, since `TaskResume` facts are version-tagged.
+
+   The capability is minted here and nowhere else. */
+rule Server_Task_Acquire:
+let body   = <'task.acquire', $S, tid, ver, $W>
+    nver   = vsucc(ver)
+    capTok = sign(<'cap', $S, tid, nver, $W>, ~ltkS)
+    resp   = <'task.acquired', $S, tid, nver, $W, pblob, kblob, capTok>
+in
+    [ In(<body, sigW>)
+    , !Server($S), !Ltk($S, ~ltkS)
+    , !Pk($W, pkW), !Member($W, grp)
+    , TaskSt($S, tid, 'tpending', ver, 'nobody')
+    , PromiseSt($S, tid, 'pending', vblob)
+    , !PromiseMeta($S, tid, 'targeted', tgt, grp, pblob, kblob, cr) ]
+  --[ Eq(verify(sigW, body, pkW), true)
+    , Acquire($S, tid, nver, $W)
+    , GrantCap($S, tid, nver, $W)
+    , Revoke($S, tid, ver)
+    , LeaseHeld($S, tid, nver, $W) ]->
+    [ TaskSt($S, tid, 'acquired', nver, $W)
+    , PromiseSt($S, tid, 'pending', vblob)
+    , Out(<resp, sign(resp, ~ltkS)>) ]
+
+/* The worker takes delivery of the claim response.  The response is matched
+   in the shape it must have if the worker is to make any use of it: the key
+   blob must open under the group key to the envelope key that the param blob
+   is sealed with.  That is the model of a successful decrypt.
+
+   `!WorkerCap` is the capability as the worker holds it; `WorkerRunning` is
+   the worker's execution state, carrying the cleartext param. */
+rule Worker_Start:
+let pblob  = senc(<'param', param>, ek)
+    kblob  = aenc(<'ek', tid, ek>, pk(~gsk))
+    capm   = <'cap', $S, tid, nver, $W>
+    resp   = <'task.acquired', $S, tid, nver, $W, pblob, kblob, capTok>
+in
+    [ In(<resp, sigS>)
+    , WorkerClaiming($W, $S, tid, ver)
+    , !Worker($W, $G, ~gsk)
+    , !Pk($S, pkS) ]
+  --[ Eq(verify(sigS, resp, pkS), true)
+    , Eq(verify(capTok, capm, pkS), true)
+    , Eq(nver, vsucc(ver))
+    , WorkerHoldsCap($W, $S, tid, nver)
+    , Unseal(ek, tid)
+    , WorkerReadsParam($W, param, tid) ]->
+    [ !WorkerCap($W, $S, tid, nver, capTok)
+    , WorkerRunning($W, $S, tid, nver, ek, param) ]
+
+
+#ifdef Core
+// Worker_Start_Own: omitted under -D=Core -- see the note in section 0
+#else
+/* Delivery of the `task.create` response: same shape as `Worker_Start`. */
+rule Worker_Start_Own:
+let capm = <'cap', $S, tid, nver, $W>
+    resp = <'task.created', $S, tid, nver, $W, senc(<'param', param>, ek),
+            aenc(<'ek', tid, ek>, pk(~gsk)), capTok>
+in
+    [ In(<resp, sigS>)
+    , WorkerSelfClaiming($W, $S, tid, ek, param)
+    , !Worker($W, $G, ~gsk)
+    , !Pk($S, pkS) ]
+  --[ Eq(verify(sigS, resp, pkS), true)
+    , Eq(verify(capTok, capm, pkS), true)
+    , Eq(nver, vsucc('v0'))
+    , WorkerHoldsCap($W, $S, tid, nver)
+    , WorkerReadsParam($W, param, tid) ]->
+    [ !WorkerCap($W, $S, tid, nver, capTok)
+    , WorkerRunning($W, $S, tid, nver, ek, param) ]
+#endif
+
+
+// ============================================================================
+// SECTION 4 -- what the capability authorises
+//
+//   task.fence, task.suspend, task.complete, task.release, task.heartbeat.
+//   Every one of them carries the capability minted at the claim, and every
+//   one of them is signed by the worker the capability names.  The server
+//   checks BOTH -- possession of the token and proof that the presenter is
+//   the principal the token names -- so a stolen token is inert.
+//
+//   The specification's own guards are unchanged and are enforced by pattern
+//   matching, exactly as in `external.lean`:
+//
+//       t.state != .acquired  -> 409      (matched: 'acquired')
+//       p.state != .pending   -> 409      (matched: 'pending')
+//       t.version != version  -> 409      (matched: the same `ver`)
+// ============================================================================
+
+// ---- task.complete -- `task.fulfill` on the wire, `taskFulfill` in the
+//      specification.  The SDK calls it "complete"; the wire surface and
+//      `02-abstract/external.lean` call it "fulfill".  Same operation.
+
+/* The worker seals its result under the SAME envelope key the param arrived
+   under, so the value is readable by exactly the principals the param was:
+   the group, and the creator who chose the key. */
+rule Worker_Complete:
+let vblob = senc(<'value', ~value>, ek)
+    body  = <'task.fulfill', $S, tid, ver, $W, st, vblob, capTok>
+in
+    [ WorkerRunning($W, $S, tid, ver, ek, param)
+    , !WorkerCap($W, $S, tid, ver, capTok)
+    , !Worker($W, $G, ~gsk)
+    , !Ltk($W, ~ltkW)
+    , In(st)
+    , Fr(~value) ]
+  --[ Settable(st)
+    , SecretValue(~value, tid, ek)
+    , WorkerCompletes($W, $S, tid, ver, st) ]->
+    [ Out(<body, sign(body, ~ltkW)>) ]
+
+/* `taskFulfill`, plus the `setSettled` it ends with: the promise is settled
+   and, because a targeted promise always has a task, that task is fulfilled
+   in the same step (`TaskObject.fulfill` -- holder, ttl, lease and dispatch
+   all cleared, version kept). */
+rule Server_Task_Complete:
+let capm = <'cap', $S, tid, ver, $W>
+    body = <'task.fulfill', $S, tid, ver, $W, st, vblob, capTok>
+    resp = <'task.completed', $S, tid, st>
+in
+    [ In(<body, sigW>)
+    , !Server($S), !Ltk($S, ~ltkS), !Pk($W, pkW)
+    , TaskSt($S, tid, 'acquired', ver, $W)
+    , PromiseSt($S, tid, 'pending', 'novalue')
+    , !PromiseMeta($S, tid, 'targeted', tgt, grp, pblob, kblob, cr) ]
+  --[ Eq(verify(sigW, body, pkW), true)
+    , Eq(verify(capTok, capm, pk(~ltkS)), true)
+    , Settable(st)
+    , UsedCap($S, tid, ver, $W, 'complete')
+    , CompletedBy($S, tid, ver, $W)
+    , Settled($S, tid, st, vblob)
+    , TaskFulfilled($S, tid, ver) ]->
+    [ TaskSt($S, tid, 'fulfilled', ver, 'nobody')
+    , PromiseSt($S, tid, st, vblob)
+    , Out(<resp, sign(resp, ~ltkS)>) ]
+
+// ---- task.fence ------------------------------------------------------------
+
+/* `taskFence` with a `create` action.  The fence is what makes a worker's
+   writes conditional on it still holding the lease: the inner
+   `promise.create` runs only if the task is still acquired at the version the
+   worker quotes.  `req.action.targetId == req.id` is a 400 -- a fence may not
+   act on its own promise -- which is the `Neq` below.
+
+   The child is created targeted, so it is born with a task of its own and
+   goes on offer.  This is how a durable execution spawns a child invocation. */
+rule Server_Task_Fence_Create:
+let capm = <'cap', $S, tid, ver, $W>
+    body = <'task.fence', $S, tid, ver, $W, 'create',
+            <cid, 'targeted', ctgt, cgrp, cpblob, ckblob>, capTok>
+    resp = <'task.fenced', $S, tid, ver, 'create', cid>
+in
+    [ In(<body, sigW>)
+    , !Server($S), !Ltk($S, ~ltkS), !Pk($W, pkW)
+    , TaskSt($S, tid, 'acquired', ver, $W)
+    , PromiseSt($S, tid, 'pending', 'novalue')
+    , !PromiseMeta($S, tid, 'targeted', tgt, grp, pblob, kblob, cr) ]
+  --[ Eq(verify(sigW, body, pkW), true)
+    , Eq(verify(capTok, capm, pk(~ltkS)), true)
+    , Neq(cid, tid)
+    , UsedCap($S, tid, ver, $W, 'fence')
+    , FencedCreate($S, tid, ver, $W, cid)
+    , PromiseBorn($S, cid)
+    , TaskBorn($S, cid, 'v0')
+    , CreatedBy($S, cid, $W)
+    , LeaseHeld($S, tid, ver, $W) ]->
+    [ TaskSt($S, tid, 'acquired', ver, $W)
+    , PromiseSt($S, tid, 'pending', 'novalue')
+    , !PromiseMeta($S, cid, 'targeted', ctgt, cgrp, cpblob, ckblob, $W)
+    , !ExternalP($S, cid)
+    , PromiseSt($S, cid, 'pending', 'novalue')
+    , TaskSt($S, cid, 'tpending', 'v0', 'nobody')
+    , ExecSlot($S, cid, 'empty')
+    , Out(<resp, sign(resp, ~ltkS)>) ]
+
+/* The worker's side of a fenced create: it mints a child envelope key, seals
+   the child's param to the child's group, and remembers the key so that it
+   can read the child's value when it is unblocked. */
+rule Worker_Fence_Create:
+let cpblob = senc(<'param', ~cparam>, ~cek)
+    ckblob = aenc(<'ek', $cid, ~cek>, pkCG)
+    body   = <'task.fence', $S, tid, ver, $W, 'create',
+              <$cid, 'targeted', $ctgt, $CG, cpblob, ckblob>, capTok>
+in
+    [ WorkerRunning($W, $S, tid, ver, ek, param)
+    , !WorkerCap($W, $S, tid, ver, capTok)
+    , !Ltk($W, ~ltkW), !Pk($CG, pkCG)
+    , Fr(~cek), Fr(~cparam) ]
+  --[ SecretParam(~cparam, $cid, $CG)
+    , Seal(~cek, $cid, $CG)
+    , WorkerFences($W, $S, tid, ver, $cid)
+    , OnlyOnce(<'fence-create', $W, tid, $cid>) ]->
+    [ Out(<body, sign(body, ~ltkW)>)
+    , WorkerRunning($W, $S, tid, ver, ek, param)
+    , WorkerChild($W, $S, tid, $cid, ~cek, ~cparam) ]
+
+/* `taskFence` with a `settle` action: the inner call is `promiseSettle`, run
+   under the same fence.  Two rules, because `setSettled` fulfils the target's
+   task when the target is targeted and there is no task to fulfil when it is
+   not (`consistent_task_iff_targeted_promise`). */
+rule Server_Task_Fence_Settle_Untargeted:
+let capm = <'cap', $S, tid, ver, $W>
+    body = <'task.fence', $S, tid, ver, $W, 'settle', <cid, st, cvblob>, capTok>
+    resp = <'task.fenced', $S, tid, ver, 'settle', cid>
+in
+    [ In(<body, sigW>)
+    , !Server($S), !Ltk($S, ~ltkS), !Pk($W, pkW)
+    , TaskSt($S, tid, 'acquired', ver, $W)
+    , PromiseSt($S, tid, 'pending', 'novalue')
+    , PromiseSt($S, cid, 'pending', 'novalue')
+    , !PromiseMeta($S, cid, ckind, ctgt, cgrp, cpblob, ckblob, ccr) ]
+  --[ Eq(verify(sigW, body, pkW), true)
+    , Eq(verify(capTok, capm, pk(~ltkS)), true)
+    , Neq(cid, tid)
+    , Untargeted(ckind)
+    , Settable(st)
+    , UsedCap($S, tid, ver, $W, 'fence')
+    , FencedSettle($S, tid, ver, $W, cid)
+    , Settled($S, cid, st, cvblob)
+    , LeaseHeld($S, tid, ver, $W) ]->
+    [ TaskSt($S, tid, 'acquired', ver, $W)
+    , PromiseSt($S, tid, 'pending', 'novalue')
+    , PromiseSt($S, cid, st, cvblob)
+    , Out(<resp, sign(resp, ~ltkS)>) ]
+
+rule Server_Task_Fence_Settle_Targeted:
+let capm = <'cap', $S, tid, ver, $W>
+    body = <'task.fence', $S, tid, ver, $W, 'settle', <cid, st, cvblob>, capTok>
+    resp = <'task.fenced', $S, tid, ver, 'settle', cid>
+in
+    [ In(<body, sigW>)
+    , !Server($S), !Ltk($S, ~ltkS), !Pk($W, pkW)
+    , TaskSt($S, tid, 'acquired', ver, $W)
+    , PromiseSt($S, tid, 'pending', 'novalue')
+    , PromiseSt($S, cid, 'pending', 'novalue')
+    , TaskSt($S, cid, ctst, cver, cholder)
+    , !PromiseMeta($S, cid, 'targeted', ctgt, cgrp, cpblob, ckblob, ccr) ]
+  --[ Eq(verify(sigW, body, pkW), true)
+    , Eq(verify(capTok, capm, pk(~ltkS)), true)
+    , Neq(cid, tid)
+    , Settable(st)
+    , UsedCap($S, tid, ver, $W, 'fence')
+    , FencedSettle($S, tid, ver, $W, cid)
+    , Settled($S, cid, st, cvblob)
+    , TaskFulfilled($S, cid, cver)
+    , SettledTargetedBy($S, cid, $W)
+    , LeaseHeld($S, tid, ver, $W) ]->
+    [ TaskSt($S, tid, 'acquired', ver, $W)
+    , PromiseSt($S, tid, 'pending', 'novalue')
+    , PromiseSt($S, cid, st, cvblob)
+    , TaskSt($S, cid, 'fulfilled', cver, 'nobody')
+    , Out(<resp, sign(resp, ~ltkS)>) ]
+
+// ---- task.release ----------------------------------------------------------
+
+/* `taskRelease`: the holder gives the lease back.  The task returns to pending
+   AT THE SAME VERSION, with its dispatch re-armed.  The capability the worker
+   holds names that version, but it names it together with the state
+   `acquired`, which the task no longer has -- so the released capability
+   authorises nothing until someone claims again, and a claim bumps the
+   version. */
+rule Server_Task_Release:
+let capm = <'cap', $S, tid, ver, $W>
+    body = <'task.release', $S, tid, ver, $W, capTok>
+    resp = <'task.released', $S, tid, ver>
+in
+    [ In(<body, sigW>)
+    , !Server($S), !Ltk($S, ~ltkS), !Pk($W, pkW)
+    , TaskSt($S, tid, 'acquired', ver, $W)
+    , PromiseSt($S, tid, 'pending', vblob) ]
+  --[ Eq(verify(sigW, body, pkW), true)
+    , Eq(verify(capTok, capm, pk(~ltkS)), true)
+    , UsedCap($S, tid, ver, $W, 'release')
+    , Released($S, tid, ver, $W)
+    , Revoke($S, tid, ver) ]->
+    [ TaskSt($S, tid, 'tpending', ver, 'nobody')
+    , PromiseSt($S, tid, 'pending', vblob)
+    , Out(<resp, sign(resp, ~ltkS)>) ]
+
+rule Worker_Release:
+let body = <'task.release', $S, tid, ver, $W, capTok>
+in
+    [ WorkerRunning($W, $S, tid, ver, ek, param)
+    , !WorkerCap($W, $S, tid, ver, capTok)
+    , !Ltk($W, ~ltkW) ]
+  --[ WorkerReleases($W, $S, tid, ver) ]->
+    [ Out(<body, sign(body, ~ltkW)>) ]
+
+// ---- task.heartbeat --------------------------------------------------------
+
+/* `heartbeatOne`.  This is the one operation the specification already binds
+   to an identity: it checks `t.pid == some pid` as well as the version.  Its
+   only effect is to push `expiresAt` out, which is a temporal field and so
+   carries no value here -- the rule is kept because WHO may refresh a lease is
+   a security question even when the refresh itself is invisible. */
+rule Server_Task_Heartbeat:
+let capm = <'cap', $S, tid, ver, $W>
+    body = <'task.heartbeat', $S, tid, ver, $W, capTok>
+    resp = <'task.heartbeat.ok', $S, tid, ver>
+in
+    [ In(<body, sigW>)
+    , !Server($S), !Ltk($S, ~ltkS), !Pk($W, pkW)
+    , TaskSt($S, tid, 'acquired', ver, $W)
+    , PromiseSt($S, tid, 'pending', vblob) ]
+  --[ Eq(verify(sigW, body, pkW), true)
+    , Eq(verify(capTok, capm, pk(~ltkS)), true)
+    , UsedCap($S, tid, ver, $W, 'heartbeat')
+    , Heartbeat($S, tid, ver, $W)
+    , LeaseHeld($S, tid, ver, $W) ]->
+    [ TaskSt($S, tid, 'acquired', ver, $W)
+    , PromiseSt($S, tid, 'pending', vblob)
+    , Out(<resp, sign(resp, ~ltkS)>) ]
+
+rule Worker_Heartbeat:
+let body = <'task.heartbeat', $S, tid, ver, $W, capTok>
+in
+    [ WorkerRunning($W, $S, tid, ver, ek, param)
+    , !WorkerCap($W, $S, tid, ver, capTok)
+    , !Ltk($W, ~ltkW) ]
+  --[ WorkerHeartbeats($W, $S, tid, ver) ]->
+    [ Out(<body, sign(body, ~ltkW)>)
+    , WorkerRunning($W, $S, tid, ver, ek, param) ]
+
+
+// ============================================================================
+// SECTION 5 -- obligations: callbacks and listeners
+//
+//   A callback is an obligation to WAKE A TASK when a promise settles; a
+//   listener is an obligation to DELIVER A RECORD to an address.  Both may be
+//   registered only on an `external` promise, both are sets, and both are
+//   discharged by an internal drain step (r4 and r3).
+// ============================================================================
+
+#ifdef Core
+// Server_Promise_Register_Callback: omitted under -D=Core -- see the note in section 0
+#else
+/* `promiseRegisterCallback`, the branch that writes.  Guards, in order:
+   awaited != awaiter (400); awaited exists (404); awaiter exists (422);
+   awaiter carries `resonate:target` (422); awaited is external (422); awaited
+   pending and awaiter pending -- only then is the callback recorded. */
+rule Server_Promise_Register_Callback:
+let body = <'promise.register_callback', $S, awaited, awaiter>
+    resp = <'promise.callback.registered', $S, awaited, awaiter>
+in
+    [ In(<body, sig>)
+    , !Server($S), !Ltk($S, ~ltkS), !Pk($A, pkA)
+    , !ExternalP($S, awaited)
+    , PromiseSt($S, awaited, 'pending', avblob)
+    , PromiseSt($S, awaiter, 'pending', wvblob)
+    , !PromiseMeta($S, awaiter, 'targeted', wtgt, wgrp, wpblob, wkblob, wcr) ]
+  --[ Eq(verify(sig, body, pkA), true)
+    , Neq(awaited, awaiter)
+    , CallbackAdded($S, awaited, awaiter)
+    , RegisterCallback($S, awaited, awaiter, $A) ]->
+    [ PromiseSt($S, awaited, 'pending', avblob)
+    , PromiseSt($S, awaiter, 'pending', wvblob)
+    , Callback($S, awaited, awaiter)
+    , !CallbackReg($S, awaited, awaiter)
+    , Out(<resp, sign(resp, ~ltkS)>) ]
+#endif
+
+#ifdef Reduced
+// Server_Promise_Register_Callback_Duplicate: response-only, omitted under -D=Reduced
+#else
+/* The idempotent branch: the pair is already registered, so answer 200 and
+   write nothing (`PromiseObject.addCallback` returns `p` unchanged). */
+rule Server_Promise_Register_Callback_Duplicate:
+let body = <'promise.register_callback', $S, awaited, awaiter>
+    resp = <'promise.callback.registered', $S, awaited, awaiter>
+in
+    [ In(<body, sig>)
+    , !Server($S), !Ltk($S, ~ltkS), !Pk($A, pkA)
+    , !CallbackReg($S, awaited, awaiter) ]
+  --[ Eq(verify(sig, body, pkA), true)
+    , CallbackNoop($S, awaited, awaiter) ]->
+    [ Out(<resp, sign(resp, ~ltkS)>) ]
+#endif
+
+#ifdef Reduced
+// Server_Promise_Register_Callback_Settled: response-only, omitted under -D=Reduced
+#else
+/* The settled branch: an awaited promise that has already settled takes no
+   callback -- the caller is told the outcome instead.  Writing nothing here is
+   what keeps `monotone_promise_callbacks_shrink_once_settled` true. */
+rule Server_Promise_Register_Callback_Settled:
+let body = <'promise.register_callback', $S, awaited, awaiter>
+    resp = <'promise.callback.settled', $S, awaited, st>
+in
+    [ In(<body, sig>)
+    , !Server($S), !Ltk($S, ~ltkS), !Pk($A, pkA)
+    , !ExternalP($S, awaited)
+    , PromiseSt($S, awaited, st, vblob) ]
+  --[ Eq(verify(sig, body, pkA), true)
+    , Neq(st, 'pending')
+    , CallbackNoop($S, awaited, awaiter) ]->
+    [ PromiseSt($S, awaited, st, vblob)
+    , Out(<resp, sign(resp, ~ltkS)>) ]
+#endif
+
+/* `promiseRegisterListener`, the branch that writes.  `addressValid` (400) is
+   modelled by the address being a public name; the awaited promise must be
+   external (422) and pending.  Unlike a callback, a listener is registered on
+   behalf of an ADDRESS, not a task, so there is no awaiter to check.
+
+   `UnblockSlot` is the outbox slot for this listener -- the outbox is keyed by
+   `<promise, address>` for unblocks, so one slot per registered listener. */
+rule Server_Promise_Register_Listener:
+let body = <'promise.register_listener', $S, awaited, $addr>
+    resp = <'promise.listener.registered', $S, awaited, $addr>
+in
+    [ In(<body, sig>)
+    , !Server($S), !Ltk($S, ~ltkS), !Pk($A, pkA)
+    , !ExternalP($S, awaited)
+    , PromiseSt($S, awaited, 'pending', avblob) ]
+  --[ Eq(verify(sig, body, pkA), true)
+    , ListenerAdded($S, awaited, $addr)
+    , RegisterListener($S, awaited, $addr, $A) ]->
+    [ PromiseSt($S, awaited, 'pending', avblob)
+    , Listener($S, awaited, $addr)
+    , !ListenerReg($S, awaited, $addr)
+    , UnblockSlot($S, awaited, $addr, 'empty')
+    , Out(<resp, sign(resp, ~ltkS)>) ]
+
+#ifdef Reduced
+// Server_Promise_Register_Listener_Duplicate: response-only, omitted under -D=Reduced
+#else
+rule Server_Promise_Register_Listener_Duplicate:
+let body = <'promise.register_listener', $S, awaited, $addr>
+    resp = <'promise.listener.registered', $S, awaited, $addr>
+in
+    [ In(<body, sig>)
+    , !Server($S), !Ltk($S, ~ltkS), !Pk($A, pkA)
+    , !ListenerReg($S, awaited, $addr) ]
+  --[ Eq(verify(sig, body, pkA), true)
+    , ListenerNoop($S, awaited, $addr) ]->
+    [ Out(<resp, sign(resp, ~ltkS)>) ]
+#endif
+
+#ifdef Reduced
+// Server_Promise_Register_Listener_Settled: response-only, omitted under -D=Reduced
+#else
+rule Server_Promise_Register_Listener_Settled:
+let body = <'promise.register_listener', $S, awaited, $addr>
+    resp = <'promise.listener.settled', $S, awaited, st>
+in
+    [ In(<body, sig>)
+    , !Server($S), !Ltk($S, ~ltkS), !Pk($A, pkA)
+    , !ExternalP($S, awaited)
+    , PromiseSt($S, awaited, st, vblob) ]
+  --[ Eq(verify(sig, body, pkA), true)
+    , Neq(st, 'pending')
+    , ListenerNoop($S, awaited, $addr) ]->
+    [ PromiseSt($S, awaited, st, vblob)
+    , Out(<resp, sign(resp, ~ltkS)>) ]
+#endif
+
+/* A client registers a listener on a promise it created, at its own address,
+   and remembers the envelope key so that it can open the value when the
+   `unblock` arrives. */
+rule Client_Register_Listener:
+let body = <'promise.register_listener', $S, pid, $addr>
+in
+    [ ClientAwaits($C, $S, pid, ek, param)
+    , !Ltk($C, ~ltkC) ]
+  --[ ClientListens($C, $S, pid, $addr) ]->
+    [ Out(<body, sign(body, ~ltkC)>)
+    , ClientListening($C, $S, pid, $addr, ek, param) ]
+
+
+// ============================================================================
+// SECTION 6 -- task.suspend
+//
+//   The worker parks its task on one or more awaited promises.  Guards
+//   (`taskSuspend`, external.lean):
+//
+//     actions empty                     -> 400
+//     any awaited == the task's own id  -> 400
+//     duplicate awaited ids             -> 400
+//     task missing / promise missing    -> 404 / 409
+//     task not acquired                 -> 409
+//     task's promise not pending        -> 409
+//     version mismatch                  -> 409
+//     any awaited missing or not external -> 422
+//     ANY awaited already settled       -> 300, resumes cleared, STILL ACQUIRED
+//     otherwise                         -> callbacks registered, task suspended
+//
+//   Arity one and arity two are both given, with every branch.  Higher arities
+//   are structurally identical: `checkAwaited` is a fold whose only output is
+//   "did any of them settle", and `registerAwaited` is a map.
+// ============================================================================
+
+// ---- arity 1, the suspending branch ----------------------------------------
+
+rule Server_Task_Suspend_1:
+let capm = <'cap', $S, tid, ver, $W>
+    body = <'task.suspend', $S, tid, ver, $W, <a1>, capTok>
+    resp = <'task.suspended', $S, tid, ver>
+in
+    [ In(<body, sigW>)
+    , !Server($S), !Ltk($S, ~ltkS), !Pk($W, pkW)
+    , TaskSt($S, tid, 'acquired', ver, $W)
+    , PromiseSt($S, tid, 'pending', 'novalue')
+    , !ExternalP($S, a1)
+    , PromiseSt($S, a1, 'pending', v1) ]
+  --[ Eq(verify(sigW, body, pkW), true)
+    , Eq(verify(capTok, capm, pk(~ltkS)), true)
+    , Neq(a1, tid)
+    , UsedCap($S, tid, ver, $W, 'suspend')
+    , Suspended($S, tid, ver, $W)
+    , Revoke($S, tid, ver)
+    , CallbackAdded($S, a1, tid)
+    , RegisterCallback($S, a1, tid, $W) ]->
+    [ TaskSt($S, tid, 'suspended', ver, 'nobody')
+    , PromiseSt($S, tid, 'pending', 'novalue')
+    , PromiseSt($S, a1, 'pending', v1)
+    , Callback($S, a1, tid)
+    , !CallbackReg($S, a1, tid)
+    , Out(<resp, sign(resp, ~ltkS)>) ]
+
+// ---- arity 1, the 300 branch: the awaited promise has already settled -------
+
+/* 300, not 200.  The task stays ACQUIRED and keeps its lease -- the worker is
+   told to carry on rather than to park -- and `resumes` is cleared.  Getting
+   this branch wrong is how a runtime parks a task that will never be woken,
+   because the settlement that would have woken it has already happened. */
+rule Server_Task_Suspend_1_AlreadySettled:
+let capm = <'cap', $S, tid, ver, $W>
+    body = <'task.suspend', $S, tid, ver, $W, <a1>, capTok>
+    resp = <'task.suspend.retry', $S, tid, ver>
+in
+    [ In(<body, sigW>)
+    , !Server($S), !Ltk($S, ~ltkS), !Pk($W, pkW)
+    , TaskSt($S, tid, 'acquired', ver, $W)
+    , PromiseSt($S, tid, 'pending', 'novalue')
+    , !ExternalP($S, a1)
+    , PromiseSt($S, a1, st1, v1) ]
+  --[ Eq(verify(sigW, body, pkW), true)
+    , Eq(verify(capTok, capm, pk(~ltkS)), true)
+    , Neq(a1, tid)
+    , Neq(st1, 'pending')
+    , UsedCap($S, tid, ver, $W, 'suspend')
+    , SuspendRefused($S, tid, ver, $W)
+    , LeaseHeld($S, tid, ver, $W) ]->
+    [ TaskSt($S, tid, 'acquired', ver, $W)
+    , PromiseSt($S, tid, 'pending', 'novalue')
+    , PromiseSt($S, a1, st1, v1)
+    , Out(<resp, sign(resp, ~ltkS)>) ]
+
+// ---- arity 2 ---------------------------------------------------------------
+
+#ifdef Core
+// Server_Task_Suspend_2: omitted under -D=Core -- see the note in section 0
+#else
+rule Server_Task_Suspend_2:
+let capm = <'cap', $S, tid, ver, $W>
+    body = <'task.suspend', $S, tid, ver, $W, <a1, a2>, capTok>
+    resp = <'task.suspended', $S, tid, ver>
+in
+    [ In(<body, sigW>)
+    , !Server($S), !Ltk($S, ~ltkS), !Pk($W, pkW)
+    , TaskSt($S, tid, 'acquired', ver, $W)
+    , PromiseSt($S, tid, 'pending', 'novalue')
+    , !ExternalP($S, a1), !ExternalP($S, a2)
+    , PromiseSt($S, a1, 'pending', v1)
+    , PromiseSt($S, a2, 'pending', v2) ]
+  --[ Eq(verify(sigW, body, pkW), true)
+    , Eq(verify(capTok, capm, pk(~ltkS)), true)
+    , Neq(a1, tid), Neq(a2, tid), Neq(a1, a2)
+    , UsedCap($S, tid, ver, $W, 'suspend')
+    , Suspended($S, tid, ver, $W)
+    , Revoke($S, tid, ver)
+    , CallbackAdded($S, a1, tid)
+    , CallbackAdded($S, a2, tid)
+    , RegisterCallback($S, a1, tid, $W)
+    , RegisterCallback($S, a2, tid, $W) ]->
+    [ TaskSt($S, tid, 'suspended', ver, 'nobody')
+    , PromiseSt($S, tid, 'pending', 'novalue')
+    , PromiseSt($S, a1, 'pending', v1)
+    , PromiseSt($S, a2, 'pending', v2)
+    , Callback($S, a1, tid), !CallbackReg($S, a1, tid)
+    , Callback($S, a2, tid), !CallbackReg($S, a2, tid)
+    , Out(<resp, sign(resp, ~ltkS)>) ]
+#endif
+
+#ifdef Core
+// Server_Task_Suspend_2_AlreadySettled: omitted under -D=Core -- see the note in section 0
+#else
+/* `checkAwaited` folds over the whole list: if ANY awaited promise has
+   settled, the answer is 300 and NOTHING is registered -- not even for the
+   awaited promises that are still pending.  That all-or-nothing is the
+   atomicity the specification's `some true` branch encodes, and it is why
+   this rule cannot be decomposed into two arity-one suspends. */
+rule Server_Task_Suspend_2_AlreadySettled:
+let capm = <'cap', $S, tid, ver, $W>
+    body = <'task.suspend', $S, tid, ver, $W, <a1, a2>, capTok>
+    resp = <'task.suspend.retry', $S, tid, ver>
+in
+    [ In(<body, sigW>)
+    , !Server($S), !Ltk($S, ~ltkS), !Pk($W, pkW)
+    , TaskSt($S, tid, 'acquired', ver, $W)
+    , PromiseSt($S, tid, 'pending', 'novalue')
+    , !ExternalP($S, a1), !ExternalP($S, a2)
+    , PromiseSt($S, a1, st1, v1)
+    , PromiseSt($S, a2, st2, v2) ]
+  --[ Eq(verify(sigW, body, pkW), true)
+    , Eq(verify(capTok, capm, pk(~ltkS)), true)
+    , Neq(a1, tid), Neq(a2, tid), Neq(a1, a2)
+    , Neq(st1, 'pending')
+    , UsedCap($S, tid, ver, $W, 'suspend')
+    , SuspendRefused($S, tid, ver, $W)
+    , LeaseHeld($S, tid, ver, $W) ]->
+    [ TaskSt($S, tid, 'acquired', ver, $W)
+    , PromiseSt($S, tid, 'pending', 'novalue')
+    , PromiseSt($S, a1, st1, v1)
+    , PromiseSt($S, a2, st2, v2)
+    , Out(<resp, sign(resp, ~ltkS)>) ]
+#endif
+
+/* The worker's side.  A worker that suspends gives up its execution state:
+   the task is parked on the server, and when it is woken it goes back on
+   offer and may be claimed by a DIFFERENT worker of the group.  That is why
+   the param has to be readable by the group and not by one worker. */
+rule Worker_Suspend_1:
+let body = <'task.suspend', $S, tid, ver, $W, <$a1>, capTok>
+in
+    [ WorkerRunning($W, $S, tid, ver, ek, param)
+    , !WorkerCap($W, $S, tid, ver, capTok)
+    , !Ltk($W, ~ltkW) ]
+  --[ WorkerSuspends($W, $S, tid, ver, $a1) ]->
+    [ Out(<body, sign(body, ~ltkW)>) ]
+
+#ifdef Core
+// Worker_Suspend_2: omitted under -D=Core -- see the note in section 0
+#else
+rule Worker_Suspend_2:
+let body = <'task.suspend', $S, tid, ver, $W, <$a1, $a2>, capTok>
+in
+    [ WorkerRunning($W, $S, tid, ver, ek, param)
+    , !WorkerCap($W, $S, tid, ver, capTok)
+    , !Ltk($W, ~ltkW) ]
+  --[ WorkerSuspends($W, $S, tid, ver, $a1) ]->
+    [ Out(<body, sign(body, ~ltkW)>) ]
+#endif
+
+
+// ============================================================================
+// SECTION 7 -- promise.settle, promise.get, task.halt, task.continue
+//
+//   These are the operations the specification leaves UNGATED -- no version,
+//   no lease, no identity.  They are modelled exactly as they are, and the
+//   consequences are the subject of lemmas 12 and 13 below.
+// ============================================================================
+
+/* `promiseSettle`.  The specification checks `settable` and that the promise
+   is pending.  It does NOT check who is asking.  Any principal that knows a
+   promise id may settle it.  For an external promise -- a webhook, a human
+   approval -- that IS the design.  For a TARGETED promise it means a
+   settlement can land while a worker holds the lease, which is what
+   `Server_Promise_Settle_Targeted` below models.
+
+   Compile with `-D=FencedSettle` to remove that rule and gate targeted
+   promises behind the fence instead. */
+rule Server_Promise_Settle_Untargeted:
+let body = <'promise.settle', $S, pid, st, vblob>
+    resp = <'promise.settled', $S, pid, st>
+in
+    [ In(<body, sig>)
+    , !Server($S), !Ltk($S, ~ltkS), !Pk($A, pkA)
+    , PromiseSt($S, pid, 'pending', 'novalue')
+    , !PromiseMeta($S, pid, kind, tgt, grp, pblob, kblob, cr) ]
+  --[ Eq(verify(sig, body, pkA), true)
+    , Untargeted(kind)
+    , Settable(st)
+    , Settled($S, pid, st, vblob)
+    , SettledBy($S, pid, $A) ]->
+    [ PromiseSt($S, pid, st, vblob)
+    , Out(<resp, sign(resp, ~ltkS)>) ]
+
+#ifdef FencedSettle
+// `Server_Promise_Settle_Targeted` is removed under -D=FencedSettle: a targeted
+// promise may then be settled only through the capability-gated task API.
+#else
+rule Server_Promise_Settle_Targeted:
+let body = <'promise.settle', $S, pid, st, vblob>
+    resp = <'promise.settled', $S, pid, st>
+in
+    [ In(<body, sig>)
+    , !Server($S), !Ltk($S, ~ltkS), !Pk($A, pkA)
+    , PromiseSt($S, pid, 'pending', 'novalue')
+    , TaskSt($S, pid, tst, tver, holder)
+    , !PromiseMeta($S, pid, 'targeted', tgt, grp, pblob, kblob, cr) ]
+  --[ Eq(verify(sig, body, pkA), true)
+    , Settable(st)
+    , Settled($S, pid, st, vblob)
+    , SettledBy($S, pid, $A)
+    , SettledTargetedBy($S, pid, $A)
+    , TaskFulfilled($S, pid, tver) ]->
+    [ PromiseSt($S, pid, st, vblob)
+    , TaskSt($S, pid, 'fulfilled', tver, 'nobody')
+    , Out(<resp, sign(resp, ~ltkS)>) ]
+#endif
+
+#ifdef Reduced
+// Server_Promise_Settle_Noop: response-only, omitted under -D=Reduced
+#else
+/* The already-settled branch: 200 with the record as it stands, no write.
+   This is what makes settlement idempotent and one-way. */
+rule Server_Promise_Settle_Noop:
+let body = <'promise.settle', $S, pid, st2, vblob2>
+    resp = <'promise.settled', $S, pid, st>
+in
+    [ In(<body, sig>)
+    , !Server($S), !Ltk($S, ~ltkS), !Pk($A, pkA)
+    , PromiseSt($S, pid, st, vblob) ]
+  --[ Eq(verify(sig, body, pkA), true)
+    , Neq(st, 'pending')
+    , Settable(st2)
+    , SettleNoop($S, pid) ]->
+    [ PromiseSt($S, pid, st, vblob)
+    , Out(<resp, sign(resp, ~ltkS)>) ]
+#endif
+
+#ifdef Reduced
+// Server_Promise_Get: response-only, omitted under -D=Reduced
+#else
+/* `promiseGet`.  The read channel: it hands back the stored record, blobs and
+   all.  It is ungated, so it is the cheapest way for anyone who knows an id
+   to obtain `pblob` and `kblob`.  Modelling it is what makes the secrecy
+   lemmas mean something -- they have to hold even though the ciphertexts are
+   free for the asking. */
+rule Server_Promise_Get:
+let body = <'promise.get', $S, pid>
+    resp = <'promise.record', $S, pid, st, kind, tgt, grp, pblob, kblob, vblob>
+in
+    [ In(body)
+    , !Server($S), !Ltk($S, ~ltkS)
+    , PromiseSt($S, pid, st, vblob)
+    , !PromiseMeta($S, pid, kind, tgt, grp, pblob, kblob, cr) ]
+  --[ PromiseRead($S, pid) ]->
+    [ PromiseSt($S, pid, st, vblob)
+    , Out(<resp, sign(resp, ~ltkS)>) ]
+#endif
+
+#ifdef Reduced
+// Server_Task_Get: response-only, omitted under -D=Reduced
+#else
+/* `taskGet`. */
+rule Server_Task_Get:
+let body = <'task.get', $S, tid>
+    resp = <'task.record', $S, tid, tst, ver, holder>
+in
+    [ In(body)
+    , !Server($S), !Ltk($S, ~ltkS)
+    , TaskSt($S, tid, tst, ver, holder) ]
+  --[ TaskRead($S, tid) ]->
+    [ TaskSt($S, tid, tst, ver, holder)
+    , Out(<resp, sign(resp, ~ltkS)>) ]
+#endif
+
+/* `taskHalt`.  Any state but `fulfilled` may be halted; there is no version
+   and no lease check in the specification, so any principal may halt any
+   task.  Halting clears the holder -- it revokes a live lease. */
+rule Server_Task_Halt:
+let body = <'task.halt', $S, tid>
+    resp = <'task.halted', $S, tid>
+in
+    [ In(<body, sig>)
+    , !Server($S), !Ltk($S, ~ltkS), !Pk($A, pkA)
+    , TaskSt($S, tid, tst, ver, holder)
+    , PromiseSt($S, tid, 'pending', vblob) ]
+  --[ Eq(verify(sig, body, pkA), true)
+    , Neq(tst, 'fulfilled')
+    , Neq(tst, 'halted')
+    , Halted($S, tid, ver, $A)
+    , Revoke($S, tid, ver) ]->
+    [ TaskSt($S, tid, 'halted', ver, 'nobody')
+    , PromiseSt($S, tid, 'pending', vblob)
+    , Out(<resp, sign(resp, ~ltkS)>) ]
+
+/* `taskContinue`: halted back to pending, dispatch re-armed, version kept. */
+rule Server_Task_Continue:
+let body = <'task.continue', $S, tid>
+    resp = <'task.continued', $S, tid>
+in
+    [ In(<body, sig>)
+    , !Server($S), !Ltk($S, ~ltkS), !Pk($A, pkA)
+    , TaskSt($S, tid, 'halted', ver, 'nobody')
+    , PromiseSt($S, tid, 'pending', vblob) ]
+  --[ Eq(verify(sig, body, pkA), true)
+    , Continued($S, tid, ver, $A) ]->
+    [ TaskSt($S, tid, 'tpending', ver, 'nobody')
+    , PromiseSt($S, tid, 'pending', vblob)
+    , Out(<resp, sign(resp, ~ltkS)>) ]
+
+
+// ============================================================================
+// SECTION 8 -- the internal steps
+//
+//   r1 the promise timeout, r3 the listener drain, r4 the callback drain,
+//   r5 the lease timeout.  (r6, the retry dispatch, is in section 3 where the
+//   offer it produces is.)  Nobody asks for these; the server takes them on
+//   its own initiative, and they take the FORCED reads -- they materialise
+//   under both readings of the machine.
+// ============================================================================
+
+#ifdef Core
+// Internal_Promise_Timeout_Timer: omitted under -D=Core -- see the note in section 0
+#else
+/* r1, `processPromiseTimeout` = `touchPromise`, whose whole content is
+   `PromiseObject.project`: a pending promise past its deadline settles, as
+   `resolved` if it is a timer and as `rejectedTimedout` otherwise, WITH NO
+   VALUE.  `rejectedTimedout` is server-owned -- `PromiseState.settable`
+   refuses it to clients -- so these three rules are the only writers of it.
+
+   A timer is never targeted (`Tags.timerTargeted` is refused at every birth
+   door), so the timer case has no task to answer for. */
+rule Internal_Promise_Timeout_Timer:
+    [ PromiseSt($S, pid, 'pending', 'novalue')
+    , !PromiseMeta($S, pid, 'timer', 'none', grp, pblob, kblob, cr) ]
+  --[ TimedOut($S, pid, 'resolved')
+    , Settled($S, pid, 'resolved', 'novalue') ]->
+    [ PromiseSt($S, pid, 'resolved', 'novalue') ]
+#endif
+
+rule Internal_Promise_Timeout_Untargeted:
+    [ PromiseSt($S, pid, 'pending', 'novalue')
+    , !PromiseMeta($S, pid, kind, 'none', grp, pblob, kblob, cr) ]
+  --[ Untargeted(kind)
+    , Neq(kind, 'timer')
+    , TimedOut($S, pid, 'rejectedTimedout')
+    , Settled($S, pid, 'rejectedTimedout', 'novalue') ]->
+    [ PromiseSt($S, pid, 'rejectedTimedout', 'novalue') ]
+
+/* `setSettled`: settling a promise that has a task fulfils that task in the
+   same step.  TIMEOUT ALWAYS WINS -- the lease does not protect a promise
+   from its own deadline, and the holder's capability dies with it. */
+rule Internal_Promise_Timeout_Targeted:
+    [ PromiseSt($S, pid, 'pending', 'novalue')
+    , TaskSt($S, pid, tst, ver, holder)
+    , !PromiseMeta($S, pid, 'targeted', tgt, grp, pblob, kblob, cr) ]
+  --[ Neq(tst, 'fulfilled')
+    , TimedOut($S, pid, 'rejectedTimedout')
+    , Settled($S, pid, 'rejectedTimedout', 'novalue')
+    , TaskFulfilled($S, pid, ver)
+    , Revoke($S, pid, ver) ]->
+    [ PromiseSt($S, pid, 'rejectedTimedout', 'novalue')
+    , TaskSt($S, pid, 'fulfilled', ver, 'nobody') ]
+
+/* r3, `processListener`.  The promise has settled and this address is still
+   on its listener list: discharge the obligation and write the `unblock` into
+   the outbox slot for that <promise, address> pair.  The obligation is
+   consumed, which is `monotone_promise_listeners_shrink_once_settled`.
+
+   The message carries the promise RECORD -- id, state, value -- and the value
+   is still the sealed blob.  The server is the courier, not a reader. */
+rule Internal_Listener_Drain:
+let msg = <'unblock', $S, pid, st, vblob>
+in
+    [ PromiseSt($S, pid, st, vblob)
+    , Listener($S, pid, $addr)
+    , UnblockSlot($S, pid, $addr, slot)
+    , !Ltk($S, ~ltkS) ]
+  --[ Neq(st, 'pending')
+    , UnblockSent($S, pid, $addr, st, vblob) ]->
+    [ PromiseSt($S, pid, st, vblob)
+    , UnblockSlot($S, pid, $addr, msg)
+    , Out(<msg, sign(msg, ~ltkS)>) ]
+
+/* The listening client takes delivery and opens the value with the envelope
+   key it chose at creation.  This is the end of the round trip: a value
+   produced by a worker, carried by a server that cannot read it, opened by
+   the client that asked for the work. */
+rule Client_Receive_Unblock:
+let vblob = senc(<'value', value>, ek)
+    msg   = <'unblock', $S, pid, st, vblob>
+in
+    [ In(<msg, sigS>)
+    , ClientListening($C, $S, pid, $addr, ek, param)
+    , !Pk($S, pkS) ]
+  --[ Eq(verify(sigS, msg, pkS), true)
+    , Neq(st, 'pending')
+    , ClientReadsValue($C, value, pid)
+    , ClientUnblocked($C, $S, pid, st) ]->
+    [ ClientDone($C, $S, pid, st, value) ]
+
+/* r4, `processCallback` -> `resumeOne`, the branch that WAKES: the awaiter's
+   task is suspended, so it goes back to pending with the awaited id recorded
+   as the reason and its dispatch armed.  `resumes := [awaited]` -- a single
+   element, replacing, which is sound because a suspended task holds none
+   (`well_formed_task_suspended_has_no_resumes`). */
+rule Internal_Callback_Drain_Resume:
+    [ PromiseSt($S, awaited, st, vblob)
+    , Callback($S, awaited, awaiter)
+    , TaskSt($S, awaiter, 'suspended', ver, 'nobody')
+    , PromiseSt($S, awaiter, 'pending', wvblob) ]
+  --[ Neq(st, 'pending')
+    , CallbackDrained($S, awaited, awaiter)
+    , ResumeAdded($S, awaiter, ver, awaited)
+    , Resumed($S, awaiter, ver, awaited) ]->
+    [ PromiseSt($S, awaited, st, vblob)
+    , PromiseSt($S, awaiter, 'pending', wvblob)
+    , TaskSt($S, awaiter, 'tpending', ver, 'nobody')
+    , TaskResume($S, awaiter, ver, awaited) ]
+
+/* `resumeOne`, the branch that BUFFERS: the awaiter is live but not parked --
+   pending, acquired or halted -- so the wake is recorded and nothing moves.
+   The worker will see it when it next runs. */
+rule Internal_Callback_Drain_Buffer:
+    [ PromiseSt($S, awaited, st, vblob)
+    , Callback($S, awaited, awaiter)
+    , TaskSt($S, awaiter, tst, ver, holder)
+    , PromiseSt($S, awaiter, 'pending', wvblob) ]
+  --[ Neq(st, 'pending')
+    , Neq(tst, 'suspended')
+    , Neq(tst, 'fulfilled')
+    , CallbackDrained($S, awaited, awaiter)
+    , ResumeAdded($S, awaiter, ver, awaited)
+    , Buffered($S, awaiter, ver, awaited) ]->
+    [ PromiseSt($S, awaited, st, vblob)
+    , PromiseSt($S, awaiter, 'pending', wvblob)
+    , TaskSt($S, awaiter, tst, ver, holder)
+    , TaskResume($S, awaiter, ver, awaited) ]
+
+/* `resumeOne`, the branch that DROPS: the awaiter has already settled, so its
+   task is fulfilled and there is nothing to wake.  The obligation is still
+   discharged -- `processCallback` removes the callback before it calls
+   `resumeOne`. */
+rule Internal_Callback_Drain_Fulfilled:
+    [ PromiseSt($S, awaited, st, vblob)
+    , Callback($S, awaited, awaiter)
+    , TaskSt($S, awaiter, 'fulfilled', ver, 'nobody') ]
+  --[ Neq(st, 'pending')
+    , CallbackDrained($S, awaited, awaiter)
+    , ResumeDropped($S, awaiter, awaited) ]->
+    [ PromiseSt($S, awaited, st, vblob)
+    , TaskSt($S, awaiter, 'fulfilled', ver, 'nobody') ]
+
+/* r5, `processLeaseTimeout`.  The holder's lease has run out while its
+   promise is still pending: the task goes back on offer AT THE SAME VERSION,
+   with the holder cleared and the dispatch armed.
+
+   This is the crux of the fencing argument.  The version is NOT bumped here,
+   so a capability naming `<tid, ver, W>` still names a real version -- but it
+   names it together with the state `acquired`, which the task has just lost.
+   The capability is inert until someone claims again, and a claim bumps the
+   version, so the old holder can never write again.  Lemma
+   `no_write_after_lease_loss` is that statement. */
+rule Internal_Lease_Timeout:
+    [ TaskSt($S, tid, 'acquired', ver, $W)
+    , PromiseSt($S, tid, 'pending', vblob) ]
+  --[ LeaseLost($S, tid, ver, $W)
+    , Revoke($S, tid, ver) ]->
+    [ TaskSt($S, tid, 'tpending', ver, 'nobody')
+    , PromiseSt($S, tid, 'pending', vblob) ]
+
+/* An `unblock` for a promise that settled at its deadline carries no value
+   (`well_formed_promise_deadline_settlement_has_no_value`), so there is
+   nothing to open.  The client still learns the outcome. */
+rule Client_Receive_Unblock_NoValue:
+let msg = <'unblock', $S, pid, st, 'novalue'>
+in
+    [ In(<msg, sigS>)
+    , ClientListening($C, $S, pid, $addr, ek, param)
+    , !Pk($S, pkS) ]
+  --[ Eq(verify(sigS, msg, pkS), true)
+    , Neq(st, 'pending')
+    , ClientUnblocked($C, $S, pid, st) ]->
+    [ ClientDone($C, $S, pid, st, 'novalue') ]
+
+
+// ============================================================================
+// SECTION 9 -- what is claimed
+//
+//   Four families:
+//
+//     A  EXECUTABILITY  -- the model runs; the lemmas below are not vacuous.
+//     B  CONFIDENTIALITY -- params and values are readable by the worker group
+//        and the creator, and by nobody else, INCLUDING A COMPROMISED SERVER.
+//     C  CAPABILITY     -- the claim is what authorises; the capability is
+//        bound to one worker and one version, and dies with the lease.
+//     D  INTEGRITY      -- offers and unblocks are authentic; a promise settles
+//        at most once.
+//
+//   Then one more, at the end, which is deliberately falsifiable and
+//   documents a property the specification does NOT have -- see
+//   `attack_open_settle_preempts_the_holder`.
+// ============================================================================
+
+// ---- sources ---------------------------------------------------------------
+
+/* The server stores a promise's `pblob` and `kblob` as OPAQUE TERMS.  It takes
+ * them off the wire, keeps them, and hands them back on `promise.get`, on the
+ * `task.acquire` response and on the `unblock`; it never looks inside, which
+ * is the whole point of the design.  The consequence for the prover is that
+ * it cannot trace, from the shape of the rules alone, where the cleartext a
+ * worker decrypts came from: the chain runs In (on `promise.create`) ->
+ * !PromiseMeta -> Out (on the claim response) -> In -> decryption, with an
+ * unconstrained variable in the middle.  Those are the open chains, and
+ * without these three lemmas the precomputation does not converge.
+ *
+ * Each says the only thing there is to say about an opaque passthrough: what
+ * comes out of one either came from the principal that sealed it, or the
+ * adversary already had it.  They are proved by induction over the trace,
+ * before anything else, and are then available to the rest.
+ *
+ * The load-bearing one is the FIRST.  The deconstruction that actually opens
+ * the chains is not the payload but the ENVELOPE KEY: `Worker_Start` recovers
+ * `ek` by opening `aenc(<'ek', tid, ek>, pk(gsk))`, and that blob is the
+ * variable that travelled through the server.  `Seal` is raised wherever an
+ * envelope key is minted; `Unseal` in the one rule that opens an envelope it
+ * did not seal.
+ */
+lemma sources_envelope [sources]:
+  "All ek tid #i.
+       Unseal(ek, tid) @ #i
+   ==> (Ex #j. KU(ek) @ #j & #j < #i)
+     | (Ex pid G #j. Seal(ek, pid, G) @ #j & #j < #i)"
+
+lemma sources_param [sources]:
+  "All W param tid #i.
+       WorkerReadsParam(W, param, tid) @ #i
+   ==> (Ex #j. KU(param) @ #j & #j < #i)
+     | (Ex pid G #j. SecretParam(param, pid, G) @ #j & #j < #i)"
+
+lemma sources_value [sources]:
+  "All C value pid #i.
+       ClientReadsValue(C, value, pid) @ #i
+   ==> (Ex #j. KU(value) @ #j & #j < #i)
+     | (Ex tid ek #j. SecretValue(value, tid, ek) @ #j & #j < #i)"
+
+// ---- helper invariants, reused by the rest ---------------------------------
+
+/* An acquired task in the store was put there by a claim.  `LeaseHeld` is
+   raised by every rule that PUTS one back -- the claim itself, and the fence,
+   the heartbeat and the refused suspend, which take the lease and return it
+   unchanged.  Stated this way the induction is local: each step asks only
+   where the lease it is holding came from, and the answer is either "this
+   claim" or "an earlier holding", which the hypothesis covers.
+
+   NOT `[reuse]`, and that is deliberate.  A `reuse` lemma is saturated into
+   every constraint system the prover builds, for every later lemma, and this
+   one quantifies over four variables and a timepoint.  Measured on
+   `resonate-capability.spthy`: with `[reuse]` on it, even `grant_is_a_claim`
+   -- two steps, decidable by looking at the rules -- does not finish in 900 s;
+   without it, five seconds.  The heavy inductive lemma is proved and then left
+   alone; the light consequence below is what gets carried forward. */
+lemma lease_was_granted [use_induction]:
+  "All S tid ver W #i.
+       LeaseHeld(S, tid, ver, W) @ #i
+   ==> Ex #j. GrantCap(S, tid, ver, W) @ #j & (#j < #i | #j = #i)"
+
+/* Everything that presents a capability was granted one -- the light
+   consequence, and the hypothesis the capability lemmas are built on.  This
+   one DOES need `[reuse]`: dropping it costs `capability_use_requires_claim`
+   its proof. */
+lemma cap_use_follows_grant [reuse]:
+  "All S tid ver W op #i.
+       UsedCap(S, tid, ver, W, op) @ #i
+   ==> Ex #j. GrantCap(S, tid, ver, W) @ #j & #j < #i"
+
+/* A capability is granted only by a claim, and a claim records the same
+   worker and the same version. */
+lemma grant_is_a_claim [reuse]:
+  "All S tid ver W #i.
+       GrantCap(S, tid, ver, W) @ #i ==> Acquire(S, tid, ver, W) @ #i"
+
+/* ONE HOLDER PER VERSION.  Two workers never hold the same <task, version>:
+   a claim consumes the pending task and puts back an acquired one at a
+   strictly larger version term, so a version is claimed once and once only.
+   This is what makes the version a fencing token rather than a counter, and
+   it is what `capability_is_bound_to_its_worker` turns into exclusivity. */
+lemma claim_is_exclusive [reuse, use_induction]:
+  "All S tid ver W1 W2 #i #j.
+       Acquire(S, tid, ver, W1) @ #i & Acquire(S, tid, ver, W2) @ #j
+   ==> #i = #j"
+
+// ---- A. executability ------------------------------------------------------
+
+/* The whole round trip, with nobody compromised: a client creates a targeted
+   promise and listens on it; the server offers the task; a worker claims it,
+   opens the param, and completes it with a sealed value; the server delivers
+   the unblock; the client opens the value.  If this fails, every lemma below
+   is about an empty set of traces. */
+lemma exec_full_cycle:
+  exists-trace
+  "Ex C W S G pid ver param value #c #a #r #k #u.
+        ClientCreates(C, pid, G) @ #c
+      & Acquire(S, pid, ver, W) @ #a
+      & WorkerReadsParam(W, param, pid) @ #r
+      & CompletedBy(S, pid, ver, W) @ #k
+      & ClientReadsValue(C, value, pid) @ #u
+      & #c < #a & #a < #r & #r < #k & #k < #u
+      & not(Ex A #z. LtkReveal(A) @ #z)
+      & not(Ex GG #z. GroupReveal(GG) @ #z)"
+
+/* The same round trip with the SERVER FULLY COMPROMISED, and the param still
+   secret.  This is the non-vacuity check for lemma 5: it shows there are runs
+   in which the server's key is in the adversary's hands, work still gets done,
+   and the payload still does not leak. */
+lemma exec_cycle_under_compromised_server:
+  exists-trace
+  "Ex C W S G pid ver param value #c #a #r #v #k #z.
+        ClientCreates(C, pid, G) @ #c
+      & SecretParam(param, pid, G) @ #c
+      & Acquire(S, pid, ver, W) @ #a
+      & WorkerReadsParam(W, param, pid) @ #r
+      & SecretValue(value, pid, G) @ #v
+      & CompletedBy(S, pid, ver, W) @ #k
+      & #r < #v & #v < #k
+      & LtkReveal(S) @ #z
+      & not(Ex #q. K(param) @ #q)
+      & not(Ex #q. K(value) @ #q)
+      & not(Ex GG #q. GroupReveal(GG) @ #q)"
+
+/* Park and wake: a worker suspends its task on an external promise, that
+   promise settles, the callback drains, and the task goes back on offer with
+   the wake recorded.  This is the branch a durable execution spends most of
+   its life in. */
+lemma exec_suspend_and_resume:
+  exists-trace
+  "Ex S W tid ver awaited #a #s #d #w.
+        Acquire(S, tid, ver, W) @ #a
+      & Suspended(S, tid, ver, W) @ #s
+      & CallbackDrained(S, awaited, tid) @ #d
+      & Resumed(S, tid, ver, awaited) @ #w
+      & #a < #s & #s < #d
+      & not(Ex A #z. LtkReveal(A) @ #z)"
+
+/* A fenced child creation: a worker holding a lease spawns a child
+   invocation, and the child goes on offer in its own right. */
+lemma exec_fenced_create:
+  exists-trace
+  "Ex S W tid ver cid #a #f #o.
+        Acquire(S, tid, ver, W) @ #a
+      & FencedCreate(S, tid, ver, W, cid) @ #f
+      & Dispatch(S, cid, 'v0') @ #o
+      & #a < #f & #f < #o
+      & not(Ex A #z. LtkReveal(A) @ #z)"
+
+/* A worker that lost its lease is not the one that finishes the work: the
+   task is re-offered and a second worker claims it at a higher version. */
+lemma exec_lease_handover:
+  exists-trace
+  "Ex S W1 W2 tid v1 v2 #a1 #l #a2.
+        Acquire(S, tid, v1, W1) @ #a1
+      & LeaseLost(S, tid, v1, W1) @ #l
+      & Acquire(S, tid, v2, W2) @ #a2
+      & #a1 < #l & #l < #a2
+      & not(W1 = W2)
+      & not(Ex A #z. LtkReveal(A) @ #z)"
+
+// ---- B. confidentiality ----------------------------------------------------
+
+/* THE SERVER CANNOT READ A PARAM.
+ *
+ * Note what is NOT excluded: `LtkReveal(S)`.  The adversary may hold the
+ * server's long-term key, and it already sees every blob the server stores,
+ * because every one of them crosses the public network.  Its knowledge is a
+ * superset of the server's.  So this lemma says precisely that no amount of
+ * server-side access opens a param.  The only exclusion is compromise of the
+ * worker group -- either the group key itself (`Compromise_Group`) or a
+ * member holding it (`Compromise_Worker`), both of which raise
+ * `GroupReveal`. */
+lemma param_secrecy:
+  "All param pid G #i #j.
+       SecretParam(param, pid, G) @ #i & K(param) @ #j
+   ==> Ex #r. GroupReveal(G) @ #r"
+
+/* THE SERVER CANNOT READ A VALUE.  Same argument, for the result the worker
+   seals under the envelope key the param arrived under. */
+lemma value_secrecy:
+  "All value tid ek G #i #j #s.
+       SecretValue(value, tid, ek) @ #i
+     & Seal(ek, tid, G) @ #s
+     & K(value) @ #j
+   ==> Ex #r. GroupReveal(G) @ #r"
+
+/* Only a member of the group a promise was sealed to ever holds its param in
+   clear.  Confidentiality restated as an access-control statement rather than
+   an adversary-knowledge one. */
+lemma param_read_only_by_group_member:
+  "All W param pid G #i #c.
+       WorkerReadsParam(W, param, pid) @ #i
+     & SecretParam(param, pid, G) @ #c
+   ==> (Ex #m. NewWorker(W, G) @ #m)
+     | (Ex #r. GroupReveal(G) @ #r)"
+
+// ---- C. capability ---------------------------------------------------------
+
+/* THE CLAIM IS WHAT AUTHORISES.  Every use of the capability -- fence,
+   suspend, complete, release, heartbeat -- was preceded by a successful
+   `task.acquire` by that same worker at that same version.  There is no
+   other way in, and this holds with no compromise assumption at all: even an
+   adversary holding the server's signing key, who can mint a syntactically
+   valid token, cannot make the server act on it, because the server also
+   checks its own record of who holds the lease. */
+lemma capability_use_requires_claim [use_induction]:
+  "All S tid ver W op #i.
+       UsedCap(S, tid, ver, W, op) @ #i
+   ==> Ex #j. Acquire(S, tid, ver, W) @ #j & #j < #i"
+
+/* THE CAPABILITY IS NOT A BEARER TOKEN.  If W1 was granted the capability for
+   <tid, ver> then no OTHER principal can use it -- stealing the token off the
+   wire is not enough, because the request must also be signed by the worker
+   the token names. */
+lemma capability_is_bound_to_its_worker:
+  "All S tid ver W1 W2 op #i #j.
+       GrantCap(S, tid, ver, W1) @ #i & UsedCap(S, tid, ver, W2, op) @ #j
+   ==> W1 = W2"
+
+/* NO WRITE AFTER LEASE LOSS -- the fencing theorem.
+ *
+ * `Revoke(S, tid, ver)` is raised wherever version `ver` stops being live: a
+ * lease timeout, a release, a suspension, a halt, a deadline settlement, and
+ * the next claim.  After any of them, the capability naming that version
+ * authorises nothing.  A worker that was partitioned away and comes back with
+ * a stale capability cannot complete, cannot fence and cannot suspend. */
+lemma no_write_after_lease_loss [use_induction]:
+  "All S tid ver W op #i #j #k.
+       Acquire(S, tid, ver, W) @ #i
+     & Revoke(S, tid, ver) @ #j
+     & UsedCap(S, tid, ver, W, op) @ #k
+     & #i < #j & #j < #k
+   ==> F"
+
+/* A completion is by the worker that claimed, at the version it claimed. */
+lemma completion_is_by_the_claimant:
+  "All S tid ver W1 W2 #i #j.
+       Acquire(S, tid, ver, W1) @ #i & CompletedBy(S, tid, ver, W2) @ #j
+   ==> W1 = W2"
+
+/* A worker's capability came from the server, not from the network. */
+lemma no_forged_capability:
+  "All W S tid ver #i.
+       WorkerHoldsCap(W, S, tid, ver) @ #i
+   ==> (Ex #j. GrantCap(S, tid, ver, W) @ #j & #j < #i)
+     | (Ex #r. LtkReveal(S) @ #r)"
+
+/* The server records as holder only a worker that actually asked -- by
+   `task.acquire`, or by the `task.create` adoption path, which is
+   `AdoptedWithoutVersion`. */
+#ifdef Core
+lemma claim_agreement:
+  "All S tid ver W #i.
+       Acquire(S, tid, ver, W) @ #i
+   ==> (Ex #j. ClaimSent(W, S, tid, ver) @ #j & #j < #i)
+     | (Ex #r. LtkReveal(W) @ #r)"
+#else
+lemma claim_agreement:
+  "All S tid ver W #i.
+       Acquire(S, tid, ver, W) @ #i
+   ==> (Ex #j. ClaimSent(W, S, tid, ver) @ #j & #j < #i)
+     | (Ex #j. AdoptedWithoutVersion(S, tid, ver, W) @ #j)
+     | (Ex #r. LtkReveal(W) @ #r)"
+#endif
+
+// ---- D. integrity ----------------------------------------------------------
+
+/* A promise settles once and stays settled -- there is no second settlement
+   to disagree with the first.  `preserved_promise_settlement_is_one_way` and
+   `preserved_promise_state_frozen_once_settled` in the specification's
+   catalogue, as one statement. */
+lemma settlement_is_unique:
+  "All S pid st1 vb1 st2 vb2 #i #j.
+       Settled(S, pid, st1, vb1) @ #i & Settled(S, pid, st2, vb2) @ #j
+   ==> #i = #j"
+
+/* A worker starts work only on a task the server actually offered.  Without
+   the signature on the `execute` message, anyone able to put a packet on the
+   wire could make a worker burn a claim on a task that does not exist. */
+lemma offer_authentication:
+  "All W S tid ver #i.
+       WorkerSawOffer(W, S, tid, ver) @ #i
+   ==> (Ex tgt grp #j. ServerOffers(S, tid, ver, tgt, grp) @ #j & #j < #i)
+     | (Ex #r. LtkReveal(S) @ #r)"
+
+/* An `unblock` a client acts on was really sent by the server, for a promise
+   that had really settled. */
+lemma unblock_authentication:
+  "All C S pid st #i.
+       ClientUnblocked(C, S, pid, st) @ #i
+   ==> (Ex addr vb #j. UnblockSent(S, pid, addr, st, vb) @ #j & #j < #i)
+     | (Ex #r. LtkReveal(S) @ #r)"
+
+/* A value a client accepts as the answer to its promise was produced by a
+   worker that held the lease on that promise's task -- or the promise settled
+   without one, through the open `promise.settle` path or its own deadline. */
+lemma value_provenance:
+  "All C value pid #i.
+       ClientReadsValue(C, value, pid) @ #i
+   ==> (Ex S W ver #j. CompletedBy(S, pid, ver, W) @ #j & #j < #i)
+     | (Ex S A #j. SettledBy(S, pid, A) @ #j & #j < #i)
+     | (Ex GG #r. GroupReveal(GG) @ #r)
+     | (Ex A #r. LtkReveal(A) @ #r)"
+
+// ---- 15. the property the specification does NOT have ----------------------
+
+/* `promiseSettle` in `02-abstract/external.lean` checks `settable` and that
+ * the promise is pending.  It does not check a version, a lease or an
+ * identity.  So for a TARGETED promise -- one a worker holds a lease on --
+ * any principal that knows the id can settle it out from under that worker,
+ * and `setSettled` will fulfil the task in the same step.  The capability
+ * model of this theory does not close that door, because the door is not on
+ * the task API.
+ *
+ * This lemma is EXPECTED TO BE FOUND, and finding it is the point: it is an
+ * exists-trace, so Tamarin returns the attack as a witness.  Nobody is
+ * compromised in it.
+ *
+ * Compile with `-D=FencedSettle` to drop `Server_Promise_Settle_Targeted`,
+ * and this lemma becomes false while `settlement_of_targeted_is_fenced`
+ * below becomes true.  That pair is the statement of the fix. */
+#ifdef FencedSettle
+/* With the open path removed, a targeted promise is settled only by the
+ * worker holding its lease, or by the parent invocation fencing a settle on
+ * it -- both of which are capability-gated.  The deadline path is not
+ * `SettledTargetedBy`; it is the server acting on its own clock, and
+ * `PromiseState.settable` keeps a client from forging it. */
+lemma settlement_of_targeted_is_fenced:
+  "All S pid A #i.
+       SettledTargetedBy(S, pid, A) @ #i
+   ==> (Ex ver #j. Acquire(S, pid, ver, A) @ #j & #j < #i)
+     | (Ex ptid pver #j. FencedSettle(S, ptid, pver, A, pid) @ #j)"
+#else
+lemma attack_open_settle_preempts_the_holder:
+  exists-trace
+  "Ex S W A tid ver #a #s.
+        Acquire(S, tid, ver, W) @ #a
+      & SettledTargetedBy(S, tid, A) @ #s
+      & #a < #s
+      & not(A = W)
+      & not(Ex B #z. LtkReveal(B) @ #z)
+      & not(Ex GG #z. GroupReveal(GG) @ #z)"
+#endif
+
+end

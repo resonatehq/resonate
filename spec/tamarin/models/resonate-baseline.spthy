@@ -1,0 +1,314 @@
+theory ResonateBaseline
+begin
+
+/*
+================================================================================
+
+  The Resonate task API AS THE SPECIFICATION AUTHORISES IT.
+
+  This is the control group for `resonate.spthy`.  It models the same core
+  loop -- offer, claim, fence, suspend, complete -- with exactly the guards
+  `02-abstract/external.lean` has and NOTHING ELSE:
+
+      taskFence   : t.state = acquired  &  p.state = pending  &  t.version = v
+      taskSuspend : t.state = acquired  &  p.state = pending  &  t.version = v
+      taskFulfill : t.state = acquired  &  p.state = pending  &  t.version = v
+
+  Read those three lines again.  `t.pid` -- the identity of the worker that
+  claimed the task -- appears in none of them.  Only `heartbeatOne` checks it.
+  So in the specification as written, the authority to fence, to suspend and
+  to complete a task is the VERSION NUMBER, and a version number is a small
+  integer that the server publishes: it is in the `execute` message, in the
+  `task.acquire` response, and in the `task.get` response.
+
+  And params and values are stored in the clear, as `Value` records the server
+  reads, writes and forwards.
+
+  The two lemmas at the bottom are therefore expected to be FOUND (they are
+  exists-trace) and FALSIFIED (the all-traces one).  They are what motivates
+  the identity and capability layer in `resonate.spthy`, where the same
+  statements hold.
+
+  Everything else is as in the main model: same states, same transitions, same
+  version discipline.  Requests are unauthenticated because the specification
+  does not authenticate them.
+
+================================================================================
+*/
+
+builtins: symmetric-encryption, signing
+
+functions: vsucc/1
+
+restriction equality:
+  "All x y #i. Eq(x, y) @ #i ==> x = y"
+
+restriction inequality:
+  "All x #i. Neq(x, x) @ #i ==> F"
+
+restriction only_once:
+  "All x #i #j. OnlyOnce(x) @ #i & OnlyOnce(x) @ #j ==> #i = #j"
+
+restriction settable:
+  "All s #i. Settable(s) @ #i ==>
+       s = 'resolved' | s = 'rejected' | s = 'rejectedCanceled'"
+
+restriction unique_promise_id:
+  "All s pid #i #j. PromiseBorn(s, pid) @ #i & PromiseBorn(s, pid) @ #j
+       ==> #i = #j"
+
+/* Collapsing identical repetitions -- the same argument as in
+   `resonate.spthy`, and needed here for the same reason.  The retry dispatch
+   and `task.get` both consume a linear fact and put back exactly what they
+   took, which makes each of them a source for its own premise and so a cycle
+   in the backward search.  A repeat leaves the same store and sends a term
+   identical to the one already sent, so dropping repeats loses no trace that
+   any lemma here can tell apart.  `task.get` is keyed on the RECORD it
+   answered with, not on the task id, so a read at a later state is a
+   different event and survives. */
+restriction dispatch_once_per_version:
+  "All s tid v #i #j. Dispatch(s, tid, v) @ #i & Dispatch(s, tid, v) @ #j
+       ==> #i = #j"
+
+restriction task_read_once_per_record:
+  "All s tid st v h #i #j. TaskRead(s, tid, st, v, h) @ #i
+                         & TaskRead(s, tid, st, v, h) @ #j ==> #i = #j"
+
+// ---------------------------------------------------------------------------
+// principals
+// ---------------------------------------------------------------------------
+
+rule Register_Server:
+    [ Fr(~ltkS) ]
+  --[ NewServer($S), OnlyOnce(<'agent', $S>) ]->
+    [ !Ltk($S, ~ltkS), !Pk($S, pk(~ltkS)), !Server($S), Out(pk(~ltkS)) ]
+
+rule Register_Worker:
+    [ Fr(~ltkW) ]
+  --[ NewWorker($W), OnlyOnce(<'agent', $W>) ]->
+    [ !Ltk($W, ~ltkW), !Pk($W, pk(~ltkW)), !Worker($W), Out(pk(~ltkW)) ]
+
+rule Register_Client:
+    [ Fr(~ltkC) ]
+  --[ NewClient($C), OnlyOnce(<'agent', $C>) ]->
+    [ !Ltk($C, ~ltkC), !Pk($C, pk(~ltkC)), !Client($C), Out(pk(~ltkC)) ]
+
+rule Compromise_Agent:
+    [ !Ltk($A, ~lt) ]
+  --[ LtkReveal($A) ]->
+    [ Out(~lt) ]
+
+// ---------------------------------------------------------------------------
+// promise birth -- `createPromise` with `resonate:target`
+//
+// The param is a `Value` record: the server stores it as it is given, and
+// hands it back on every read.  No envelope, no key.
+// ---------------------------------------------------------------------------
+
+rule Client_Create_Targeted:
+let body = <'promise.create', $S, $pid, $tgt, ~param>
+in
+    [ Fr(~param), !Client($C), !Server($S) ]
+  --[ ClientCreates($C, $pid)
+    , SecretParam(~param, $pid)
+    , OnlyOnce(<'create', $C, $pid>) ]->
+    [ Out(body), ClientAwaits($C, $S, $pid, ~param) ]
+
+rule Server_Promise_Create_Targeted:
+let body = <'promise.create', $S, pid, tgt, param>
+in
+    [ In(body), !Server($S) ]
+  --[ PromiseBorn($S, pid), TaskBorn($S, pid) ]->
+    [ !PromiseMeta($S, pid, tgt, param)
+    , PromiseSt($S, pid, 'pending', 'novalue')
+    , TaskSt($S, pid, 'tpending', 'v0', 'nobody')
+    , Out(<'promise.created', $S, pid, param>) ]
+
+// ---------------------------------------------------------------------------
+// r6 the offer, and the claim
+// ---------------------------------------------------------------------------
+
+/* The `execute` message is unauthenticated and carries the task's current
+   version -- `Message.execute (taskId : String) (version : Nat)`. */
+rule Internal_Retry_Dispatch:
+    [ TaskSt($S, tid, 'tpending', ver, 'nobody')
+    , PromiseSt($S, tid, 'pending', vblob)
+    , !PromiseMeta($S, tid, tgt, param) ]
+  --[ Dispatch($S, tid, ver), ServerOffers($S, tid, ver, tgt) ]->
+    [ TaskSt($S, tid, 'tpending', ver, 'nobody')
+    , PromiseSt($S, tid, 'pending', vblob)
+    , Out(<'execute', $S, tid, ver>) ]
+
+/* `taskAcquire`.  `pid` is recorded, so the server knows who holds the lease;
+   the point of this theory is that it never checks the record again. */
+rule Server_Task_Acquire:
+let nver = vsucc(ver)
+in
+    [ In(<'task.acquire', $S, tid, ver, $W>)
+    , !Server($S), !Worker($W)
+    , TaskSt($S, tid, 'tpending', ver, 'nobody')
+    , PromiseSt($S, tid, 'pending', vblob)
+    , !PromiseMeta($S, tid, tgt, param) ]
+  --[ Acquire($S, tid, nver, $W), Revoke($S, tid, ver) ]->
+    [ TaskSt($S, tid, 'acquired', nver, $W)
+    , PromiseSt($S, tid, 'pending', vblob)
+    , Out(<'task.acquired', $S, tid, nver, param>) ]
+
+rule Worker_Claim:
+    [ In(<'execute', $S, tid, ver>), !Worker($W) ]
+  --[ ClaimSent($W, $S, tid, vsucc(ver)) ]->
+    [ Out(<'task.acquire', $S, tid, ver, $W>)
+    , WorkerClaiming($W, $S, tid, vsucc(ver)) ]
+
+rule Worker_Start:
+    [ In(<'task.acquired', $S, tid, nver, param>)
+    , WorkerClaiming($W, $S, tid, nver) ]
+  --[ WorkerReadsParam($W, param, tid) ]->
+    [ WorkerRunning($W, $S, tid, nver, param) ]
+
+/* `taskGet` is ungated and reports `TaskRecord.version`.  So is
+   `Server_Task_Acquire`'s response.  The authority to write is public. */
+rule Server_Task_Get:
+    [ In(<'task.get', $S, tid>)
+    , TaskSt($S, tid, tst, ver, holder) ]
+  --[ TaskRead($S, tid, tst, ver, holder) ]->
+    [ TaskSt($S, tid, tst, ver, holder)
+    , Out(<'task.record', $S, tid, tst, ver, holder>) ]
+
+// ---------------------------------------------------------------------------
+// the three operations that check a version and nothing else
+// ---------------------------------------------------------------------------
+
+/* `taskFulfill`.  The guards are the specification's, verbatim: acquired,
+   promise pending, version matches.  Note the absence of `$W` anywhere on the
+   left: whoever sends this wins. */
+rule Server_Task_Complete:
+    [ In(<'task.fulfill', $S, tid, ver, st, value>)
+    , !Server($S)
+    , TaskSt($S, tid, 'acquired', ver, holder)
+    , PromiseSt($S, tid, 'pending', 'novalue') ]
+  --[ Settable(st)
+    , CompletedAt($S, tid, ver)
+    , Settled($S, tid, st, value)
+    , TaskFulfilled($S, tid, ver) ]->
+    [ TaskSt($S, tid, 'fulfilled', ver, 'nobody')
+    , PromiseSt($S, tid, st, value)
+    , Out(<'task.completed', $S, tid, st, value>) ]
+
+/* The honest worker's completion, tagged so the lemmas can tell it apart
+   from anybody else's. */
+rule Worker_Complete:
+    [ WorkerRunning($W, $S, tid, ver, param), Fr(~value), In(st) ]
+  --[ Settable(st)
+    , SecretValue(~value, tid)
+    , WorkerCompletes($W, $S, tid, ver) ]->
+    [ Out(<'task.fulfill', $S, tid, ver, st, ~value>) ]
+
+/* Anyone at all, holding nothing but a task id and a version they read off
+   the wire, completing the task with a value of their own choosing. */
+rule Outsider_Complete:
+    [ In(<'task.record', $S, tid, 'acquired', ver, holder>)
+    , Fr(~forged) ]
+  --[ OutsiderCompletes($S, tid, ver, ~forged) ]->
+    [ Out(<'task.fulfill', $S, tid, ver, 'resolved', ~forged>) ]
+
+/* `taskFence`, same guard set. */
+rule Server_Task_Fence_Settle:
+    [ In(<'task.fence', $S, tid, ver, 'settle', cid, st, value>)
+    , !Server($S)
+    , TaskSt($S, tid, 'acquired', ver, holder)
+    , PromiseSt($S, tid, 'pending', 'novalue')
+    , PromiseSt($S, cid, 'pending', 'novalue') ]
+  --[ Neq(cid, tid)
+    , Settable(st)
+    , FencedAt($S, tid, ver)
+    , Settled($S, cid, st, value) ]->
+    [ TaskSt($S, tid, 'acquired', ver, holder)
+    , PromiseSt($S, tid, 'pending', 'novalue')
+    , PromiseSt($S, cid, st, value)
+    , Out(<'task.fenced', $S, tid, ver, cid>) ]
+
+/* `taskSuspend`, arity one, same guard set. */
+rule Server_Task_Suspend:
+    [ In(<'task.suspend', $S, tid, ver, a1>)
+    , !Server($S)
+    , TaskSt($S, tid, 'acquired', ver, holder)
+    , PromiseSt($S, tid, 'pending', 'novalue')
+    , PromiseSt($S, a1, 'pending', v1) ]
+  --[ Neq(a1, tid)
+    , SuspendedAt($S, tid, ver)
+    , Revoke($S, tid, ver) ]->
+    [ TaskSt($S, tid, 'suspended', ver, 'nobody')
+    , PromiseSt($S, tid, 'pending', 'novalue')
+    , PromiseSt($S, a1, 'pending', v1)
+    , Out(<'task.suspended', $S, tid, ver>) ]
+
+/* r5, the lease timeout. */
+rule Internal_Lease_Timeout:
+    [ TaskSt($S, tid, 'acquired', ver, $W)
+    , PromiseSt($S, tid, 'pending', vblob) ]
+  --[ LeaseLost($S, tid, ver, $W), Revoke($S, tid, ver) ]->
+    [ TaskSt($S, tid, 'tpending', ver, 'nobody')
+    , PromiseSt($S, tid, 'pending', vblob) ]
+
+// ---------------------------------------------------------------------------
+// what the specification's authorisation does and does not buy
+// ---------------------------------------------------------------------------
+
+/* Sanity: the loop runs. */
+lemma exec_cycle:
+  exists-trace
+  "Ex C W S pid ver param #c #a #r #k.
+        ClientCreates(C, pid) @ #c
+      & Acquire(S, pid, ver, W) @ #a
+      & WorkerReadsParam(W, param, pid) @ #r
+      & WorkerCompletes(W, S, pid, ver) @ #k
+      & #c < #a & #a < #r & #r < #k
+      & not(Ex A #z. LtkReveal(A) @ #z)"
+
+/* THE SERVER READS THE PARAM -- and so does anybody else, since `promise.get`
+   and the `task.acquire` response hand it out.  Compare `param_secrecy` in
+   `resonate.spthy`, which holds even with the server's key in the
+   adversary's hands.  Expected: FOUND. */
+lemma attack_param_is_public:
+  exists-trace
+  "Ex param pid #i #j.
+        SecretParam(param, pid) @ #i
+      & K(param) @ #j
+      & not(Ex A #z. LtkReveal(A) @ #z)"
+
+/* A PRINCIPAL THAT NEVER CLAIMED THE TASK COMPLETES IT.  The version is
+   public -- `task.get` hands it over -- and the version is the whole of the
+   authority `taskFulfill` asks for.  Nobody is compromised in this trace.
+   Expected: FOUND. */
+lemma attack_outsider_completes_a_held_task:
+  exists-trace
+  "Ex S W tid ver forged #a #o.
+        Acquire(S, tid, ver, W) @ #a
+      & OutsiderCompletes(S, tid, ver, forged) @ #o
+      & #a < #o
+      & not(Ex A #z. LtkReveal(A) @ #z)"
+
+/* The statement `resonate.spthy` proves and this theory cannot: a completion
+   the server accepts came from the worker that holds the lease.  There is no
+   identity in a `task.complete` request to compare against `t.pid`, so the
+   server cannot tell, and the lemma is false.  Expected: FALSIFIED, with the
+   `Outsider_Complete` trace as the counterexample. */
+lemma completion_is_by_the_claimant:
+  "All S tid ver #i.
+       CompletedAt(S, tid, ver) @ #i
+   ==> Ex W #j. WorkerCompletes(W, S, tid, ver) @ #j & #j < #i"
+
+/* Fencing DOES work, even here: the version discipline alone is enough to
+   stop a worker that lost its lease from writing at the version it held.
+   Expected: VERIFIED -- this is the part of the specification's design that
+   the capability layer inherits rather than replaces. */
+lemma no_write_after_lease_loss [use_induction]:
+  "All S tid ver W #i #j #k.
+       Acquire(S, tid, ver, W) @ #i
+     & Revoke(S, tid, ver) @ #j
+     & CompletedAt(S, tid, ver) @ #k
+     & #i < #j & #j < #k
+   ==> F"
+
+end

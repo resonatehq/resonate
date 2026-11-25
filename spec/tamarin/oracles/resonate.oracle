@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+"""
+Proof-goal ranking oracle for models/resonate.spthy.
+
+Tamarin feeds this script the name of the lemma on argv[1] and a list of
+"%i:goal" lines on stdin, and reads back the goal indices in the order it
+should try them.  Goals this script does not list are still tried, after the
+ones it does.
+
+The ranking encodes one idea: the Resonate state machine is a CHAIN of linear
+facts -- a task is acquired because it was pending because it was born -- and
+following that chain backwards is what settles every capability lemma.  So
+protocol state comes first, message deduction comes last, and the persistent
+registration facts, which never constrain anything but do split on every agent
+name in the theory, come last of all.
+"""
+
+import re
+import sys
+
+lemma = sys.argv[1]
+lines = sys.stdin.readlines()
+
+MAXPRIO = 110
+rank = [[] for _ in range(MAXPRIO + 1)]
+
+
+# A secrecy proof is a proof ABOUT adversary knowledge: the question is how a
+# term could have got into !KU, and answering it is what closes the branch.
+# Everywhere else message deduction is the expensive part and the protocol
+# state is what cuts the search.  So the two families want opposite orders.
+SECRECY = re.search(r'secre|read_only|sources_', lemma) is not None
+
+
+def prio(goal):
+    # Trivially solvable registration facts: they never cut the search, they
+    # only fan it out over every principal in the theory.  Dead last.
+    if re.search(r'!(Pk|Ltk|Server|Worker|Client|Member|GroupKey|ScheduleRec)\(', goal):
+        return 105
+
+    # Adversary knowledge.
+    if re.match(r'^!KU\(\s*~', goal):
+        return 5 if SECRECY else 90
+    if goal.startswith('!KU('):
+        return 15 if SECRECY else 95
+
+    # The capability chain: these are the action facts the lemmas quantify
+    # over, and resolving them tells us which rule instance we are in.
+    if re.search(r'(GrantCap|UsedCap|Acquire|Revoke|CompletedBy|ClaimSent)\(', goal):
+        return 10
+
+    # The core mutable state.  Following TaskSt backwards is the whole proof
+    # of the fencing lemmas; PromiseSt is the same for the settlement ones.
+    if 'TaskSt(' in goal:
+        return 20
+    if 'PromiseSt(' in goal:
+        return 25
+
+    # Worker- and client-side session state.
+    if re.search(r'(WorkerCap|WorkerRunning|WorkerClaiming|WorkerSelfClaiming|'
+                 r'ClientAwaits|ClientListening)\(', goal):
+        return 30
+
+    # Obligations, outbox slots and immutable birth fields.
+    if re.search(r'(Callback|Listener|ExecSlot|UnblockSlot|TaskResume|'
+                 r'!PromiseMeta|!ExternalP|!CallbackReg|!ListenerReg)\(', goal):
+        return 40
+
+    # Equality splits: cheap, and they prune.
+    if goal.startswith('splitEqs'):
+        return 50
+
+    return 70
+
+
+for line in lines:
+    num = line.split(':', 1)[0]
+    goal = line.split(':', 1)[1].strip() if ':' in line else ''
+    rank[prio(goal)].append(num)
+
+for bucket in rank:
+    for num in bucket:
+        print(num)
