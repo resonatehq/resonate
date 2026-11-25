@@ -2,6 +2,7 @@ import type { Codec } from "./codec.js";
 import type { InnerContext } from "./context.js";
 import exceptions from "./exceptions.js";
 import { joinId } from "./ids.js";
+import { drive, type Fiber } from "./kernel.js";
 import type { Logger } from "./logger.js";
 import {
   isSuccess,
@@ -10,6 +11,7 @@ import {
   type PromiseRecord,
   type PromiseSettleReq,
   type PromiseSettleRes,
+  type Response,
 } from "./network/types.js";
 import { type Options, RESONATE_OPTIONS } from "./options.js";
 import { randomUUID } from "./platform.js";
@@ -140,15 +142,12 @@ export function getCallerInfo(): string {
 }
 
 // retry
-export async function executeWithRetry(
-  ctx: InnerContext,
-  func: Func,
-  args: any[],
-  logger: Logger,
-): Promise<Result<any, any>> {
+
+/** Runs a leaf function with its retry policy. Each attempt is an `invoke`, each backoff a `sleep`. */
+export function* retrying(ctx: InnerContext, func: Func, args: any[], logger: Logger): Fiber<Result<any, any>> {
   while (true) {
     try {
-      const data = await func(ctx, ...args);
+      const data = yield { op: "invoke", func, ctx, args };
       return { kind: "value", value: data };
     } catch (error) {
       const isNonRetryable = ctx.nonRetryableErrors.some((Ctor) => error instanceof Ctor);
@@ -169,18 +168,37 @@ export async function executeWithRetry(
         `Retry error details for '${ctx.func}'`,
       );
       ctx.info.attempt++;
-      await new Promise((resolve) => setTimeout(resolve, retryIn));
+      yield { op: "sleep", ms: retryIn };
     }
   }
 }
 
+export function executeWithRetry(
+  ctx: InnerContext,
+  func: Func,
+  args: any[],
+  logger: Logger,
+): Promise<Result<any, any>> {
+  return drive(retrying(ctx, func, args, logger), {
+    send: () => Promise.reject(new Error("executeWithRetry does not send")),
+  });
+}
+
 // effects
+
+/** Effects as fibers, plus promise-returning versions driven with `send` for callers outside the kernel. */
+export type FencedEffects = Effects & {
+  send: Send;
+  create: (req: PromiseCreateReq, func?: string) => Fiber<PromiseRecord>;
+  settle: (req: PromiseSettleReq, func?: string) => Fiber<PromiseRecord>;
+};
+
 export function buildEffects(
   send: Send,
   codec: Codec,
   fence: { id: string; version: number },
   preload: PromiseRecord[] = [],
-): Effects {
+): FencedEffects {
   // Decode preloaded promises, skipping any that fail to decode
   const cache = new Map<string, PromiseRecord>();
   const mergePreload = (pls: PromiseRecord[]) => {
@@ -195,14 +213,17 @@ export function buildEffects(
   };
   mergePreload(preload);
 
-  async function sendFenced<R extends PromiseCreateReq | PromiseSettleReq>(
+  function* sendFenced<R extends PromiseCreateReq | PromiseSettleReq>(
     inner: R,
-  ): Promise<R extends PromiseCreateReq ? PromiseCreateRes : PromiseSettleRes> {
-    const outer = await send({
-      kind: "task.fence",
-      head: { corrId: randomUUID(), version: VERSION },
-      data: { id: fence.id, version: fence.version, action: inner },
-    });
+  ): Fiber<R extends PromiseCreateReq ? PromiseCreateRes : PromiseSettleRes> {
+    const outer: Extract<Response, { kind: "task.fence" }> = yield {
+      op: "send",
+      req: {
+        kind: "task.fence",
+        head: { corrId: randomUUID(), version: VERSION },
+        data: { id: fence.id, version: fence.version, action: inner },
+      },
+    };
     if (!isSuccess(outer)) {
       throw exceptions.SERVER_ERROR(outer.data, true, {
         code: outer.head.status,
@@ -213,55 +234,61 @@ export function buildEffects(
     return outer.data.action as any;
   }
 
+  function* create(req: PromiseCreateReq, func = "unknown"): Fiber<PromiseRecord> {
+    const cached = cache.get(req.data.id);
+    if (cached) {
+      return cached;
+    }
+
+    try {
+      req.data.param = codec.encode(req.data.param.data);
+    } catch (e) {
+      throw exceptions.ENCODING_ARGS_UNENCODEABLE(func, e);
+    }
+
+    const res = yield* sendFenced(req);
+    if (!isSuccess(res)) {
+      throw exceptions.SERVER_ERROR(res.data, true, {
+        code: res.head.status,
+        message: res.data,
+      });
+    }
+
+    const decoded = codec.decodePromise(res.data.promise);
+    cache.set(decoded.id, decoded);
+    return decoded;
+  }
+
+  function* settle(req: PromiseSettleReq, func = "unknown"): Fiber<PromiseRecord> {
+    const cached = cache.get(req.data.id);
+    if (cached && cached.state !== "pending") {
+      return cached;
+    }
+
+    try {
+      req.data.value = codec.encode(req.data.value.data);
+    } catch (e) {
+      throw exceptions.ENCODING_RETV_UNENCODEABLE(func, e);
+    }
+
+    const res = yield* sendFenced(req);
+    if (!isSuccess(res)) {
+      throw exceptions.SERVER_ERROR(res.data, true, {
+        code: res.head.status,
+        message: res.data,
+      });
+    }
+
+    const decoded = codec.decodePromise(res.data.promise);
+    cache.set(decoded.id, decoded);
+    return decoded;
+  }
+
   return {
-    promiseCreate: async (req, func = "unknown") => {
-      const cached = cache.get(req.data.id);
-      if (cached) {
-        return cached;
-      }
-
-      try {
-        req.data.param = codec.encode(req.data.param.data);
-      } catch (e) {
-        throw exceptions.ENCODING_ARGS_UNENCODEABLE(func, e);
-      }
-
-      const res = await sendFenced(req);
-      if (!isSuccess(res)) {
-        throw exceptions.SERVER_ERROR(res.data, true, {
-          code: res.head.status,
-          message: res.data,
-        });
-      }
-
-      const decoded = codec.decodePromise(res.data.promise);
-      cache.set(decoded.id, decoded);
-      return decoded;
-    },
-
-    promiseSettle: async (req, func = "unknown") => {
-      const cached = cache.get(req.data.id);
-      if (cached && cached.state !== "pending") {
-        return cached;
-      }
-
-      try {
-        req.data.value = codec.encode(req.data.value.data);
-      } catch (e) {
-        throw exceptions.ENCODING_RETV_UNENCODEABLE(func, e);
-      }
-
-      const res = await sendFenced(req);
-      if (!isSuccess(res)) {
-        throw exceptions.SERVER_ERROR(res.data, true, {
-          code: res.head.status,
-          message: res.data,
-        });
-      }
-
-      const decoded = codec.decodePromise(res.data.promise);
-      cache.set(decoded.id, decoded);
-      return decoded;
-    },
+    send,
+    create,
+    settle,
+    promiseCreate: (req, func) => drive(create(req, func), { send }),
+    promiseSettle: (req, func) => drive(settle(req, func), { send }),
   };
 }

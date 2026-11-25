@@ -3,8 +3,17 @@ import type { Codec } from "./codec.js";
 import { Computation, type Done, type Status } from "./computation.js";
 import exceptions, { ResonateError } from "./exceptions.js";
 import type { Heartbeat } from "./heartbeat.js";
+import { drive, type Fiber } from "./kernel.js";
 import type { Logger } from "./logger.js";
-import { isRedirect, isSuccess, type Message, type PromiseRecord, type TaskRecord } from "./network/types.js";
+import {
+  isRedirect,
+  isSuccess,
+  type Message,
+  type PromiseRecord,
+  type Request,
+  type Response,
+  type TaskRecord,
+} from "./network/types.js";
 import type { OptionsBuilder } from "./options.js";
 import { randomUUID } from "./platform.js";
 import type { Registry } from "./registry.js";
@@ -74,11 +83,22 @@ export class Core {
     ]);
   }
 
-  public async executeUntilBlocked(
-    task: TaskRecord,
-    rootPromise: PromiseRecord,
-    preload?: PromiseRecord[],
-  ): Promise<Status> {
+  /** Runs `execute` with the production driver. */
+  public executeUntilBlocked(task: TaskRecord, rootPromise: PromiseRecord, preload?: PromiseRecord[]): Promise<Status> {
+    return drive(this.execute(task, rootPromise, preload), { send: this.send });
+  }
+
+  /** Runs `handle` with the production driver. */
+  public onMessage(msg: Message): Promise<Status | undefined> {
+    return drive(this.handle(msg), { send: this.send });
+  }
+
+  /**
+   * Executes an acquired task until it is done or blocked on remote promises.
+   * A fiber: every request it makes and every leaf it runs is yielded to the
+   * driver, so it contains no await.
+   */
+  public *execute(task: TaskRecord, rootPromise: PromiseRecord, preload?: PromiseRecord[]): Fiber<Status> {
     util.assert(task.state === "acquired", `expected task state to be 'acquired', got '${task.state}'`);
 
     // A resonate:timer promise is a durable sleep. It names no function to
@@ -112,7 +132,7 @@ export class Core {
         value: rootPromise.value?.data,
         trace: collector.getTrace(),
       };
-      await this.fulfillTask(task, rootPromise, status);
+      yield* this.fulfillTask(task, rootPromise, status);
       return status;
     }
 
@@ -122,15 +142,15 @@ export class Core {
     );
 
     try {
-      const status = await computation.executeUntilBlocked(rootPromise);
+      const status = yield* computation.run(rootPromise);
       if (status.kind === "suspended") {
-        const suspendResult = await this.suspendTask(task, rootPromise, status.awaited);
+        const suspendResult = yield* this.suspendTask(task, rootPromise, status.awaited);
         if (suspendResult.continue) {
-          return this.executeUntilBlocked(task, rootPromise, suspendResult.preload);
+          return yield* this.execute(task, rootPromise, suspendResult.preload);
         }
       }
       if (status.kind === "done") {
-        await this.fulfillTask(task, rootPromise, status);
+        yield* this.fulfillTask(task, rootPromise, status);
       }
       return status;
     } catch (err) {
@@ -143,7 +163,9 @@ export class Core {
           "executeUntilBlocked failed unexpectedly",
         );
       }
-      await this.releaseTask(task, rootPromise).catch(() => {});
+      try {
+        yield* this.releaseTask(task, rootPromise);
+      } catch {}
       throw err;
     }
   }
@@ -163,20 +185,24 @@ export class Core {
     );
   }
 
-  private async releaseTask(task: TaskRecord, rootPromise: PromiseRecord): Promise<void> {
-    await this.send({
+  private *request<R extends Request>(req: R): Fiber<Extract<Response, { kind: R["kind"] }>> {
+    return yield { op: "send", req };
+  }
+
+  private *releaseTask(task: TaskRecord, rootPromise: PromiseRecord): Fiber<void> {
+    yield* this.request({
       kind: "task.release",
       head: { corrId: randomUUID(), version: util.VERSION, "resonate:origin": rootPromise.tags["resonate:origin"] },
       data: { id: task.id, version: task.version },
     });
   }
 
-  private async suspendTask(
+  private *suspendTask(
     task: TaskRecord,
     rootPromise: PromiseRecord,
     awaited: string[],
-  ): Promise<{ continue: true; preload: PromiseRecord[] } | { continue: false }> {
-    const res = await this.send({
+  ): Fiber<{ continue: true; preload: PromiseRecord[] } | { continue: false }> {
+    const res = yield* this.request({
       kind: "task.suspend",
       head: { corrId: randomUUID(), version: util.VERSION, "resonate:origin": rootPromise.tags["resonate:origin"] },
       data: {
@@ -201,10 +227,10 @@ export class Core {
     });
   }
 
-  private async fulfillTask(task: TaskRecord, rootPromise: PromiseRecord, doneValue: Done): Promise<void> {
+  private *fulfillTask(task: TaskRecord, rootPromise: PromiseRecord, doneValue: Done): Fiber<void> {
     const encoded = this.codec.encode(doneValue.value);
 
-    await this.send({
+    yield* this.request({
       kind: "task.fulfill",
       head: { corrId: randomUUID(), version: util.VERSION, "resonate:origin": rootPromise.tags["resonate:origin"] },
       data: {
@@ -223,7 +249,8 @@ export class Core {
     });
   }
 
-  public async onMessage(msg: Message): Promise<Status | undefined> {
+  /** Handles one message off the network: acquires the task and executes it. */
+  public *handle(msg: Message): Fiber<Status | undefined> {
     // `msg` arrives off the network: an unexpected kind is an external
     // condition (unhandled message type, corruption), not an internal
     // invariant — drop it with a warning instead of asserting (which exits).
@@ -236,7 +263,7 @@ export class Core {
     }
 
     const task = msg.data.task;
-    const res = await this.send({
+    const res = yield* this.request({
       kind: "task.acquire",
       head: { corrId: randomUUID(), version: util.VERSION, "resonate:origin": task.id },
       data: { id: task.id, version: task.version, pid: this.pid, ttl: this.ttl },
@@ -254,7 +281,7 @@ export class Core {
 
     this.heartbeat.start(acquiredTask);
     try {
-      return await this.executeUntilBlocked(acquiredTask, rootPromise, res.data.preload);
+      return yield* this.execute(acquiredTask, rootPromise, res.data.preload);
     } finally {
       this.heartbeat.stop(acquiredTask);
     }

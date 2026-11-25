@@ -87,8 +87,3 @@ export function install(hooks: Hooks): () => void {
     installed = undefined;
   };
 }
-
-/** Resolve after the microtask queue has drained completely, on the real event loop. */
-export function quiesce(): Promise<void> {
-  return new Promise((resolve) => real.setImmediate(resolve));
-}

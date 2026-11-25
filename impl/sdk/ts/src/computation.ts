@@ -4,6 +4,7 @@ import { Coroutine } from "./coroutine.js";
 import exceptions from "./exceptions.js";
 import type { Heartbeat } from "./heartbeat.js";
 import { originOf } from "./ids.js";
+import { drive, type Fiber } from "./kernel.js";
 import type { Logger } from "./logger.js";
 import type { PromiseRecord } from "./network/types.js";
 import type { OptionsBuilder } from "./options.js";
@@ -12,6 +13,7 @@ import { Exponential, Never, type RetryPolicyConstructor } from "./retries.js";
 import { type Trace, TraceCollector } from "./trace.js";
 
 import type { Effects, Func } from "./types.js";
+import type { FencedEffects } from "./util.js";
 import * as util from "./util.js";
 
 export type Status = Done | Suspended;
@@ -71,18 +73,23 @@ export class Computation {
     this.logger = logger;
   }
 
-  public async executeUntilBlocked(rootPromise: PromiseRecord): Promise<Status> {
+  /** Runs the computation with the production driver. */
+  public executeUntilBlocked(rootPromise: PromiseRecord): Promise<Status> {
+    return drive(this.run(rootPromise), { send: (this.effects as FencedEffects).send });
+  }
+
+  public *run(rootPromise: PromiseRecord): Fiber<Status> {
     if (this.processing) throw exceptions.PANIC("computation", "already processing");
 
     this.processing = true;
     try {
-      return await this.processAcquired(rootPromise);
+      return yield* this.processAcquired(rootPromise);
     } finally {
       this.processing = false;
     }
   }
 
-  private async processAcquired(rootPromise: PromiseRecord): Promise<Status> {
+  private *processAcquired(rootPromise: PromiseRecord): Fiber<Status> {
     if (!isValidData(rootPromise.param?.data)) {
       throw exceptions.PANIC("computation", "invalid promise data");
     }
@@ -132,18 +139,18 @@ export class Computation {
     };
 
     if (util.isGeneratorFunction(registered.func)) {
-      return this.processGenerator(registered.func, ctxConfig, args, rootPromise);
+      return yield* this.processGenerator(registered.func, ctxConfig, args, rootPromise);
     }
 
-    return this.processFunction(this.id, registered.func, new InnerContext(ctxConfig), args);
+    return yield* this.processFunction(this.id, registered.func, new InnerContext(ctxConfig), args);
   }
 
-  private async processGenerator(
+  private *processGenerator(
     func: Func,
     ctxConfig: ConstructorParameters<typeof InnerContext>[0],
     args: any[],
     rootPromise: PromiseRecord,
-  ): Promise<Status> {
+  ): Fiber<Status> {
     const collector = new TraceCollector();
 
     // If boundary promise is done, short-circuit (dedup the root)
@@ -161,7 +168,7 @@ export class Computation {
     }
 
     const ctx = new InnerContext(ctxConfig);
-    const status = await Coroutine.exec(this.logger, ctx, func, args, this.effects, collector);
+    const status = yield* Coroutine.run(this.logger, ctx, func, args, this.effects as FencedEffects, collector);
     const trace = collector.getTrace();
 
     if (status.type === "done") {
@@ -178,12 +185,12 @@ export class Computation {
     return { kind: "suspended", awaited: status.todo.remote.map((t) => t.id), trace };
   }
 
-  private async processFunction(id: string, func: Func, ctx: InnerContext, args: any[]): Promise<Status> {
+  private *processFunction(id: string, func: Func, ctx: InnerContext, args: any[]): Fiber<Status> {
     const collector = new TraceCollector();
     collector.emit({ kind: "spawn", id });
     this.logger.debug({ component: "trace", kind: "spawn", id }, "trace: spawn");
 
-    const result = await util.executeWithRetry(ctx, func, args, this.logger);
+    const result = yield* util.retrying(ctx, func, args, this.logger);
     const state = result.kind === "value" ? "resolved" : "rejected";
     const value = result.kind === "value" ? result.value : result.error;
 
