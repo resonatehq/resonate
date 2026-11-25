@@ -175,16 +175,6 @@ class SimulatedNetwork implements Network {
   }
 }
 
-// Both `Core` (generator engine) and `AsyncCore` (async engine) take the
-// identical dependency object and expose `onMessage`, so the worker is made
-// engine-agnostic by injecting a factory. This is the single swap point that
-// lets a (seed, workload, fault) triple run on either engine.
-export type EngineDeps = ConstructorParameters<typeof Core>[0];
-export type SimEngine = { onMessage(msg: Message): Promise<unknown> };
-export type EngineFactory = (deps: EngineDeps) => SimEngine;
-
-export const genEngine: EngineFactory = (deps) => new Core(deps);
-
 export class WorkerProcess extends Process {
   private clock: StepClock;
   private network: SimulatedNetwork;
@@ -196,13 +186,12 @@ export class WorkerProcess extends Process {
     { charFlipProb }: DeliveryOptions,
     public readonly iaddr: string,
     public readonly gaddr: string,
-    engineFactory: EngineFactory = genEngine,
   ) {
     super(iaddr, gaddr);
     this.clock = clock;
     this.network = new SimulatedNetwork(iaddr, gaddr, prng, { charFlipProb }, unicast(iaddr), unicast("server"));
     const logger = new ConsoleLogger("error");
-    const core = engineFactory({
+    const core = new Core({
       pid: iaddr,
       ttl: 10000,
       clock: this.clock,

@@ -14,11 +14,11 @@
  * id minting fails locally instead of as a 400 from a real server.
  */
 
-import type { Context, Info } from "../src/async/context.js";
-import { Resonate } from "../src/async/resonate.js";
+import type { Context } from "../src/context.js";
 import { joinId, originOf, validateRootId } from "../src/ids.js";
 import { LocalNetwork, Server } from "../src/network/local.js";
 import type { Network } from "../src/network/network.js";
+import { Resonate } from "../src/resonate.js";
 import * as util from "../src/util.js";
 
 // =============================================================================
@@ -108,33 +108,33 @@ async function runWorkflow(rootId: string): Promise<{ creates: string[]; tags: M
   const recording = new RecordingNetwork(new LocalNetwork({ pid: "default", group: "default" }));
   const resonate = new Resonate({ network: recording, ttl: Number.MAX_SAFE_INTEGER });
   try {
-    const leaf = async (_info: Info, n: number): Promise<number> => n;
-    const tail = async (_info: Info, n: number): Promise<number> => n;
-    const grandchild = async (ctx: Context, n: number): Promise<number> => {
-      await ctx.run("leaf", n);
+    const leaf = (_ctx: Context, n: number): number => n;
+    const tail = (_ctx: Context, n: number): number => n;
+    function* grandchild(ctx: Context, n: number): Generator<any, number, any> {
+      yield* ctx.run("leaf", n);
       return n;
-    };
+    }
     // A detached child that itself detaches — the recursion-bounding case.
-    const detachesAgain = async (ctx: Context, n: number): Promise<number> => {
-      await ctx.detached("tail", n);
+    function* detachesAgain(ctx: Context, n: number): Generator<any, number, any> {
+      yield* ctx.detached("tail", n);
       return n;
-    };
-    const mid = async (ctx: Context, n: number): Promise<number> => {
-      await ctx.run("grandchild", n);
+    }
+    function* mid(ctx: Context, n: number): Generator<any, number, any> {
+      yield* ctx.run("grandchild", n);
       // A global-scope timer promise: minted from the same seq as everything
       // else. A 1ms sleep settles fast enough for the pass to continue.
-      await ctx.sleep(1);
+      yield* ctx.sleep(1);
       // Detached from a *nested* context: its id is minted off the origin,
       // not off this context, so its declared ancestors must be the origin
       // too.
-      await ctx.detached("detachesAgain", n);
+      yield* ctx.detached("detachesAgain", n);
       return n;
-    };
-    const top = async (ctx: Context, n: number): Promise<number> => {
-      await ctx.run("mid", n);
-      await ctx.run("mid", n + 1);
+    }
+    function* top(ctx: Context, n: number): Generator<any, number, any> {
+      yield* ctx.run("mid", n);
+      yield* ctx.run("mid", n + 1);
       return n;
-    };
+    }
     resonate.register("leaf", leaf);
     resonate.register("tail", tail);
     resonate.register("grandchild", grandchild);
@@ -142,7 +142,7 @@ async function runWorkflow(rootId: string): Promise<{ creates: string[]; tags: M
     resonate.register("mid", mid);
     resonate.register("top", top);
 
-    await (await resonate.run(rootId, top, 1)).result();
+    await resonate.run(rootId, top, 1);
 
     // Let the fire-and-forget detached children be dispatched and run: 2x mid
     // each detach a child that detaches again -> 4 detached promises.
@@ -163,7 +163,7 @@ async function runWorkflow(rootId: string): Promise<{ creates: string[]; tags: M
 // Tests
 // =============================================================================
 
-describe("promise id format compliance (async engine)", () => {
+describe("promise id format compliance", () => {
   let created: { creates: string[]; tags: Map<string, Record<string, string>> };
 
   beforeAll(async () => {
