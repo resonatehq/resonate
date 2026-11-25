@@ -24,11 +24,6 @@
       "import": "./dist/src/index.js",
       "default": "./dist/src/index.js"
     },
-    "./async": {
-      "types": "./dist/src/async/index.d.ts",
-      "import": "./dist/src/async/index.js",
-      "default": "./dist/src/async/index.js"
-    },
     "./nats": {
       "types": "./dist/src/network/nats.d.ts",
       "import": "./dist/src/network/nats.js",
@@ -59,7 +54,6 @@
     "debug": "node --inspect-brk ./node_modules/.bin/jest -i",
     "docs": "typedoc ./src --githubPages",
     "dst": "tsx sim/main.ts",
-    "dst:diff": "tsx sim/src/differential.ts",
     "fmt": "biome format ./ --write",
     "prepare": "npm run build",
     "release": "tsx scripts/release.ts",
