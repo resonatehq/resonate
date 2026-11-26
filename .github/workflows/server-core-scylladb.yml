@@ -1,0 +1,66 @@
+# The server's ScyllaDB plugin held to the engine differential, nightly and on
+# demand rather than on every pull request.
+#
+# ScyllaDB has no transactions: every task and promise transition is a
+# lightweight transaction (Paxos), so against a single node the differential's
+# default trajectory takes about 30 minutes, against seconds for SQLite. Like
+# TiDB, that is too long for every server PR and fine for a nightly run.
+#
+# Only the engine differential runs here. The port differential and the
+# linearizability check have no ScyllaDB leg yet.
+
+name: server-core-scylladb
+
+on:
+  schedule:
+    - cron: "47 3 * * *" # nightly, 03:47 UTC
+  workflow_dispatch:
+  # Only when this file changes, so an edit to it is tested before it lands.
+  pull_request:
+    paths:
+      - ".github/workflows/server-core-scylladb.yml"
+
+defaults:
+  run:
+    working-directory: impl/server/core
+
+jobs:
+  differential:
+    name: Differential (scylladb)
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-workspaces: impl/server/core
+
+      # Not a service container: ScyllaDB needs its own arguments to fit a
+      # runner, and services cannot pass a command.
+      - name: Start ScyllaDB
+        run: |
+          docker run -d --name scylladb -p 9042:9042 scylladb/scylla:2025.1 \
+            --smp 1 --memory 2G --developer-mode 1 --overprovisioned 1
+
+      - name: Wait for ScyllaDB
+        run: |
+          for i in $(seq 1 90); do
+            docker exec scylladb cqlsh -e "SELECT now() FROM system.local" >/dev/null 2>&1 && exit 0
+            sleep 2
+          done
+          docker logs scylladb | tail -50
+          echo "scylladb did not accept CQL"; exit 1
+
+      - name: Differential
+        env:
+          XTASK_SCYLLA_HOSTS: 127.0.0.1
+        run: cargo xtask differential --backend scylladb
+
+      - name: Concurrent task transitions
+        env:
+          TEST_SCYLLA_HOSTS: 127.0.0.1
+        run: cargo test --release --test scylla_race -- --nocapture

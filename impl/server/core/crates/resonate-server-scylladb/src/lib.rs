@@ -15,7 +15,7 @@
 
 mod db;
 mod deadlines;
-mod engine;
+pub mod engine;
 mod errors;
 mod metrics;
 mod ops_promise;
@@ -309,6 +309,25 @@ impl ScyllaEngine {
     }
 
     pub async fn dispatch(&self, req: &RequestEnvelope, now: i64) -> Output {
+        // A task operation that loses its compare-and-set has already undone
+        // its own side writes. Running it again re-reads the row, so the loser
+        // gets the 409 (or the idempotent 200) a serial order gives, not a
+        // retryable 500 for a request that can never succeed. Bounded: each
+        // retry means another request committed in between.
+        let mut out = self.dispatch_once(req, now).await;
+        for _ in 0..LOST_RACE_RETRIES {
+            let lost = out.response.as_ref().is_some_and(|r| {
+                r.head.status == 500 && r.data.as_str() == Some(ops_task::LOST_RACE)
+            });
+            if !lost {
+                break;
+            }
+            out = self.dispatch_once(req, now).await;
+        }
+        out
+    }
+
+    async fn dispatch_once(&self, req: &RequestEnvelope, now: i64) -> Output {
         match req.kind.as_str() {
             "promise.get" => self.op_promise_get(req, now).await,
             "promise.create" => self.op_promise_create(req, now).await,
@@ -397,6 +416,8 @@ pub(crate) struct Ctx {
 }
 
 pub(crate) type Tags = HashMap<String, String>;
+
+const LOST_RACE_RETRIES: usize = 8;
 
 #[async_trait]
 impl Engine for ScyllaEngine {

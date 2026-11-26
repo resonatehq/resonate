@@ -20,6 +20,10 @@ use crate::db::{big, cql_set, get_text, int, opt_text, text, Args, PromiseRow, S
 use crate::ops_promise::{err, ok, parse, storage_err};
 use crate::{Ctx, ScyllaEngine};
 
+/// A conditional write lost to a concurrent one. `dispatch` runs the operation
+/// again, and its fresh read gives the answer a serial order would.
+pub(crate) const LOST_RACE: &str = "Concurrent modification; please retry";
+
 impl ScyllaEngine {
     /// Branch siblings, capped — what a task response preloads. Branch
     /// members share the origin partition, so this is a partition scan.
@@ -158,7 +162,7 @@ impl ScyllaEngine {
                                 )
                                 .await;
                         }
-                        return err(req, 500, "Concurrent modification; please retry");
+                        return err(req, 500, LOST_RACE);
                     }
                     if let Some(old_retry) = row.task_timeout_retry {
                         let _ = self
@@ -343,7 +347,7 @@ impl ScyllaEngine {
                         .await;
                 }
             }
-            return err(req, 500, "Concurrent modification; please retry");
+            return err(req, 500, LOST_RACE);
         }
 
         if !already_timedout {
@@ -762,7 +766,7 @@ impl ScyllaEngine {
             Err(e) => return storage_err(req, e),
         };
         if !applied {
-            return err(req, 500, "Concurrent modification; please retry");
+            return err(req, 500, LOST_RACE);
         }
         if let Some(old_lease) = row.task_timeout_lease {
             let _ = self
@@ -1072,7 +1076,7 @@ impl ScyllaEngine {
             return match get_text(&lwt, "task_state").as_deref() {
                 Some("halted") => ok(req, ctx, &json!({})),
                 Some("fulfilled") => err(req, 409, "Task is fulfilled"),
-                _ => err(req, 500, "Concurrent modification; please retry"),
+                _ => err(req, 500, LOST_RACE),
             };
         }
         match row.task_state.as_deref() {
