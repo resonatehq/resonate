@@ -58,6 +58,11 @@ path = "diff/differential.rs"
 name = "port"
 path = "diff/port.rs"
 
+# Concurrent task transitions on ScyllaDB; skipped unless TEST_SCYLLA_HOSTS is set.
+[[test]]
+name = "scylla_race"
+path = "diff/scylla_race.rs"
+
 [features]
 # No feature per plugin. Choosing plugins is what a *binary* does, by naming
 # them — a dependency here and a line in `registry()` — and this binary is the

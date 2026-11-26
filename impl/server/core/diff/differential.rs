@@ -98,6 +98,105 @@ fn req(kind: &str, data: Value) -> RequestEnvelope {
 }
 
 // ---------------------------------------------------------------------------
+// ScyllaDB, through an adapter: it has its own copy of the engine contract.
+// ---------------------------------------------------------------------------
+
+mod scylla_backend {
+    use async_trait::async_trait;
+    use resonate_server_scylladb::engine as se;
+    use resonate_server_scylladb::engine::Engine as _;
+    use resonate_server_scylladb::ScyllaEngine;
+    use resonate_sql::engine::{Engine, Input, Outgoing, Output, Scheduled, Timeout};
+    use resonate_sql::StorageResult;
+
+    pub struct ScyllaBackend(pub ScyllaEngine);
+
+    fn out_msg(m: se::Outgoing) -> Outgoing {
+        match m {
+            se::Outgoing::Execute {
+                address,
+                task_id,
+                version,
+            } => Outgoing::Execute {
+                address,
+                task_id,
+                version,
+            },
+            se::Outgoing::Unblock { address, promise } => Outgoing::Unblock { address, promise },
+        }
+    }
+    fn out_timeout(t: se::Timeout) -> Timeout {
+        match t {
+            se::Timeout::PromiseTimeout { promise_id } => Timeout::PromiseTimeout { promise_id },
+            se::Timeout::TaskRetryTimeout { task_id } => Timeout::TaskRetryTimeout { task_id },
+            se::Timeout::TaskLeaseTimeout { task_id, pid } => {
+                Timeout::TaskLeaseTimeout { task_id, pid }
+            }
+            se::Timeout::ScheduleDue { schedule_id } => Timeout::ScheduleDue { schedule_id },
+        }
+    }
+    fn in_timeout(t: Timeout) -> se::Timeout {
+        match t {
+            Timeout::PromiseTimeout { promise_id } => se::Timeout::PromiseTimeout { promise_id },
+            Timeout::TaskRetryTimeout { task_id } => se::Timeout::TaskRetryTimeout { task_id },
+            Timeout::TaskLeaseTimeout { task_id, pid } => {
+                se::Timeout::TaskLeaseTimeout { task_id, pid }
+            }
+            Timeout::ScheduleDue { schedule_id } => se::Timeout::ScheduleDue { schedule_id },
+        }
+    }
+    fn out_sched(s: se::Scheduled) -> Scheduled {
+        Scheduled {
+            at: s.at,
+            timeout: out_timeout(s.timeout),
+        }
+    }
+    fn err<E: std::fmt::Display>(e: E) -> resonate_sql::StorageError {
+        resonate_sql::StorageError::Backend(e.to_string())
+    }
+
+    #[async_trait]
+    impl Engine for ScyllaBackend {
+        async fn process(&self, input: Input<'_>, now: i64) -> Output {
+            let o = match input {
+                Input::External(r) => self.0.process(se::Input::External(r), now).await,
+                Input::Internal(t) => {
+                    self.0
+                        .process(se::Input::Internal(in_timeout(t)), now)
+                        .await
+                }
+            };
+            Output {
+                response: o.response,
+                messages: o.messages.into_iter().map(out_msg).collect(),
+                timeouts: o.timeouts.into_iter().map(out_sched).collect(),
+            }
+        }
+        async fn tick(&self, now: i64) -> StorageResult<(usize, Vec<Outgoing>, Vec<Scheduled>)> {
+            let (n, m, s) = self.0.tick(now).await.map_err(err)?;
+            Ok((
+                n,
+                m.into_iter().map(out_msg).collect(),
+                s.into_iter().map(out_sched).collect(),
+            ))
+        }
+        async fn upcoming(&self, limit: usize) -> StorageResult<Vec<Scheduled>> {
+            Ok(self
+                .0
+                .upcoming(limit)
+                .await
+                .map_err(err)?
+                .into_iter()
+                .map(out_sched)
+                .collect())
+        }
+        fn returns_messages(&self) -> bool {
+            true
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Backend abstraction
 // ---------------------------------------------------------------------------
 
@@ -268,6 +367,7 @@ async fn differential_random() {
         }
     };
 
+    let mut scylla_backend_slot: Option<Backend> = None;
     let my_backend: Option<Backend> = match my_url {
         Some(url) => {
             let my = MysqlEngine::connect(&url, 5, TASK_RETRY_TIMEOUT_MS, PRELOAD_LIMIT, true)
@@ -282,6 +382,22 @@ async fn differential_random() {
         }
     };
 
+    if let Ok(hosts) = std::env::var("TEST_SCYLLA_HOSTS") {
+        let cfg = resonate_server_scylladb::Config {
+            hosts: hosts.split(',').map(String::from).collect(),
+            keyspace: "resonate_diff".into(),
+            migrate: true,
+            preload_limit: PRELOAD_LIMIT,
+            ..Default::default()
+        };
+        let sc = resonate_server_scylladb::ScyllaEngine::connect(&cfg, TASK_RETRY_TIMEOUT_MS, true)
+            .await
+            .expect("scylladb connect");
+        scylla_backend_slot = Some(Arc::new(scylla_backend::ScyllaBackend(sc)) as Backend);
+    } else {
+        eprintln!("[diff] TEST_SCYLLA_HOSTS not set — ScyllaDB skipped");
+    }
+
     let mut backends: Vec<(String, Backend)> = vec![
         ("sqlite".into(), sqlite),
         ("oracle".into(), Arc::clone(&oracle) as Backend),
@@ -291,6 +407,9 @@ async fn differential_random() {
     }
     if let Some(my) = my_backend {
         backends.push(("mysql".into(), my));
+    }
+    if let Some(sc) = scylla_backend_slot {
+        backends.push(("scylladb".into(), sc));
     }
 
     // Iterating on one backend does not need all of them, and a full run is
@@ -383,6 +502,10 @@ async fn differential_random() {
                 let op = pick_op(&mut rng, &o, &covered);
                 build_envelope(op, &mut rng, &o, now)
             };
+            // The state before this step is the state at the old clock: a
+            // backend that projects expiry on read would otherwise show a
+            // tick's effects before the tick is sent.
+            let before_now = now;
             now = now_after;
             total_steps += 1;
 
@@ -391,7 +514,7 @@ async fn differential_random() {
             eprintln!("[diff] {ctx} now={now}");
 
             // Verify backends agree before this step.
-            let (pre_snaps, pre_queued) = snap_all(&backends, now).await;
+            let (pre_snaps, pre_queued) = snap_all(&backends, before_now).await;
             assert_no_divergence(
                 &pre_snaps,
                 &[
@@ -739,6 +862,7 @@ async fn snap_all(
         assert_eq!(resp.head.status, 200, "debug.snap failed on {name}");
         let mut data = resp.data;
         normalize_snap(&mut data);
+        project_internal(&mut data, now);
         let messages = data
             .as_object_mut()
             .and_then(|o| o.remove("messages"))
@@ -749,6 +873,27 @@ async fn snap_all(
         state.push((name.clone(), data));
     }
     (state, queued)
+}
+
+/// `diff/port.rs`'s `project`: an internal promise past its deadline is
+/// expired whether or not its row says so yet. ScyllaDB writes the expiry
+/// eagerly, the SQL engines and the oracle lazily; the spec treats them alike.
+fn project_internal(snap: &mut Value, now: i64) {
+    let Some(ps) = snap.get_mut("promises").and_then(|v| v.as_array_mut()) else {
+        return;
+    };
+    for p in ps.iter_mut() {
+        let t = &p["tags"];
+        let internal = t["resonate:target"].is_null()
+            && t["resonate:external"].as_str() != Some("true")
+            && t["resonate:scope"].as_str() != Some("global")
+            && t["resonate:timer"].as_str() != Some("true");
+        let due = p["timeoutAt"].as_i64().is_some_and(|x| x <= now);
+        if internal && due && p["state"].as_str() == Some("pending") {
+            p["settledAt"] = p["timeoutAt"].clone();
+            p["state"] = json!("rejected_timedout");
+        }
+    }
 }
 
 /// Every entry must be the same value.

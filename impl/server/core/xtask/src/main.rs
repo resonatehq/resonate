@@ -102,6 +102,9 @@ enum Backend {
     /// database behind the wire protocol.
     Tidb,
     Blob,
+    /// ScyllaDB: the engine differential only. Its server has no port
+    /// differential leg yet, and a keyspace is reset rather than created.
+    Scylladb,
 }
 
 #[derive(Args, Clone)]
@@ -116,6 +119,9 @@ struct DbArgs {
     /// Admin connection to a TiDB server (MySQL protocol, port 4000).
     #[arg(long, env = "XTASK_TIDB_ADMIN_URL")]
     tidb_admin_url: Option<String>,
+    /// Comma-separated ScyllaDB seed hosts.
+    #[arg(long, env = "XTASK_SCYLLA_HOSTS")]
+    scylla_hosts: Option<String>,
     /// Leave the fresh databases in place after the run, for inspection.
     #[arg(long)]
     keep_db: bool,
@@ -270,7 +276,7 @@ impl FreshDb {
                     .await
                     .map_err(|e| format!("create database {name}: {e}"))?;
             }
-            Backend::Sqlite | Backend::Blob => {
+            Backend::Sqlite | Backend::Blob | Backend::Scylladb => {
                 unreachable!("no server to create a database on")
             }
         }
@@ -315,7 +321,7 @@ impl FreshDb {
                     Err(e) => Err(e.to_string()),
                 }
             }
-            Backend::Sqlite | Backend::Blob => Ok(()),
+            Backend::Sqlite | Backend::Blob | Backend::Scylladb => Ok(()),
         };
         match dropped {
             Ok(()) => eprintln!("==> dropped database {}", self.name),
@@ -344,7 +350,7 @@ fn admin_url(db: &DbArgs, backend: Backend) -> Result<Option<String>> {
                 .clone()
                 .ok_or("tidb needs --tidb-admin-url or XTASK_TIDB_ADMIN_URL")?,
         ),
-        Backend::Sqlite | Backend::Blob => None,
+        Backend::Sqlite | Backend::Blob | Backend::Scylladb => None,
     })
 }
 
@@ -370,7 +376,7 @@ fn url_var(backend: Backend) -> Option<&'static str> {
     match backend {
         Backend::Postgres => Some("TEST_POSTGRES_URL"),
         Backend::Mysql | Backend::Tidb => Some("TEST_MYSQL_URL"),
-        Backend::Sqlite | Backend::Blob => None,
+        Backend::Sqlite | Backend::Blob | Backend::Scylladb => None,
     }
 }
 
@@ -432,6 +438,29 @@ async fn one_differential(backend: Backend, seed: Option<u64>, db: &DbArgs) -> R
             "port differential",
             with_seed(
                 cargo().args(["test", "--release", "--test", "port", "--", "--nocapture"]),
+                seed,
+            ),
+        );
+    }
+    if backend == Backend::Scylladb {
+        let hosts = db
+            .scylla_hosts
+            .clone()
+            .ok_or("scylladb needs --scylla-hosts or XTASK_SCYLLA_HOSTS")?;
+        return run(
+            "engine differential",
+            with_seed(
+                cargo()
+                    .args([
+                        "test",
+                        "--release",
+                        "--test",
+                        "differential",
+                        "--all-features",
+                        "--",
+                        "--nocapture",
+                    ])
+                    .env("TEST_SCYLLA_HOSTS", hosts),
                 seed,
             ),
         );
@@ -597,6 +626,9 @@ async fn porcupine(backend: Backend, db: &DbArgs, porc: &PorcArgs) -> Result<()>
                 // No bucket: the in-process object store, fresh with the
                 // process, with real conditional-write semantics.
                 server.env("RESONATE_SERVERS__ACTIVE", "server_blob");
+            }
+            Backend::Scylladb => {
+                return Err("no linearizability leg for scylladb yet".into());
             }
             Backend::Sqlite => {
                 server.env("RESONATE_SERVERS__ACTIVE", "server_sqlite").env(
