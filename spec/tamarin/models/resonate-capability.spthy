@@ -1,0 +1,592 @@
+theory ResonateCapability
+begin
+
+/*
+================================================================================
+
+  THE CAPABILITY, ON ITS OWN.
+
+  The counterpart to `models/resonate-payload.spthy`.  That theory takes the
+  envelope and drops the task lifecycle; this one takes the task lifecycle and
+  drops the envelope.  Between them they discharge the two things
+  `resonate.spthy` adds to the specification -- who may write, and who may
+  read -- on theories small enough for the prover to finish.
+
+  Neither is a reduction of `resonate.spthy`, and neither should be read as
+  one.  This theory carries no payloads at all: a promise's param is a public
+  constant, and so is its value.  It therefore says NOTHING about
+  confidentiality.  What it does carry is the whole authorisation story, with
+  the specification's guards unchanged:
+
+      t.state != .acquired  -> 409      (matched: 'acquired')
+      p.state != .pending   -> 409      (matched: 'pending')
+      t.version != version  -> 409      (matched: the same `ver`)
+
+  plus the two things the identity model adds on top: the request must be
+  signed by the worker the capability names, and the capability must verify
+  under the server's own key.
+
+      cap = sign(<'cap', S, tid, version, W>, sk(S))
+
+  The rules are transcribed from `resonate.spthy` with the blob arguments
+  removed.  Where that theory has `Server_Task_Complete`, this one has the
+  same premises, the same two signature checks and the same effects, over a
+  `PromiseSt(S, pid, st)` that carries a state and nothing else.
+
+  Time is abstracted exactly as it is there: the lease timeout, the promise
+  timeout and the retry dispatch may fire whenever their non-temporal guards
+  hold, which is an over-approximation and so sound for the safety properties
+  below.
+
+  VERSIONS ARE NONCES HERE, AND PUBLISHED.  `taskAcquire` increments an
+  integer; this theory mints a fresh name instead and writes it to the network
+  the moment it is issued.  The justification is that EVERY guard in the
+  specification that reads a version tests it by equality --
+
+      t.version != req.version -> 409          (fence, suspend, fulfill, release)
+      t.version == ref.version                 (heartbeat)
+
+  -- and nothing anywhere compares two versions for magnitude.  So the
+  identity of a version is all a guard can see, and a nonce is faithful to
+  every one of them.  Two things change, and both are accounted for:
+
+    * Ordering is lost.  No lemma below uses it.  (The specification's
+      `monotone_task_version_increases_only_on_acquisition` does, but that is
+      a well-formedness property of the machine, not one of these.)
+
+    * A counter is guessable and a nonce is not, which would WEAKEN the
+      adversary.  So every version is `Out`-ed as it is minted: the adversary
+      knows every version that exists, immediately, without reading `task.get`
+      and without guessing.  That is strictly more than it could do against a
+      real counter.  The converse -- forging a version the server never issued
+      -- gains nothing, because such a version matches no stored task and
+      every guard rejects it.
+
+  Global freshness also means versions never collide across tasks, where real
+  counters do; no guard compares versions across tasks, so that is immaterial.
+
+  What it buys: `claim_is_exclusive` -- two workers never hold the same
+  <task, version> -- becomes a statement about `Fr`, which Tamarin decides
+  natively.  Four steps and four seconds, against a 700 s timeout under three
+  different rankings with `vsucc`.
+
+  `models/resonate-baseline.spthy` deliberately KEEPS the counter.  There the
+  version is the entire authority to write, and its guessability is the point
+  being made, so it must stay guessable.
+
+================================================================================
+*/
+
+builtins: signing
+
+// ---------------------------------------------------------------------------
+// restrictions
+// ---------------------------------------------------------------------------
+
+restriction equality:
+  "All x y #i. Eq(x, y) @ #i ==> x = y"
+
+restriction inequality:
+  "All x #i. Neq(x, x) @ #i ==> F"
+
+restriction only_once:
+  "All x #i #j. OnlyOnce(x) @ #i & OnlyOnce(x) @ #j ==> #i = #j"
+
+restriction settable:
+  "All s #i. Settable(s) @ #i ==>
+       s = 'resolved' | s = 'rejected' | s = 'rejectedCanceled'"
+
+restriction unique_promise_id:
+  "All s pid #i #j. PromiseBorn(s, pid) @ #i & PromiseBorn(s, pid) @ #j
+       ==> #i = #j"
+
+/* Collapsing repetitions -- the same argument as in `resonate.spthy`.  The
+   retry dispatch and the heartbeat each consume a linear fact and put back
+   exactly what they took, which makes the rule a source for its own premise.
+   A repeat leaves the same store and sends a term identical to one already on
+   the wire, so dropping repeats loses no trace any lemma here can tell apart.
+   Keyed on the version, so a dispatch at a new version still counts. */
+restriction dispatch_once_per_version:
+  "All s tid v #i #j. Dispatch(s, tid, v) @ #i & Dispatch(s, tid, v) @ #j
+       ==> #i = #j"
+
+restriction heartbeat_once_per_lease:
+  "All s tid v w #i #j. Heartbeat(s, tid, v, w) @ #i
+                     & Heartbeat(s, tid, v, w) @ #j ==> #i = #j"
+
+// ---------------------------------------------------------------------------
+// principals
+// ---------------------------------------------------------------------------
+
+rule Register_Server:
+    [ Fr(~ltkS) ]
+  --[ NewServer($S), OnlyOnce(<'agent', $S>) ]->
+    [ !Ltk($S, ~ltkS), !Pk($S, pk(~ltkS)), !Server($S), Out(pk(~ltkS)) ]
+
+rule Register_Worker:
+    [ Fr(~ltkW) ]
+  --[ NewWorker($W, $G), OnlyOnce(<'agent', $W>) ]->
+    [ !Ltk($W, ~ltkW), !Pk($W, pk(~ltkW)), !Member($W, $G), Out(pk(~ltkW)) ]
+
+rule Register_Client:
+    [ Fr(~ltkC) ]
+  --[ NewClient($C), OnlyOnce(<'agent', $C>) ]->
+    [ !Ltk($C, ~ltkC), !Pk($C, pk(~ltkC)), Out(pk(~ltkC)) ]
+
+rule Compromise_Agent:
+    [ !Ltk($A, ~lt) ]
+  --[ LtkReveal($A) ]->
+    [ Out(~lt) ]
+
+// ---------------------------------------------------------------------------
+// promise and task birth
+// ---------------------------------------------------------------------------
+
+rule Server_Promise_Create_Targeted:
+let body = <'promise.create', $S, pid, 'targeted', tgt, grp>
+in
+    [ In(<body, sig>), !Server($S), !Ltk($S, ~ltkS), !Pk($A, pkA) ]
+  --[ Eq(verify(sig, body, pkA), true)
+    , PromiseBorn($S, pid)
+    , TaskBorn($S, pid, 'v0') ]->
+    [ !PromiseMeta($S, pid, 'targeted', tgt, grp)
+    , PromiseSt($S, pid, 'pending')
+    , TaskSt($S, pid, 'tpending', 'v0', 'nobody')
+    , Out(<'promise.created', $S, pid>) ]
+
+/* An untargeted external promise -- something to suspend on. */
+rule Server_Promise_Create_External:
+let body = <'promise.create', $S, pid, 'ext', 'none', grp>
+in
+    [ In(<body, sig>), !Server($S), !Ltk($S, ~ltkS), !Pk($A, pkA) ]
+  --[ Eq(verify(sig, body, pkA), true)
+    , PromiseBorn($S, pid) ]->
+    [ !PromiseMeta($S, pid, 'ext', 'none', grp)
+    , !ExternalP($S, pid)
+    , PromiseSt($S, pid, 'pending')
+    , Out(<'promise.created', $S, pid>) ]
+
+rule Server_Mark_Targeted_External:
+    [ !PromiseMeta($S, pid, 'targeted', tgt, grp) ]
+  --[ OnlyOnce(<'ext', $S, pid>) ]->
+    [ !ExternalP($S, pid) ]
+
+// ---------------------------------------------------------------------------
+// the offer and the claim
+// ---------------------------------------------------------------------------
+
+rule Internal_Retry_Dispatch:
+let msg = <'execute', $S, tid, ver>
+in
+    [ TaskSt($S, tid, 'tpending', ver, 'nobody')
+    , PromiseSt($S, tid, 'pending')
+    , !PromiseMeta($S, tid, 'targeted', tgt, grp)
+    , !Ltk($S, ~ltkS) ]
+  --[ Dispatch($S, tid, ver), ServerOffers($S, tid, ver, tgt, grp) ]->
+    [ TaskSt($S, tid, 'tpending', ver, 'nobody')
+    , PromiseSt($S, tid, 'pending')
+    , Out(<msg, sign(msg, ~ltkS)>) ]
+
+rule Worker_Claim:
+let msg  = <'execute', $S, tid, ver>
+    body = <'task.acquire', $S, tid, ver, $W>
+in
+    [ In(<msg, sigS>)
+    , !Member($W, $G), !Ltk($W, ~ltkW), !Server($S), !Pk($S, pkS) ]
+  --[ Eq(verify(sigS, msg, pkS), true)
+    , WorkerSawOffer($W, $S, tid, ver)
+    , ClaimSent($W, $S, tid, ver) ]->
+    [ Out(<body, sign(body, ~ltkW)>), WorkerClaiming($W, $S, tid, ver) ]
+
+rule Server_Task_Acquire:
+let body   = <'task.acquire', $S, tid, ver, $W>
+    nver   = ~fresh
+    capTok = sign(<'cap', $S, tid, nver, $W>, ~ltkS)
+    resp   = <'task.acquired', $S, tid, nver, $W, capTok>
+in
+    [ In(<body, sigW>), Fr(~fresh)
+    , !Server($S), !Ltk($S, ~ltkS), !Pk($W, pkW), !Member($W, grp)
+    , TaskSt($S, tid, 'tpending', ver, 'nobody')
+    , PromiseSt($S, tid, 'pending')
+    , !PromiseMeta($S, tid, 'targeted', tgt, grp) ]
+  --[ Eq(verify(sigW, body, pkW), true)
+    , Acquire($S, tid, nver, $W)
+    , GrantCap($S, tid, nver, $W)
+    , LeaseHeld($S, tid, nver, $W)
+    , Revoke($S, tid, ver) ]->
+    [ TaskSt($S, tid, 'acquired', nver, $W)
+    , PromiseSt($S, tid, 'pending')
+    , Out(nver)
+    , Out(<resp, sign(resp, ~ltkS)>) ]
+
+rule Worker_Start:
+let capm = <'cap', $S, tid, nver, $W>
+    resp = <'task.acquired', $S, tid, nver, $W, capTok>
+in
+    [ In(<resp, sigS>)
+    , WorkerClaiming($W, $S, tid, ver)
+    , !Pk($S, pkS) ]
+  --[ Eq(verify(sigS, resp, pkS), true)
+    , Eq(verify(capTok, capm, pkS), true)
+    , WorkerHoldsCap($W, $S, tid, nver) ]->
+    [ !WorkerCap($W, $S, tid, nver, capTok)
+    , WorkerRunning($W, $S, tid, nver) ]
+
+// ---------------------------------------------------------------------------
+// what the capability authorises
+// ---------------------------------------------------------------------------
+
+rule Worker_Complete:
+let body = <'task.fulfill', $S, tid, ver, $W, $st, capTok>
+in
+    [ WorkerRunning($W, $S, tid, ver)
+    , !WorkerCap($W, $S, tid, ver, capTok)
+    , !Ltk($W, ~ltkW) ]
+  --[ Settable($st), WorkerCompletes($W, $S, tid, ver, $st) ]->
+    [ Out(<body, sign(body, ~ltkW)>) ]
+
+rule Server_Task_Complete:
+let capm = <'cap', $S, tid, ver, $W>
+    body = <'task.fulfill', $S, tid, ver, $W, st, capTok>
+in
+    [ In(<body, sigW>)
+    , !Server($S), !Ltk($S, ~ltkS), !Pk($W, pkW)
+    , TaskSt($S, tid, 'acquired', ver, $W)
+    , PromiseSt($S, tid, 'pending') ]
+  --[ Eq(verify(sigW, body, pkW), true)
+    , Eq(verify(capTok, capm, pk(~ltkS)), true)
+    , Settable(st)
+    , UsedCap($S, tid, ver, $W, 'complete')
+    , CompletedBy($S, tid, ver, $W)
+    , Settled($S, tid, st) ]->
+    [ TaskSt($S, tid, 'fulfilled', ver, 'nobody')
+    , PromiseSt($S, tid, st)
+    , Out(<'task.completed', $S, tid, st>) ]
+
+rule Worker_Fence:
+let body = <'task.fence', $S, tid, ver, $W, 'settle', $cid, $st, capTok>
+in
+    [ WorkerRunning($W, $S, tid, ver)
+    , !WorkerCap($W, $S, tid, ver, capTok)
+    , !Ltk($W, ~ltkW) ]
+  --[ Settable($st), WorkerFences($W, $S, tid, ver, $cid) ]->
+    [ Out(<body, sign(body, ~ltkW)>), WorkerRunning($W, $S, tid, ver) ]
+
+rule Server_Task_Fence_Settle:
+let capm = <'cap', $S, tid, ver, $W>
+    body = <'task.fence', $S, tid, ver, $W, 'settle', cid, st, capTok>
+in
+    [ In(<body, sigW>)
+    , !Server($S), !Ltk($S, ~ltkS), !Pk($W, pkW)
+    , TaskSt($S, tid, 'acquired', ver, $W)
+    , PromiseSt($S, tid, 'pending')
+    , PromiseSt($S, cid, 'pending')
+    , !PromiseMeta($S, cid, 'ext', 'none', cgrp) ]
+  --[ Eq(verify(sigW, body, pkW), true)
+    , Eq(verify(capTok, capm, pk(~ltkS)), true)
+    , Neq(cid, tid)
+    , Settable(st)
+    , UsedCap($S, tid, ver, $W, 'fence')
+    , LeaseHeld($S, tid, ver, $W)
+    , FencedSettle($S, tid, ver, $W, cid)
+    , Settled($S, cid, st) ]->
+    [ TaskSt($S, tid, 'acquired', ver, $W)
+    , PromiseSt($S, tid, 'pending')
+    , PromiseSt($S, cid, st)
+    , Out(<'task.fenced', $S, tid, ver, cid>) ]
+
+rule Worker_Suspend:
+let body = <'task.suspend', $S, tid, ver, $W, $a1, capTok>
+in
+    [ WorkerRunning($W, $S, tid, ver)
+    , !WorkerCap($W, $S, tid, ver, capTok)
+    , !Ltk($W, ~ltkW) ]
+  --[ WorkerSuspends($W, $S, tid, ver, $a1) ]->
+    [ Out(<body, sign(body, ~ltkW)>) ]
+
+rule Server_Task_Suspend:
+let capm = <'cap', $S, tid, ver, $W>
+    body = <'task.suspend', $S, tid, ver, $W, a1, capTok>
+in
+    [ In(<body, sigW>)
+    , !Server($S), !Ltk($S, ~ltkS), !Pk($W, pkW)
+    , TaskSt($S, tid, 'acquired', ver, $W)
+    , PromiseSt($S, tid, 'pending')
+    , !ExternalP($S, a1)
+    , PromiseSt($S, a1, 'pending') ]
+  --[ Eq(verify(sigW, body, pkW), true)
+    , Eq(verify(capTok, capm, pk(~ltkS)), true)
+    , Neq(a1, tid)
+    , UsedCap($S, tid, ver, $W, 'suspend')
+    , Suspended($S, tid, ver, $W)
+    , Revoke($S, tid, ver) ]->
+    [ TaskSt($S, tid, 'suspended', ver, 'nobody')
+    , PromiseSt($S, tid, 'pending')
+    , PromiseSt($S, a1, 'pending')
+    , Callback($S, a1, tid)
+    , Out(<'task.suspended', $S, tid, ver>) ]
+
+rule Worker_Release:
+let body = <'task.release', $S, tid, ver, $W, capTok>
+in
+    [ WorkerRunning($W, $S, tid, ver)
+    , !WorkerCap($W, $S, tid, ver, capTok)
+    , !Ltk($W, ~ltkW) ]
+  --[ WorkerReleases($W, $S, tid, ver) ]->
+    [ Out(<body, sign(body, ~ltkW)>) ]
+
+rule Server_Task_Release:
+let capm = <'cap', $S, tid, ver, $W>
+    body = <'task.release', $S, tid, ver, $W, capTok>
+in
+    [ In(<body, sigW>)
+    , !Server($S), !Ltk($S, ~ltkS), !Pk($W, pkW)
+    , TaskSt($S, tid, 'acquired', ver, $W)
+    , PromiseSt($S, tid, 'pending') ]
+  --[ Eq(verify(sigW, body, pkW), true)
+    , Eq(verify(capTok, capm, pk(~ltkS)), true)
+    , UsedCap($S, tid, ver, $W, 'release')
+    , Released($S, tid, ver, $W)
+    , Revoke($S, tid, ver) ]->
+    [ TaskSt($S, tid, 'tpending', ver, 'nobody')
+    , PromiseSt($S, tid, 'pending')
+    , Out(<'task.released', $S, tid, ver>) ]
+
+rule Server_Task_Heartbeat:
+let capm = <'cap', $S, tid, ver, $W>
+    body = <'task.heartbeat', $S, tid, ver, $W, capTok>
+in
+    [ In(<body, sigW>)
+    , !Server($S), !Ltk($S, ~ltkS), !Pk($W, pkW)
+    , TaskSt($S, tid, 'acquired', ver, $W)
+    , PromiseSt($S, tid, 'pending') ]
+  --[ Eq(verify(sigW, body, pkW), true)
+    , Eq(verify(capTok, capm, pk(~ltkS)), true)
+    , UsedCap($S, tid, ver, $W, 'heartbeat')
+    , LeaseHeld($S, tid, ver, $W)
+    , Heartbeat($S, tid, ver, $W) ]->
+    [ TaskSt($S, tid, 'acquired', ver, $W)
+    , PromiseSt($S, tid, 'pending')
+    , Out(<'task.heartbeat.ok', $S, tid, ver>) ]
+
+rule Worker_Heartbeat:
+let body = <'task.heartbeat', $S, tid, ver, $W, capTok>
+in
+    [ WorkerRunning($W, $S, tid, ver)
+    , !WorkerCap($W, $S, tid, ver, capTok)
+    , !Ltk($W, ~ltkW) ]
+  --[ WorkerHeartbeats($W, $S, tid, ver) ]->
+    [ Out(<body, sign(body, ~ltkW)>), WorkerRunning($W, $S, tid, ver) ]
+
+// ---------------------------------------------------------------------------
+// what is NOT gated -- the specification leaves these open
+// ---------------------------------------------------------------------------
+
+/* `promiseSettle`: settable, and pending.  No version, no lease, no identity.
+   For a targeted promise that means a settlement can land while a worker
+   holds the lease.  Modelled as the specification has it. */
+rule Server_Promise_Settle:
+let body = <'promise.settle', $S, pid, st>
+in
+    [ In(<body, sig>)
+    , !Server($S), !Ltk($S, ~ltkS), !Pk($A, pkA)
+    , PromiseSt($S, pid, 'pending') ]
+  --[ Eq(verify(sig, body, pkA), true)
+    , Settable(st)
+    , Settled($S, pid, st)
+    , SettledBy($S, pid, $A) ]->
+    [ PromiseSt($S, pid, st)
+    , Out(<'promise.settled', $S, pid, st>) ]
+
+/* `taskHalt`: any state but fulfilled, no version and no lease check. */
+rule Server_Task_Halt:
+let body = <'task.halt', $S, tid>
+in
+    [ In(<body, sig>)
+    , !Server($S), !Ltk($S, ~ltkS), !Pk($A, pkA)
+    , TaskSt($S, tid, tst, ver, holder)
+    , PromiseSt($S, tid, 'pending') ]
+  --[ Eq(verify(sig, body, pkA), true)
+    , Neq(tst, 'fulfilled')
+    , Neq(tst, 'halted')
+    , Halted($S, tid, ver, $A)
+    , Revoke($S, tid, ver) ]->
+    [ TaskSt($S, tid, 'halted', ver, 'nobody')
+    , PromiseSt($S, tid, 'pending')
+    , Out(<'task.halted', $S, tid>) ]
+
+// ---------------------------------------------------------------------------
+// internal steps
+// ---------------------------------------------------------------------------
+
+rule Internal_Lease_Timeout:
+    [ TaskSt($S, tid, 'acquired', ver, $W)
+    , PromiseSt($S, tid, 'pending') ]
+  --[ LeaseLost($S, tid, ver, $W), Revoke($S, tid, ver) ]->
+    [ TaskSt($S, tid, 'tpending', ver, 'nobody')
+    , PromiseSt($S, tid, 'pending') ]
+
+rule Internal_Callback_Drain_Resume:
+    [ PromiseSt($S, awaited, st)
+    , Callback($S, awaited, awaiter)
+    , TaskSt($S, awaiter, 'suspended', ver, 'nobody')
+    , PromiseSt($S, awaiter, 'pending') ]
+  --[ Neq(st, 'pending')
+    , CallbackDrained($S, awaited, awaiter)
+    , Resumed($S, awaiter, ver, awaited) ]->
+    [ PromiseSt($S, awaited, st)
+    , PromiseSt($S, awaiter, 'pending')
+    , TaskSt($S, awaiter, 'tpending', ver, 'nobody') ]
+
+/* TIMEOUT ALWAYS WINS: the lease does not protect a promise from its own
+   deadline, and the holder's capability dies with it. */
+rule Internal_Promise_Timeout:
+    [ PromiseSt($S, pid, 'pending')
+    , TaskSt($S, pid, tst, ver, holder) ]
+  --[ Neq(tst, 'fulfilled')
+    , Settled($S, pid, 'rejectedTimedout')
+    , Revoke($S, pid, ver) ]->
+    [ PromiseSt($S, pid, 'rejectedTimedout')
+    , TaskSt($S, pid, 'fulfilled', ver, 'nobody') ]
+
+// ---------------------------------------------------------------------------
+// what is claimed
+// ---------------------------------------------------------------------------
+
+/* An acquired task in the store was put there by a claim.  `LeaseHeld` is
+   raised by every rule that PUTS one back -- the claim itself, and the fence
+   and the heartbeat, which take the lease and return it unchanged.  Stated
+   this way the induction is local: each step asks only where the lease it is
+   holding came from, and the answer is either "this claim" or "an earlier
+   holding", which the hypothesis covers.  Stated over `UsedCap` directly, as
+   it was, the induction has to chase the whole read-modify-write chain at
+   once, and does not converge. */
+/* NOT `[reuse]`, and that is the whole difference between this theory
+   proving and this theory hanging.  A `reuse` lemma is saturated into every
+   constraint system the prover builds, for every later lemma; this one
+   quantifies over four variables and a timepoint, and paying for it at every
+   step costs more than it ever saves.  With `[reuse]` on it, even
+   `grant_is_a_claim` -- two steps, decidable by looking at the rules -- does
+   not finish in 900 s.  Without it, five seconds.
+
+   `cap_use_follows_grant` below DOES need `[reuse]`: it is the hypothesis the
+   capability lemmas are built on, and dropping it there costs
+   `capability_use_requires_claim` its proof.  So the split is deliberate --
+   the heavy inductive lemma is proved and then left alone, and the light
+   consequence of it is what gets carried forward. */
+lemma lease_was_granted [use_induction]:
+  "All S tid ver W #i.
+       LeaseHeld(S, tid, ver, W) @ #i
+   ==> Ex #j. GrantCap(S, tid, ver, W) @ #j & (#j < #i | #j = #i)"
+
+lemma cap_use_follows_grant [reuse]:
+  "All S tid ver W op #i.
+       UsedCap(S, tid, ver, W, op) @ #i
+   ==> Ex #j. GrantCap(S, tid, ver, W) @ #j & #j < #i"
+
+lemma grant_is_a_claim [reuse]:
+  "All S tid ver W #i.
+       GrantCap(S, tid, ver, W) @ #i ==> Acquire(S, tid, ver, W) @ #i"
+
+/* ONE HOLDER PER VERSION -- what makes the version a fencing token. */
+lemma claim_is_exclusive [reuse, use_induction]:
+  "All S tid ver W1 W2 #i #j.
+       Acquire(S, tid, ver, W1) @ #i & Acquire(S, tid, ver, W2) @ #j
+   ==> #i = #j"
+
+lemma exec_claim_and_complete:
+  exists-trace
+  "Ex S W tid ver #a #k.
+        Acquire(S, tid, ver, W) @ #a
+      & CompletedBy(S, tid, ver, W) @ #k
+      & #a < #k
+      & not(Ex A #z. LtkReveal(A) @ #z)"
+
+lemma exec_lease_handover:
+  exists-trace
+  "Ex S W1 W2 tid v1 v2 #a1 #l #a2.
+        Acquire(S, tid, v1, W1) @ #a1
+      & LeaseLost(S, tid, v1, W1) @ #l
+      & Acquire(S, tid, v2, W2) @ #a2
+      & #a1 < #l & #l < #a2
+      & not(W1 = W2)
+      & not(Ex A #z. LtkReveal(A) @ #z)"
+
+lemma exec_suspend_and_resume:
+  exists-trace
+  "Ex S W tid ver awaited #a #s #w.
+        Acquire(S, tid, ver, W) @ #a
+      & Suspended(S, tid, ver, W) @ #s
+      & Resumed(S, tid, ver, awaited) @ #w
+      & #a < #s & #s < #w
+      & not(Ex A #z. LtkReveal(A) @ #z)"
+
+/* THE CLAIM IS WHAT AUTHORISES.  Holds with no compromise assumption at all:
+   even an adversary with the server's signing key, who can mint a
+   syntactically valid token, cannot make the server act on it, because the
+   server also checks its own record of who holds the lease. */
+lemma capability_use_requires_claim:
+  "All S tid ver W op #i.
+       UsedCap(S, tid, ver, W, op) @ #i
+   ==> Ex #j. Acquire(S, tid, ver, W) @ #j & #j < #i"
+
+/* THE CAPABILITY IS NOT A BEARER TOKEN. */
+lemma capability_is_bound_to_its_worker:
+  "All S tid ver W1 W2 op #i #j.
+       GrantCap(S, tid, ver, W1) @ #i & UsedCap(S, tid, ver, W2, op) @ #j
+   ==> W1 = W2"
+
+/* NO WRITE AFTER LEASE LOSS -- the fencing theorem.  `Revoke` is raised
+   wherever a version stops being live: a lease timeout, a release, a
+   suspension, a halt, a deadline settlement, and the next claim. */
+lemma no_write_after_lease_loss:
+  "All S tid ver W op #i #j #k.
+       Acquire(S, tid, ver, W) @ #i
+     & Revoke(S, tid, ver) @ #j
+     & UsedCap(S, tid, ver, W, op) @ #k
+     & #i < #j & #j < #k
+   ==> F"
+
+lemma completion_is_by_the_claimant:
+  "All S tid ver W1 W2 #i #j.
+       Acquire(S, tid, ver, W1) @ #i & CompletedBy(S, tid, ver, W2) @ #j
+   ==> W1 = W2"
+
+lemma no_forged_capability:
+  "All W S tid ver #i.
+       WorkerHoldsCap(W, S, tid, ver) @ #i
+   ==> (Ex #j. GrantCap(S, tid, ver, W) @ #j & #j < #i)
+     | (Ex #r. LtkReveal(S) @ #r)"
+
+/* The version a claim quotes is the one it is superseding, not the one it
+   will be granted, so the agreement is on the task and the worker. */
+lemma claim_agreement:
+  "All S tid ver W #i.
+       Acquire(S, tid, ver, W) @ #i
+   ==> (Ex pre #j. ClaimSent(W, S, tid, pre) @ #j & #j < #i)
+     | (Ex #r. LtkReveal(W) @ #r)"
+
+lemma settlement_is_unique:
+  "All S pid st1 st2 #i #j.
+       Settled(S, pid, st1) @ #i & Settled(S, pid, st2) @ #j ==> #i = #j"
+
+lemma offer_authentication:
+  "All W S tid ver #i.
+       WorkerSawOffer(W, S, tid, ver) @ #i
+   ==> (Ex tgt grp #j. ServerOffers(S, tid, ver, tgt, grp) @ #j & #j < #i)
+     | (Ex #r. LtkReveal(S) @ #r)"
+
+/* The property the specification does not have.  `promiseSettle` checks no
+   version, no lease and no identity, so a targeted promise can be settled out
+   from under the worker holding it.  Expected: FOUND, with nobody
+   compromised.  This is what `-D=FencedSettle` in `resonate.spthy` closes. */
+lemma attack_open_settle_preempts_the_holder:
+  exists-trace
+  "Ex S W A tid ver #a #s.
+        Acquire(S, tid, ver, W) @ #a
+      & SettledBy(S, tid, A) @ #s
+      & #a < #s
+      & not(A = W)
+      & not(Ex B #z. LtkReveal(B) @ #z)"
+
+end

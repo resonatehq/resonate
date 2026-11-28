@@ -41,6 +41,7 @@ report rather than a difference of opinion.
 | [`tlap/`](tlap) | the TLA+ machine — the same alphabet with atomicity removed, and the catalogue checked against it |
 | [`valid/`](valid) | the trace checker — `lake exe checktrace < trace.ndjson` |
 | [`work/`](work) | traffic generators that drive real servers and record traces |
+| [`tamarin/`](tamarin) | the Tamarin model — identity, capabilities and sealed payloads on top of the machine, and the security properties proved over it |
 
 Every Lean file opens with a header saying what that piece is for and why
 it is shaped the way it is; `valid/` and the two `work/` generators carry

@@ -1,0 +1,219 @@
+theory ResonatePayload
+begin
+
+/*
+================================================================================
+
+  THE PAYLOAD ENVELOPE, ON ITS OWN.
+
+  `resonate.spthy` states `param_secrecy` and `value_secrecy` over the whole
+  protocol.  Those statements have not been discharged: the full theory is
+  large enough that Tamarin's search does not converge on the hardware this
+  was run on (see RESULTS.md).  This theory discharges the confidentiality
+  design instead -- the envelope, the group key, and the server's role as a
+  courier -- with nothing else in it.
+
+  It is NOT a reduction of `resonate.spthy` and must not be read as one: it
+  omits the task lifecycle entirely, so it says nothing about fencing,
+  capabilities or authorisation.  What it does say, it says in the strongest
+  form available:
+
+    THE SERVER PUBLISHES ITS ENTIRE STORE.
+
+  There is no server principal here and no server key.  Every term the server
+  would hold -- the sealed param, the sealed envelope key, the sealed value --
+  is written straight to the network the moment the server receives it.  A
+  secrecy result under that assumption is stronger than one under a
+  compromised server: a compromised server has its keys and its store, and
+  here the store IS the adversary's.
+
+  Requests are unauthenticated for the same reason.  Dropping the signature
+  checks only adds behaviour, so a secrecy result here holds a fortiori for
+  the signed protocol in `resonate.spthy`.
+
+  The envelope is exactly the one the main theory uses:
+
+      pblob = senc(param, ek)
+      kblob = aenc(<'ek', pid, ek>, pk(gsk(G)))
+
+  and the completing worker seals its result under the same `ek`, so the value
+  is readable by exactly the principals the param was: the worker group, and
+  the creator, who chose the key.
+
+================================================================================
+*/
+
+builtins: asymmetric-encryption, symmetric-encryption
+
+restriction only_once:
+  "All x #i #j. OnlyOnce(x) @ #i & OnlyOnce(x) @ #j ==> #i = #j"
+
+// ---------------------------------------------------------------------------
+// principals
+// ---------------------------------------------------------------------------
+
+/* A worker group.  `gsk` is the only key that opens an envelope, and it is
+   held by every worker of the group and by nobody else. */
+rule Setup_Group:
+    [ Fr(~gsk) ]
+  --[ NewGroup($G), OnlyOnce(<'group', $G>) ]->
+    [ !GroupKey($G, ~gsk), !Pk($G, pk(~gsk)), Out(pk(~gsk)) ]
+
+rule Register_Worker:
+    [ !GroupKey($G, ~gsk) ]
+  --[ NewWorker($W, $G), OnlyOnce(<'worker', $W>) ]->
+    [ !Worker($W, $G, ~gsk) ]
+
+rule Register_Client:
+    [ ]
+  --[ NewClient($C), OnlyOnce(<'client', $C>) ]->
+    [ !Client($C) ]
+
+/* A compromised worker gives up the group key it holds.  Every worker of a
+   group holds the same one, so compromising ANY member exposes every param
+   and every value ever sealed to that group.  That is a property of this key
+   distribution, and the secrecy lemmas below name it rather than hide it. */
+rule Compromise_Worker:
+    [ !Worker($W, $G, ~gsk) ]
+  --[ WorkerCompromised($W, $G), GroupReveal($G) ]->
+    [ Out(~gsk) ]
+
+/* The group key leaking on its own -- a key store rather than a worker. */
+rule Compromise_Group:
+    [ !GroupKey($G, ~gsk) ]
+  --[ GroupReveal($G) ]->
+    [ Out(~gsk) ]
+
+// ---------------------------------------------------------------------------
+// the round trip
+// ---------------------------------------------------------------------------
+
+/* The creator mints a fresh envelope key, seals the param under it, and seals
+   the key to the group that will execute the promise.  It keeps `ek` so that
+   it can read the value that comes back. */
+rule Client_Create:
+let pblob = senc(<'param', ~param>, ~ek)
+    kblob = aenc(<'ek', $pid, ~ek>, pkG)
+in
+    [ Fr(~ek), Fr(~param), !Client($C), !Pk($G, pkG) ]
+  --[ ClientCreates($C, $pid, $G)
+    , SecretParam(~param, $pid, $G)
+    , Seal(~ek, $pid, $G)
+    , OnlyOnce(<'create', $C, $pid>) ]->
+    [ Out(<'promise.create', $pid, $G, pblob, kblob>)
+    , ClientAwaits($C, $pid, ~ek, ~param) ]
+
+/* THE SERVER PUBLISHES ITS STORE.  It takes the promise off the wire, keeps
+   it, and writes everything it kept straight back out.  This is the whole of
+   the server in this theory: a courier that leaks. */
+rule Server_Store_And_Publish:
+    [ In(<'promise.create', pid, grp, pblob, kblob>) ]
+  --[ ServerStores(pid, grp) ]->
+    [ !Stored(pid, grp, pblob, kblob)
+    , Out(<'promise.record', pid, grp, pblob, kblob>) ]
+
+/* A worker of the group opens the envelope: the key blob must decrypt under
+   the group key to the envelope key the param blob is sealed with.  That is
+   the model of a successful decrypt, and it is the only way a cleartext param
+   enters the protocol. */
+rule Worker_Open:
+let pblob = senc(<'param', param>, ek)
+    kblob = aenc(<'ek', pid, ek>, pk(~gsk))
+in
+    [ In(<'promise.record', pid, grp, pblob, kblob>)
+    , !Worker($W, $G, ~gsk) ]
+  --[ Unseal(ek, pid)
+    , WorkerReadsParam($W, param, pid) ]->
+    [ WorkerRunning($W, pid, ek, param) ]
+
+/* The worker seals its result under the SAME envelope key, so the value is
+   readable by exactly the principals the param was. */
+rule Worker_Complete:
+let vblob = senc(<'value', ~value>, ek)
+in
+    [ WorkerRunning($W, pid, ek, param), Fr(~value) ]
+  --[ SecretValue(~value, pid, ek)
+    , WorkerCompletes($W, pid) ]->
+    [ Out(<'task.fulfill', pid, vblob>) ]
+
+/* The server takes the value and publishes that too. */
+rule Server_Settle_And_Publish:
+    [ In(<'task.fulfill', pid, vblob>) ]
+  --[ ServerSettles(pid) ]->
+    [ Out(<'unblock', pid, vblob>) ]
+
+/* The creator opens the value with the key it chose.  This is the end of the
+   round trip: a value produced by a worker, carried by a server that
+   published everything it touched, and readable only by the two of them. */
+rule Client_Receive:
+let vblob = senc(<'value', value>, ek)
+in
+    [ In(<'unblock', pid, vblob>)
+    , ClientAwaits($C, pid, ek, param) ]
+  --[ ClientReadsValue($C, value, pid) ]->
+    [ ClientDone($C, pid, value) ]
+
+// ---------------------------------------------------------------------------
+// what is claimed
+// ---------------------------------------------------------------------------
+
+lemma sources_envelope [sources]:
+  "All ek pid #i.
+       Unseal(ek, pid) @ #i
+   ==> (Ex #j. KU(ek) @ #j & #j < #i)
+     | (Ex G #j. Seal(ek, pid, G) @ #j & #j < #i)"
+
+/* The round trip runs, so the secrecy lemmas are not about an empty set of
+   traces: a client creates a sealed promise, a worker of the group opens it,
+   completes it with a sealed value, and the client opens the value. */
+lemma exec_round_trip:
+  exists-trace
+  "Ex C W G pid param value #c #r #k #u.
+        ClientCreates(C, pid, G) @ #c
+      & WorkerReadsParam(W, param, pid) @ #r
+      & WorkerCompletes(W, pid) @ #k
+      & ClientReadsValue(C, value, pid) @ #u
+      & #c < #r & #r < #k & #k < #u
+      & not(Ex GG #z. GroupReveal(GG) @ #z)"
+
+/* THE SERVER CANNOT READ A PARAM.  The server published everything it held,
+   and the adversary still cannot derive the param unless the worker group was
+   compromised -- either a member holding the key, or the key itself. */
+lemma param_secrecy:
+  "All param pid G #i #j.
+       SecretParam(param, pid, G) @ #i & K(param) @ #j
+   ==> Ex #r. GroupReveal(G) @ #r"
+
+/* THE SERVER CANNOT READ A VALUE.  Same, for the result the worker sealed
+   under the envelope key the param arrived under. */
+lemma value_secrecy:
+  "All value pid ek G #i #j #s.
+       SecretValue(value, pid, ek) @ #i
+     & Seal(ek, pid, G) @ #s
+     & K(value) @ #j
+   ==> Ex #r. GroupReveal(G) @ #r"
+
+/* Confidentiality as access control rather than as adversary knowledge: the
+   only principals that ever hold a param in clear are members of the group it
+   was sealed to. */
+lemma param_read_only_by_group_member:
+  "All W param pid G #i #c.
+       WorkerReadsParam(W, param, pid) @ #i
+     & SecretParam(param, pid, G) @ #c
+   ==> (Ex #m. NewWorker(W, G) @ #m)
+     | (Ex #r. GroupReveal(G) @ #r)"
+
+/* And the value reaches the creator that asked for the work. */
+/* A value the creator accepts as the answer was produced by a worker.  This
+   is the lemma the prover broke first, and the break was worth having: with
+   the param and the value sealed under the same key and no tag to tell them
+   apart, the creator accepted its own PARAM back, replayed off the wire as
+   the answer, with no worker involved at all -- four steps.  The envelope now
+   carries 'param' and 'value' tags, and the replay no longer types. */
+lemma value_reaches_its_creator:
+  "All C value pid #i.
+       ClientReadsValue(C, value, pid) @ #i
+   ==> (Ex W #j. WorkerCompletes(W, pid) @ #j & #j < #i)
+     | (Ex G #r. GroupReveal(G) @ #r)"
+
+end
